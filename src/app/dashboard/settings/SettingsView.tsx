@@ -20,6 +20,7 @@ import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
+import { RequireAccountLoginSection } from './sections/RequireAccountLoginSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
@@ -1084,6 +1085,7 @@ function SettingsViewInner({
             description="Choose which booking experiences are active for guests and which tools appear in your dashboard."
           >
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </SettingsProfileGroup>
 
           {showRestaurantTableProfileSections && !isAppointmentsProduct && (

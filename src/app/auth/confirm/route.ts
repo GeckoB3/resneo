@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server';
 import { getAuthFailurePath, mapAuthErrorMessageToDetail, SET_PASSWORD_PATH } from '@/lib/auth-link';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
+import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 
 function getBaseUrl(requestUrl: string): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
@@ -30,7 +33,7 @@ export async function GET(request: Request) {
     | 'email_change'
     | null;
   const rawNext = searchParams.get('next');
-  const nextPath =
+  const fallbackNext =
     rawNext != null && rawNext !== ''
       ? sanitizeAuthNextPath(rawNext)
       : type === 'invite' || type === 'recovery'
@@ -42,11 +45,46 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (!error) {
-      return NextResponse.redirect(`${base}${nextPath}`);
+      const { error: claimErr } = await supabase.rpc('claim_user_account');
+      if (claimErr) {
+        console.warn('[auth/confirm] claim_user_account:', claimErr.message);
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user?.id) {
+        return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
+      }
+
+      const meta = user.user_metadata as Record<string, unknown> | undefined;
+      const needsSetPassword = meta?.has_set_password === false;
+      const isSuper = hasPlatformSuperuserJwtRole(user);
+
+      const admin = getSupabaseAdminClient();
+      let destination = await resolvePostLoginDestination({
+        admin,
+        userId: user.id,
+        userEmail: user.email ?? '',
+        rawNext: fallbackNext,
+        isPlatformSuperuser: isSuper,
+        needsSetPassword,
+      });
+
+      destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper);
+
+      if (isSuper) {
+        const pathOnly = destination.split('?')[0] ?? '';
+        if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
+          destination = '/super';
+        }
+      }
+
+      return NextResponse.redirect(`${base}${destination}`);
     }
     console.error('Auth confirm failed:', error.message);
-    return NextResponse.redirect(`${base}${getAuthFailurePath(nextPath, mapAuthErrorMessageToDetail(error.message))}`);
+    return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, mapAuthErrorMessageToDetail(error.message))}`);
   }
 
-  return NextResponse.redirect(`${base}${getAuthFailurePath(nextPath, 'exchange_failed')}`);
+  return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
 }

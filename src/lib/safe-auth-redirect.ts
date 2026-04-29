@@ -27,7 +27,14 @@ export function sanitizeMagicLinkNextPath(raw: string | null | undefined): strin
     next === '/dashboard' ||
     next.startsWith('/dashboard?') ||
     next.startsWith('/dashboard/') ||
-    next === '/onboarding'
+    next === '/onboarding' ||
+    next.startsWith('/onboarding?') ||
+    next.startsWith('/onboarding/') ||
+    next === '/account' ||
+    next.startsWith('/account?') ||
+    next.startsWith('/account/') ||
+    next === '/auth/choose-destination' ||
+    next.startsWith('/auth/choose-destination?')
   ) {
     return next;
   }

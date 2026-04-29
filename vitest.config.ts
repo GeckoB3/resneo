@@ -9,6 +9,8 @@ export default defineConfig({
     env: {
       // Policy resolver imports Stripe-backed helpers; tests must not require a local .env.
       STRIPE_SECRET_KEY: 'sk_test_vitest_placeholder',
+      PAYMENT_TOKEN_SECRET: 'vitest_payment_token_secret',
+      NEXT_PUBLIC_BASE_URL: 'https://vitest.example',
     },
   },
   resolve: {

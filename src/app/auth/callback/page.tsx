@@ -9,9 +9,7 @@ import {
   getAuthFailurePath,
   mapAuthErrorMessageToDetail,
   parseHashSearchParams,
-  SET_PASSWORD_PATH,
 } from '@/lib/auth-link';
-import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 
 /**
@@ -33,23 +31,28 @@ function AuthCallbackContent() {
       );
 
       async function redirectAfterSession() {
-        let destination = sanitizeAuthNextPath(searchParams.get('next'));
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        const meta = user?.user_metadata as Record<string, unknown> | undefined;
-        if (meta?.has_set_password === false) {
-          const pathOnly = destination.split('?')[0] ?? '';
-          if (pathOnly !== SET_PASSWORD_PATH && !pathOnly.startsWith(`${SET_PASSWORD_PATH}/`)) {
-            destination = `${SET_PASSWORD_PATH}?next=${encodeURIComponent(destination)}`;
-          }
-        } else if (user && hasPlatformSuperuserJwtRole(user)) {
-          const pathOnly = destination.split('?')[0] ?? '';
-          if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
-            destination = '/super';
-          }
+        const { error: claimErr } = await supabase.rpc('claim_user_account');
+        if (claimErr) {
+          console.warn('[auth/callback] claim_user_account:', claimErr.message);
         }
+
+        const nextParam = searchParams.get('next') ?? '';
+        let destination = sanitizeAuthNextPath(nextParam);
+        try {
+          const res = await fetch(
+            `/api/auth/resolve-next?next=${encodeURIComponent(nextParam)}`,
+            { credentials: 'include' },
+          );
+          if (res.ok) {
+            const body = (await res.json()) as { destination?: string };
+            if (body.destination && typeof body.destination === 'string') {
+              destination = body.destination;
+            }
+          }
+        } catch (e) {
+          console.error('[auth/callback] resolve-next failed:', e instanceof Error ? e.message : e);
+        }
+
         router.replace(destination);
         router.refresh();
       }

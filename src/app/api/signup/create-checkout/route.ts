@@ -146,10 +146,22 @@ export async function POST(request: Request) {
       }
     }
 
-    const priceIdMap: Record<string, string | undefined> = {
-      appointments: process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID,
-      plus: process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID,
-      restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
+    const priceIdMap: Record<
+      'appointments' | 'plus' | 'restaurant',
+      { priceId: string | undefined; envName: string }
+    > = {
+      appointments: {
+        priceId: process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID,
+        envName: 'STRIPE_APPOINTMENTS_PRO_PRICE_ID',
+      },
+      plus: {
+        priceId: process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID,
+        envName: 'STRIPE_APPOINTMENTS_PLUS_PRICE_ID',
+      },
+      restaurant: {
+        priceId: process.env.STRIPE_RESTAURANT_PRICE_ID,
+        envName: 'STRIPE_RESTAURANT_PRICE_ID',
+      },
     };
 
     let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
@@ -163,10 +175,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: msg }, { status: 500 });
       }
     } else {
-      const priceId = priceIdMap[plan];
-      if (!priceId) {
+      const entry = priceIdMap[plan as keyof typeof priceIdMap];
+      const priceId = entry?.priceId?.trim();
+      if (!priceId || !entry) {
+        const envName = entry?.envName ?? 'STRIPE_*_PRICE_ID for this plan';
         return NextResponse.json(
-          { error: 'Stripe price not configured. Run scripts/create-stripe-products.ts first.' },
+          {
+            error: `${envName} is not set or empty. Add it in Vercel (same Stripe account/mode as STRIPE_SECRET_KEY), e.g. from scripts/create-stripe-products.ts output.`,
+          },
           { status: 500 },
         );
       }

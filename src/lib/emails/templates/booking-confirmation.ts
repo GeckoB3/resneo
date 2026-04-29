@@ -10,7 +10,9 @@ import {
   formatDate,
   formatTime,
   formatDepositAmount,
+  escapeHtml,
 } from "./base-template";
+import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
 import { confirmationStructuredPriceText } from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 
@@ -100,6 +102,12 @@ export function renderBookingConfirmation(
 
   let mainContent: string;
   mainContent = confirmationIntroLine(booking);
+  const accountPortal =
+    booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
+  if (accountPortal) {
+    const safeUrl = escapeHtml(accountPortal);
+    mainContent += `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${safeUrl}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`;
+  }
   if (!appt && depositPending) {
     mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
   }
@@ -231,6 +239,11 @@ export function renderBookingConfirmation(
     }
   } else if (booking.manage_booking_link) {
     textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
+  }
+  const portalText =
+    booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
+  if (portalText) {
+    textParts.push("", `View all your bookings: ${portalText}`);
   }
   textParts.push(
     "",

@@ -20,6 +20,8 @@ describe('sanitizeMagicLinkNextPath', () => {
     expect(sanitizeMagicLinkNextPath('/auth/callback?next=%2Fdashboard')).toBe('/auth/callback?next=%2Fdashboard');
     expect(sanitizeMagicLinkNextPath('/dashboard')).toBe('/dashboard');
     expect(sanitizeMagicLinkNextPath('/dashboard/reports')).toBe('/dashboard/reports');
+    expect(sanitizeMagicLinkNextPath('/account')).toBe('/account');
+    expect(sanitizeMagicLinkNextPath('/account/bookings')).toBe('/account/bookings');
   });
 
   it('rejects non-allowlisted paths', () => {

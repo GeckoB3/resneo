@@ -43,6 +43,8 @@ export interface BookingEmailData {
   deposit_status?: string | null;
   refund_cutoff?: string | null;
   manage_booking_link?: string | null;
+  /** Signed-in account portal link for "manage all bookings" / unified booking history. */
+  account_bookings_link?: string | null;
   confirm_cancel_link?: string | null;
   /**
    * Effective booking model for this row (compile/render). Set for C/D/E so comms stay model-aware

@@ -13,6 +13,8 @@ import {
   logSupportApiMutationFromMiddleware,
   parseSupportSessionCookieValue,
 } from '@/lib/support-session-core';
+import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
+import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 
 async function loadSupportSessionRow(request: NextRequest, userId: string) {
   const raw = request.cookies.get(SUPPORT_SESSION_COOKIE_NAME)?.value;
@@ -63,6 +65,8 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isDashboard = pathname.startsWith('/dashboard');
+  const isAccount = pathname.startsWith('/account');
+  const isChooseDestination = pathname.startsWith('/auth/choose-destination');
   const isPlatformUI = pathname.startsWith('/super');
   const isPlatformAPI = pathname.startsWith('/api/platform');
   const signupPlan = request.nextUrl.searchParams.get('plan');
@@ -91,8 +95,8 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Unauthenticated: protect /dashboard and /super
-  if (!user && (isDashboard || isPlatformUI)) {
+  // Unauthenticated: protect /dashboard, /account, /super, and post-login chooser
+  if (!user && (isDashboard || isAccount || isPlatformUI || isChooseDestination)) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', pathname);
@@ -194,13 +198,26 @@ export async function middleware(request: NextRequest) {
   if (user && pathname === '/login') {
     const explicit = request.nextUrl.searchParams.get('redirectTo');
     if (explicit) {
-      return NextResponse.redirect(new URL(explicit, request.url));
+      const safe = sanitizeAuthNextPath(explicit);
+      return NextResponse.redirect(new URL(safe, request.url));
     }
     if (jwtSuperuser) {
       const sess = await loadSupportSessionRow(request, user.id);
       return NextResponse.redirect(new URL(sess ? '/dashboard' : '/super', request.url));
     }
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const admin = getSupabaseAdminClient();
+    const meta = user.user_metadata as Record<string, unknown> | undefined;
+    const needsSetPassword = meta?.has_set_password === false;
+    let dest = await resolvePostLoginDestination({
+      admin,
+      userId: user.id,
+      userEmail: user.email ?? '',
+      rawNext: null,
+      isPlatformSuperuser: false,
+      needsSetPassword,
+    });
+    dest = withSetPasswordGateIfNeeded(dest, needsSetPassword);
+    return NextResponse.redirect(new URL(dest, request.url));
   }
 
   return response;

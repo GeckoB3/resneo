@@ -88,11 +88,20 @@ export async function PATCH(request: NextRequest) {
       }
 
       const venueMode = await resolveVenueMode(admin, staff.venue_id);
-      const { guest } = await findOrCreateGuest(admin, staff.venue_id, {
-        name: existingEntry.guest_name,
-        email: existingEntry.guest_email || null,
-        phone: existingEntry.guest_phone,
-      });
+      const emailNorm =
+        typeof existingEntry.guest_email === 'string' && existingEntry.guest_email.trim() !== ''
+          ? existingEntry.guest_email.trim().toLowerCase()
+          : null;
+      const { guest } = await findOrCreateGuest(
+        admin,
+        staff.venue_id,
+        {
+          name: existingEntry.guest_name,
+          email: emailNorm,
+          phone: existingEntry.guest_phone,
+        },
+        { silentAuthSignup: Boolean(emailNorm) },
+      );
 
       const { data: booking, error: bookingError } = await admin
         .from('bookings')

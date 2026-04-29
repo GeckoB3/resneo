@@ -12,6 +12,7 @@ import {
   renderBaseTemplate,
 } from '@/lib/emails/templates/base-template';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
+import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
 import {
   bookingConfirmationSmsPriceSuffix,
   confirmationStructuredPriceText,
@@ -49,6 +50,20 @@ function isAppointmentLane(lane: CommunicationLane): boolean {
 
 function htmlParagraph(text: string): string {
   return `<p style="margin:0 0 14px 0">${escapeHtml(text)}</p>`;
+}
+
+/** Account portal / magic-link line for policy-driven booking emails (complements single-booking manage URL). */
+function accountBookingsLinkParts(booking: BookingEmailData): { html: string; textLine: string | null } {
+  const url =
+    (booking.account_bookings_link ?? '').trim() ||
+    accountBookingsMagicLinkUrl(booking.guest_email) ||
+    accountBookingsPortalUrl();
+  if (!url) return { html: '', textLine: null };
+  const safe = escapeHtml(url);
+  return {
+    html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:#4E6B78;font-weight:600">View or sign in to your account</a>.</p>`,
+    textLine: `View or sign in to your account: ${url}`,
+  };
 }
 
 function htmlRaw(text: string): string {
@@ -238,6 +253,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
 
   switch (opts.messageKey) {
     case 'booking_confirmation': {
+      const acct = accountBookingsLinkParts(opts.booking);
       const structuredPrice = appointment ? confirmationStructuredPriceText(opts.booking) : null;
       const structuredTextLines = structuredPrice
         ? ['Price and payment:', ...structuredPrice.split('\n')]
@@ -258,6 +274,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
+          acct.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -274,6 +291,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.preAppointmentInstructions && appointment
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
             : null,
+          acct.textLine,
           '',
           'Need to make changes?',
         ],
@@ -281,7 +299,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
     }
-    case 'deposit_payment_request':
+    case 'deposit_payment_request': {
+      const acctDep = accountBookingsLinkParts(opts.booking);
       return {
         subject: `Complete your booking at ${opts.venue.name}`,
         heading: 'Complete your booking',
@@ -300,6 +319,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
                   : `Please complete your payment within ${opts.paymentDeadlineHours} hours to secure your booking.`,
               )
             : '',
+          acctDep.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -315,11 +335,14 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.paymentDeadlineHours != null
             ? `Please complete payment within ${opts.paymentDeadlineHours} hours to secure it.`
             : null,
+          acctDep.textLine,
         ],
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
       };
-    case 'deposit_confirmation':
+    }
+    case 'deposit_confirmation': {
+      const acctPaid = accountBookingsLinkParts(opts.booking);
       return {
         subject: `Deposit received for ${opts.venue.name}`,
         heading: 'Deposit received',
@@ -327,16 +350,19 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           htmlParagraph(`Hi ${guestName},`),
           htmlParagraph('Your deposit has been received and your booking is secured.'),
           depositAmount ? htmlRaw(`<strong>Deposit paid:</strong> ${escapeHtml(depositAmount)}`) : '',
+          acctPaid.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
           '',
           'Your deposit has been received and your booking is secured.',
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
+          acctPaid.textLine,
         ],
         ctaLabel: 'Manage Your Booking',
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
+    }
     case 'confirm_or_cancel_prompt':
       return {
         subject: `Are you still coming to ${opts.venue.name}?`,
@@ -399,7 +425,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
       };
-    case 'pre_visit_reminder':
+    case 'pre_visit_reminder': {
+      const acctPre = accountBookingsLinkParts(opts.booking);
       return {
         subject: appointment
           ? `Reminder: Your appointment at ${opts.venue.name} is coming up`
@@ -416,6 +443,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
           depositAmount ? htmlRaw(`<strong>Deposit paid:</strong> ${escapeHtml(depositAmount)}`) : '',
+          acctPre.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -431,11 +459,14 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
             : null,
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
+          acctPre.textLine,
         ],
         ctaLabel: 'Manage Your Booking',
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
-    case 'booking_modification':
+    }
+    case 'booking_modification': {
+      const acctMod = accountBookingsLinkParts(opts.booking);
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been updated`
@@ -445,6 +476,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           htmlParagraph(`Hi ${guestName},`),
           htmlParagraph('Your booking has been updated. Here are the new details:'),
           opts.changeSummary ? htmlRaw(`<strong>What changed:</strong> ${escapeHtml(opts.changeSummary)}`) : '',
+          acctMod.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -455,10 +487,12 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
           opts.changeSummary ? `What changed: ${opts.changeSummary}` : null,
+          acctMod.textLine,
         ],
         ctaLabel: 'Manage Your Booking',
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
+    }
     case 'cancellation_confirmation':
       return {
         subject: appointment

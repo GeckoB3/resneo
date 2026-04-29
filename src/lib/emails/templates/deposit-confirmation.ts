@@ -9,7 +9,9 @@ import {
   formatDate,
   formatTime,
   formatDepositAmount,
+  escapeHtml,
 } from "./base-template";
+import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
@@ -39,11 +41,18 @@ export function renderDepositConfirmation(
     booking.refund_cutoff ?? null,
   );
 
+  const portal =
+    booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
+  const portalHtml = portal
+    ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(portal)}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`
+    : "";
+
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
     heading: `Deposit received for your booking at ${venue.name}`,
-    mainContent: `<p style="margin:0 0 12px 0">Thank you. Your deposit of £${amount} has been received.</p>`,
+    mainContent:
+      `<p style="margin:0 0 12px 0">Thank you. Your deposit of £${amount} has been received.</p>` + portalHtml,
     bookingDate: date,
     bookingTime: time,
     partySize: booking.party_size,
@@ -86,6 +95,9 @@ export function renderDepositConfirmation(
   if (customMessage) textParts.push("", customMessage);
   if (booking.manage_booking_link) {
     textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
+  }
+  if (portal) {
+    textParts.push("", `View all your bookings: ${portal}`);
   }
   textParts.push("", venue.name);
 

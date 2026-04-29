@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   renderCommunicationEmail,
   renderCommunicationSms,
@@ -136,6 +136,40 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     expect(out?.html).not.toContain('There is no charge for this booking');
     expect(out?.text).toContain('Price and payment:');
     expect(out?.text).toContain('Free');
+  });
+});
+
+describe('renderCommunicationEmail booking_confirmation account CTA', () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', 'https://rnapp.test');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('includes per-booking manage CTA plus account magic-link copy when guest_email is set', () => {
+    const venue: VenueEmailData = { name: 'Test Venue', address: '1 High St' };
+    const out = renderCommunicationEmail({
+      lane: 'table',
+      messageKey: 'booking_confirmation',
+      booking: {
+        id: 'b1',
+        guest_name: 'Sam',
+        guest_email: 'sam@example.com',
+        booking_date: '2026-06-01',
+        booking_time: '10:00',
+        party_size: 2,
+        manage_booking_link: 'https://example.com/m',
+      },
+      venue,
+    });
+    expect(out?.html).toContain('Manage Your Booking');
+    expect(out?.html).toContain('https://example.com/m');
+    expect(out?.html).toContain('/auth/magic');
+    expect(out?.html).toContain('View or sign in to your account');
+    expect(out?.text).toMatch(/View or sign in to your account:/);
+    expect(out?.text).toContain('https://rnapp.test/auth/magic');
+    expect(out?.text).toMatch(/email=sam%40example\.com/);
   });
 });
 

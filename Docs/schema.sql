@@ -18,13 +18,29 @@
 -- id (uuid PK), name, slug (unique), address, phone, email, cover_photo_url,
 -- opening_hours (jsonb), booking_rules (jsonb), deposit_config (jsonb),
 -- availability_config (jsonb), daily_booking_log_email_config (jsonb),
--- timezone (default 'Europe/London'), created_at, updated_at
+-- require_account_login_for_bookings (boolean), timezone (default 'Europe/London'), created_at, updated_at
 
--- staff - venue staff, linked to Supabase Auth by email
--- id (uuid PK), venue_id (FK → venues), email, name, role (staff_role), created_at
+-- staff - venue staff; email retained for invites; user_id preferred for auth linkage
+-- id (uuid PK), venue_id (FK → venues), user_id (FK → auth.users, nullable), email, name, role (staff_role),
+-- permissions (jsonb), invited_at, accepted_at, revoked_at, phone, created_at, updated_at
+
+-- user_profiles - application profile 1:1 with auth.users (customer + staff overlap)
+-- id (uuid PK, FK → auth.users), display_name, first_name, last_name, phone, profile_image_url,
+-- locale, timezone, notification_preferences (jsonb), default_login_destination ('account'|'dashboard'|'ask'),
+-- stripe_customer_id, account_claimed_at, last_active_at, deleted_at (soft-delete grace), created_at, updated_at
+
+-- user_devices - optional push device rows (future mobile)
+-- id (uuid PK), user_id (FK), platform, push_token, device_name, app_version, os_version, last_seen_at, created_at
 
 -- guests - one per guest per venue; unique (venue_id, email); index (venue_id, phone)
--- id (uuid PK), venue_id (FK), name, email, phone (E.164), global_guest_hash, visit_count, created_at, updated_at
+-- id (uuid PK), venue_id (FK), user_id (FK → auth.users, nullable), name, email, phone (E.164),
+-- marketing_consent, marketing_consent_at, marketing_opt_out, source, first_booked_at, last_booked_at,
+-- total_bookings_count, total_spent_minor, waiver_signed_at, waiver_version, tags, custom_fields,
+-- global_guest_hash, visit_count, identifiability_tier (generated), created_at, updated_at
+-- guests_account_safe view: customer-safe projection excluding venue-private CRM fields
+
+-- RPC/helpers: handle_new_user (auth trigger), claim_user_account, request_account_deletion,
+-- refresh_guest_booking_aggregates, lookup_auth_user_id_by_email (service_role)
 
 -- bookings
 -- id (uuid PK), venue_id (FK), guest_id (FK), booking_date, booking_time, party_size,

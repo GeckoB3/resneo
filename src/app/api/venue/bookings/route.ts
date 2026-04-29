@@ -181,11 +181,16 @@ export async function POST(request: NextRequest) {
     }
 
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
-    const { guest } = await findOrCreateGuest(admin, venueId, {
-      name,
-      email: emailNorm,
-      phone: phoneE164,
-    });
+    const { guest } = await findOrCreateGuest(
+      admin,
+      venueId,
+      {
+        name,
+        email: emailNorm,
+        phone: phoneE164,
+      },
+      { silentAuthSignup: Boolean(emailNorm) },
+    );
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 

@@ -58,6 +58,11 @@ export interface VenueSettings {
    * Multi-area table venues: `auto` = combined slot list on public + staff booking; `manual` = area tabs to view times per area.
    */
   public_booking_area_mode?: 'auto' | 'manual';
+  /**
+   * When true, guests must sign in to ReserveNI (magic link) before completing an online booking.
+   * See `venues.require_account_login_for_bookings`.
+   */
+  require_account_login_for_bookings?: boolean;
 }
 
 export type OpeningHoursDaySettings =

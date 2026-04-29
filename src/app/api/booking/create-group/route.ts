@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
@@ -24,6 +25,7 @@ import { createShortManageLink } from '@/lib/short-manage-link';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -60,6 +62,23 @@ export async function POST(request: NextRequest) {
     }
 
     const { venue_id, name, email, phone, source, people, dietary_notes } = parsed.data;
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
+    if (!user?.email) {
+      return NextResponse.json(
+        { error: 'Sign in is required for group bookings.' },
+        { status: 401 },
+      );
+    }
+    const customerEmail = (email?.trim() || user.email).toLowerCase();
+    if (customerEmail !== user.email.toLowerCase().trim()) {
+      return NextResponse.json(
+        { error: 'Booking email must match the signed-in account for group bookings.' },
+        { status: 403 },
+      );
+    }
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
@@ -75,12 +94,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
     }
 
+    const isOnlineLikeSource =
+      source === 'online' || source === 'widget' || source === 'booking_page';
+    if (isOnlineLikeSource && !customerEmail) {
+      return NextResponse.json(
+        { error: 'Email is required for online bookings.' },
+        { status: 400 },
+      );
+    }
+    const guestLinkOptions = {
+      silentAuthSignup: true,
+    };
+
     const supabase = getSupabaseAdminClient();
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status',
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, require_account_login_for_bookings',
       )
       .eq('id', venue_id)
       .single();
@@ -88,6 +119,15 @@ export async function POST(request: NextRequest) {
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
+
+    const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
+      requireAccountLogin: Boolean(
+        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      ),
+      authSupabase: authClient,
+      bookingEmail: customerEmail,
+    });
+    if (loginDenied) return loginDenied;
 
     if (
       isOnlineBookingBlockedForLightPastDue(
@@ -237,12 +277,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
-    const { guest } = await findOrCreateGuest(supabase, venue_id, {
-      name,
-      email: emailNorm,
-      phone: phoneE164,
-    });
+    const emailNorm = customerEmail;
+    const { guest } = await findOrCreateGuest(
+      supabase,
+      venue_id,
+      {
+        name,
+        email: emailNorm,
+        phone: phoneE164,
+      },
+      guestLinkOptions,
+    );
 
     const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];

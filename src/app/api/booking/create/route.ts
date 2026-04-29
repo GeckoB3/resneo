@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
+import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
@@ -133,12 +135,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
     }
 
+    const isOnlineLikeSource =
+      source === 'online' || source === 'widget' || source === 'booking_page';
+    if (isOnlineLikeSource && !String(email ?? '').trim()) {
+      return NextResponse.json(
+        { error: 'Email is required for online bookings.' },
+        { status: 400 },
+      );
+    }
+    const guestLinkOptions = {
+      silentAuthSignup: isOnlineLikeSource && Boolean(String(email ?? '').trim()),
+    };
+
     const supabase = getSupabaseAdminClient();
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status',
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, require_account_login_for_bookings',
       )
       .eq('id', venue_id)
       .single();
@@ -146,6 +160,16 @@ export async function POST(request: NextRequest) {
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
+
+    const authClient = await createClient();
+    const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
+      requireAccountLogin: Boolean(
+        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      ),
+      authSupabase: authClient,
+      bookingEmail: email,
+    });
+    if (loginDenied) return loginDenied;
 
     if (
       isOnlineBookingBlockedForLightPastDue(
@@ -165,12 +189,30 @@ export async function POST(request: NextRequest) {
     if (venueMode.bookingModel !== 'table_reservation') {
       const inferredSecondary = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
       const effectiveModel = inferredSecondary ?? venueMode.bookingModel;
-      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, effectiveModel);
+      return handleNonTableBooking(
+        request,
+        supabase,
+        venue,
+        venueMode,
+        parsed.data,
+        phoneE164,
+        effectiveModel,
+        guestLinkOptions,
+      );
     }
 
     const secondaryModel = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
     if (secondaryModel) {
-      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, secondaryModel);
+      return handleNonTableBooking(
+        request,
+        supabase,
+        venue,
+        venueMode,
+        parsed.data,
+        phoneE164,
+        secondaryModel,
+        guestLinkOptions,
+      );
     }
     if (hasNonTableBookingPayload(parsed.data)) {
       return NextResponse.json(
@@ -278,11 +320,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { guest } = await findOrCreateGuest(supabase, venue_id, {
-      name,
-      email: email || null,
-      phone: phoneE164,
-    });
+    const { guest } = await findOrCreateGuest(
+      supabase,
+      venue_id,
+      {
+        name,
+        email: email || null,
+        phone: phoneE164,
+      },
+      guestLinkOptions,
+    );
 
     const refundWindowHoursTable = await resolveCancellationNoticeHoursForCreate({
       supabase,
@@ -482,6 +529,7 @@ async function handleNonTableBooking(
   data: z.infer<typeof createBookingSchema>,
   phoneE164: string,
   effectiveModel: BookingModel,
+  guestLinkOptions: { silentAuthSignup: boolean },
 ) {
   const {
     venue_id, booking_date, booking_time, party_size, name, email,
@@ -493,6 +541,15 @@ async function handleNonTableBooking(
     event_session_id,
     capacity_used,
   } = data;
+
+  const isOnlineLikeSource =
+    source === 'online' || source === 'widget' || source === 'booking_page';
+  if (isOnlineLikeSource && !String(email ?? '').trim()) {
+    return NextResponse.json(
+      { error: 'Email is required for online bookings.' },
+      { status: 400 },
+    );
+  }
 
   const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
   const timeStr = timeForDb.slice(0, 5);
@@ -853,11 +910,16 @@ async function handleNonTableBooking(
     );
   }
 
-  const { guest } = await findOrCreateGuest(supabase, venue_id, {
-    name,
-    email: email || null,
-    phone: phoneE164,
-  });
+  const { guest } = await findOrCreateGuest(
+    supabase,
+    venue_id,
+    {
+      name,
+      email: email || null,
+      phone: phoneE164,
+    },
+    guestLinkOptions,
+  );
 
   const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
     supabase,

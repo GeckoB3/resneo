@@ -46,6 +46,7 @@ type StaffLookupRow = {
   id: string;
   venue_id: string;
   email?: string | null;
+  user_id?: string | null;
   role: 'admin' | 'staff';
 };
 
@@ -71,7 +72,7 @@ function resolveUniqueStaffRow(rows: StaffLookupRow[], context: string): StaffLo
  */
 export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaff | null> {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return null;
+  if (!user?.id) return null;
 
   const admin = getSupabaseAdminClient();
 
@@ -102,11 +103,37 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
     }
   }
 
-  const normalised = user.email.toLowerCase().trim();
+  const { data: byUserId, error: userIdErr } = await admin
+    .from('staff')
+    .select('id, venue_id, email, role, user_id')
+    .eq('user_id', user.id)
+    .is('revoked_at', null)
+    .order('id', { ascending: true })
+    .limit(10);
+
+  if (userIdErr) {
+    console.error('[getVenueStaff] staff user_id lookup failed:', userIdErr.message, { userId: user.id });
+  }
+
+  const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], 'getVenueStaff');
+  if (fromUserId) {
+    return {
+      id: fromUserId.id,
+      venue_id: fromUserId.venue_id,
+      email: fromUserId.email ?? user.email ?? '',
+      role: fromUserId.role as 'admin' | 'staff',
+      db: admin,
+    };
+  }
+
+  const normalised = user.email?.toLowerCase().trim() ?? '';
+  if (!normalised) return null;
+
   const { data: rows, error } = await admin
     .from('staff')
-    .select('id, venue_id, email, role')
+    .select('id, venue_id, email, role, user_id')
     .ilike('email', normalised)
+    .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
 
@@ -143,7 +170,7 @@ export async function getDashboardStaff(
 }> {
   const admin = getSupabaseAdminClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return { id: null, email: '', venue_id: null, role: null, db: admin };
+  if (!user?.id) return { id: null, email: '', venue_id: null, role: null, db: admin };
 
   if (isPlatformSuperuser(user)) {
     const cookieSessionId = await getSupportSessionCookieIdFromCookies();
@@ -172,11 +199,39 @@ export async function getDashboardStaff(
     }
   }
 
-  const normalised = user.email.toLowerCase().trim();
+  const { data: byUserId, error: uidErr } = await admin
+    .from('staff')
+    .select('id, venue_id, role, user_id')
+    .eq('user_id', user.id)
+    .is('revoked_at', null)
+    .order('id', { ascending: true })
+    .limit(10);
+
+  if (uidErr) {
+    console.error('[getDashboardStaff] staff user_id lookup failed:', uidErr.message, { userId: user.id });
+  }
+
+  const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], 'getDashboardStaff');
+  if (fromUserId) {
+    return {
+      id: fromUserId.id,
+      email: user.email?.toLowerCase().trim() ?? '',
+      venue_id: fromUserId.venue_id,
+      role: fromUserId.role as 'admin' | 'staff',
+      db: admin,
+    };
+  }
+
+  const normalised = user.email?.toLowerCase().trim() ?? '';
+  if (!normalised) {
+    return { id: null, email: '', venue_id: null, role: null, db: admin };
+  }
+
   const { data: rows, error } = await admin
     .from('staff')
-    .select('id, venue_id, role')
+    .select('id, venue_id, role, user_id')
     .ilike('email', normalised)
+    .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
 

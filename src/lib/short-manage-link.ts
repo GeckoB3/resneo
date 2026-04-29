@@ -2,20 +2,97 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { getPaymentTokenSecret, tryGetPaymentTokenSecret } from '@/lib/payment-token';
 
+/** Default expiry for scoped manage tokens (14 days). */
+const MANAGE_LINK_TTL_SEC = 60 * 60 * 24 * 14;
+/** Compatibility window for old stateless /m/{payload}.{sig} links. */
+const LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS = Date.UTC(2026, 7, 1, 0, 0, 0);
+
+function parseLegacyShortManageCode(code: string, secret: string): string | null {
+  if (Date.now() > LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS) return null;
+
+  const dotIdx = code.lastIndexOf('.');
+  if (dotIdx < 1) return null;
+  const payload = code.slice(0, dotIdx);
+  const sig = code.slice(dotIdx + 1);
+
+  const expectedFull = createHmac('sha256', secret).update(payload).digest('base64url');
+  const expected = expectedFull.slice(0, 12);
+  if (expected.length !== sig.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null;
+  } catch {
+    return null;
+  }
+
+  try {
+    const bytes = Buffer.from(payload, 'base64url');
+    if (bytes.length !== 16) return null;
+    const hex = bytes.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  } catch {
+    return null;
+  }
+}
+
+function parseV2ShortManageCode(code: string, secret: string): string | null {
+  const without = code.startsWith('v2.') ? code.slice(3) : null;
+  if (!without) return null;
+  const lastDot = without.lastIndexOf('.');
+  if (lastDot < 1) return null;
+  const payload = without.slice(0, lastDot);
+  const sig = without.slice(lastDot + 1);
+  const expected = createHmac('sha256', secret)
+    .update(`manage2:${payload}`)
+    .digest('base64url')
+    .slice(0, 18);
+  if (expected.length !== sig.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null;
+  } catch {
+    return null;
+  }
+  let parsed: { v?: number; bid?: string; exp?: number };
+  try {
+    parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      v?: number;
+      bid?: string;
+      exp?: number;
+    };
+  } catch {
+    return null;
+  }
+  if (parsed.v !== 2 || typeof parsed.bid !== 'string' || typeof parsed.exp !== 'number') return null;
+  if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
+  return parsed.bid;
+}
+
 /**
- * Create a compact signed manage link for a booking.
- * Format: /m/[base64url(uuid_bytes)].[hmac_12chars]
- * Path segment after /m/ is ~35 chars (stateless; shorter than /manage/{uuid}/… or ?hmac=…).
+ * Verify short manage URL segment and return booking id (legacy or v2 scoped token).
+ */
+export function resolveShortManageBookingId(code: string): string | null {
+  const secret = tryGetPaymentTokenSecret();
+  if (!secret) return null;
+  if (code.startsWith('v2.')) {
+    return parseV2ShortManageCode(code, secret);
+  }
+  return parseLegacyShortManageCode(code, secret);
+}
+
+/**
+ * Create a compact signed manage link for a booking (v2 scoped token with expiry).
+ * Legacy v1 links are still accepted in {@link resolveShortManageBookingId}.
  */
 export function createShortManageLink(bookingId: string): string {
-  const hex = bookingId.replace(/-/g, '');
-  const payload = Buffer.from(hex, 'hex').toString('base64url');
-  const sig = createHmac('sha256', getPaymentTokenSecret())
-    .update(payload)
+  const secret = getPaymentTokenSecret();
+  const exp = Math.floor(Date.now() / 1000) + MANAGE_LINK_TTL_SEC;
+  const payloadObj = { v: 2 as const, bid: bookingId, exp };
+  const payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
+  const sig = createHmac('sha256', secret)
+    .update(`manage2:${payload}`)
     .digest('base64url')
-    .slice(0, 12);
+    .slice(0, 18);
   const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  return `${baseUrl}/m/${payload}.${sig}`;
+  return `${baseUrl}/m/v2.${payload}.${sig}`;
 }
 
 /**

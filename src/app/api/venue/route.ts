@@ -33,6 +33,8 @@ const venueProfileSchema = z.object({
   enabled_models: z.array(z.string()).optional(),
   /** Guest booking: combined slots vs pick-area-first (table_reservation). */
   public_booking_area_mode: z.enum(['auto', 'manual']).optional(),
+  /** When true, public booking must complete magic-link login before checkout (see booking create). */
+  require_account_login_for_bookings: z.boolean().optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue - return the authenticated user's venue profile. */
@@ -47,7 +49,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings')
       .eq('id', staff.venue_id)
       .single();
 
@@ -56,7 +58,7 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -162,6 +164,9 @@ export async function PATCH(request: NextRequest) {
     if (data.public_booking_area_mode !== undefined) {
       update.public_booking_area_mode = data.public_booking_area_mode;
     }
+    if (data.require_account_login_for_bookings !== undefined) {
+      update.require_account_login_for_bookings = data.require_account_login_for_bookings;
+    }
 
     let nextActiveModels: BookingModel[] | null = null;
 
@@ -241,7 +246,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings',
       )
       .single();
 

@@ -638,6 +638,22 @@ export function BookingDetailPanel({
   const nextStatuses = BOOKING_STATUS_TRANSITIONS[d.status as BookingStatus] ?? [];
   const canChangeStatus = nextStatuses.length > 0;
   const bookingStyleIsTable = isTableStyleBookingDetail(d, isAppointment);
+  const currentStatus = d.status as BookingStatus;
+  const forwardStatuses = nextStatuses.filter((status) => !isRevertTransition(currentStatus, status));
+  const statusRevertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+  const forwardLabel = (status: BookingStatus) => {
+    if (status === 'Seated') return bookingStyleIsTable ? 'Seat' : 'Start';
+    if (status === 'Completed') return 'Complete';
+    if (status === 'Cancelled') return 'Cancel';
+    return status;
+  };
+  const revertLabel =
+    statusRevertAction &&
+    currentStatus === 'Seated' &&
+    statusRevertAction.target === 'Booked' &&
+    !bookingStyleIsTable
+      ? 'Undo Start'
+      : statusRevertAction?.label;
   const confirmationSentAt = d.communications.find(
     (comm) =>
       comm.message_type === 'booking_confirmation_email' ||
@@ -646,6 +662,10 @@ export function BookingDetailPanel({
   const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
   const endTime = endHHMMOrFallback(d.estimated_end_time, startTime, 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
+  const tableLine =
+    optimisticTableLabel ??
+    (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
+  const hasAssignedTable = Boolean(tableLine);
 
   return (
     <div
@@ -656,11 +676,11 @@ export function BookingDetailPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Booking detail panel"
-        className="w-full max-w-sm overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
+        className="w-full max-w-md overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header - compact */}
-        <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
+        <div className="sticky top-0 z-10 border-b border-slate-100 bg-gradient-to-br from-white via-white to-brand-50/70 px-4 py-3 backdrop-blur">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -675,6 +695,13 @@ export function BookingDetailPanel({
                   </span>
                 )}
               </div>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-slate-600">
+                <span>{formatDateNice(d.booking_date)}</span>
+                <span className="text-slate-300">·</span>
+                <span className="tabular-nums">{startTime} - {endTime}</span>
+                <span className="text-slate-300">·</span>
+                <span>{d.party_size} cover{d.party_size === 1 ? '' : 's'}</span>
+              </p>
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                 <span className="font-mono">#{d.id.slice(0, 8)}</span>
                 <button
@@ -697,6 +724,81 @@ export function BookingDetailPanel({
         <div className="space-y-3 p-4">
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+          )}
+
+          <SectionCard className="border-brand-200 bg-gradient-to-br from-brand-50 via-white to-white">
+            <SectionCard.Body className="p-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-600">Booking slot</p>
+                  <p className="mt-1 text-2xl font-bold tracking-tight text-slate-950 tabular-nums">{startTime} - {endTime}</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {durationMinutes} min · {d.party_size} cover{d.party_size === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:min-w-40">
+                  <div className={`rounded-xl border px-3 py-2 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
+                    <p className={`mt-0.5 truncate text-sm font-bold ${hasAssignedTable ? 'text-emerald-900' : 'text-amber-800'}`}>
+                      {tableLine ?? 'Unassigned'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
+                    <p className={`mt-0.5 truncate text-sm font-bold ${
+                      d.deposit_status === 'Paid'
+                        ? 'text-emerald-700'
+                        : d.deposit_status === 'Pending'
+                          ? 'text-amber-700'
+                          : 'text-slate-700'
+                    }`}>
+                      {depositPaid && depositAmountStr
+                        ? `${depositAmountStr} paid`
+                        : d.deposit_status === 'Not Required'
+                          ? 'None'
+                          : d.deposit_status}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </SectionCard.Body>
+          </SectionCard>
+
+          {canChangeStatus && (
+            <SectionCard>
+              <SectionCard.Body className="p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Next action</p>
+                    <p className="mt-0.5 text-xs text-slate-500">Update this booking without leaving the grid.</p>
+                  </div>
+                  <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot>
+                    {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
+                  </Pill>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {forwardStatuses.map((status) => (
+                    <ActionButton
+                      key={status}
+                      onClick={() => updateStatus(status)}
+                      disabled={actionLoading || !isHydrated}
+                      variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
+                    >
+                      {forwardLabel(status)}
+                    </ActionButton>
+                  ))}
+                  {statusRevertAction && (
+                    <ActionButton
+                      onClick={() => updateStatus(statusRevertAction.target)}
+                      disabled={actionLoading || !isHydrated}
+                      variant="secondary"
+                    >
+                      {revertLabel}
+                    </ActionButton>
+                  )}
+                </div>
+              </SectionCard.Body>
+            </SectionCard>
           )}
 
           {/* Guest + summary row */}
@@ -1059,56 +1161,6 @@ export function BookingDetailPanel({
               })();
             }}
           />
-
-          {/* Status actions */}
-          {canChangeStatus && (() => {
-            const currentStatus = d.status as BookingStatus;
-            const forwardStatuses = nextStatuses.filter((s) => !isRevertTransition(currentStatus, s));
-            const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
-            const forwardLabel = (status: BookingStatus) => {
-              if (status === 'Seated') return bookingStyleIsTable ? 'Seat' : 'Start';
-              if (status === 'Completed') return 'Complete';
-              if (status === 'Cancelled') return 'Cancel';
-              return status;
-            };
-            const revertLabel =
-              revertAction &&
-              currentStatus === 'Seated' &&
-              revertAction.target === 'Booked' &&
-              !bookingStyleIsTable
-                ? 'Undo Start'
-                : revertAction?.label;
-            return (
-              <SectionCard>
-                <SectionCard.Body className="p-3.5">
-                  <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Actions</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {forwardStatuses.map((status) => (
-                      <ActionButton
-                        key={status}
-                        onClick={() => updateStatus(status)}
-                        disabled={actionLoading || !isHydrated}
-                        variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
-                      >
-                        {forwardLabel(status)}
-                      </ActionButton>
-                    ))}
-                  </div>
-                  {revertAction && (
-                    <div className="mt-1.5">
-                      <ActionButton
-                        onClick={() => updateStatus(revertAction.target)}
-                        disabled={actionLoading || !isHydrated}
-                        variant="secondary"
-                      >
-                        {revertLabel}
-                      </ActionButton>
-                    </div>
-                  )}
-                </SectionCard.Body>
-              </SectionCard>
-            );
-          })()}
 
           {d.status === 'Cancelled' && (
             <SectionCard className="border-red-100 bg-red-50/20">

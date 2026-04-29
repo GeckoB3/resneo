@@ -10,6 +10,7 @@ import {
   tableDimensionsPercentToPixels,
 } from '@/types/table-management';
 import {
+  computeStageFitToView,
   FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
 } from '@/lib/floor-plan/fit-view';
@@ -125,6 +126,7 @@ export default function LiveFloorCanvas({
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const baseScaleRef = useRef(1);
+  const hasMeasuredViewport = viewport.w > 1 && viewport.h > 1;
   const [draggingBookingId, setDraggingBookingId] = useState<string | null>(null);
   const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -187,6 +189,25 @@ export default function LiveFloorCanvas({
 
     return lines;
   }, [combinedTableGroups, tables, layoutPixelW, layoutPixelH]);
+
+  const layoutSignature = useMemo(
+    () =>
+      tables
+        .map((table) =>
+          [
+            table.id,
+            table.position_x ?? '',
+            table.position_y ?? '',
+            table.width ?? '',
+            table.height ?? '',
+            table.shape,
+            table.max_covers,
+          ].join(':'),
+        )
+        .sort()
+        .join('|'),
+    [tables],
+  );
 
   const handleTableMouseDown = useCallback((tableId: string, _e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     const table = tables.find((t) => t.id === tableId);
@@ -282,45 +303,26 @@ export default function LiveFloorCanvas({
    * positioned in `layoutPixelW`×`layoutPixelH` space — we find their AABB and scale+pan the Stage.
    */
   const fitViewToStage = useCallback(() => {
-    const vw = stageWidth;
-    const vh = stageHeight;
+    const vw = viewport.w;
+    const vh = viewport.h;
     if (vw < 1 || vh < 1 || tables.length === 0) return;
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const t of tables) {
-      const fb = getTableDimensions(t.max_covers, t.shape);
-      const { w, h } = tableDimensionsPercentToPixels(
-        t.width ?? fb.width,
-        t.height ?? fb.height,
-        layoutPixelW,
-        layoutPixelH,
-        t.shape,
-      );
-      const cx = t.position_x != null ? (t.position_x / 100) * layoutPixelW : layoutPixelW / 2;
-      const cy = t.position_y != null ? (t.position_y / 100) * layoutPixelH : layoutPixelH / 2;
-      minX = Math.min(minX, cx - w / 2);
-      maxX = Math.max(maxX, cx + w / 2);
-      minY = Math.min(minY, cy - h / 2);
-      maxY = Math.max(maxY, cy + h / 2);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
-
-    const pad = 48;
-    const bw = maxX - minX + pad * 2;
-    const bh = maxY - minY + pad * 2;
-    const nextScale = Math.max(0.1, Math.min(3, Math.min(vw / bw, vh / bh)));
-    const midX = (minX + maxX) / 2;
-    const midY = (minY + maxY) / 2;
+    const fit = computeStageFitToView(
+      tables,
+      layoutPixelW,
+      layoutPixelH,
+      vw,
+      vh,
+      {
+        padding: 48,
+        maxScale: 3,
+      },
+    );
+    const nextScale = Math.max(0.1, fit.scale);
     baseScaleRef.current = nextScale;
     setScale(nextScale);
-    setStagePos({
-      x: vw / 2 - midX * nextScale,
-      y: vh / 2 - midY * nextScale,
-    });
-  }, [tables, layoutPixelW, layoutPixelH, stageWidth, stageHeight]);
+    setStagePos({ x: fit.x, y: fit.y });
+  }, [tables, layoutPixelW, layoutPixelH, viewport.w, viewport.h]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -342,14 +344,14 @@ export default function LiveFloorCanvas({
   const initialFitDone = useRef(false);
   useEffect(() => {
     initialFitDone.current = false;
-  }, [layoutWidth, layoutHeight]);
+  }, [layoutWidth, layoutHeight, layoutSignature]);
   useEffect(() => {
-    if (tables.length === 0 || stageWidth < 1 || stageHeight < 1) return;
+    if (tables.length === 0 || !hasMeasuredViewport) return;
     if (!initialFitDone.current) {
       fitViewToStage();
       initialFitDone.current = true;
     }
-  }, [tables, stageWidth, stageHeight, fitViewToStage]);
+  }, [tables.length, hasMeasuredViewport, fitViewToStage]);
 
   const zoomBy = useCallback(
     (delta: number) => {

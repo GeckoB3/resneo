@@ -1731,7 +1731,7 @@ export function AppointmentBookingsDashboard({
 
         <div className="flex flex-col gap-3 border-t border-slate-100 pt-3 sm:flex-row sm:items-end">
           <label className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
-            <span className="text-xs font-medium text-slate-600">Staff member</span>
+            <span className="text-xs font-medium text-slate-600">Calendar</span>
             <select
               value={practitionerFilter}
               onChange={(e) => setPractitionerFilter(e.target.value as 'all' | string)}

@@ -92,6 +92,7 @@ export function FloorPlanLiveView({
   const [blocks, setBlocks] = useState<TableBlock[]>([]);
   const [bookingMap, setBookingMap] = useState<Map<string, BookingOnTable>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [viewportRefreshing, setViewportRefreshing] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [combinedTableGroups, setCombinedTableGroups] = useState<Map<string, string[]>>(new Map());
   const [manualCombinations, setManualCombinations] = useState<CombinationInfo[]>([]);
@@ -176,7 +177,7 @@ export function FloorPlanLiveView({
   const pickerEndHour = endHourOverride ?? derivedEndHour;
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    setViewportRefreshing(true);
     try {
       const areaQs =
         bookingModel === 'table_reservation' && diningAreaId
@@ -267,6 +268,7 @@ export function FloorPlanLiveView({
       console.error('Failed to load floor plan data:', err);
     } finally {
       setLoading(false);
+      setViewportRefreshing(false);
     }
   }, [bookingModel, diningAreaId, selectedDate]);
 
@@ -860,6 +862,13 @@ export function FloorPlanLiveView({
 
       {/* Canvas area */}
       <div className="relative h-[680px] min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5 sm:h-[760px] lg:h-[840px]">
+        {viewportRefreshing && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-50/70 backdrop-blur-[1px]">
+            <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
+              Updating floor plan...
+            </div>
+          </div>
+        )}
         {reassignMode && (
           <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
             <span>Tap a highlighted table to move <strong>{reassignMode.guestName}</strong></span>

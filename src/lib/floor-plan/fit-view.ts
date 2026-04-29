@@ -28,14 +28,16 @@ export interface ComputeStageFitOptions {
  */
 export function computeStageFitToView(
   tables: FitViewTableLike[],
-  canvasW: number,
-  canvasH: number,
+  layoutW: number,
+  layoutH: number,
+  viewportW: number,
+  viewportH: number,
   options?: ComputeStageFitOptions,
 ): { scale: number; x: number; y: number } {
   const pad = options?.padding ?? 48;
   const maxScale = options?.maxScale ?? 3;
 
-  if (tables.length === 0 || canvasW < 1 || canvasH < 1) {
+  if (tables.length === 0 || layoutW < 1 || layoutH < 1 || viewportW < 1 || viewportH < 1) {
     return { scale: 1, x: 0, y: 0 };
   }
 
@@ -46,13 +48,13 @@ export function computeStageFitToView(
 
   for (const t of tables) {
     const fb = getTableDimensions(t.max_covers, t.shape as TableShape);
-    const cx = t.position_x != null ? (t.position_x / 100) * canvasW : canvasW / 2;
-    const cy = t.position_y != null ? (t.position_y / 100) * canvasH : canvasH / 2;
+    const cx = t.position_x != null ? (t.position_x / 100) * layoutW : layoutW / 2;
+    const cy = t.position_y != null ? (t.position_y / 100) * layoutH : layoutH / 2;
     const { w, h } = tableDimensionsPercentToPixels(
       t.width ?? fb.width,
       t.height ?? fb.height,
-      canvasW,
-      canvasH,
+      layoutW,
+      layoutH,
       t.shape,
     );
     minX = Math.min(minX, cx - w / 2);
@@ -67,13 +69,13 @@ export function computeStageFitToView(
 
   const bw = maxX - minX + pad * 2;
   const bh = maxY - minY + pad * 2;
-  const scale = Math.min(canvasW / bw, canvasH / bh, maxScale);
+  const scale = Math.min(viewportW / bw, viewportH / bh, maxScale);
   const midX = (minX + maxX) / 2;
   const midY = (minY + maxY) / 2;
   return {
     scale,
-    x: canvasW / 2 - midX * scale,
-    y: canvasH / 2 - midY * scale,
+    x: viewportW / 2 - midX * scale,
+    y: viewportH / 2 - midY * scale,
   };
 }
 

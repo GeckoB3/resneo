@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/core';
 import {
   BOOKING_STATUSES,
+  BOOKING_PRIMARY_ACTIONS,
   BOOKING_STATUS_TRANSITIONS,
   BOOKING_REVERT_ACTIONS,
   canTransitionBookingStatus,
@@ -1012,6 +1013,7 @@ export function TimelineGrid({
                       onContextMenu={handleContextMenu}
                       onBookingPointerDown={handleBookingPointerDown}
                       onClick={onBookingClick}
+                      onQuickStatusChange={(nextStatus) => { void handleStatusChange(block.id, block.status, nextStatus); }}
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
                       activeDragBookingId={activeDrag?.id ?? null}
@@ -1055,6 +1057,7 @@ export function TimelineGrid({
                       onContextMenu={handleContextMenu}
                       onBookingPointerDown={handleBookingPointerDown}
                       onClick={onBookingClick}
+                      onQuickStatusChange={(nextStatus) => { void handleStatusChange(block.id, block.status, nextStatus); }}
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
                       activeDragBookingId={activeDrag?.id ?? null}
@@ -1371,7 +1374,7 @@ function DroppableCell({
   );
 }
 
-function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMultiTable, onContextMenu, onBookingPointerDown, onClick, resizeVisual, onResizeVisual, activeDragBookingId }: {
+function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMultiTable, onContextMenu, onBookingPointerDown, onClick, onQuickStatusChange, resizeVisual, onResizeVisual, activeDragBookingId }: {
   block: BookingBlock;
   dragId: string;
   slotWidth: number;
@@ -1381,6 +1384,7 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   onContextMenu: (e: React.MouseEvent, block: BookingBlock) => void;
   onBookingPointerDown: (block: BookingBlock, clientX: number, clientY: number) => void;
   onClick: (bookingId: string) => void;
+  onQuickStatusChange: (nextStatus: BookingStatus) => void;
   resizeVisual: { bookingId: string; deltaSlots: number } | null;
   onResizeVisual: (state: { bookingId: string; deltaSlots: number } | null) => void;
   activeDragBookingId: string | null;
@@ -1403,6 +1407,12 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   const isCondensed = width < 72;
   const comboLabel = block.table_names.length > 1 ? block.table_names.join('+') : '';
   const depositIcon = block.deposit_status === 'Paid' ? '£' : block.deposit_status === 'Pending' ? '!' : null;
+  const primaryAction = isBookingStatus(block.status) ? BOOKING_PRIMARY_ACTIONS[block.status] : undefined;
+  const canShowPrimaryAction = Boolean(primaryAction) && width >= 132;
+  const canShowNoShowAction =
+    isBookingStatus(block.status) &&
+    canTransitionBookingStatus(block.status, 'No-Show') &&
+    width >= 228;
 
   const startResize = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1476,7 +1486,7 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
       style={{ left, top, width, height, WebkitTapHighlightColor: 'transparent' }}
       title={`${block.guest_name} · Party of ${block.party_size} · ${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}${isMultiTable ? ' · Table combination' : ''}`}
     >
-      <div {...listeners} className="flex w-full min-h-0 flex-1 items-center gap-1 pr-2 touch-none">
+      <div {...listeners} className="flex min-h-0 flex-1 items-center gap-1 pr-1 touch-none">
         {isCondensed ? (
           <>
             <span className="text-[10px] font-semibold">{block.party_size}</span>
@@ -1514,6 +1524,42 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
           </>
         )}
       </div>
+      {(canShowPrimaryAction || canShowNoShowAction) && (
+        <div className="flex shrink-0 items-center gap-1 pr-1">
+          {primaryAction && canShowPrimaryAction && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickStatusChange(primaryAction.target);
+              }}
+              className="rounded-md bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-slate-800 shadow-sm ring-1 ring-black/5 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400/40"
+              aria-label={`${primaryAction.label} booking for ${block.guest_name}`}
+            >
+              {primaryAction.label}
+            </button>
+          )}
+          {canShowNoShowAction && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickStatusChange('No-Show');
+              }}
+              className="rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm ring-1 ring-rose-200/70 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
+              aria-label={`Mark no-show for ${block.guest_name}`}
+            >
+              No-show
+            </button>
+          )}
+        </div>
+      )}
       <span
         onMouseDown={startResize}
         className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/20 opacity-60 transition-opacity hover:opacity-100"

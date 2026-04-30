@@ -15,9 +15,7 @@ function joinSmsPrefixAndUrl(prefix: string, url: string, label = "", max = SMS_
   const labelledUrl = `${label}${u}`;
   const combined = `${base} ${labelledUrl}`;
   if (combined.length <= max) return combined;
-  const budget = max - labelledUrl.length - 1;
-  if (budget < 12) return u;
-  return `${clipSmsText(base, budget)} ${labelledUrl}`;
+  return combined;
 }
 
 export function renderDayOfReminderSms(

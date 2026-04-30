@@ -3,7 +3,7 @@ import { createShortManageLink, resolveShortManageBookingId } from '@/lib/short-
 import { resolveManageBookingToken } from '@/lib/manage-booking-token';
 
 describe('manage-booking-token', () => {
-  it('resolves v2 segment to booking id and booking-scoped hmac', () => {
+  it('resolves v3 segment to booking id and booking-scoped hmac', () => {
     const bookingId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const url = createShortManageLink(bookingId);
     const segment = new URL(url).pathname.split('/').pop()!;

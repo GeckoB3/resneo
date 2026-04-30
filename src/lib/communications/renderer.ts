@@ -103,9 +103,9 @@ function joinSmsPrefixAndUrl(
   const labelledUrl = `${label}${u}`;
   const combined = `${base} ${labelledUrl}`;
   if (combined.length <= max) return combined;
-  const budget = max - labelledUrl.length - 1;
-  if (budget < 12) return u;
-  return `${clipSmsText(base, budget)} ${labelledUrl}`;
+  // Long signed links can exceed a single SMS segment. Keep the actual message copy
+  // and allow Twilio to split into segments rather than sending a bare URL.
+  return combined;
 }
 
 function smsLeadPart(raw: string | null | undefined): string {

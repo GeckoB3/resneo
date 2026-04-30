@@ -174,6 +174,41 @@ describe('renderCommunicationEmail booking_confirmation account CTA', () => {
 });
 
 describe('renderCommunicationSms confirm_or_cancel_prompt', () => {
+  it('keeps table booking confirmation wording when the manage link is long', () => {
+    const longManageLink =
+      'https://www.reserveni.com/m/v2.eyJib29raW5nSWQiOiJhYWFhYWFhYS1iYmJiLWNjY2MtZGRkZC1lZWVlZWVlZWVlZWUiLCJzaWciOiIxMjM0NTY3ODkwIn0';
+    const out = renderCommunicationSms({
+      lane: 'table',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        party_size: 4,
+        manage_booking_link: longManageLink,
+      }),
+      venue,
+    });
+
+    expect(out?.body).toContain('Test Venue: Booking confirmed for 4 guests');
+    expect(out?.body).toContain('Manage: https://www.reserveni.com/m/v2.');
+    expect(out?.body).not.toBe(longManageLink);
+  });
+
+  it('keeps table confirm-or-cancel wording when the confirm link is long', () => {
+    const longConfirmLink =
+      'https://www.reserveni.com/c/v2.eyJib29raW5nSWQiOiJhYWFhYWFhYS1iYmJiLWNjY2MtZGRkZC1lZWVlZWVlZWVlZWUiLCJzaWciOiIxMjM0NTY3ODkwIn0';
+    const out = renderCommunicationSms({
+      lane: 'table',
+      messageKey: 'confirm_or_cancel_prompt',
+      booking: baseBooking({ party_size: 4 }),
+      venue,
+      confirmLink: longConfirmLink,
+      cancelLink: longConfirmLink,
+    });
+
+    expect(out?.body).toContain('Test Venue: Please confirm or cancel your booking for 4 guests');
+    expect(out?.body).toContain(longConfirmLink);
+    expect(out?.body).not.toBe(longConfirmLink);
+  });
+
   it('uses one confirm-or-cancel link for table bookings', () => {
     const link = 'https://example.com/c/signed';
     const out = renderCommunicationSms({

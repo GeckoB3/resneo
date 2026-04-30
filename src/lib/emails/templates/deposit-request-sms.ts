@@ -7,21 +7,13 @@ import { formatSmsDate, formatTime, formatDepositAmount } from "./base-template"
 
 const SMS_MAX = 160;
 
-function clipSmsText(s: string, max: number): string {
-  const t = s.trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, Math.max(0, max - 3))}...`;
-}
-
 function joinSmsPrefixAndUrl(prefix: string, url: string, label = "", max = SMS_MAX): string {
   const u = url.trim();
   const base = prefix.trim();
   const labelledUrl = `${label}${u}`;
   const combined = `${base} ${labelledUrl}`;
   if (combined.length <= max) return combined;
-  const budget = max - labelledUrl.length - 1;
-  if (budget < 12) return u;
-  return `${clipSmsText(base, budget)} ${labelledUrl}`;
+  return combined;
 }
 
 function isAppointment(booking: BookingEmailData): boolean {
@@ -65,5 +57,5 @@ export function renderDepositRequestSms(
     }
   }
 
-  return { body: clipSmsText(body, SMS_MAX) };
+  return { body };
 }

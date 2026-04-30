@@ -66,12 +66,40 @@ function parseV2ShortManageCode(code: string, secret: string): string | null {
   return parsed.bid;
 }
 
+function parseV3ShortManageCode(code: string, secret: string): string | null {
+  const without = code.startsWith('v3.') ? code.slice(3) : null;
+  if (!without) return null;
+  const lastDot = without.lastIndexOf('.');
+  if (lastDot < 1) return null;
+  const payload = without.slice(0, lastDot);
+  const sig = without.slice(lastDot + 1);
+  const payloadBuf = Buffer.from(payload, 'base64url');
+  if (payloadBuf.length !== 20) return null;
+  const expected = createHmac('sha256', secret)
+    .update(Buffer.concat([Buffer.from('manage3:'), payloadBuf]))
+    .digest('base64url')
+    .slice(0, 12);
+  if (expected.length !== sig.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null;
+  } catch {
+    return null;
+  }
+  const expSec = payloadBuf.readUInt32BE(16);
+  if (expSec < Math.floor(Date.now() / 1000)) return null;
+  const hex = payloadBuf.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /**
- * Verify short manage URL segment and return booking id (legacy or v2 scoped token).
+ * Verify short manage URL segment and return booking id (legacy, v2, or compact v3 scoped token).
  */
 export function resolveShortManageBookingId(code: string): string | null {
   const secret = tryGetPaymentTokenSecret();
   if (!secret) return null;
+  if (code.startsWith('v3.')) {
+    return parseV3ShortManageCode(code, secret);
+  }
   if (code.startsWith('v2.')) {
     return parseV2ShortManageCode(code, secret);
   }
@@ -79,20 +107,27 @@ export function resolveShortManageBookingId(code: string): string | null {
 }
 
 /**
- * Create a compact signed manage link for a booking (v2 scoped token with expiry).
- * Legacy v1 links are still accepted in {@link resolveShortManageBookingId}.
+ * Create a compact signed manage link for a booking (v3 scoped token with expiry).
+ * Legacy v1 and v2 links are still accepted in {@link resolveShortManageBookingId}.
  */
 export function createShortManageLink(bookingId: string): string {
   const secret = getPaymentTokenSecret();
+  const hex = bookingId.replace(/-/g, '');
+  const idBytes = Buffer.from(hex, 'hex');
+  if (idBytes.length !== 16) {
+    throw new Error('Invalid booking id for manage token');
+  }
   const exp = Math.floor(Date.now() / 1000) + MANAGE_LINK_TTL_SEC;
-  const payloadObj = { v: 2 as const, bid: bookingId, exp };
-  const payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
+  const expBuf = Buffer.alloc(4);
+  expBuf.writeUInt32BE(exp, 0);
+  const payloadBuf = Buffer.concat([idBytes, expBuf]);
+  const payload = payloadBuf.toString('base64url');
   const sig = createHmac('sha256', secret)
-    .update(`manage2:${payload}`)
+    .update(Buffer.concat([Buffer.from('manage3:'), payloadBuf]))
     .digest('base64url')
-    .slice(0, 18);
+    .slice(0, 12);
   const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  return `${baseUrl}/m/v2.${payload}.${sig}`;
+  return `${baseUrl}/m/v3.${payload}.${sig}`;
 }
 
 /**

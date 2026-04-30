@@ -133,6 +133,19 @@ describe("renderDepositRequestSms", () => {
     );
     expect(result.body.startsWith("Hi! Deposit needed.")).toBe(true);
   });
+
+  it("keeps deposit request wording when the payment link is long", () => {
+    const longPaymentLink =
+      "https://www.reserveni.com/pay/v2.eyJib29raW5nSWQiOiJiLTAwMSIsInNpZyI6IjEyMzQ1Njc4OTAiLCJleHAiOjE4MzAwMDAwMDB9";
+    const result = renderDepositRequestSms(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      longPaymentLink,
+    );
+    expect(result.body).toContain("The Golden Whisk: £20.00 deposit needed");
+    expect(result.body).toContain(`Pay: ${longPaymentLink}`);
+    expect(result.body).not.toBe(longPaymentLink);
+  });
 });
 
 describe("renderDepositRequestEmail", () => {
@@ -204,6 +217,18 @@ describe("renderDayOfReminderSms", () => {
     expect(result.body).toContain("The Golden Whisk");
     expect(result.body).toContain("7:30pm");
     expect(result.body.length).toBeLessThanOrEqual(160);
+  });
+
+  it("keeps reminder wording when the manage link is long", () => {
+    const longManageLink =
+      "https://www.reserveni.com/m/v2.eyJib29raW5nSWQiOiJiLTAwMSIsInNpZyI6IjEyMzQ1Njc4OTAiLCJleHAiOjE4MzAwMDAwMDB9";
+    const result = renderDayOfReminderSms(
+      { ...SAMPLE_BOOKING, manage_booking_link: longManageLink },
+      SAMPLE_VENUE,
+    );
+    expect(result.body).toContain("The Golden Whisk: Reminder: your booking");
+    expect(result.body).toContain(`Manage: ${longManageLink}`);
+    expect(result.body).not.toBe(longManageLink);
   });
 });
 

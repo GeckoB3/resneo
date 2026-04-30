@@ -20,7 +20,11 @@ import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
-import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import {
+  isAttendanceConfirmed,
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -53,12 +57,19 @@ interface PractitionerServiceLink {
   custom_duration_minutes: number | null;
 }
 
-const STATUS_FILTERS: Array<{ label: string; apiValue: string | null }> = [
+interface StatusFilterOption {
+  label: string;
+  apiValue: string | null;
+  attendanceConfirmed?: boolean;
+  excludeAttendanceConfirmed?: boolean;
+}
+
+const STATUS_FILTERS: StatusFilterOption[] = [
   { label: 'All', apiValue: null },
   { label: 'Pending', apiValue: 'Pending' },
-  { label: 'Booked', apiValue: 'Booked' },
-  /** Guest tapped confirm/cancel link or staff confirmed attendance — `bookings.status = 'Confirmed'`. */
-  { label: 'Confirmed', apiValue: 'Confirmed' },
+  { label: 'Booked', apiValue: 'Booked', excludeAttendanceConfirmed: true },
+  /** Guest confirmed via link or staff confirmed attendance, including legacy `status = 'Confirmed'`. */
+  { label: 'Confirmed', apiValue: null, attendanceConfirmed: true },
   { label: 'Started', apiValue: 'Seated' },
   { label: 'Completed', apiValue: 'Completed' },
   { label: 'Cancelled', apiValue: 'Cancelled' },
@@ -460,7 +471,9 @@ export function AppointmentBookingsDashboard({
         const params = new URLSearchParams(
           viewMode === 'day' ? { date: from } : { from, to },
         );
-        if (selectedStatusFilter?.apiValue) {
+        if (selectedStatusFilter?.attendanceConfirmed) {
+          params.set('attendance_confirmed', '1');
+        } else if (selectedStatusFilter?.apiValue) {
           params.set('status', selectedStatusFilter.apiValue);
         }
         if (filterGuestId) params.set('guest', filterGuestId);
@@ -472,9 +485,12 @@ export function AppointmentBookingsDashboard({
         }
         const data = await res.json();
         const raw = (data.bookings ?? []) as RegistryAppointment[];
-        const visible = raw.filter((b) =>
+        let visible = raw.filter((b) =>
           venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
         );
+        if (selectedStatusFilter?.excludeAttendanceConfirmed) {
+          visible = visible.filter((booking) => !isAttendanceConfirmed(booking));
+        }
         setBookings(visible);
       } catch {
         setError('Network error loading appointments');
@@ -803,7 +819,7 @@ export function AppointmentBookingsDashboard({
 
   const stats = useMemo(() => {
     const total = statsBookings.length;
-    const confirmed = statsBookings.filter((b) => b.status === 'Confirmed').length;
+    const confirmed = statsBookings.filter(isAttendanceConfirmed).length;
     const completed = statsBookings.filter((b) => b.status === 'Completed').length;
     const noShows = statsBookings.filter((b) => b.status === 'No-Show').length;
     return { total, confirmed, completed, noShows };

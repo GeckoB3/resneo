@@ -112,16 +112,23 @@ interface BookingDetailLite {
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
+interface StatusFilterOption {
+  label: string;
+  apiStatus: string | null;
+  attendanceConfirmed?: boolean;
+  excludeAttendanceConfirmed?: boolean;
+}
+
 /**
  * Filter UI labels.
- *  - `Booked`    — `status === 'Booked'` (booking active, no attendance confirmation yet).
- *  - `Confirmed` — `status === 'Confirmed'` (guest or staff confirmed attendance).
+ *  - `Booked`    — `status === 'Booked'` and not attendance-confirmed.
+ *  - `Confirmed` — guest or staff confirmed attendance, including legacy `status === 'Confirmed'`.
  */
-const STATUS_FILTER_OPTIONS: Array<{ label: string; apiStatus: string | null }> = [
+const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
   { label: 'All', apiStatus: null },
   { label: 'Pending', apiStatus: 'Pending' },
-  { label: 'Booked', apiStatus: 'Booked' },
-  { label: 'Confirmed', apiStatus: 'Confirmed' },
+  { label: 'Booked', apiStatus: 'Booked', excludeAttendanceConfirmed: true },
+  { label: 'Confirmed', apiStatus: null, attendanceConfirmed: true },
   { label: 'Started', apiStatus: 'Seated' },
   { label: 'Completed', apiStatus: 'Completed' },
   { label: 'Cancelled', apiStatus: 'Cancelled' },
@@ -518,7 +525,8 @@ export function BookingsDashboard({
         : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
       if (!ids && statusFilter !== 'All') {
         const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
-        if (opt?.apiStatus) params.set('status', opt.apiStatus);
+        if (opt?.attendanceConfirmed) params.set('attendance_confirmed', '1');
+        else if (opt?.apiStatus) params.set('status', opt.apiStatus);
       }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       if (!ids && filterAreaId) params.set('area', filterAreaId);
@@ -530,7 +538,11 @@ export function BookingsDashboard({
         return;
       }
       const data = await res.json();
-      const next: BookingRow[] = data.bookings ?? [];
+      const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
+      const loaded: BookingRow[] = data.bookings ?? [];
+      const next = !ids && opt?.excludeAttendanceConfirmed
+        ? loaded.filter((booking) => !isAttendanceConfirmed(booking))
+        : loaded;
       setBookings((prev) => {
         if (!ids || ids.length === 0) return next;
         const map = new Map(prev.map((b) => [b.id, b]));

@@ -66,6 +66,8 @@ export interface MiniFloorPlanPickerProps {
   /** Logical floor-plan dimensions from the Layout tab. */
   layoutWidth?: number;
   layoutHeight?: number;
+  /** Use the logical floor-plan aspect ratio when sizing the preview canvas. */
+  preserveLayoutAspect?: boolean;
 }
 
 function computeFit(
@@ -74,15 +76,16 @@ function computeFit(
   layoutH: number,
   viewportW: number,
   viewportH: number,
+  fitFullLayout = false,
 ): { scale: number; x: number; y: number } {
   if (tables.length === 0 || layoutW < 1 || layoutH < 1 || viewportW < 1 || viewportH < 1) {
     return { scale: 1, x: 0, y: 0 };
   }
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
+  let minX = fitFullLayout ? 0 : Infinity;
+  let minY = fitFullLayout ? 0 : Infinity;
+  let maxX = fitFullLayout ? layoutW : -Infinity;
+  let maxY = fitFullLayout ? layoutH : -Infinity;
 
   for (const t of tables) {
     const fb = getTableDimensions(t.max_covers, t.shape);
@@ -126,6 +129,7 @@ export default function MiniFloorPlanPicker({
   previewMode = false,
   layoutWidth,
   layoutHeight,
+  preserveLayoutAspect = false,
 }: MiniFloorPlanPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -203,16 +207,20 @@ export default function MiniFloorPlanPicker({
     const ro = new ResizeObserver(() => {
       const w = el.offsetWidth;
       if (w < 1) return;
-      const h = Math.max(minHeight, Math.round(w * 0.55));
+      const layoutAspectHeight =
+        preserveLayoutAspect && layoutWidth && layoutHeight && layoutWidth > 0 && layoutHeight > 0
+          ? w * (layoutHeight / layoutWidth)
+          : w * 0.55;
+      const h = Math.max(minHeight, Math.round(layoutAspectHeight));
       setDimensions((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [minHeight]);
+  }, [layoutHeight, layoutWidth, minHeight, preserveLayoutAspect]);
 
   const fit = useMemo(
-    () => computeFit(tables, logicalW, logicalH, canvasW, canvasH),
-    [tables, logicalW, logicalH, canvasW, canvasH],
+    () => computeFit(tables, logicalW, logicalH, canvasW, canvasH, previewMode && preserveLayoutAspect),
+    [tables, logicalW, logicalH, canvasW, canvasH, previewMode, preserveLayoutAspect],
   );
 
   useEffect(() => {

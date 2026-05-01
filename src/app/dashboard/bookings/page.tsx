@@ -62,7 +62,7 @@ export default async function BookingsPage() {
   return (
     <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
       <div className={`mx-auto min-w-0 ${isTablePrimaryShell ? 'max-w-none' : 'max-w-6xl'}`}>
-        {!isTablePrimaryShell ? (
+        {!isTablePrimaryShell && !isAppointmentShell ? (
           <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
         ) : null}
         <ToastProvider>

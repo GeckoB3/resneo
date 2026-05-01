@@ -104,16 +104,10 @@ export function UnifiedFloorPlanView({
       ? `/dashboard/availability?tab=table&fp=layout&area=${encodeURIComponent(effectiveDiningAreaId)}`
       : '/dashboard/availability?tab=table&fp=layout';
 
-  const areaTabs = useMemo(
-    () => activeDiningAreas.map((a) => ({ id: a.id, label: a.name })),
-    [activeDiningAreas],
-  );
-
   const areaNav: FloorPlanAreaNavConfig | null =
     showDiningAreaChrome && effectiveDiningAreaId
       ? {
-          showTabs: true,
-          tabs: areaTabs,
+          areas: activeDiningAreas,
           value: effectiveDiningAreaId,
           onChange: setDiningAreaFilter,
         }

@@ -3,7 +3,7 @@ import type { TableShape } from '@/types/table-management';
 
 /** Default logical canvas size when `floor_plans.canvas_*` is unset (matches floor plan editor). */
 export const FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH = 2600;
-export const FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT = 1950;
+export const FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT = 2600;
 
 /** Minimal table fields needed to compute bounding box in stage coordinates. */
 export interface FitViewTableLike {

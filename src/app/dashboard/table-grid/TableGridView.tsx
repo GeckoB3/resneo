@@ -16,6 +16,7 @@ import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } 
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { DiningAreaPicker } from '@/components/dashboard/DiningAreaPicker';
 import { coversInUseAtTime, tablesInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
@@ -27,6 +28,9 @@ import type { VenueArea } from '@/types/areas';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
+import { computePointAnchoredMenuStyle } from '@/lib/ui/clamped-floating-styles';
+import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -46,6 +50,12 @@ function minutesToTime(value: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+function localDateTimeIso(date: string, minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return new Date(`${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).toISOString();
+}
+
 /** Matches `TimelineGrid` default slot column width at 100% scale. */
 const TIMELINE_SLOT_BASE_PX = 64;
 const TIMELINE_SCALE_PERCENT_MIN = 50;
@@ -53,6 +63,11 @@ const TIMELINE_SCALE_PERCENT_MAX = 150;
 const TIMELINE_SCALE_STEP = 5;
 const TIMELINE_SCALE_STORAGE_KEY = 'reserve:table-grid:timeline-scale-pct';
 const LEGACY_SLOT_WIDTH_STORAGE_KEY = 'reserve:table-grid:slot-width';
+const VISUAL_RECONCILE_DELAY_MS = 120;
+const VISUAL_RECONCILE_MIN_INTERVAL_MS = 350;
+const VISUAL_RECONCILE_FOLLOW_UP_DELAY_MS = 80;
+const SETTLED_VISUAL_HOLD_MS = 1_500;
+const TABLE_GRID_VISUAL_INTERACTION_EVENT = 'table-grid-visual-interaction';
 
 function timelinePercentToSlotWidthPx(percent: number): number {
   const raw = Math.round(TIMELINE_SLOT_BASE_PX * (percent / 100));
@@ -88,16 +103,74 @@ function effectiveBookingEndMinutes(
   return scheduledEnd;
 }
 
+type VisualBookingSnapshot = {
+  booking: NonNullable<TableGridData['cells'][number]['booking_details']>;
+  tableIds: string[];
+};
+
+function visualBookingSnapshot(data: TableGridData | null, bookingId: string): VisualBookingSnapshot | null {
+  if (!data) return null;
+  const bookingCells = data.cells.filter((cell) => cell.booking_id === bookingId && cell.booking_details);
+  const bookingFromCell = bookingCells[0]?.booking_details;
+  if (bookingFromCell) {
+    return {
+      booking: bookingFromCell,
+      tableIds: Array.from(new Set(bookingCells.map((cell) => cell.table_id))),
+    };
+  }
+
+  const unassignedBooking = data.unassigned_bookings.find((booking) => booking.id === bookingId);
+  if (!unassignedBooking) return null;
+
+  return {
+    booking: {
+      guest_name: unassignedBooking.guest_name,
+      party_size: unassignedBooking.party_size,
+      status: unassignedBooking.status,
+      deposit_status: null,
+      guest_attendance_confirmed_at: unassignedBooking.guest_attendance_confirmed_at ?? null,
+      staff_attendance_confirmed_at: unassignedBooking.staff_attendance_confirmed_at ?? null,
+      start_time: unassignedBooking.start_time,
+      end_time: unassignedBooking.end_time,
+      actual_departed_time: unassignedBooking.actual_departed_time ?? null,
+      dietary_notes: unassignedBooking.dietary_notes,
+      occasion: unassignedBooking.occasion,
+    },
+    tableIds: [],
+  };
+}
+
 function withOptimisticBookingMove(
   prev: TableGridData | null,
   bookingId: string,
-  patch: { tableIds?: string[]; startTime?: string; endTime?: string }
+  patch: { tableIds?: string[]; startTime?: string; endTime?: string },
+  fallback?: VisualBookingSnapshot | null,
 ): TableGridData | null {
   if (!prev) return prev;
   const bookingCells = prev.cells.filter((c) => c.booking_id === bookingId && c.booking_details);
-  if (bookingCells.length === 0) return prev;
-  const booking = bookingCells[0]!.booking_details!;
-  const targetTables = patch.tableIds ?? Array.from(new Set(bookingCells.map((c) => c.table_id)));
+  const unassignedBooking = prev.unassigned_bookings.find((booking) => booking.id === bookingId);
+  if (bookingCells.length === 0 && !unassignedBooking && !fallback) return prev;
+  const booking = bookingCells[0]?.booking_details ?? (unassignedBooking
+    ? {
+        guest_name: unassignedBooking.guest_name,
+        party_size: unassignedBooking.party_size,
+        status: unassignedBooking.status,
+        deposit_status: null,
+        guest_attendance_confirmed_at: unassignedBooking.guest_attendance_confirmed_at ?? null,
+        staff_attendance_confirmed_at: unassignedBooking.staff_attendance_confirmed_at ?? null,
+        start_time: unassignedBooking.start_time,
+        end_time: unassignedBooking.end_time,
+        actual_departed_time: unassignedBooking.actual_departed_time ?? null,
+        dietary_notes: unassignedBooking.dietary_notes,
+        occasion: unassignedBooking.occasion,
+      }
+    : fallback?.booking ?? null);
+  if (!booking) return prev;
+  const targetTables = patch.tableIds ?? (
+    bookingCells.length > 0
+      ? Array.from(new Set(bookingCells.map((c) => c.table_id)))
+      : fallback?.tableIds ?? []
+  );
   const startTime = patch.startTime ?? booking.start_time.slice(0, 5);
   const durationMins = (() => {
     const start = timeToMinutes(booking.start_time.slice(0, 5));
@@ -108,8 +181,15 @@ function withOptimisticBookingMove(
     const end = timeToMinutes(startTime) + durationMins;
     return `${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
   })();
+  const nextBookingDetails = {
+    ...booking,
+    start_time: startTime,
+    end_time: endTime,
+    table_ids: targetTables,
+    table_names: targetTables.map((tableId) => prev.tables.find((table) => table.id === tableId)?.name ?? tableId),
+  };
 
-  const updatedCells = prev.cells.map((cell) => {
+  let updatedCells = prev.cells.map((cell) => {
     if (cell.booking_id === bookingId) {
       return {
         ...cell,
@@ -125,17 +205,74 @@ function withOptimisticBookingMove(
     return {
       ...cell,
       booking_id: bookingId,
-      booking_details: {
-        ...booking,
-        start_time: startTime,
-        end_time: endTime,
-      },
+      booking_details: nextBookingDetails,
     };
   });
+
+  // Rendering only needs one cell with booking details to rebuild the full bar.
+  // During rapid resize/reconcile races, the requested range can temporarily miss
+  // all current slots; preserve an anchor so the bar never disappears for a frame.
+  if (targetTables.length > 0 && !updatedCells.some((cell) => cell.booking_id === bookingId)) {
+    const targetTableSet = new Set(targetTables);
+    const startMinutes = timeToMinutes(startTime);
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < updatedCells.length; index += 1) {
+      const cell = updatedCells[index]!;
+      if (!targetTableSet.has(cell.table_id)) continue;
+      const distance = Math.abs(timeToMinutes(cell.time.slice(0, 5)) - startMinutes);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+
+    if (bestIndex >= 0) {
+      updatedCells = updatedCells.map((cell, index) =>
+        index === bestIndex
+          ? {
+              ...cell,
+              booking_id: bookingId,
+              booking_details: nextBookingDetails,
+            }
+          : cell,
+      );
+    }
+  }
+
+  if (targetTables.length === 0 && patch.tableIds === undefined && !unassignedBooking) {
+    return prev;
+  }
+
+  const movedToUnassigned = targetTables.length === 0;
+  const nextUnassignedBooking = {
+    id: bookingId,
+    guest_name: booking.guest_name,
+    party_size: booking.party_size,
+    start_time: startTime,
+    end_time: endTime,
+    status: booking.status,
+    guest_attendance_confirmed_at: booking.guest_attendance_confirmed_at ?? null,
+    staff_attendance_confirmed_at: booking.staff_attendance_confirmed_at ?? null,
+    dietary_notes: booking.dietary_notes,
+    occasion: booking.occasion,
+    actual_departed_time: booking.actual_departed_time ?? null,
+  };
+  const unassignedWithoutBooking = prev.unassigned_bookings.filter((item) => item.id !== bookingId);
 
   return {
     ...prev,
     cells: updatedCells,
+    unassigned_bookings: movedToUnassigned
+      ? [...unassignedWithoutBooking, nextUnassignedBooking]
+      : unassignedWithoutBooking,
+    summary: {
+      ...prev.summary,
+      unassigned_count: movedToUnassigned
+        ? unassignedWithoutBooking.length + 1
+        : unassignedWithoutBooking.length,
+    },
   };
 }
 
@@ -143,6 +280,7 @@ function withOptimisticBookingStatus(
   prev: TableGridData | null,
   bookingId: string,
   status: BookingStatus,
+  options?: { actualDepartedTime?: string },
 ): TableGridData | null {
   if (!prev) return prev;
 
@@ -155,6 +293,12 @@ function withOptimisticBookingStatus(
         booking_details: {
           ...cell.booking_details,
           status,
+          actual_departed_time:
+            status === 'Completed'
+              ? options?.actualDepartedTime ?? new Date().toISOString()
+              : cell.booking_details.status === 'Completed' && status === 'Seated'
+                ? null
+                : cell.booking_details.actual_departed_time ?? null,
           staff_attendance_confirmed_at:
             status === 'Confirmed'
               ? cell.booking_details.staff_attendance_confirmed_at ?? new Date().toISOString()
@@ -169,6 +313,12 @@ function withOptimisticBookingStatus(
       return {
         ...booking,
         status,
+        actual_departed_time:
+          status === 'Completed'
+            ? options?.actualDepartedTime ?? new Date().toISOString()
+            : booking.status === 'Completed' && status === 'Seated'
+              ? null
+              : booking.actual_departed_time ?? null,
         staff_attendance_confirmed_at:
           status === 'Confirmed'
             ? booking.staff_attendance_confirmed_at ?? new Date().toISOString()
@@ -200,6 +350,86 @@ interface FetchGridOptions {
   silent?: boolean;
 }
 
+type PendingVisualMutation =
+  | {
+      id: string;
+      bookingId: string;
+      expiresAt: number;
+      settledUntil?: number;
+      type: 'move';
+      patch: { tableIds?: string[]; startTime?: string; endTime?: string };
+      fallback: VisualBookingSnapshot | null;
+    }
+  | {
+      id: string;
+      bookingId: string;
+      expiresAt: number;
+      settledUntil?: number;
+      type: 'status';
+      status: BookingStatus;
+      actualDepartedTime?: string;
+    };
+
+type PendingVisualMutationInput =
+  | {
+      bookingId: string;
+      type: 'move';
+      patch: { tableIds?: string[]; startTime?: string; endTime?: string };
+    }
+  | {
+      bookingId: string;
+      type: 'status';
+      status: BookingStatus;
+      actualDepartedTime?: string;
+    };
+
+function applyPendingVisualMutations(
+  data: TableGridData,
+  mutations: PendingVisualMutation[],
+  now = Date.now(),
+): TableGridData {
+  return mutations
+    .filter((mutation) => mutation.expiresAt > now)
+    .reduce<TableGridData>((next, mutation) => {
+      if (mutation.type === 'move') {
+        return withOptimisticBookingMove(next, mutation.bookingId, mutation.patch, mutation.fallback) ?? next;
+      }
+      return withOptimisticBookingStatus(
+        next,
+        mutation.bookingId,
+        mutation.status,
+        { actualDepartedTime: mutation.actualDepartedTime },
+      ) ?? next;
+    }, data);
+}
+
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((value) => bSet.has(value));
+}
+
+function isPendingVisualMutationSettled(data: TableGridData, mutation: PendingVisualMutation): boolean {
+  if (mutation.type === 'status') {
+    const cell = data.cells.find((item) => item.booking_id === mutation.bookingId && item.booking_details);
+    const unassigned = data.unassigned_bookings.find((item) => item.id === mutation.bookingId);
+    return (cell?.booking_details?.status ?? unassigned?.status) === mutation.status;
+  }
+
+  const bookingCells = data.cells.filter((item) => item.booking_id === mutation.bookingId && item.booking_details);
+  const unassigned = data.unassigned_bookings.find((item) => item.id === mutation.bookingId);
+  const details = bookingCells[0]?.booking_details ?? unassigned;
+  if (!details) return false;
+
+  if (mutation.patch.tableIds) {
+    const actualTableIds = Array.from(new Set(bookingCells.map((cell) => cell.table_id)));
+    if (!sameStringSet(actualTableIds, mutation.patch.tableIds)) return false;
+  }
+  if (mutation.patch.startTime && details.start_time.slice(0, 5) !== mutation.patch.startTime) return false;
+  if (mutation.patch.endTime && details.end_time.slice(0, 5) !== mutation.patch.endTime) return false;
+  return true;
+}
+
 export function TableGridView({
   venueId,
   currency,
@@ -227,9 +457,11 @@ export function TableGridView({
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const searchPopoverRef = useRef<HTMLDivElement>(null);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterPopoverRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [showUndoToast, setShowUndoToast] = useState(false);
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
@@ -240,6 +472,18 @@ export function TableGridView({
   const [coversClockTick, setCoversClockTick] = useState(0);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
   const [cellContext, setCellContext] = useState<{ tableId: string; time: string; x: number; y: number } | null>(null);
+  const viewportBounds = useViewportBounds();
+  const cellContextMenuStyle = useMemo(() => {
+    if (!cellContext) return undefined;
+    return computePointAnchoredMenuStyle({
+      anchorX: cellContext.x,
+      anchorY: cellContext.y,
+      viewportWidth: viewportBounds.width,
+      viewportHeight: viewportBounds.height,
+      minWidth: Math.min(224, viewportBounds.width - 24),
+      maxWidth: Math.min(288, viewportBounds.width - 16),
+    });
+  }, [cellContext, viewportBounds.width, viewportBounds.height]);
   const [blockForm, setBlockForm] = useState<BlockFormState | null>(null);
   const [blockSaving, setBlockSaving] = useState(false);
   const [blockDetails, setBlockDetails] = useState<Array<{
@@ -264,7 +508,9 @@ export function TableGridView({
   const reconcileInFlightRef = useRef(false);
   const pendingReconcileRef = useRef(false);
   const lastReconcileAtRef = useRef(0);
+  const visualInteractionCountRef = useRef(0);
   const gridDataRef = useRef<TableGridData | null>(null);
+  const pendingVisualMutationsRef = useRef<PendingVisualMutation[]>([]);
   const skipNextTimelineScalePersist = useRef(true);
   const { addToast } = useToast();
 
@@ -273,6 +519,66 @@ export function TableGridView({
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
   const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+
+  const rememberPendingVisualMutation = useCallback((mutation: PendingVisualMutationInput): string => {
+    const id = crypto.randomUUID();
+    const nextMutation = {
+      ...mutation,
+      id,
+      expiresAt: Date.now() + 10_000,
+      ...(mutation.type === 'move'
+        ? { fallback: visualBookingSnapshot(gridDataRef.current, mutation.bookingId) }
+        : {}),
+    } as PendingVisualMutation;
+    pendingVisualMutationsRef.current = [
+      ...pendingVisualMutationsRef.current.filter((item) => item.expiresAt > Date.now()),
+      nextMutation,
+    ];
+    return id;
+  }, []);
+
+  const forgetPendingVisualMutation = useCallback((id: string) => {
+    pendingVisualMutationsRef.current = pendingVisualMutationsRef.current.filter((mutation) => mutation.id !== id);
+  }, []);
+
+  const applyPendingVisuals = useCallback((data: TableGridData): TableGridData => {
+    const now = Date.now();
+    pendingVisualMutationsRef.current = pendingVisualMutationsRef.current.flatMap((mutation) => {
+      if (mutation.expiresAt <= now) return [];
+      const settled = isPendingVisualMutationSettled(data, mutation);
+      if (!settled) return [mutation];
+
+      const settledUntil = mutation.settledUntil ?? now + SETTLED_VISUAL_HOLD_MS;
+      if (settledUntil <= now) return [];
+      return [{ ...mutation, settledUntil }];
+    });
+    return applyPendingVisualMutations(data, pendingVisualMutationsRef.current, now);
+  }, []);
+
+  const commitVisualGridUpdate = useCallback((updater: (prev: TableGridData | null) => TableGridData | null) => {
+    flushSync(() => {
+      setGridData(updater);
+    });
+  }, []);
+
+  const shouldRollbackPendingMutation = useCallback((pendingId: string, bookingId: string): boolean => {
+    const now = Date.now();
+    return !pendingVisualMutationsRef.current.some(
+      (mutation) => mutation.id !== pendingId && mutation.bookingId === bookingId && mutation.expiresAt > now,
+    );
+  }, []);
+
+  const rollbackPendingMutation = useCallback((
+    pendingId: string,
+    bookingId: string,
+    rollback: TableGridData | null,
+  ) => {
+    const shouldRollback = shouldRollbackPendingMutation(pendingId, bookingId);
+    forgetPendingVisualMutation(pendingId);
+    if (shouldRollback) {
+      setGridData(rollback);
+    }
+  }, [forgetPendingVisualMutation, shouldRollbackPendingMutation]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -496,7 +802,7 @@ export function TableGridView({
       const res = await fetch(`/api/venue/tables/availability?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setGridData(data);
+        setGridData(applyPendingVisuals(data as TableGridData));
       }
     } catch (err) {
       console.error('Failed to load grid data:', err);
@@ -505,14 +811,24 @@ export function TableGridView({
         setLoading(false);
       }
     }
-  }, [bookingModel, date, diningAreaId, serviceId]);
+  }, [applyPendingVisuals, bookingModel, date, diningAreaId, serviceId]);
 
   const runSilentReconcile = useCallback(async () => {
+    if (visualInteractionCountRef.current > 0) {
+      pendingReconcileRef.current = true;
+      if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
+      reconcileTimerRef.current = setTimeout(() => {
+        reconcileTimerRef.current = null;
+        void runSilentReconcile();
+      }, VISUAL_RECONCILE_DELAY_MS);
+      return;
+    }
+
     if (reconcileInFlightRef.current) {
       pendingReconcileRef.current = true;
       return;
     }
-    const minIntervalMs = 1200;
+    const minIntervalMs = VISUAL_RECONCILE_MIN_INTERVAL_MS;
     const elapsed = Date.now() - lastReconcileAtRef.current;
     if (elapsed < minIntervalMs) {
       pendingReconcileRef.current = true;
@@ -537,12 +853,12 @@ export function TableGridView({
         reconcileTimerRef.current = setTimeout(() => {
           reconcileTimerRef.current = null;
           void runSilentReconcile();
-        }, 250);
+        }, VISUAL_RECONCILE_FOLLOW_UP_DELAY_MS);
       }
     }
   }, [fetchGrid]);
 
-  const scheduleReconcile = useCallback((delayMs = 500) => {
+  const scheduleReconcile = useCallback((delayMs = VISUAL_RECONCILE_DELAY_MS) => {
     pendingReconcileRef.current = true;
     if (reconcileTimerRef.current) {
       clearTimeout(reconcileTimerRef.current);
@@ -553,6 +869,26 @@ export function TableGridView({
       void runSilentReconcile();
     }, delayMs);
   }, [runSilentReconcile]);
+
+  useEffect(() => {
+    const handleVisualInteraction = (event: Event) => {
+      const detail = (event as CustomEvent<{ active?: boolean }>).detail;
+      if (detail?.active) {
+        visualInteractionCountRef.current += 1;
+        return;
+      }
+
+      visualInteractionCountRef.current = Math.max(0, visualInteractionCountRef.current - 1);
+      if (visualInteractionCountRef.current === 0 && pendingReconcileRef.current) {
+        scheduleReconcile(VISUAL_RECONCILE_DELAY_MS);
+      }
+    };
+
+    window.addEventListener(TABLE_GRID_VISUAL_INTERACTION_EVENT, handleVisualInteraction as EventListener);
+    return () => {
+      window.removeEventListener(TABLE_GRID_VISUAL_INTERACTION_EVENT, handleVisualInteraction as EventListener);
+    };
+  }, [scheduleReconcile]);
 
   const fetchCombinations = useCallback(async () => {
     try {
@@ -741,7 +1077,7 @@ export function TableGridView({
   }, [gridData, combinations, combinationThreshold]);
 
   const handleLiveChange = useCallback(() => {
-    scheduleReconcile(700);
+    scheduleReconcile(VISUAL_RECONCILE_DELAY_MS);
   }, [scheduleReconcile]);
   const liveState = useVenueLiveSync({ venueId, date, onChange: handleLiveChange });
 
@@ -821,7 +1157,8 @@ export function TableGridView({
   const handleReassign = useCallback(async (bookingId: string, oldTableIds: string[], newTableIds: string[]) => {
     const isUndo = isUndoingRef.current;
     const rollback = gridData;
-    setGridData((prev) => withOptimisticBookingMove(prev, bookingId, { tableIds: newTableIds }));
+    const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { tableIds: newTableIds } });
+    commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { tableIds: newTableIds }));
 
     try {
       const res = await fetch('/api/venue/tables/assignments', {
@@ -852,17 +1189,20 @@ export function TableGridView({
         scheduleReconcile();
       } else {
         const data = await res.json().catch(() => ({}));
-        setGridData(rollback);
+        rollbackPendingMutation(pendingId, bookingId, rollback);
         addToast(data.error ?? 'Failed to reassign table', 'error');
       }
     } catch (err) {
       console.error('Reassign failed:', err);
-      setGridData(rollback);
+      rollbackPendingMutation(pendingId, bookingId, rollback);
       addToast('Failed to reassign table', 'error');
     }
-  }, [scheduleReconcile, addToast, gridData]);
+  }, [commitVisualGridUpdate, rememberPendingVisualMutation, rollbackPendingMutation, scheduleReconcile, addToast, gridData]);
 
   const handleAssign = useCallback(async (bookingId: string, tableIds: string[]) => {
+    const rollback = gridData;
+    const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { tableIds } });
+    commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { tableIds }));
     try {
       const res = await fetch('/api/venue/tables/assignments', {
         method: 'POST',
@@ -885,17 +1225,20 @@ export function TableGridView({
         scheduleReconcile();
       } else {
         const data = await res.json().catch(() => ({}));
+        rollbackPendingMutation(pendingId, bookingId, rollback);
         addToast(data.error ?? 'Failed to assign table', 'error');
       }
     } catch (err) {
       console.error('Assign failed:', err);
+      rollbackPendingMutation(pendingId, bookingId, rollback);
       addToast('Failed to assign table', 'error');
     }
-  }, [scheduleReconcile, addToast]);
+  }, [commitVisualGridUpdate, gridData, rememberPendingVisualMutation, rollbackPendingMutation, scheduleReconcile, addToast]);
 
   const handleTimeChange = useCallback(async (bookingId: string, newTime: string) => {
     const rollback = gridData;
-    setGridData((prev) => withOptimisticBookingMove(prev, bookingId, { startTime: newTime }));
+    const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { startTime: newTime } });
+    commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { startTime: newTime }));
     try {
       const oldBlock = gridData?.cells.find((c) => c.booking_id === bookingId);
       const oldTime = oldBlock?.booking_details?.start_time ?? '';
@@ -934,19 +1277,22 @@ export function TableGridView({
         scheduleReconcile();
       } else {
         const data = await res.json().catch(() => ({}));
-        setGridData(rollback);
+        rollbackPendingMutation(pendingId, bookingId, rollback);
         addToast(data.error ?? 'Failed to change time', 'error');
       }
     } catch (err) {
       console.error('Time change failed:', err);
-      setGridData(rollback);
+      rollbackPendingMutation(pendingId, bookingId, rollback);
       addToast('Failed to change time', 'error');
     }
-  }, [gridData, date, scheduleReconcile, addToast]);
+  }, [commitVisualGridUpdate, gridData, date, rememberPendingVisualMutation, rollbackPendingMutation, scheduleReconcile, addToast]);
 
   const handleUnassign = useCallback(async (bookingId: string) => {
+    const rollback = gridData;
     const existingCells = gridData?.cells.filter((c) => c.booking_id === bookingId) ?? [];
     const existingTableIds = [...new Set(existingCells.map((c) => c.table_id))];
+    const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { tableIds: [] } });
+    commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { tableIds: [] }));
 
     try {
       const res = await fetch('/api/venue/tables/assignments', {
@@ -969,18 +1315,22 @@ export function TableGridView({
         addToast('Table unassigned', 'success');
         scheduleReconcile();
       } else {
+        rollbackPendingMutation(pendingId, bookingId, rollback);
         addToast('Failed to unassign table', 'error');
       }
     } catch (err) {
       console.error('Unassign failed:', err);
+      rollbackPendingMutation(pendingId, bookingId, rollback);
       addToast('Failed to unassign table', 'error');
     }
-  }, [gridData, scheduleReconcile, addToast]);
+  }, [commitVisualGridUpdate, gridData, rememberPendingVisualMutation, rollbackPendingMutation, scheduleReconcile, addToast]);
 
   const handleResizeBooking = useCallback(async (bookingId: string, newEndTime: string) => {
     const rollback = gridData;
-    const startTime = gridData?.cells.find((c) => c.booking_id === bookingId)?.booking_details?.start_time?.slice(0, 5);
+    const anchorCell = gridData?.cells.find((c) => c.booking_id === bookingId);
+    const startTime = anchorCell?.booking_details?.start_time?.slice(0, 5);
     if (!startTime) return;
+    if (anchorCell?.booking_details?.status === 'Completed') return;
     const startMinutes = timeToMinutes(startTime);
     const requestedEnd = Math.max(startMinutes + 15, timeToMinutes(newEndTime));
     const bookingTableIds = Array.from(new Set(
@@ -998,9 +1348,8 @@ export function TableGridView({
     }
     const clampedEnd = nextBoundary === null ? requestedEnd : Math.min(requestedEnd, nextBoundary);
     const clampedEndTime = `${Math.floor(clampedEnd / 60).toString().padStart(2, '0')}:${(clampedEnd % 60).toString().padStart(2, '0')}`;
-    flushSync(() => {
-      setGridData((prev) => withOptimisticBookingMove(prev, bookingId, { endTime: clampedEndTime }));
-    });
+    const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { endTime: clampedEndTime } });
+    commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { endTime: clampedEndTime }));
     try {
       const res = await fetch('/api/venue/tables/assignments', {
         method: 'POST',
@@ -1014,7 +1363,7 @@ export function TableGridView({
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        setGridData(rollback);
+        rollbackPendingMutation(pendingId, bookingId, rollback);
         addToast(payload.error ?? 'Failed to resize booking', 'error');
         return;
       }
@@ -1022,10 +1371,10 @@ export function TableGridView({
       scheduleReconcile();
     } catch (err) {
       console.error('Resize failed:', err);
-      setGridData(rollback);
+      rollbackPendingMutation(pendingId, bookingId, rollback);
       addToast('Failed to resize booking', 'error');
     }
-  }, [gridData, date, scheduleReconcile, addToast]);
+  }, [commitVisualGridUpdate, gridData, date, rememberPendingVisualMutation, rollbackPendingMutation, scheduleReconcile, addToast]);
 
   const handleBookingStatusChange = useCallback(async (
     bookingId: string,
@@ -1044,22 +1393,58 @@ export function TableGridView({
         return;
       }
     }
+    const completedAtOverride = (() => {
+      if (nextStatus !== 'Completed') return undefined;
+      const data = gridDataRef.current;
+      if (!data) return undefined;
+      const bookingCells = data.cells.filter((cell) => cell.booking_id === bookingId && cell.booking_details);
+      const booking = bookingCells[0]?.booking_details;
+      if (!booking) return undefined;
+      const bookingTableIds = Array.from(new Set(bookingCells.map((cell) => cell.table_id)));
+      if (bookingTableIds.length === 0) return undefined;
+      const bookingStart = timeToMinutes(booking.start_time.slice(0, 5));
+      const bookingEffectiveEnd = effectiveBookingEndMinutes(booking.status, booking.start_time, booking.end_time, date === formatDateInput(new Date()));
+      let nextStart: number | null = null;
+      for (const cell of data.cells) {
+        if (!cell.booking_id || !cell.booking_details) continue;
+        if (cell.booking_id === bookingId) continue;
+        if (!bookingTableIds.includes(cell.table_id)) continue;
+        const otherStart = timeToMinutes(cell.booking_details.start_time.slice(0, 5));
+        if (otherStart <= bookingStart) continue;
+        if (bookingEffectiveEnd <= otherStart) continue;
+        if (nextStart === null || otherStart < nextStart) nextStart = otherStart;
+      }
+      return nextStart === null ? undefined : localDateTimeIso(date, nextStart);
+    })();
     const rollback = gridDataRef.current;
-    setGridData((prev) => withOptimisticBookingStatus(prev, bookingId, nextStatus));
+    const pendingId = rememberPendingVisualMutation({
+      type: 'status',
+      bookingId,
+      status: nextStatus,
+      actualDepartedTime: completedAtOverride,
+    });
+    commitVisualGridUpdate((prev) =>
+      withOptimisticBookingStatus(prev, bookingId, nextStatus, { actualDepartedTime: completedAtOverride })
+    );
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({
+          status: nextStatus,
+          ...(completedAtOverride ? { actual_departed_time: completedAtOverride } : {}),
+        }),
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
+        forgetPendingVisualMutation(pendingId);
         setGridData(rollback);
         addToast(payload.error ?? 'Failed to update status', 'error');
         return;
       }
     } catch (err) {
       console.error('Booking status update failed:', err);
+      forgetPendingVisualMutation(pendingId);
       setGridData(rollback);
       addToast('Failed to update status', 'error');
       return;
@@ -1076,9 +1461,9 @@ export function TableGridView({
       setUndoStack((prev) => [...prev.slice(-9), action]);
       setShowUndoToast(true);
     }
-    addToast('Booking status updated', 'success');
+    addToast(nextStatus === 'Completed' ? 'Marked complete' : 'Booking status updated', 'success');
     scheduleReconcile();
-  }, [addToast, scheduleReconcile, date, noShowGraceMinutes]);
+  }, [addToast, commitVisualGridUpdate, forgetPendingVisualMutation, rememberPendingVisualMutation, scheduleReconcile, date, noShowGraceMinutes]);
 
   const handleAssignAllUnassigned = useCallback(async () => {
     if (assignAllUnassignedLoading) return;
@@ -1410,10 +1795,11 @@ export function TableGridView({
                 </button>
               </div>
           )}
-          toolbarTools={(
+          toolbarTools={(toolbarPanelAnchorRef) => (
             <>
               <div ref={searchPopoverRef} className="relative shrink-0">
                 <button
+                  ref={searchTriggerRef}
                   type="button"
                   onClick={() => setSearchOpen((prev) => !prev)}
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition-colors ${
@@ -1428,57 +1814,58 @@ export function TableGridView({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                   </svg>
                 </button>
-                {searchOpen ? (
-                  <div className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-40 w-[min(17rem,calc(100vw-2rem))] origin-top-left rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100">
-                    <div className="relative">
-                      <input
-                        ref={searchInputRef}
-                        type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search guest"
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white py-0 pl-7 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                      <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                      </svg>
-                      {search ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSearch('');
-                            searchInputRef.current?.focus();
-                          }}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                          aria-label="Clear guest search"
-                        >
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      ) : null}
-                    </div>
+                <ClampedFixedDropdown
+                  open={searchOpen}
+                  triggerRef={searchTriggerRef}
+                  verticalAnchorRef={toolbarPanelAnchorRef}
+                  horizontalCenter
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={272}
+                  className="animate-fade-in z-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  <div className="relative">
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search guest"
+                      className="h-8 w-full rounded-md border border-slate-200 bg-white py-0 pl-7 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                    <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                    </svg>
+                    {search ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch('');
+                          searchInputRef.current?.focus();
+                        }}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        aria-label="Clear guest search"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    ) : null}
                   </div>
-                ) : null}
+                </ClampedFixedDropdown>
               </div>
               {showDiningAreaChrome && diningAreaId ? (
-                <select
+                <DiningAreaPicker
+                  areas={diningAreas}
                   value={diningAreaId}
-                  onChange={(e) => setDiningAreaFilter(e.target.value)}
-                  className="h-8 w-[6.75rem] min-w-0 shrink-0 truncate rounded-lg border border-slate-200 bg-white px-1.5 py-0 pr-5 text-[11px] font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:w-[7.25rem] sm:pr-6"
-                  aria-label="Dining area"
-                >
-                  {diningAreas
-                    .filter((a) => a.is_active)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                </select>
+                  onChange={setDiningAreaFilter}
+                  verticalAnchorRef={toolbarPanelAnchorRef}
+                  compact
+                />
               ) : null}
               <div ref={filterPopoverRef} className="relative shrink-0">
                 <button
+                  ref={filterTriggerRef}
                   type="button"
                   onClick={() => setFilterOpen((prev) => !prev)}
                   className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-semibold shadow-sm transition-colors ${
@@ -1499,54 +1886,62 @@ export function TableGridView({
                     </span>
                   ) : null}
                 </button>
-                {filterOpen ? (
-                  <div className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-40 w-[min(17rem,calc(100vw-2rem))] origin-top-left rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100">
-                    <div className="space-y-2">
-                      <label className="block">
-                        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Service</span>
-                        <select
-                          value={serviceId ?? ''}
-                          onChange={(e) => setServiceId(e.target.value || null)}
-                          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          aria-label="Service filter"
-                        >
-                          <option value="">All services</option>
-                          {services.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block">
-                        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
-                        <select
-                          value={statusFilter ?? ''}
-                          onChange={(e) => setStatusFilter(e.target.value || null)}
-                          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          aria-label="Status filter"
-                        >
-                          <option value="">All statuses</option>
-                          <option value="Booked">Booked</option>
-                          <option value="Confirmed">Confirmed</option>
-                          <option value="Pending">Pending</option>
-                          <option value="Seated">Seated</option>
-                          <option value="Arrived">Arrived</option>
-                        </select>
-                      </label>
-                      {(serviceId || statusFilter) ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setServiceId(null);
-                            setStatusFilter(null);
-                          }}
-                          className="h-8 rounded-lg px-2 text-[11px] font-semibold text-brand-700 hover:bg-brand-50"
-                        >
-                          Clear filters
-                        </button>
-                      ) : null}
-                    </div>
+                <ClampedFixedDropdown
+                  open={filterOpen}
+                  triggerRef={filterTriggerRef}
+                  verticalAnchorRef={toolbarPanelAnchorRef}
+                  horizontalCenter
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={272}
+                  className="animate-fade-in z-40 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  <div className="space-y-2">
+                    <label className="block">
+                      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Service</span>
+                      <select
+                        value={serviceId ?? ''}
+                        onChange={(e) => setServiceId(e.target.value || null)}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        aria-label="Service filter"
+                      >
+                        <option value="">All services</option>
+                        {services.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
+                      <select
+                        value={statusFilter ?? ''}
+                        onChange={(e) => setStatusFilter(e.target.value || null)}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        aria-label="Status filter"
+                      >
+                        <option value="">All statuses</option>
+                        <option value="Booked">Booked</option>
+                        <option value="Confirmed">Confirmed</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Seated">Seated</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Arrived">Arrived</option>
+                      </select>
+                    </label>
+                    {(serviceId || statusFilter) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setServiceId(null);
+                          setStatusFilter(null);
+                        }}
+                        className="h-8 rounded-lg px-2 text-[11px] font-semibold text-brand-700 hover:bg-brand-50"
+                      >
+                        Clear filters
+                      </button>
+                    ) : null}
                   </div>
-                ) : null}
+                </ClampedFixedDropdown>
               </div>
               {zones.length > 0 ? (
                 <select
@@ -1597,6 +1992,7 @@ export function TableGridView({
             cells={timelineCells}
             unassignedBookings={timelineUnassigned}
             combinations={allCombinations}
+            combinationThreshold={combinationThreshold}
             serviceStartTime={timelineStartTime}
             serviceEndTime={timelineEndTime}
             slotIntervalMinutes={gridData.slot_interval_minutes}
@@ -1680,6 +2076,7 @@ export function TableGridView({
           venueId={venueId}
           venueCurrency={currency}
           initialSnapshot={selectedBookingSnapshot}
+          onStatusChange={handleBookingStatusChange}
           onClose={() => {
             setSelectedBookingId(null);
             setSelectedBookingAnchor(null);
@@ -1691,15 +2088,12 @@ export function TableGridView({
           anchor={selectedBookingAnchor}
         />
       )}
-      {cellContext && (
+      {cellContext && cellContextMenuStyle ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setCellContext(null)} />
           <div
-            className="fixed z-50 w-56 rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
-            style={{
-              left: `min(max(0.5rem, ${cellContext.x}px), calc(100vw - 14.5rem))`,
-              top: `min(max(0.5rem, ${cellContext.y}px), calc(100dvh - 10rem))`,
-            }}
+            className="fixed z-50 rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
+            style={cellContextMenuStyle}
           >
             <p className="px-2 py-1 text-[11px] font-semibold text-slate-800">Slot actions</p>
             <p className="px-2 pb-1 text-[10px] text-slate-500">{cellContext.time}</p>
@@ -1737,7 +2131,7 @@ export function TableGridView({
             </div>
           </div>
         </>
-      )}
+      ) : null}
       {moveBookingId && (
         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-800 shadow">
           Move mode active: click a target cell, or{' '}

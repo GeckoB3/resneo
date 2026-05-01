@@ -1,7 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 
@@ -32,6 +33,11 @@ const MONTHS_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const VIEW_MODE_OPTIONS: { id: CalendarToolbarViewMode; label: string }[] = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+];
 
 function addDays(date: string, days: number): string {
   const d = new Date(date + 'T12:00:00');
@@ -84,6 +90,10 @@ export function PractitionerCalendarToolbar({
   summaryContent,
 }: PractitionerCalendarToolbarProps) {
   const periodLabel = formatCalendarPeriodLabel(viewMode, date, weekStart, monthAnchor);
+  const viewModePanelId = useId();
+  const viewModeTriggerRef = useRef<HTMLButtonElement>(null);
+  const viewModeWrapRef = useRef<HTMLDivElement>(null);
+  const [viewModePopoverOpen, setViewModePopoverOpen] = useState(false);
   const toolbarSummary: ViewToolbarSummary = {
     total_covers_booked: 0,
     total_covers_capacity: 0,
@@ -93,25 +103,86 @@ export function PractitionerCalendarToolbar({
     combos_in_use: 0,
   };
 
-  const viewModeSwitcher = (
-    <div className="-mx-1 flex max-w-full items-center gap-1 overflow-x-auto px-1 pb-0.5 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
-      {(['day', 'week', 'month'] as const).map((m) => (
+  useEffect(() => {
+    if (!viewModePopoverOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setViewModePopoverOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (viewModeWrapRef.current?.contains(target)) return;
+      setViewModePopoverOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [viewModePopoverOpen]);
+
+  const viewModeSwitcher = useCallback(
+    (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
+      <div ref={viewModeWrapRef} className="relative shrink-0">
         <button
-          key={m}
+          ref={viewModeTriggerRef}
           type="button"
-          aria-label={`${m} schedule view`}
-          aria-pressed={viewMode === m}
-          onClick={() => onViewModeChange(m)}
-          className={`min-h-8 shrink-0 rounded-lg px-3 py-1 text-[11px] font-semibold capitalize transition-all sm:text-xs ${
-            viewMode === m
-              ? 'bg-brand-600 text-white shadow-sm shadow-brand-900/20 ring-1 ring-brand-600'
-              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          onClick={() => setViewModePopoverOpen((openNow) => !openNow)}
+          className={`inline-flex min-h-8 shrink-0 items-center gap-0.5 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 sm:text-xs ${
+            viewModePopoverOpen
+              ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+              : 'border-slate-200 bg-white text-slate-700'
           }`}
+          aria-expanded={viewModePopoverOpen}
+          aria-haspopup="dialog"
+          aria-controls={viewModePanelId}
+          aria-label="View - Day, week, or month"
         >
-          {m}
+          <span className="max-w-[4.75rem] truncate sm:max-w-none">
+            {VIEW_MODE_OPTIONS.find((option) => option.id === viewMode)?.label ?? 'Day'}
+          </span>
+          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
         </button>
-      ))}
-    </div>
+        <ClampedFixedDropdown
+          open={viewModePopoverOpen}
+          triggerRef={viewModeTriggerRef}
+          verticalAnchorRef={toolbarPanelAnchorRef}
+          horizontalCenter
+          gapPx={4}
+          align="start"
+          maxWidthPx={240}
+          id={viewModePanelId}
+          aria-label="Choose calendar view"
+          className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+        >
+          <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">View</p>
+          <div role="radiogroup" aria-label="Calendar view" className="space-y-0.5">
+            {VIEW_MODE_OPTIONS.map(({ id: modeId, label }) => (
+              <button
+                key={modeId}
+                type="button"
+                role="radio"
+                aria-checked={viewMode === modeId}
+                onClick={() => {
+                  onViewModeChange(modeId);
+                  setViewModePopoverOpen(false);
+                }}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${
+                  viewMode === modeId
+                    ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+                    : 'text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </ClampedFixedDropdown>
+      </div>
+    ),
+    [onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
   );
 
   const datePickerPanel = (
@@ -182,7 +253,7 @@ export function PractitionerCalendarToolbar({
       controlsPanel={controlsPanel}
       controlsLabel={controlsLabel}
       compact
-      pinnedRow={viewModeSwitcher}
+      toolbarLeadingTools={viewModeSwitcher}
     />
   );
 }

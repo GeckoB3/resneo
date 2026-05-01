@@ -133,6 +133,11 @@ export interface TableGridCell {
     staff_attendance_confirmed_at?: string | null;
     start_time: string;
     end_time: string;
+    /** When status is Completed — wall-time end of visit for timeline rendering */
+    actual_departed_time?: string | null;
+    /** Full table assignment for bookings that span a combination. */
+    table_ids?: string[];
+    table_names?: string[];
     dietary_notes: string | null;
     occasion: string | null;
   } | null;
@@ -153,6 +158,7 @@ export interface TableGridData {
     staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
+    actual_departed_time?: string | null;
   }[];
   summary: {
     total_covers_booked: number;

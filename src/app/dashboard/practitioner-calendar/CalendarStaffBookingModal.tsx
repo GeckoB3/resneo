@@ -50,10 +50,10 @@ export function CalendarStaffBookingModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="calendar-staff-booking-title"
-        className="max-h-[min(90dvh,90vh)] w-full max-w-5xl overflow-y-auto rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl"
+        className="flex h-[min(90dvh,90vh)] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-6 py-4">
           <h2 id="calendar-staff-booking-title" className="text-lg font-semibold text-slate-900">
             {title}
           </h2>
@@ -69,19 +69,21 @@ export function CalendarStaffBookingModal({
           </button>
         </div>
 
-        <StaffSurfaceBookingStack
-          bookingModel={bookingModel}
-          enabledModels={enabledModels}
-          venueId={venueId}
-          currency={currency}
-          advancedMode={advancedMode}
-          bookingIntent={intent}
-          onCreated={onCreated}
-          onClose={onClose}
-          initialDate={preselectedDate}
-          initialTime={preselectedTime}
-          preselectedPractitionerId={preselectedPractitionerId}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:pb-6">
+          <StaffSurfaceBookingStack
+            bookingModel={bookingModel}
+            enabledModels={enabledModels}
+            venueId={venueId}
+            currency={currency}
+            advancedMode={advancedMode}
+            bookingIntent={intent}
+            onCreated={onCreated}
+            onClose={onClose}
+            initialDate={preselectedDate}
+            initialTime={preselectedTime}
+            preselectedPractitionerId={preselectedPractitionerId}
+          />
+        </div>
       </div>
     </div>
   );

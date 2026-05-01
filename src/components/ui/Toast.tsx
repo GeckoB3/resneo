@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ addToast }}>
       {children}
       <div
-        className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-[100] flex flex-col gap-2 sm:left-auto sm:right-4 sm:max-w-sm"
+        className="pointer-events-none fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom,0px))] z-[100] flex flex-col gap-1.5 sm:left-auto sm:right-3 sm:max-w-xs"
         aria-live="polite"
         aria-atomic="false"
       >
@@ -82,11 +82,11 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
-      className={`${bg} animate-slide-in-right pointer-events-auto flex items-start gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white shadow-lg ring-1 ring-black/5`}
+      className={`${bg} animate-slide-in-right pointer-events-auto flex items-start gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white shadow-lg ring-1 ring-black/5`}
     >
       {toast.type === 'success' && (
         <svg
-          className="mt-px h-4 w-4 shrink-0"
+          className="mt-px h-3.5 w-3.5 shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -98,7 +98,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       )}
       {toast.type === 'error' && (
         <svg
-          className="mt-px h-4 w-4 shrink-0"
+          className="mt-px h-3.5 w-3.5 shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -117,10 +117,10 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
         type="button"
         aria-label="Dismiss notification"
         onClick={() => onDismiss(toast.id)}
-        className="ml-1 flex h-10 min-h-10 w-10 min-w-10 shrink-0 items-center justify-center rounded-lg hover:bg-white/20"
+        className="ml-0.5 flex h-6 min-h-6 w-6 min-w-6 shrink-0 items-center justify-center rounded-md hover:bg-white/20"
       >
         <svg
-          className="h-4 w-4"
+          className="h-3.5 w-3.5"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"

@@ -17,6 +17,17 @@ function timeToMinutes(t: string): number {
   return (hh ?? 0) * 60 + (mm ?? 0);
 }
 
+function feedGridLineClass(minutes: number): string {
+  if (minutes % 60 === 0) return 'border-t-slate-400';
+  if (minutes % 30 === 0) return 'border-t-slate-300';
+  return 'border-t-slate-100';
+}
+
+function feedSlotBandClass(minutes: number): string {
+  const slotIndex = Math.max(0, Math.floor(minutes / SLOT_MINUTES));
+  return slotIndex % 2 === 1 ? 'bg-slate-50/55' : 'bg-white';
+}
+
 interface ScheduleFeedColumnProps {
   label: string;
   date: string;
@@ -65,13 +76,33 @@ export function ScheduleFeedColumn({
   const dayBlocks = blocks.filter((b) => b.date === date);
 
   return (
-    <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-100 last:border-r-0 sm:min-w-[240px]">
+    <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
       {!hideHeader ? (
-        <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
+        <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/90 px-3 py-2 shadow-sm shadow-slate-900/5">
           <span className="truncate text-center text-sm font-semibold text-slate-900">{label}</span>
         </div>
       ) : null}
       <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
+        {Array.from({ length: totalSlots + 1 }, (_, i) => {
+          const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
+          return (
+            <div
+              key={`grid-${i}`}
+              className={`absolute left-0 right-0 z-[1] border-t ${feedGridLineClass(slotStartMins)}`}
+              style={{ top: i * SLOT_HEIGHT }}
+            />
+          );
+        })}
+        {Array.from({ length: totalSlots }, (_, i) => {
+          const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
+          return (
+            <div
+              key={`band-${i}`}
+              className={`absolute left-0 right-0 z-0 ${feedSlotBandClass(slotStartMins)}`}
+              style={{ top: i * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+            />
+          );
+        })}
         {dayBlocks.map((b) => {
           const top = slotTop(b.start_time);
           const height = slotHeight(b.start_time, b.end_time);
@@ -89,8 +120,8 @@ export function ScheduleFeedColumn({
               : null;
           const isClass = b.kind === 'class_session';
           const cardClass = isClass
-            ? `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border shadow-sm ring-1 ring-white/70 ${CLASS_LANE_BG} ${CLASS_LANE_BORDER} px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-xl`
-            : `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl`;
+            ? `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border shadow-sm ring-1 ring-white/70 ${CLASS_LANE_BG} ${CLASS_LANE_BORDER} px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12`
+            : `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2 text-left shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12`;
           const body = (
             <div
               className={`${cardClass} ${clickable ? 'cursor-pointer hover:brightness-[0.98]' : ''}`}

@@ -310,11 +310,15 @@ export async function applyBookingLifecycleStatusEffects(
   }
 
   const assignedTableIds = await getAssignedTableIds(db, bookingId);
-  if (nextStatus === 'Cancelled' || nextStatus === 'No-Show' || nextStatus === 'Completed') {
+  if (nextStatus === 'Cancelled' || nextStatus === 'No-Show') {
     await clearTableStatusesForBooking(db, bookingId, actorId);
     // Remove assignment rows so dashboards and exports do not show stale table links.
     await replaceBookingAssignments(db, bookingId, [], actorId);
     await deleteTemporaryTablesForBooking(db, bookingId);
+  } else if (nextStatus === 'Completed') {
+    await clearTableStatusesForBooking(db, bookingId, actorId);
+    await deleteTemporaryTablesForBooking(db, bookingId);
+    // Keep table assignments so the timeline grid still shows where the party sat.
   } else if (nextStatus === 'Seated' || nextStatus === 'Booked' || nextStatus === 'Pending') {
     // Table assignment is locked at booking time, not at attendance time —
     // sync on Booked but skip on Booked → Confirmed (the table is already

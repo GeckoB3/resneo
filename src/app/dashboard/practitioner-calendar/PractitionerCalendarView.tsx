@@ -333,6 +333,17 @@ function minutesToTime(m: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+function calendarGridLineClass(minutes: number): string {
+  if (minutes % 60 === 0) return 'border-t-slate-400';
+  if (minutes % 30 === 0) return 'border-t-slate-300';
+  return 'border-t-slate-100';
+}
+
+function calendarSlotBandClass(minutes: number): string {
+  const slotIndex = Math.max(0, Math.floor(minutes / SLOT_MINUTES));
+  return slotIndex % 2 === 1 ? 'bg-slate-50/55' : 'bg-white';
+}
+
 /** Human-readable length for a same-day block (start → end). */
 function formatBlockDurationLabel(totalMins: number): string {
   if (totalMins < 60) return `${totalMins} min`;
@@ -800,6 +811,8 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
     data: { pracId, dateStr, slotStartMins },
   });
   const tlabel = minutesToTime(slotStartMins);
+  const gridLineClass = calendarGridLineClass(slotStartMins);
+  const slotBandClass = calendarSlotBandClass(slotStartMins);
   return (
     <button
       type="button"
@@ -809,7 +822,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       onClick={(e) => {
         if (!disabled) onEmptyClick(e, pracId, dateStr, tlabel);
       }}
-      className={`absolute left-0 right-0 z-0 border-t border-slate-50 transition-colors ${
+      className={`absolute left-0 right-0 z-0 border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
       style={{ top, height: SLOT_HEIGHT }}
@@ -1066,11 +1079,42 @@ export function PractitionerCalendarView({
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
-    () =>
-      getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
+    () => {
+      const base = getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
-      }),
-    [activeDayDate, openingHours, venueTimezone],
+      });
+      if (viewMode !== 'day') return base;
+
+      let minM = base.startHour * 60;
+      let maxM = base.endHour * 60;
+      const includeRange = (start: string | null | undefined, end: string | null | undefined, fallbackMinutes: number) => {
+        if (!start) return;
+        const startM = timeToMinutes(start);
+        if (!Number.isFinite(startM)) return;
+        const endM = end ? timeToMinutes(end) : startM + fallbackMinutes;
+        if (!Number.isFinite(endM)) return;
+        minM = Math.min(minM, startM);
+        maxM = Math.max(maxM, endM <= startM ? startM + fallbackMinutes : endM);
+      };
+
+      for (const booking of bookings) {
+        if (booking.booking_date !== activeDayDate) continue;
+        includeRange(booking.booking_time, booking.booking_end_time, 30);
+      }
+      for (const block of blocks) {
+        if (block.block_date !== activeDayDate) continue;
+        includeRange(block.start_time, block.end_time, 60);
+      }
+      for (const block of scheduleBlocks) {
+        if (block.date !== activeDayDate) continue;
+        includeRange(block.start_time, block.end_time, 60);
+      }
+
+      const startHour = Math.max(0, Math.floor(minM / 60));
+      const endHour = Math.min(24, Math.max(startHour + 1, Math.ceil(maxM / 60)));
+      return { startHour, endHour };
+    },
+    [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, venueTimezone, viewMode],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -1475,6 +1519,14 @@ export function PractitionerCalendarView({
     setPrefillDate(dateStr);
     setPrefillTime(time);
     setStaffBookingModal('new');
+    setSlotMenu(null);
+  }
+
+  function openWalkInAtSlot(pracId: string, dateStr: string, time: string) {
+    setPrefillPractitionerId(pracId);
+    setPrefillDate(dateStr);
+    setPrefillTime(time);
+    setStaffBookingModal('walk-in');
     setSlotMenu(null);
   }
 
@@ -2026,14 +2078,14 @@ export function PractitionerCalendarView({
           }}
         />
       ) : viewMode === 'week' ? (
-        <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+        <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03]">
           <HorizontalScrollHint />
           <div className="overflow-x-auto touch-pan-x [-webkit-overflow-scrolling:touch]">
             <div className="min-w-[920px]">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50/90 shadow-sm">
-                  <th className="sticky left-0 top-0 z-30 bg-slate-50/95 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr className="sticky top-0 z-20 border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/90 shadow-sm shadow-slate-900/5">
+                  <th className="sticky left-0 top-0 z-30 bg-gradient-to-br from-white via-slate-50 to-slate-100/95 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-500 shadow-[4px_0_14px_rgba(15,23,42,0.05)]">
                     Team
                   </th>
                   {weekDays.map((d) => {
@@ -2041,8 +2093,8 @@ export function PractitionerCalendarView({
                     return (
                       <th
                         key={d}
-                        className={`sticky top-0 z-20 px-2 py-2 text-center ${
-                          isToday ? 'bg-brand-50/80' : 'bg-slate-50/90'
+                        className={`sticky top-0 z-20 border-l border-slate-300 px-2 py-2 text-center ${
+                          isToday ? 'bg-brand-50/90 ring-1 ring-inset ring-brand-100' : ''
                         }`}
                       >
                         <div className={`text-[11px] font-semibold uppercase tracking-wide ${isToday ? 'text-brand-700' : 'text-slate-500'}`}>
@@ -2058,8 +2110,8 @@ export function PractitionerCalendarView({
               </thead>
               <tbody>
                 {filteredPractitioners.map((prac) => (
-                  <tr key={prac.id} className="border-b border-slate-100">
-                    <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-900">
+                  <tr key={prac.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
+                    <td className="sticky left-0 bg-white/95 px-3 py-2 font-semibold text-slate-900 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
                       {prac.name}
                     </td>
                     {weekDays.map((d) => {
@@ -2071,7 +2123,7 @@ export function PractitionerCalendarView({
                         (b) => b.calendar_id === prac.id && b.date === d,
                       );
                       return (
-                        <td key={d} className="align-top px-1 py-2">
+                        <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
                           <div className="flex min-h-[80px] flex-col gap-1">
                             {dayBookings.map((b) => {
                               const p = bookingCalendarBlockStyle(b);
@@ -2080,7 +2132,7 @@ export function PractitionerCalendarView({
                                   key={b.id}
                                   type="button"
                                   onClick={() => openBookingDetail(b.id)}
-                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                   style={bookingBlockCardStyle(p)}
                                 >
                                   <div className="flex min-w-0 items-start justify-between gap-2">
@@ -2108,7 +2160,7 @@ export function PractitionerCalendarView({
                                   key={cb.id}
                                   type="button"
                                   onClick={() => openClassInstanceDetail(cb)}
-                                  className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs shadow-sm hover:bg-slate-100"
+                                  className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-md"
                                   style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 >
                                   <div className="font-semibold text-slate-900">{cb.title}</div>
@@ -2127,8 +2179,8 @@ export function PractitionerCalendarView({
                               const shell = eb.experience_event_id ? emptyOccurrence : !eb.booking_id;
                               const inner = (
                                 <div
-                                  className={`rounded-md border px-2 py-1 text-left text-xs ${
-                                    shell ? 'border-dashed border-amber-200 bg-amber-50/80' : 'border-slate-200 bg-white'
+                                  className={`rounded-lg border px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-md ${
+                                    shell ? 'border-dashed border-amber-200 bg-amber-50/80' : 'border-slate-200 bg-gradient-to-br from-white to-slate-50'
                                   }`}
                                   style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 >
@@ -2196,7 +2248,7 @@ export function PractitionerCalendarView({
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className={`min-w-0 w-full touch-auto overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch] ${
+              className={`min-w-0 w-full touch-auto overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch] ${
                 mousePanning ? 'cursor-grabbing' : 'cursor-grab'
               }`}
               onMouseDown={handleCalendarMouseDown}
@@ -2206,20 +2258,22 @@ export function PractitionerCalendarView({
               {dayViewNowLineTop != null ? (
                 <div
                   className="pointer-events-none absolute left-0 right-0 z-[25]"
-                  style={{ top: 52 + dayViewNowLineTop }}
+                  style={{ top: 58 + dayViewNowLineTop }}
                   aria-hidden
                 >
                   <div className="flex items-center">
                     <div className="flex w-14 shrink-0 justify-center sm:w-16">
-                      <span className="h-2 w-2 rounded-full bg-brand-600 shadow-sm ring-2 ring-white" />
+                      <span className="rounded-full bg-brand-600 px-1.5 py-0.5 text-[9px] font-bold tabular-nums text-white shadow-md shadow-brand-600/20 ring-2 ring-white">
+                        Now
+                      </span>
                     </div>
-                    <div className="h-px flex-1 bg-gradient-to-r from-brand-500/70 via-brand-400/50 to-transparent" />
+                    <div className="h-0.5 flex-1 bg-gradient-to-r from-brand-600/80 via-brand-400/55 to-transparent shadow-[0_0_12px_rgba(59,130,246,0.25)]" />
                   </div>
                 </div>
               ) : null}
-              <div className="w-14 flex-shrink-0 border-r border-slate-200 bg-slate-50 sm:w-16">
+              <div className="w-14 flex-shrink-0 border-r border-slate-300 bg-gradient-to-r from-slate-100/90 to-slate-50/80 shadow-[4px_0_14px_rgba(15,23,42,0.05)] sm:w-16">
                 <div
-                  className="min-h-[52px] rounded-tl-xl border-b border-slate-200 bg-slate-50"
+                  className="min-h-[58px] rounded-tl-xl border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/80"
                   aria-hidden
                 />
                 <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
@@ -2227,10 +2281,12 @@ export function PractitionerCalendarView({
                     i % 4 === 0 ? (
                       <div
                         key={t}
-                        className="absolute left-0 w-full pr-2 text-right text-[11px] font-semibold tabular-nums text-slate-500"
-                        style={{ top: i === 0 ? 0 : i * SLOT_HEIGHT - 6 }}
+                        className="absolute left-0 flex w-full justify-end pr-1.5"
+                        style={{ top: i * SLOT_HEIGHT, transform: 'translateY(-50%)' }}
                       >
-                        {t}
+                        <span className="rounded-full border border-slate-200/80 bg-white/90 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-600 shadow-sm shadow-slate-900/5">
+                          {t}
+                        </span>
                       </div>
                     ) : null,
                   )}
@@ -2238,7 +2294,7 @@ export function PractitionerCalendarView({
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
                 <div
-                  className="sticky top-0 z-20 flex w-full divide-x divide-slate-200 rounded-tr-xl border-b border-slate-200 border-l border-slate-200 bg-white shadow-sm"
+                  className="sticky top-0 z-20 flex w-full divide-x divide-slate-300 rounded-tr-xl border-b border-slate-300 border-l border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/90 shadow-sm shadow-slate-900/5"
                   role="row"
                   aria-label="Calendar columns"
                 >
@@ -2274,7 +2330,7 @@ export function PractitionerCalendarView({
                     </div>
                   ) : null}
                 </div>
-                <div className="flex w-full min-w-0 border-l border-slate-100">
+                <div className="flex w-full min-w-0 border-l border-slate-300">
               {filteredPractitioners.map((prac) => {
                 const pracBookings = bookingsForPractitioner(prac.id, date);
                 const pracClassBlocks = classBlocksForGrid.filter(
@@ -2290,15 +2346,18 @@ export function PractitionerCalendarView({
                     bl.block_type !== 'class_session',
                 );
                 return (
-                  <div key={prac.id} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-100 last:border-r-0 sm:min-w-[240px]">
+                  <div key={prac.id} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
-                      {timeLabels.map((_, i) => (
-                        <div
-                          key={i}
-                          className={`absolute left-0 w-full border-t ${i % 4 === 0 ? 'border-slate-100' : 'border-slate-50'}`}
-                          style={{ top: i * SLOT_HEIGHT }}
-                        />
-                      ))}
+                      {timeLabels.map((_, i) => {
+                        const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
+                        return (
+                          <div
+                            key={i}
+                            className={`absolute left-0 w-full border-t ${calendarGridLineClass(slotStartMins)}`}
+                            style={{ top: i * SLOT_HEIGHT }}
+                          />
+                        );
+                      })}
 
                       {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
                         const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
@@ -2739,6 +2798,13 @@ export function PractitionerCalendarView({
               >
                 New appointment
               </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => openWalkInAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+              >
+                Walk-in
+              </button>
               {resourcesHere.map((r) => (
                 <button
                   key={r.id}
@@ -2913,10 +2979,14 @@ export function PractitionerCalendarView({
           intent={staffBookingModal}
           onClose={() => {
             setStaffBookingModal(null);
+            setPrefillDate(undefined);
+            setPrefillPractitionerId(undefined);
             setPrefillTime(undefined);
           }}
           onCreated={() => {
             setStaffBookingModal(null);
+            setPrefillDate(undefined);
+            setPrefillPractitionerId(undefined);
             setPrefillTime(undefined);
             void fetchData({ silent: true });
           }}

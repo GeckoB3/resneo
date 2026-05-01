@@ -7,9 +7,10 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
-import { Pill } from '@/components/ui/dashboard/Pill';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { nextBookingsTileContent } from '@/lib/table-management/next-bookings-slot';
 
 function formatDateInput(d: Date): string {
@@ -84,6 +85,20 @@ function KpiChips({ summary }: { summary: ViewToolbarSummary }) {
 const COMPACT_BOOKING_ACTION_LAYOUT =
   'inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1 rounded-lg text-[11px] font-semibold text-white shadow-sm transition-colors sm:w-[5.15rem] sm:min-w-[5.15rem] sm:max-w-[5.15rem] sm:gap-1 sm:px-1.5';
 
+function LiveStateIndicator({ state }: { state: 'live' | 'reconnecting' }) {
+  const isLive = state === 'live';
+  return (
+    <span
+      className={`inline-flex h-3 w-3 shrink-0 rounded-full ring-2 ring-white ${
+        isLive ? 'bg-emerald-500' : 'bg-amber-400'
+      }`}
+      role="status"
+      aria-label={isLive ? 'Live' : 'Reconnecting'}
+      title={isLive ? 'Live' : 'Reconnecting'}
+    />
+  );
+}
+
 export interface OperationsWorkspaceToolbarProps {
   title: string;
   summary: ViewToolbarSummary;
@@ -114,8 +129,10 @@ export interface OperationsWorkspaceToolbarProps {
   inlineTools?: ReactNode;
   /** Compact tools shown beside the KPI chips. */
   summaryTools?: ReactNode;
-  /** Compact tools shown in the main date/action row. */
-  toolbarTools?: ReactNode;
+  /** Tools after “Today”, before timeline/controls/search. Pass a function to receive `toolbarPanelAnchorRef` for fixed dropdowns. */
+  toolbarLeadingTools?: ReactNode | ((toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => ReactNode);
+  /** Compact tools in the date/action row. Pass a function to receive `toolbarPanelAnchorRef` for fixed dropdowns inside the toolbar card. */
+  toolbarTools?: ReactNode | ((toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => ReactNode);
   /** Optional search popover content shown from a magnifying-glass icon in compact toolbars. */
   searchPanel?: ReactNode;
   searchActive?: boolean;
@@ -125,7 +142,7 @@ export interface OperationsWorkspaceToolbarProps {
   trailingActions?: ReactNode;
 }
 
-type OpenPanel = 'none' | 'date' | 'controls' | 'timeline' | 'search';
+type OpenPanel = 'none' | 'info' | 'date' | 'controls' | 'timeline' | 'search';
 
 export function OperationsWorkspaceToolbar({
   title,
@@ -149,6 +166,7 @@ export function OperationsWorkspaceToolbar({
   pinnedRow,
   inlineTools,
   summaryTools,
+  toolbarLeadingTools,
   toolbarTools,
   searchPanel,
   searchActive = false,
@@ -161,27 +179,37 @@ export function OperationsWorkspaceToolbar({
   const timelinePanelId = `${baseId}-timeline-panel`;
   const [open, setOpen] = useState<OpenPanel>('none');
   const sheetRef = useRef<HTMLDivElement>(null);
+  const infoPopoverRef = useRef<HTMLDivElement>(null);
   const datePopoverRef = useRef<HTMLDivElement>(null);
   const controlsPopoverRef = useRef<HTMLDivElement>(null);
   const searchPopoverRef = useRef<HTMLDivElement>(null);
   const timelinePopoverRef = useRef<HTMLDivElement>(null);
+  const panelSurfaceRef = useRef<HTMLDivElement>(null);
+  const infoTriggerRef = useRef<HTMLButtonElement>(null);
+  const dateTriggerRef = useRef<HTMLButtonElement>(null);
+  const timelineTriggerRef = useRef<HTMLButtonElement>(null);
+  const controlsTriggerRef = useRef<HTMLButtonElement>(null);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
   const todayIso = formatDateInput(new Date());
   const isToday = date === todayIso;
+  const inlineInfoOpen = compact && open === 'info';
   const inlineDateOpen = compact && open === 'date';
   const inlineControlsOpen = compact && open === 'controls';
   const inlineSearchOpen = compact && open === 'search';
   const inlineTimelineOpen = compact && open === 'timeline';
 
   const close = useCallback(() => setOpen('none'), []);
+  const infoPanelId = `${baseId}-info-panel`;
+  const summaryNode = summaryContent ?? <KpiChips summary={summary} />;
 
   useEffect(() => {
-    if (open === 'none' || inlineDateOpen || inlineControlsOpen || inlineSearchOpen || inlineTimelineOpen) return;
+    if (open === 'none' || inlineInfoOpen || inlineDateOpen || inlineControlsOpen || inlineSearchOpen || inlineTimelineOpen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [open, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
+  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
 
   useEffect(() => {
     if (open === 'none') return;
@@ -197,22 +225,25 @@ export function OperationsWorkspaceToolbar({
     const t = window.setTimeout(() => {
       const container = inlineDateOpen
         ? datePopoverRef.current
-        : inlineControlsOpen
-          ? controlsPopoverRef.current
-          : inlineSearchOpen
-            ? searchPopoverRef.current
-            : inlineTimelineOpen
-              ? timelinePopoverRef.current
-              : sheetRef.current;
+        : inlineInfoOpen
+          ? infoPopoverRef.current
+          : inlineControlsOpen
+            ? controlsPopoverRef.current
+            : inlineSearchOpen
+              ? searchPopoverRef.current
+              : inlineTimelineOpen
+                ? timelinePopoverRef.current
+                : sheetRef.current;
       container?.querySelector<HTMLElement>('button, [href], input, select, textarea')?.focus();
     }, 0);
     return () => window.clearTimeout(t);
-  }, [open, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
+  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
 
   useEffect(() => {
-    if (!inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen) return;
+    if (!inlineInfoOpen && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen) return;
 
     const onPointerDown = (event: PointerEvent) => {
+      if (infoPopoverRef.current?.contains(event.target as Node)) return;
       if (datePopoverRef.current?.contains(event.target as Node)) return;
       if (controlsPopoverRef.current?.contains(event.target as Node)) return;
       if (searchPopoverRef.current?.contains(event.target as Node)) return;
@@ -222,10 +253,10 @@ export function OperationsWorkspaceToolbar({
 
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen, close]);
+  }, [inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen, close]);
 
   return (
-    <div className="sticky top-2 z-30 shrink-0 space-y-1">
+    <div className="shrink-0 space-y-1">
       <div
         className={
           compact
@@ -234,31 +265,63 @@ export function OperationsWorkspaceToolbar({
         }
       >
         <div
-            className={
-              compact
-                ? 'flex min-w-0 flex-col gap-0.5'
-                : 'flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3'
-            }
+          ref={compact ? panelSurfaceRef : undefined}
+          className={
+            compact
+              ? 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'
+              : 'flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3'
+          }
         >
           <div
             className={
               compact
-                ? 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'
+                ? 'contents'
                 : 'min-w-0 flex-1'
             }
           >
             {compact ? null : (
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operations</p>
             )}
-            <h1 className={compact ? 'shrink-0 truncate text-sm font-bold tracking-tight text-slate-900 sm:text-base' : 'truncate text-sm font-bold tracking-tight text-slate-900 sm:text-base'}>{title}</h1>
-            <div className={compact ? 'min-w-0 flex-auto' : 'mt-1'}>
-              {summaryContent ?? <KpiChips summary={summary} />}
-            </div>
+            <h1 className={compact ? 'min-w-[5rem] max-w-[min(11rem,48vw)] flex-[1_1_7rem] truncate text-sm font-bold tracking-tight text-slate-900 sm:max-w-[14rem] sm:flex-none sm:text-base' : 'truncate text-sm font-bold tracking-tight text-slate-900 sm:text-base'}>{title}</h1>
             {compact ? (
-              <span className="inline-flex h-7 shrink-0 items-center">
-                <Pill variant={liveState === 'live' ? 'success' : 'warning'} dot>
-                  {liveState === 'live' ? 'Live' : 'Reconnecting'}
-                </Pill>
+              <div ref={infoPopoverRef} className="relative shrink-0">
+                <button
+                  ref={infoTriggerRef}
+                  type="button"
+                  onClick={() => setOpen((p) => (p === 'info' ? 'none' : 'info'))}
+                  className={`inline-flex h-7 items-center justify-center rounded-lg border px-2 text-[11px] font-semibold shadow-sm hover:bg-slate-50 ${
+                    open === 'info'
+                      ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                  aria-expanded={open === 'info'}
+                  aria-controls={infoPanelId}
+                >
+                  Info
+                </button>
+                <ClampedFixedDropdown
+                  open={inlineInfoOpen}
+                  triggerRef={infoTriggerRef}
+                  verticalAnchorRef={panelSurfaceRef}
+                  horizontalCenter
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={360}
+                  id={infoPanelId}
+                  aria-label="View summary information"
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  {summaryNode}
+                </ClampedFixedDropdown>
+              </div>
+            ) : (
+              <div className="mt-1">
+                {summaryNode}
+              </div>
+            )}
+            {compact ? (
+              <span className="inline-flex h-7 shrink-0 items-center px-1">
+                <LiveStateIndicator state={liveState} />
               </span>
             ) : null}
             {summaryTools ? (
@@ -268,10 +331,11 @@ export function OperationsWorkspaceToolbar({
           <div
             className={
               compact
-                ? 'flex min-w-0 flex-wrap items-center gap-1'
+                ? 'contents'
                 : '-mx-1 flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:max-w-[min(64rem,68vw)] sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0'
             }
           >
+            <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
@@ -286,10 +350,11 @@ export function OperationsWorkspaceToolbar({
             </button>
             <div ref={datePopoverRef} className="relative shrink-0">
               <button
+                ref={dateTriggerRef}
                 type="button"
                 onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
                 className={compact
-                  ? 'min-h-8 w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-800 shadow-sm hover:bg-slate-50 sm:w-[9rem] sm:text-xs'
+                  ? 'min-h-8 w-[clamp(7.5rem,42vw,9rem)] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-800 shadow-sm hover:bg-slate-50 sm:text-xs'
                   : 'min-h-10 min-w-[8.75rem] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:min-w-[10rem] sm:px-3 sm:text-sm'}
                 aria-expanded={open === 'date'}
                 aria-controls={datePanelId}
@@ -299,16 +364,20 @@ export function OperationsWorkspaceToolbar({
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Today</span>
                 ) : null}
               </button>
-              {inlineDateOpen ? (
-                <div
-                  id={datePanelId}
-                  role="dialog"
-                  aria-label="Date and calendar"
-                  className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-50 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
-                >
-                  {datePickerPanel}
-                </div>
-              ) : null}
+              <ClampedFixedDropdown
+                open={inlineDateOpen}
+                triggerRef={dateTriggerRef}
+                verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                horizontalCenter={compact}
+                gapPx={4}
+                align="start"
+                maxWidthPx={352}
+                id={datePanelId}
+                aria-label="Date and calendar"
+                className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
+              >
+                {datePickerPanel}
+              </ClampedFixedDropdown>
             </div>
             <button
               type="button"
@@ -322,6 +391,7 @@ export function OperationsWorkspaceToolbar({
                 <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
               </svg>
             </button>
+            </div>
             <button
               type="button"
               onClick={() => onDateChange(todayIso)}
@@ -331,9 +401,18 @@ export function OperationsWorkspaceToolbar({
             >
               Today
             </button>
+            {toolbarLeadingTools
+              ? typeof toolbarLeadingTools === 'function'
+                // This render prop only forwards the ref object to child overlay components;
+                // it does not read `.current` during render.
+                // eslint-disable-next-line react-hooks/refs
+                ? toolbarLeadingTools(panelSurfaceRef)
+                : toolbarLeadingTools
+              : null}
             {timelinePanel ? (
               <div ref={timelinePopoverRef} className="relative shrink-0">
                 <button
+                  ref={timelineTriggerRef}
                   type="button"
                   onClick={() => setOpen((p) => (p === 'timeline' ? 'none' : 'timeline'))}
                   className={compact
@@ -348,21 +427,26 @@ export function OperationsWorkspaceToolbar({
                   </svg>
                   {!compact && timelineLabel ? <span className="tabular-nums">{timelineLabel}</span> : null}
                 </button>
-                {inlineTimelineOpen ? (
-                  <div
-                    id={timelinePanelId}
-                    role="dialog"
-                    aria-label="Timeline controls"
-                    className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-50 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
-                  >
-                    {timelinePanel}
-                  </div>
-                ) : null}
+                <ClampedFixedDropdown
+                  open={inlineTimelineOpen}
+                  triggerRef={timelineTriggerRef}
+                  verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                  horizontalCenter={compact}
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={320}
+                  id={timelinePanelId}
+                  aria-label="Timeline controls"
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  {timelinePanel}
+                </ClampedFixedDropdown>
               </div>
             ) : null}
             {showControlsButton ? (
               <div ref={controlsPopoverRef} className="relative shrink-0">
                 <button
+                  ref={controlsTriggerRef}
                   type="button"
                   onClick={() => setOpen((p) => (p === 'controls' ? 'none' : 'controls'))}
                   className={compact
@@ -373,22 +457,34 @@ export function OperationsWorkspaceToolbar({
                 >
                   {controlsLabel}
                 </button>
-                {inlineControlsOpen ? (
-                  <div
-                    id={controlsPanelId}
-                    role="dialog"
-                    aria-label={controlsLabel}
-                    className="animate-fade-in absolute left-0 top-[calc(100%+0.35rem)] z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
-                  >
-                    {controlsPanel}
-                  </div>
-                ) : null}
+                <ClampedFixedDropdown
+                  open={inlineControlsOpen}
+                  triggerRef={controlsTriggerRef}
+                  verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                  horizontalCenter={compact}
+                  gapPx={4}
+                  align="start"
+                  maxWidthPx={384}
+                  id={controlsPanelId}
+                  aria-label={controlsLabel}
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  {controlsPanel}
+                </ClampedFixedDropdown>
               </div>
             ) : null}
-            {toolbarTools}
+            {toolbarTools
+              ? typeof toolbarTools === 'function'
+                // This render prop only forwards the ref object to child overlay components;
+                // it does not read `.current` during render.
+                // eslint-disable-next-line react-hooks/refs
+                ? toolbarTools(panelSurfaceRef)
+                : toolbarTools
+              : null}
             {searchPanel ? (
               <div ref={searchPopoverRef} className="relative shrink-0">
                 <button
+                  ref={searchTriggerRef}
                   type="button"
                   onClick={() => setOpen((p) => (p === 'search' ? 'none' : 'search'))}
                   className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 ${
@@ -404,16 +500,20 @@ export function OperationsWorkspaceToolbar({
                     <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                   </svg>
                 </button>
-                {inlineSearchOpen ? (
-                  <div
-                    id={`${baseId}-search-panel`}
-                    role="dialog"
-                    aria-label="Search bookings"
-                    className="animate-fade-in absolute right-0 top-[calc(100%+0.35rem)] z-50 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
-                  >
-                    {searchPanel}
-                  </div>
-                ) : null}
+                <ClampedFixedDropdown
+                  open={inlineSearchOpen}
+                  triggerRef={searchTriggerRef}
+                  verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                  horizontalCenter={compact}
+                  gapPx={4}
+                  align="end"
+                  maxWidthPx={352}
+                  id={`${baseId}-search-panel`}
+                  aria-label="Search bookings"
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                >
+                  {searchPanel}
+                </ClampedFixedDropdown>
               </div>
             ) : null}
             <button
@@ -433,12 +533,11 @@ export function OperationsWorkspaceToolbar({
               </svg>
             </button>
             {!compact ? (
-              <span className="inline-flex shrink-0">
-                <Pill variant={liveState === 'live' ? 'success' : 'warning'} dot>
-                  {liveState === 'live' ? 'Live' : 'Reconnecting'}
-                </Pill>
+              <span className="inline-flex h-9 shrink-0 items-center px-1">
+                <LiveStateIndicator state={liveState} />
               </span>
             ) : null}
+            <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={onNewBooking}
@@ -473,14 +572,17 @@ export function OperationsWorkspaceToolbar({
               </svg>
               <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>Walk-in</span>
             </button>
+            </div>
             {trailingActions}
           </div>
+          {compact && pinnedRow ? <div className="contents">{pinnedRow}</div> : null}
+          {compact && inlineTools ? <div className="contents">{inlineTools}</div> : null}
         </div>
-        {pinnedRow ? <div className={compact ? 'mt-0.5 border-t border-slate-100 pt-0.5' : 'mt-1.5 border-t border-slate-100 pt-1.5'}>{pinnedRow}</div> : null}
-        {inlineTools ? <div className={compact ? 'mt-0.5 border-t border-slate-100 pt-0.5' : 'mt-1.5 border-t border-slate-100 pt-1.5'}>{inlineTools}</div> : null}
+        {!compact && pinnedRow ? <div className="mt-1.5 border-t border-slate-100 pt-1.5">{pinnedRow}</div> : null}
+        {!compact && inlineTools ? <div className="mt-1.5 border-t border-slate-100 pt-1.5">{inlineTools}</div> : null}
       </div>
 
-      {open !== 'none' && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen ? (
+      {open !== 'none' && !inlineInfoOpen && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen ? (
         <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-stretch sm:justify-end">
           <button
             type="button"
@@ -493,12 +595,12 @@ export function OperationsWorkspaceToolbar({
             id={open === 'date' ? datePanelId : open === 'timeline' ? timelinePanelId : open === 'search' ? `${baseId}-search-panel` : controlsPanelId}
             role="dialog"
             aria-modal="true"
-            aria-label={open === 'date' ? 'Date and calendar' : open === 'timeline' ? 'Timeline controls' : open === 'search' ? 'Search bookings' : controlsLabel}
+            aria-label={open === 'info' ? 'View summary information' : open === 'date' ? 'Date and calendar' : open === 'timeline' ? 'Timeline controls' : open === 'search' ? 'Search bookings' : controlsLabel}
             className="relative z-[71] flex max-h-[min(92dvh,920px)] w-full max-w-lg flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:rounded-l-2xl sm:border-y sm:border-l sm:border-r-0 sm:border-slate-200 sm:shadow-xl"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-2 sm:px-4">
               <h2 className="text-sm font-semibold text-slate-900">
-                {open === 'date' ? 'Date' : open === 'timeline' ? 'Timeline' : open === 'search' ? 'Search' : controlsLabel}
+                {open === 'info' ? 'Info' : open === 'date' ? 'Date' : open === 'timeline' ? 'Timeline' : open === 'search' ? 'Search' : controlsLabel}
               </h2>
               <button
                 type="button"
@@ -512,7 +614,7 @@ export function OperationsWorkspaceToolbar({
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
-              {open === 'date' ? datePickerPanel : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
+              {open === 'info' ? summaryNode : open === 'date' ? datePickerPanel : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
             </div>
           </div>
         </div>

@@ -39,6 +39,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
+const actualDepartedTimeSchema = z.string().datetime();
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
   const [y, m, d] = bookingDate.split('-').map(Number);
@@ -87,7 +88,7 @@ export async function GET(
 
     const { data: guest } = await staff.db
       .from('guests')
-      .select('id, name, email, phone, visit_count, tags, customer_profile_notes')
+      .select('id, name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes')
       .eq('id', booking.guest_id)
       .single();
 
@@ -502,6 +503,21 @@ export async function PATCH(
         // (mirror of the staff_attendance_confirmed=false path below).
         if (booking.status === 'Confirmed' && newStatus === 'Booked') {
           statusPayload.staff_attendance_confirmed_at = null;
+        }
+        if (newStatus === 'Completed') {
+          const parsedDepartedTime =
+            body.actual_departed_time !== undefined
+              ? actualDepartedTimeSchema.safeParse(body.actual_departed_time)
+              : null;
+          if (body.actual_departed_time !== undefined && !parsedDepartedTime?.success) {
+            return NextResponse.json({ error: 'Invalid actual departed time' }, { status: 400 });
+          }
+          statusPayload.actual_departed_time = parsedDepartedTime?.success
+            ? parsedDepartedTime.data
+            : new Date().toISOString();
+        }
+        if (booking.status === 'Completed' && newStatus === 'Seated') {
+          statusPayload.actual_departed_time = null;
         }
         await staff.db.from('bookings').update(statusPayload).eq('id', id);
 

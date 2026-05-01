@@ -39,15 +39,15 @@ export function MonthScheduleGrid({
   }, [monthDayScheduleCounts]);
 
   return (
-    <div className="w-full min-w-0 overflow-x-auto rounded-[1.75rem] border border-slate-200 bg-white p-3 shadow-sm shadow-slate-900/5 sm:p-4">
-      <div className="grid min-w-[680px] grid-cols-7 gap-1 text-center text-xs font-bold uppercase tracking-wide text-slate-500">
+    <div className="w-full min-w-0 overflow-x-auto rounded-[1.75rem] border border-slate-200 bg-white p-3 shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] sm:p-4">
+      <div className="grid min-w-[680px] grid-cols-7 gap-1 rounded-2xl bg-gradient-to-br from-white via-slate-50 to-slate-100/90 p-1 text-center text-xs font-bold uppercase tracking-wide text-slate-500 shadow-sm shadow-slate-900/5">
         {WEEK_SHORT.map((d) => (
-          <div key={d} className="py-2">
+          <div key={d} className="rounded-xl py-2">
             {d}
           </div>
         ))}
       </div>
-      <div className="grid min-w-[680px] grid-cols-7 gap-1.5">
+      <div className="mt-2 grid min-w-[680px] grid-cols-7 gap-1.5">
         {monthCells.map((cell) => {
           const inMonth = cell.startsWith(monthAnchor.slice(0, 7));
           const isToday = cell === todayIso;
@@ -82,8 +82,8 @@ export function MonthScheduleGrid({
               type="button"
               title={tip}
               onClick={() => onSelectDay(cell)}
-              className={`group flex min-h-[96px] flex-col items-start justify-between gap-2 rounded-2xl border p-2.5 text-left text-sm shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                inMonth ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-transparent bg-slate-50/50 text-slate-400'
+              className={`group flex min-h-[96px] flex-col items-start justify-between gap-2 rounded-2xl border p-2.5 text-left text-sm shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                inMonth ? 'border-slate-200 bg-gradient-to-br from-white to-slate-50/80 hover:bg-slate-50' : 'border-transparent bg-slate-50/50 text-slate-400'
               }`}
               style={{
                 backgroundColor:
@@ -93,7 +93,7 @@ export function MonthScheduleGrid({
               <div className="flex w-full items-start justify-between gap-2">
                 <span
                   className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black tabular-nums ${
-                    isToday ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-900'
+                    isToday ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20 ring-2 ring-white' : 'text-slate-900'
                   }`}
                 >
                   {Number(cell.slice(8, 10))}

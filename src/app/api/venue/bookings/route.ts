@@ -17,7 +17,6 @@ import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
   computeAppointmentAvailability,
-  validateExactAppointmentStart,
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -791,28 +790,7 @@ export async function POST(request: NextRequest) {
 
       let matchingSlot: { duration_minutes: number; start_time: string; service_id: string } | null = null;
 
-      if (staffWalkIn) {
-        /** Walk-ins start at counter time; ignore min-notice and 15-minute slot grid (still validate hours/conflicts). */
-        appointmentInput.skipPastSlotFilter = true;
-        appointmentInput.minNoticeHours = 0;
-        const exact = validateExactAppointmentStart(
-          appointmentInput,
-          practitioner_id,
-          appointment_service_id,
-          timeStr,
-        );
-        if (!exact.ok) {
-          return NextResponse.json(
-            {
-              error:
-                exact.reason === 'Past minimum notice window'
-                  ? 'Selected time is not available for this practitioner and service'
-                  : (exact.reason ?? 'Selected time is not available for this practitioner and service'),
-            },
-            { status: 409 },
-          );
-        }
-      } else {
+      if (!staffWalkIn) {
         const availResult = computeAppointmentAvailability(appointmentInput);
         const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
         matchingSlot =

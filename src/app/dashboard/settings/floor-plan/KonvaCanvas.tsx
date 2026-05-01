@@ -16,10 +16,11 @@ import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fon
 
 /** Logical floor size is at least this wide (px) so 50+ tables can be placed comfortably. */
 const MIN_LAYOUT_WIDTH = 2600;
+/** New unsaved layouts default to a square floor area. */
+const MIN_LAYOUT_HEIGHT = 2600;
 
 /** Snap “close polygon” to first vertex: tolerance in stage pixels (fat-finger friendly on touch). */
 const POLYGON_CLOSE_HIT_STAGE_PX = 28;
-const MIN_LAYOUT_HEIGHT = 1950;
 const MIN_RESIZE_WIDTH = 1600;
 const MIN_RESIZE_HEIGHT = 1200;
 /** Match toolbar limits in FloorPlanEditor */
@@ -291,7 +292,7 @@ export default function KonvaCanvas({
       if (containerRef.current) {
         const vw = containerRef.current.offsetWidth;
         const autoW = Math.max(Math.round(vw * VIEWPORT_TO_LAYOUT_MULTIPLIER), MIN_LAYOUT_WIDTH);
-        const autoH = Math.max(Math.round(autoW * 0.75), MIN_LAYOUT_HEIGHT);
+        const autoH = Math.max(autoW, MIN_LAYOUT_HEIGHT);
         setDimensions({
           width: layoutWidth ?? autoW,
           height: layoutHeight ?? autoH,

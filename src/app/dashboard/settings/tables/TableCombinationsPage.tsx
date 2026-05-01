@@ -417,6 +417,23 @@ export function TableCombinationsPage({
           </div>
         )}
 
+        <div className="lg:hidden">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50">
+            <MiniFloorPlanPicker
+              tables={miniTables}
+              selectedIds={previewIds}
+              onChange={() => {}}
+              partySize={2}
+              minHeight={180}
+              previewMode
+              layoutWidth={layoutWidth}
+              layoutHeight={layoutHeight}
+              preserveLayoutAspect
+            />
+          </div>
+        </div>
+
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,320px)]">
         <div className="min-w-0">
           {combinationsSubTab === 'auto' && (
@@ -652,19 +669,17 @@ export function TableCombinationsPage({
 
           <aside className="sticky top-6 z-10 hidden self-start lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
-            <div
-              className="max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
-              style={{ minHeight: 320 }}
-            >
+            <div className="rounded-xl border border-slate-200 bg-slate-50">
               <MiniFloorPlanPicker
                 tables={miniTables}
                 selectedIds={previewIds}
                 onChange={() => {}}
                 partySize={2}
-                className="min-h-[300px]"
+                minHeight={220}
                 previewMode
                 layoutWidth={layoutWidth}
                 layoutHeight={layoutHeight}
+                preserveLayoutAspect
               />
             </div>
           </aside>

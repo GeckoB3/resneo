@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import dynamic from 'next/dynamic';
 import type { VenueTable, TableGridData, TableBlock, UndoAction } from '@/types/table-management';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
@@ -10,7 +10,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
-import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { DiningAreaPicker } from '@/components/dashboard/DiningAreaPicker';
 import { useToast } from '@/components/ui/Toast';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -22,6 +22,7 @@ import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import type { OpeningHours } from '@/types/availability';
+import type { VenueArea } from '@/types/areas';
 import {
   FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
@@ -92,8 +93,7 @@ function bookingEndMinutes(booking: BookingOnTable, selectedDate: string, nowMin
 const BLOCK_DURATION_PRESETS = [30, 45, 60, 90, 120, 180] as const;
 
 export interface FloorPlanAreaNavConfig {
-  showTabs: true;
-  tabs: readonly { id: string; label: string }[];
+  areas: VenueArea[];
   value: string;
   onChange: (id: string) => void;
 }
@@ -940,15 +940,17 @@ export function FloorPlanLiveView({
         controlsPanel={(
           <div />
         )}
-        pinnedRow={areaNav?.showTabs ? (
-          <TabBar
-            tabs={areaNav.tabs}
-            value={areaNav.value}
-            onChange={areaNav.onChange}
-            mobileNote="Swipe dining areas"
-            density="compact"
-          />
-        ) : undefined}
+        toolbarLeadingTools={(toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) =>
+          areaNav ? (
+            <DiningAreaPicker
+              areas={areaNav.areas}
+              value={areaNav.value}
+              onChange={areaNav.onChange}
+              verticalAnchorRef={toolbarPanelAnchorRef}
+              compact
+            />
+          ) : null
+        }
       />
 
       {/* Canvas area — fill remaining viewport under dashboard chrome */}

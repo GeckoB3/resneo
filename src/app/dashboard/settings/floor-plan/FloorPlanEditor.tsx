@@ -110,7 +110,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   // Canvas layout size (from active floor plan)
   const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
   const [layoutHeight, setLayoutHeight] = useState<number | null>(null);
-  const [canvasDims, setCanvasDims] = useState<{ width: number; height: number }>({ width: 2600, height: 1950 });
+  const [canvasDims, setCanvasDims] = useState<{ width: number; height: number }>({ width: 2600, height: 2600 });
 
   // Polygon drawing mode
   const [polygonDrawPending, setPolygonDrawPending] = useState(false);

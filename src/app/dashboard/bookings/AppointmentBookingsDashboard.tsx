@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
@@ -9,9 +10,8 @@ import {
   type AppointmentDetailPrefetch,
 } from '@/components/booking/AppointmentDetailSheet';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
-import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
@@ -32,6 +32,8 @@ import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
@@ -111,20 +113,6 @@ function formatDateLabel(date: string, mode: ViewMode): string {
     return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
-  return '';
-}
-
-/** Shorter label for narrow screens (avoids truncation in date navigator). */
-function formatDateLabelCompact(date: string, mode: ViewMode): string {
-  const d = new Date(`${date}T12:00:00`);
-  if (mode === 'day') {
-    return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
-  }
-  if (mode === 'week') {
-    const end = new Date(`${addDays(date, 6)}T12:00:00`);
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${String(end.getFullYear()).slice(-2)}`;
-  }
-  if (mode === 'month') return `${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
   return '';
 }
 
@@ -318,6 +306,10 @@ export function AppointmentBookingsDashboard({
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [customFrom, setCustomFrom] = useState(todayISO);
   const [customTo, setCustomTo] = useState(addDays(todayISO(), 7));
+  const [viewRangePopoverOpen, setViewRangePopoverOpen] = useState(false);
+  const viewRangeTriggerRef = useRef<HTMLButtonElement>(null);
+  const viewRangeWrapRef = useRef<HTMLDivElement>(null);
+  const viewRangePanelId = useId();
   const [statusKey, setStatusKey] = useState<string>('All');
   const [practitionerFilter, setPractitionerFilter] = useState<'all' | string>(defaultPractitionerFilter);
   const [serviceFilter, setServiceFilter] = useState<'all' | string>('all');
@@ -357,6 +349,9 @@ export function AppointmentBookingsDashboard({
   const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
   const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
+  const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
+  const [messageChannelById, setMessageChannelById] = useState<Record<string, GuestMessageChannel>>({});
+  const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -407,6 +402,25 @@ export function AppointmentBookingsDashboard({
   useEffect(() => {
     if (statusKey === 'In progress') setStatusKey('Started');
   }, [statusKey]);
+
+  useEffect(() => {
+    if (!viewRangePopoverOpen) return;
+    const handler = (event: PointerEvent) => {
+      if (viewRangeWrapRef.current?.contains(event.target as Node)) return;
+      setViewRangePopoverOpen(false);
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [viewRangePopoverOpen]);
+
+  useEffect(() => {
+    if (!viewRangePopoverOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setViewRangePopoverOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewRangePopoverOpen]);
 
   useEffect(() => {
     const ob = searchParams.get('openBooking');
@@ -849,9 +863,6 @@ export function AppointmentBookingsDashboard({
     }
   };
 
-  const goToday = () => setAnchorDate(todayISO());
-  const goTomorrow = () => setAnchorDate(addDays(todayISO(), 1));
-
   const openCsvModal = () => {
     setCsvFrom(from);
     setCsvTo(to);
@@ -1000,6 +1011,38 @@ export function AppointmentBookingsDashboard({
     [addToast, selectedBookingIds],
   );
 
+  const sendGuestMessage = useCallback(
+    async (bookingId: string, message: string, channel: GuestMessageChannel) => {
+      const trimmed = message.trim();
+      if (!trimmed) return;
+      setSendingMessageIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed, channel }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+          errors?: string[];
+        };
+        if (!res.ok || !payload.success) {
+          const issues = payload.errors?.join('; ') || payload.error || 'Could not send message';
+          addToast(issues, 'error');
+          return;
+        }
+        setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        addToast('Message sent', 'success');
+      } catch {
+        addToast('Could not send message', 'error');
+      } finally {
+        setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
+      }
+    },
+    [addToast],
+  );
+
   function toggleExpanded(id: string) {
     setExpandedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -1105,6 +1148,9 @@ export function AppointmentBookingsDashboard({
       b.deposit_amount_pence != null
         ? formatMoneyPence(b.deposit_amount_pence, sym)
         : null;
+    const draftMessage = messageDraftById[b.id] ?? '';
+    const sendingMessage = sendingMessageIds.includes(b.id);
+    const messageChannel = messageChannelById[b.id] ?? 'both';
 
     return (
       <div
@@ -1120,39 +1166,46 @@ export function AppointmentBookingsDashboard({
             toggleExpanded(b.id);
           }
         }}
-        className={`cursor-pointer border-l-[3px] py-3 pl-3 pr-3 transition-colors sm:pl-4 sm:pr-4 ${statusBorderClass(b.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
+        className={`cursor-pointer border-l-[3px] py-2 pl-2 pr-2 transition-colors sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(b.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
       >
-        <div className="flex items-start gap-3">
-          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+        <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+          <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
             <input
               type="checkbox"
               checked={selectedBookingIds.includes(b.id)}
               onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
               aria-label={`Select booking for ${b.guest_name}`}
+              className="h-4 w-4 rounded border-slate-300"
             />
           </div>
-          <div className="flex w-20 flex-none flex-col items-start leading-tight sm:w-24">
-            <span className="font-semibold tabular-nums text-slate-900">
-              {startTime}
-            </span>
-            {endTime && (
-              <span className="text-[11px] tabular-nums text-slate-400">
-                → {endTime}
-              </span>
-            )}
-            <span className="mt-0.5 text-[11px] tabular-nums text-slate-400">
-              {formatDayHeader(b.booking_date)}
-            </span>
-          </div>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-semibold text-slate-900">{b.guest_name}</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs sm:text-sm">
+              <span className="min-w-0 max-w-[8.75rem] truncate font-semibold text-slate-900 sm:max-w-[14rem]">
+                {b.guest_name}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-slate-700">
+                {startTime}
+                {endTime ? <span className="text-slate-400">-{endTime}</span> : null}
+              </span>
+              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
+              <span className="hidden shrink-0 text-[11px] font-medium text-slate-500 sm:inline">
+                {formatDayHeader(b.booking_date)}
+              </span>
+              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
+              <span className="hidden max-w-[10rem] truncate text-[11px] font-medium text-slate-600 sm:inline">
+                {svcName}
+              </span>
+              <span className="hidden shrink-0 text-slate-300 md:inline">·</span>
+              <span className="hidden max-w-[8rem] truncate text-[11px] text-slate-500 md:inline">
+                {pracName}
+              </span>
               <Pill variant={statusPillVariant(b.status)} size="sm">
                 {tableStatusLabel(b.status)}
               </Pill>
               {showDepositPendingPill(b) && (
                 <Pill variant="warning" size="sm" dot>
-                  Deposit pending
+                  <span className="sm:hidden">Deposit</span>
+                  <span className="hidden sm:inline">Deposit pending</span>
                 </Pill>
               )}
               {showAttendanceConfirmedPill(b) && (
@@ -1163,43 +1216,37 @@ export function AppointmentBookingsDashboard({
               <Pill variant="neutral" size="sm">
                 {typeLabel}
               </Pill>
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-              <span className="truncate font-medium text-slate-600">{svcName}</span>
-              <span className="text-slate-300">·</span>
-              <span className="truncate">{pracName}</span>
               {duration != null && (
-                <>
-                  <span className="text-slate-300">·</span>
-                  <span className="tabular-nums">{duration} min</span>
-                </>
+                <span className="hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block">
+                  {duration} min
+                </span>
               )}
               {b.party_size > 1 && (
-                <>
-                  <span className="text-slate-300">·</span>
-                  <span>
-                    {b.party_size} {b.party_size === 1 ? 'person' : 'people'}
-                  </span>
-                </>
+                <span className="hidden rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 sm:inline-block">
+                  {b.party_size} people
+                </span>
               )}
-              <span className="text-slate-300">·</span>
-              <Pill variant={sourcePillVariant(b.source)} size="sm">
-                {sourceLabelShort(b.source)}
-              </Pill>
-              {priceDisplay && (
-                <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
-                  {priceDisplay} · {b.deposit_status}
+              <span className="hidden sm:inline-flex">
+                <Pill variant={sourcePillVariant(b.source)} size="sm">
+                  {sourceLabelShort(b.source)}
                 </Pill>
+              </span>
+              {priceDisplay && (
+                <span className="hidden sm:inline-flex">
+                  <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
+                    {priceDisplay} · {b.deposit_status}
+                  </Pill>
+                </span>
               )}
             </div>
           </div>
-          <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 items-center gap-1.5">
+          <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center justify-end gap-1">
             {showConfirm && (
               <button
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void confirmBookingAttendance(b.id)}
-                className="hidden min-w-[4.75rem] items-center justify-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60 sm:inline-flex"
+                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60 sm:min-w-[4.75rem] sm:px-2.5 sm:text-xs"
                 aria-label={`Confirm attendance for ${b.guest_name}`}
                 aria-busy={confirmAttendanceLoadingId === b.id}
               >
@@ -1217,7 +1264,7 @@ export function AppointmentBookingsDashboard({
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                className="hidden min-w-[5.5rem] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60 sm:inline-flex"
+                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60 sm:min-w-[5.5rem] sm:px-2.5 sm:text-xs"
                 aria-label={`Cancel staff attendance confirmation for ${b.guest_name}`}
                 aria-busy={confirmAttendanceLoadingId === b.id}
               >
@@ -1227,12 +1274,13 @@ export function AppointmentBookingsDashboard({
                     aria-hidden
                   />
                 ) : null}
-                <span>Unconfirm</span>
+                <span className="sm:hidden">Undo</span>
+                <span className="hidden sm:inline">Unconfirm</span>
               </button>
             )}
           </div>
           <svg
-            className={`mt-1 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             strokeWidth={2}
@@ -1246,9 +1294,18 @@ export function AppointmentBookingsDashboard({
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
-            className="mt-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-4"
+            className="mt-1.5 space-y-2 px-0.5 pb-2.5 sm:px-1"
           >
-            {renderExpandedAppointment(b, { svcName, pracName, duration })}
+            {renderExpandedAppointment(b, {
+              svcName,
+              pracName,
+              duration,
+              typeLabel,
+              priceDisplay,
+              draftMessage,
+              sendingMessage,
+              messageChannel,
+            })}
           </div>
         )}
       </div>
@@ -1257,15 +1314,20 @@ export function AppointmentBookingsDashboard({
 
   function renderExpandedAppointment(
     b: RegistryAppointment,
-    ctx: { svcName: string; pracName: string; duration: number | null },
+    ctx: {
+      svcName: string;
+      pracName: string;
+      duration: number | null;
+      typeLabel: string;
+      priceDisplay: string | null;
+      draftMessage: string;
+      sendingMessage: boolean;
+      messageChannel: GuestMessageChannel;
+    },
   ) {
-    const { svcName, pracName, duration } = ctx;
+    const { svcName, pracName, duration, typeLabel, priceDisplay, draftMessage, sendingMessage, messageChannel } = ctx;
     const showConfirm = canShowConfirmBookingAttendance(b);
     const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
-    const priceDisplay =
-      b.deposit_amount_pence != null
-        ? formatMoneyPence(b.deposit_amount_pence, sym)
-        : null;
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
     const notes = b.special_requests?.trim() || null;
     const internal = b.internal_notes?.trim() || null;
@@ -1277,134 +1339,163 @@ export function AppointmentBookingsDashboard({
           month: 'short',
         })
       : null;
+    const firstName = b.guest_name.split(' ')[0] || 'guest';
+
+    const infoTile = (label: string, value: ReactNode, tone = 'slate') => (
+      <div className={`rounded-lg border px-2 py-1.5 ${
+        tone === 'brand'
+          ? 'border-brand-100 bg-brand-50/60'
+          : tone === 'emerald'
+            ? 'border-emerald-100 bg-emerald-50/60'
+            : tone === 'amber'
+              ? 'border-amber-100 bg-amber-50/60'
+              : 'border-slate-200 bg-slate-50/70'
+      }`}>
+        <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
+        <div className="truncate text-xs font-bold text-slate-800">{value}</div>
+      </div>
+    );
+
     return (
-      <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <section>
-            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Guest
-            </h4>
-            <p className="mt-1.5 font-semibold text-slate-900">{b.guest_name}</p>
-            {b.guest_visit_count != null && (
-              <p className="mt-0.5 text-xs text-slate-500">
-                {b.guest_visit_count === 0
-                  ? 'First visit'
-                  : `${b.guest_visit_count} previous ${b.guest_visit_count === 1 ? 'visit' : 'visits'}`}
-              </p>
-            )}
-            <div className="mt-2 flex flex-col gap-1 text-sm">
-              {b.guest_email && (
-                <a
-                  href={`mailto:${b.guest_email}`}
-                  className="inline-flex w-fit items-center gap-1.5 text-brand-700 hover:underline"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v10.5A2.25 2.25 0 0 1 19.5 19.5h-15a2.25 2.25 0 0 1-2.25-2.25V6.75Z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="m3 7 9 6 9-6"
-                    />
-                  </svg>
-                  <span className="break-all">{b.guest_email}</span>
-                </a>
-              )}
-              {b.guest_phone && (
-                <a
-                  href={`tel:${b.guest_phone}`}
-                  className="inline-flex w-fit items-center gap-1.5 text-brand-700 hover:underline"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M2.25 6.75A4.5 4.5 0 0 1 6.75 2.25h.5c.8 0 1.5.56 1.66 1.35l.83 4.16a1.5 1.5 0 0 1-.74 1.62l-1.65.82a13.5 13.5 0 0 0 6.06 6.06l.82-1.65a1.5 1.5 0 0 1 1.62-.74l4.16.83c.79.16 1.35.86 1.35 1.66v.5a4.5 4.5 0 0 1-4.5 4.5A15 15 0 0 1 2.25 6.75Z"
-                    />
-                  </svg>
-                  <span>{b.guest_phone}</span>
-                </a>
-              )}
-              {!b.guest_email && !b.guest_phone && (
-                <span className="text-xs text-slate-400">No contact details on file</span>
-              )}
+      <div className="space-y-2">
+        <section className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm shadow-slate-900/[0.03] sm:p-3">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
+                {b.guest_name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <p className="max-w-[12rem] truncate text-sm font-bold text-slate-900 sm:max-w-[18rem]">{b.guest_name}</p>
+                  <Pill variant="neutral" size="sm">
+                    {b.guest_visit_count && b.guest_visit_count > 0
+                      ? `${b.guest_visit_count} visit${b.guest_visit_count === 1 ? '' : 's'}`
+                      : 'First visit'}
+                  </Pill>
+                  <Pill variant="neutral" size="sm">{typeLabel}</Pill>
+                </div>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="font-medium text-slate-700">{formatDayHeader(b.booking_date)}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-semibold tabular-nums text-slate-700">
+                    {b.booking_time.slice(0, 5)}{endTime ? `-${endTime}` : ''}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                  <span className="max-w-[12rem] truncate">{svcName}</span>
+                </div>
+              </div>
             </div>
-          </section>
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0 sm:items-center">
+              {b.guest_phone ? (
+                <a href={`tel:${b.guest_phone}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                  Call
+                </a>
+              ) : null}
+              {b.guest_email ? (
+                <a href={`mailto:${b.guest_email}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                  Email
+                </a>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            {infoTile('Service', svcName, 'brand')}
+            {infoTile('Staff', pracName)}
+            {infoTile('Time', (
+              <span className="tabular-nums">
+                {b.booking_time.slice(0, 5)}{endTime ? `-${endTime}` : ''}
+                {duration != null ? <span className="ml-1 text-slate-500">({duration}m)</span> : null}
+              </span>
+            ))}
+            {infoTile('Payment', priceDisplay ? `${priceDisplay} · ${b.deposit_status}` : b.deposit_status, b.deposit_status === 'Paid' ? 'emerald' : b.deposit_status === 'Pending' ? 'amber' : 'slate')}
+            {infoTile('Source', <Pill variant={sourcePillVariant(b.source)} size="sm">{sourceLabelShort(b.source)}</Pill>)}
+            {arrivedAt ? infoTile('Arrived', arrivedAt, 'emerald') : null}
+            {b.party_size > 1 ? infoTile('Party', `${b.party_size} people`) : null}
+            {infoTile('Ref', (
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(b.id)}
+                className="truncate text-left hover:text-brand-700"
+                title="Copy booking reference"
+              >
+                #{b.id.slice(0, 8)}
+              </button>
+            ))}
+          </div>
+        </section>
 
-          <section>
-            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Appointment
-            </h4>
-            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-              <dt className="text-slate-500">Service</dt>
-              <dd className="font-medium text-slate-800">{svcName}</dd>
-              <dt className="text-slate-500">Staff</dt>
-              <dd className="font-medium text-slate-800">{pracName}</dd>
-              <dt className="text-slate-500">Date</dt>
-              <dd className="font-medium tabular-nums text-slate-800">{b.booking_date}</dd>
-              <dt className="text-slate-500">Time</dt>
-              <dd className="font-medium tabular-nums text-slate-800">
-                {b.booking_time.slice(0, 5)}
-                {endTime && <span className="text-slate-400"> → {endTime}</span>}
-                {duration != null && (
-                  <span className="ml-1.5 text-xs text-slate-400">({duration} min)</span>
-                )}
-              </dd>
-              {b.party_size > 1 && (
-                <>
-                  <dt className="text-slate-500">Party</dt>
-                  <dd className="font-medium text-slate-800">
-                    {b.party_size} {b.party_size === 1 ? 'person' : 'people'}
-                  </dd>
-                </>
-              )}
-              <dt className="text-slate-500">Deposit</dt>
-              <dd>
-                {priceDisplay ? (
-                  <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
-                    {priceDisplay} · {b.deposit_status}
-                  </Pill>
-                ) : (
-                  <Pill variant={depositPillVariant(b.deposit_status)} size="sm">
-                    {b.deposit_status}
-                  </Pill>
-                )}
-              </dd>
-              <dt className="text-slate-500">Source</dt>
-              <dd>
-                <Pill variant={sourcePillVariant(b.source)} size="sm">
-                  {sourceLabelShort(b.source)}
-                </Pill>
-              </dd>
-              {arrivedAt && (
-                <>
-                  <dt className="text-slate-500">Arrived</dt>
-                  <dd className="font-medium text-emerald-700">{arrivedAt}</dd>
-                </>
-              )}
+        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+            <span>SMS / email guest</span>
+            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+              {b.guest_phone && b.guest_email ? 'SMS + email' : b.guest_phone ? 'SMS' : b.guest_email ? 'Email' : 'No contact'}
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </summary>
+          <div className="border-t border-slate-100 bg-brand-50/20 p-2.5 sm:p-3">
+            <textarea
+              value={draftMessage}
+              onChange={(e) => setMessageDraftById((prev) => ({ ...prev, [b.id]: e.target.value }))}
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
+              placeholder={`Write a message to ${firstName}...`}
+            />
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <label className="flex items-center justify-between gap-2 text-xs font-medium text-slate-500 sm:justify-start">
+                Send via
+                <GuestMessageChannelSelect
+                  value={messageChannel}
+                  onChange={(value) => setMessageChannelById((prev) => ({ ...prev, [b.id]: value }))}
+                  disabled={sendingMessage}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={sendingMessage || draftMessage.trim().length === 0}
+                onClick={() => void sendGuestMessage(b.id, draftMessage, messageChannel)}
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:min-h-8 sm:py-1.5"
+                aria-busy={sendingMessage}
+              >
+                {sendingMessage ? (
+                  <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/25 border-t-white" aria-hidden />
+                ) : null}
+                Send
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+            <span>Appointment details</span>
+            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{svcName}</span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </summary>
+          <div className="border-t border-slate-100 p-2.5">
+            <dl className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              {infoTile('Client', b.guest_name)}
+              {infoTile('Email', b.guest_email ? <a href={`mailto:${b.guest_email}`} className="hover:text-brand-700">{b.guest_email}</a> : 'Not provided')}
+              {infoTile('Phone', b.guest_phone ? <a href={`tel:${b.guest_phone}`} className="hover:text-brand-700">{b.guest_phone}</a> : 'Not provided')}
+              {infoTile('Status', <Pill variant={statusPillVariant(b.status)} size="sm">{tableStatusLabel(b.status)}</Pill>)}
             </dl>
-          </section>
-        </div>
+          </div>
+        </details>
 
-        {(notes || internal) && (
-          <section className="space-y-2 rounded-lg bg-slate-50/70 p-3 ring-1 ring-slate-200/70">
+        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]" open={Boolean(notes || internal)}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+            <span>Notes and preferences</span>
+            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+              {[notes, internal].filter(Boolean).length || 'None'}
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </summary>
+          <section className="space-y-2 border-t border-slate-100 p-2.5">
             {notes && (
               <div>
                 <h5 className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
@@ -1421,10 +1512,11 @@ export function AppointmentBookingsDashboard({
                 <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{internal}</p>
               </div>
             )}
+            {!notes && !internal ? <p className="text-xs text-slate-400">No notes or preferences recorded.</p> : null}
           </section>
-        )}
+        </details>
 
-        <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+        <section className="flex flex-wrap items-end gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm shadow-slate-900/[0.03]">
           <label className="flex min-w-0 flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Status
@@ -1447,7 +1539,7 @@ export function AppointmentBookingsDashboard({
               type="button"
               disabled={confirmAttendanceLoadingId === b.id}
               onClick={() => void confirmBookingAttendance(b.id)}
-              className="inline-flex min-h-[36px] min-w-[9.5rem] items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60"
+              className="inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60"
               aria-busy={confirmAttendanceLoadingId === b.id}
             >
               {confirmAttendanceLoadingId === b.id ? (
@@ -1456,7 +1548,7 @@ export function AppointmentBookingsDashboard({
                   aria-hidden
                 />
               ) : null}
-              <span>Confirm booking</span>
+              <span>Confirm</span>
             </button>
           )}
           {showCancelConfirm && (
@@ -1464,7 +1556,7 @@ export function AppointmentBookingsDashboard({
               type="button"
               disabled={confirmAttendanceLoadingId === b.id}
               onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-              className="inline-flex min-h-[36px] min-w-[11rem] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60"
+              className="inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60"
               aria-busy={confirmAttendanceLoadingId === b.id}
             >
               {confirmAttendanceLoadingId === b.id ? (
@@ -1473,14 +1565,14 @@ export function AppointmentBookingsDashboard({
                   aria-hidden
                 />
               ) : null}
-              <span>Cancel confirmation</span>
+              <span>Unconfirm</span>
             </button>
           )}
           <div className="ml-auto flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setDetailBookingId(b.id)}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:bg-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 shadow-sm transition-colors hover:bg-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             >
               Open full view
               <svg
@@ -1495,21 +1587,326 @@ export function AppointmentBookingsDashboard({
               </svg>
             </button>
           </div>
-        </div>
+        </section>
       </div>
     );
   }
 
+  const filterCount =
+    (statusKey !== 'All' ? 1 : 0) +
+    (practitionerFilter !== 'all' ? 1 : 0) +
+    (serviceFilter !== 'all' ? 1 : 0) +
+    (modelFilter !== 'all' ? 1 : 0) +
+    (timeRangeFilterActive ? 1 : 0);
+
+  const toolbarSummary = {
+    total_covers_booked: stats.total,
+    total_covers_capacity: Math.max(stats.total, 1),
+    tables_in_use: stats.confirmed,
+    tables_total: Math.max(stats.total, 1),
+    unassigned_count: stats.noShows,
+    combos_in_use: stats.completed,
+  };
+
+  const appointmentSummaryContent = (
+    <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Bookings summary">
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">{statsPrimaryLabel}</span>
+        <span className="tabular-nums">{stats.total}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-emerald-200/90 bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-900">
+        <span className="font-normal text-emerald-700">Confirmed</span>
+        <span className="tabular-nums">{stats.confirmed}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-violet-200/90 bg-violet-50 px-1.5 py-0.5 font-medium text-violet-900">
+        <span className="font-normal text-violet-700">Completed</span>
+        <span className="tabular-nums">{stats.completed}</span>
+      </span>
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+        <span className="font-normal text-slate-500">No-shows</span>
+        <span className="tabular-nums">{stats.noShows}</span>
+      </span>
+    </div>
+  );
+
+  const appointmentFilterPanel = (
+    <div className="space-y-3">
+      {showModelFilters && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Type</p>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setModelFilter('all')}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                modelFilter === 'all' ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              All
+            </button>
+            {filterModels.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setModelFilter(m)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  modelFilter === m ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                }`}
+              >
+                {bookingModelShortLabel(m)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Calendar</span>
+          <select
+            value={practitionerFilter}
+            onChange={(e) => setPractitionerFilter(e.target.value as 'all' | string)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All appointments</option>
+            {myCalendarIds.length === 0 ? (
+              activePractitioners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))
+            ) : (
+              <>
+                {myCalendarIds.map((cid) => {
+                  const p = activePractitioners.find((x) => x.id === cid);
+                  const label = myCalendarIds.length === 1 ? 'My appointments' : `Mine - ${p?.name ?? 'Calendar'}`;
+                  return (
+                    <option key={cid} value={cid}>
+                      {label}
+                    </option>
+                  );
+                })}
+                {activePractitioners
+                  .filter((p) => !myCalendarIds.includes(p.id))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </>
+            )}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</span>
+          <select
+            value={serviceFilter}
+            onChange={(e) => setServiceFilter(e.target.value as 'all' | string)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="all">All services</option>
+            {services.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
+        <div className="flex flex-wrap gap-1.5">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.label}
+              type="button"
+              onClick={() => setStatusKey(f.label)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                statusKey === f.label ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {filterCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setStatusKey('All');
+            setPractitionerFilter(defaultPractitionerFilter);
+            setServiceFilter('all');
+            setModelFilter('all');
+            setStartHourOverride(null);
+            setEndHourOverride(null);
+            setTimeRangeFilterActive(false);
+          }}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear filters
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const appointmentDatePanel = (
+    <div className="space-y-3">
+      {viewMode === 'custom' ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">From</span>
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">To</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
+          </label>
+          {invalidCustomRange ? <p className="text-sm font-medium text-red-600 sm:col-span-2">From must be on or before To.</p> : null}
+        </div>
+      ) : viewMode === 'day' ? (
+        <>
+          <CalendarDateTimePicker
+            date={anchorDate}
+            onDateChange={setAnchorDate}
+            startHour={pickerStartHour}
+            endHour={pickerEndHour}
+            onTimeRangeChange={(start, end) => {
+              setStartHourOverride(start);
+              setEndHourOverride(end);
+              setTimeRangeFilterActive(true);
+            }}
+          />
+          {timeRangeFilterActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setStartHourOverride(null);
+                setEndHourOverride(null);
+                setTimeRangeFilterActive(false);
+              }}
+              className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+            >
+              Clear time filter
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-sm text-slate-600">Use the arrows to move through the selected {viewMode} view.</p>
+      )}
+    </div>
+  );
+
+  const appointmentSearchPanel = (
+    <div className="space-y-2">
+      <label htmlFor="appointment-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Search
+      </label>
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+        </div>
+        <input
+          id="appointment-toolbar-search"
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search client, phone, email..."
+          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
+          autoComplete="off"
+        />
+      </div>
+      {searchQuery.trim() ? (
+        <button
+          type="button"
+          onClick={() => setSearchQuery('')}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear search
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const appointmentToolbarLeadingTools = useCallback(
+    (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
+      <div ref={viewRangeWrapRef} className="relative shrink-0">
+        <button
+          ref={viewRangeTriggerRef}
+          type="button"
+          onClick={() => setViewRangePopoverOpen((openNow) => !openNow)}
+          className={`inline-flex min-h-8 shrink-0 items-center gap-0.5 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 sm:text-xs ${
+            viewRangePopoverOpen
+              ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+              : 'border-slate-200 bg-white text-slate-700'
+          }`}
+          aria-expanded={viewRangePopoverOpen}
+          aria-haspopup="dialog"
+          aria-controls={viewRangePanelId}
+          aria-label="View - day, week, month, or custom range"
+        >
+          <span className="max-w-[4.75rem] truncate sm:max-w-none">
+            {viewMode.charAt(0).toUpperCase() + viewMode.slice(1)}
+          </span>
+          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+        <ClampedFixedDropdown
+          open={viewRangePopoverOpen}
+          triggerRef={viewRangeTriggerRef}
+          verticalAnchorRef={toolbarPanelAnchorRef}
+          horizontalCenter
+          gapPx={4}
+          align="start"
+          maxWidthPx={288}
+          id={viewRangePanelId}
+          aria-label="Choose view range"
+          className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+        >
+          <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">View</p>
+          <div role="radiogroup" aria-label="Date range view" className="space-y-0.5">
+            {(['day', 'week', 'month', 'custom'] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={viewMode === mode}
+                onClick={() => {
+                  setViewMode(mode);
+                  if (mode !== 'custom') setAnchorDate(todayISO());
+                  setViewRangePopoverOpen(false);
+                }}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${
+                  viewMode === mode ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200' : 'text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
+          </div>
+        </ClampedFixedDropdown>
+      </div>
+    ),
+    [viewMode, viewRangePopoverOpen, viewRangePanelId],
+  );
+
   return (
     <PageFrame>
-      <PageHeader
-        eyebrow="Operations"
-        title={statsPrimaryLabel}
-        subtitle={`Filter, sort, and export your ${statsPrimaryLabel.toLowerCase()}. Expand cards for full client details.`}
-      />
-      <div className="min-w-0 space-y-5">
+      <div className="min-w-0 space-y-6">
       {realtimeConnected === false && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 sm:px-4">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Updates may be delayed. Reconnecting…
         </div>
       )}
@@ -1523,36 +1920,6 @@ export function AppointmentBookingsDashboard({
           >
             Dismiss
           </button>
-        </div>
-      )}
-      {showModelFilters && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-          <span className="text-xs font-medium text-slate-600">Type:</span>
-          <button
-            type="button"
-            onClick={() => setModelFilter('all')}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              modelFilter === 'all'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            All
-          </button>
-          {filterModels.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setModelFilter(m)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                modelFilter === m
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {bookingModelShortLabel(m)}
-            </button>
-          ))}
         </div>
       )}
 
@@ -1569,305 +1936,49 @@ export function AppointmentBookingsDashboard({
         </div>
       )}
 
-      {/* Grid keeps columns in separate tracks so intrinsic widths cannot overlap (flex + w-max on the period control caused overflow into the actions column). */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-x-8 lg:gap-y-4">
-        <div className="min-w-0 max-w-full">
-          <p className="mb-2 text-xs font-medium text-slate-500">View period</p>
-          <div className="grid w-full max-w-full grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:grid-cols-4">
-            {(['day', 'week', 'month', 'custom'] as ViewMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setViewMode(mode);
-                  if (mode !== 'custom') setAnchorDate(todayISO());
-                }}
-                className={`min-w-0 touch-manipulation rounded-lg px-2 py-3 text-sm font-medium capitalize transition-all sm:px-3 sm:py-2.5 md:px-4 ${
-                  viewMode === mode ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex min-w-0 max-w-full flex-col gap-3 lg:max-w-none lg:shrink-0">
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={goToday}
-              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={goTomorrow}
-              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
-            >
-              Tomorrow
-            </button>
-            <button
-              type="button"
-              onClick={openCsvModal}
-              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
-            >
-              Export
-            </button>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-            <button
-              type="button"
-              onClick={() => setNewBookingOpen(true)}
-              className="flex min-h-[48px] touch-manipulation items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white shadow-sm active:bg-brand-800 sm:min-h-[44px] hover:bg-brand-700"
-            >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              New Booking
-            </button>
-            <button
-              type="button"
-              onClick={() => setWalkInOpen(true)}
-              className="flex min-h-[48px] touch-manipulation items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-sm active:bg-emerald-800 sm:min-h-[44px] hover:bg-emerald-700"
-            >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              Walk-in
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {viewMode !== 'custom' ? (
-        viewMode === 'day' ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <CalendarDateTimePicker
-              date={anchorDate}
-              onDateChange={setAnchorDate}
-              startHour={pickerStartHour}
-              endHour={pickerEndHour}
-              onTimeRangeChange={(start, end) => {
-                setStartHourOverride(start);
-                setEndHourOverride(end);
-                setTimeRangeFilterActive(true);
-              }}
-            />
-            {timeRangeFilterActive && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                <p className="text-xs text-slate-600">
-                  Showing bookings with start times from{' '}
-                  <span className="font-medium text-slate-800">
-                    {String(pickerStartHour).padStart(2, '0')}:00
-                  </span>{' '}
-                  up to{' '}
-                  <span className="font-medium text-slate-800">
-                    {String(pickerEndHour).padStart(2, '0')}:00
-                  </span>{' '}
-                  (not including the end hour).
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStartHourOverride(null);
-                    setEndHourOverride(null);
-                    setTimeRangeFilterActive(false);
-                  }}
-                  className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
-                >
-                  Clear time filter
-                </button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-stretch justify-between gap-1 rounded-xl border border-slate-200 bg-white px-1 py-2 shadow-sm sm:px-4 sm:py-3">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
-              aria-label="Previous period"
-            >
-              <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-              </svg>
-            </button>
-            <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
-              <h2 className="text-sm font-semibold leading-snug text-slate-900 sm:text-base">
-                <span className="sm:hidden">{formatDateLabelCompact(anchorDate, viewMode)}</span>
-                <span className="hidden sm:inline">{formatDateLabel(anchorDate, viewMode)}</span>
-              </h2>
-              {anchorDate === todayISO() && (
-                <span className="mt-0.5 inline-block text-xs font-medium text-brand-600">Today</span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate(1)}
-              className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
-              aria-label="Next period"
-            >
-              <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
-          </div>
-        )
-      ) : (
-        <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="appt-custom-from" className="text-xs font-medium text-slate-600">
-              From
-            </label>
-            <input
-              id="appt-custom-from"
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="appt-custom-to" className="text-xs font-medium text-slate-600">
-              To
-            </label>
-            <input
-              id="appt-custom-to"
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          {invalidCustomRange && (
-            <p className="w-full text-sm font-medium text-red-600">“From” must be on or before “To”.</p>
-          )}
-        </div>
-      )}
-
-      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-        <DashboardStatCard label={statsPrimaryLabel} value={stats.total} color="brand" />
-        <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
-        <DashboardStatCard label="Completed" value={stats.completed} color="violet" />
-        <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
-      </div>
-
-      <div className="relative space-y-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <OperationsWorkspaceToolbar
+        title={statsPrimaryLabel}
+        summary={toolbarSummary}
+        summaryContent={appointmentSummaryContent}
+        date={anchorDate}
+        dateLabel={viewMode === 'custom' ? `${customFrom} - ${customTo}` : formatDateLabel(anchorDate, viewMode)}
+        onDateChange={setAnchorDate}
+        onPreviousDate={() => navigate(-1)}
+        onNextDate={() => navigate(1)}
+        liveState={realtimeConnected === false ? 'reconnecting' : 'live'}
+        onRefresh={() => {
+          void fetchBookings({ silent: true });
+          void fetchBookingsForStats();
+        }}
+        onNewBooking={() => setNewBookingOpen(true)}
+        onWalkIn={() => setWalkInOpen(true)}
+        compact
+        toolbarLeadingTools={appointmentToolbarLeadingTools}
+        controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
+        controlsPanel={appointmentFilterPanel}
+        datePickerPanel={appointmentDatePanel}
+        searchActive={searchQuery.trim().length > 0}
+        searchPanel={appointmentSearchPanel}
+        trailingActions={
+          <button
+            type="button"
+            onClick={openCsvModal}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
+            aria-label="Export appointments"
+          >
+            <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 12 12 16.5m0 0 4.5-4.5M12 16.5V3" />
+            </svg>
+            <span className="hidden sm:inline">Export</span>
+          </button>
+        }
+      />
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
         <div
           className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-brand-500 transition-opacity duration-200 ease-out ${isRefreshing ? 'opacity-100' : 'opacity-0'}`}
           aria-hidden
         />
-        <p className="text-xs font-medium text-slate-500">Status</p>
-        <div className="-mx-0.5 flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-1 pt-0.5 [scrollbar-width:thin] touch-pan-x sm:-mx-1">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.label}
-              type="button"
-              onClick={() => setStatusKey(f.label)}
-              className={`snap-start flex-shrink-0 touch-manipulation rounded-full px-3.5 py-2.5 text-xs font-medium transition-colors sm:py-2 sm:text-sm ${
-                statusKey === f.label
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-3 sm:flex-row sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
-            <span className="text-xs font-medium text-slate-600">Calendar</span>
-            <select
-              value={practitionerFilter}
-              onChange={(e) => setPractitionerFilter(e.target.value as 'all' | string)}
-              className="min-h-[48px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
-            >
-              <option value="all">All appointments</option>
-              {myCalendarIds.length === 0 ? (
-                activePractitioners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))
-              ) : (
-                <>
-                  {myCalendarIds.map((cid) => {
-                    const p = activePractitioners.find((x) => x.id === cid);
-                    const label =
-                      myCalendarIds.length === 1
-                        ? 'My appointments'
-                        : `Mine — ${p?.name ?? 'Calendar'}`;
-                    return (
-                      <option key={cid} value={cid}>
-                        {label}
-                      </option>
-                    );
-                  })}
-                  {activePractitioners
-                    .filter((p) => !myCalendarIds.includes(p.id))
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </>
-              )}
-            </select>
-          </label>
-          <label className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
-            <span className="text-xs font-medium text-slate-600">Service</span>
-            <select
-              value={serviceFilter}
-              onChange={(e) => setServiceFilter(e.target.value as 'all' | string)}
-              className="min-h-[48px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
-            >
-              <option value="all">All services</option>
-              {services.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-md">
-            <span className="text-xs font-medium text-slate-600">Search</span>
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Name, phone, email, or booking reference"
-              className="min-h-[48px] w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
-              autoComplete="off"
-            />
-          </label>
-        </div>
       </div>
-
-      {selectedBookingIds.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-          <span className="text-xs font-medium text-slate-600">
-            {selectedBookingIds.length} selected
-          </span>
-          <button
-            type="button"
-            disabled={bulkGuestMessageSending}
-            onClick={() => setBulkGuestMessageOpen(true)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            Send message…
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedBookingIds([])}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50"
-          >
-            Clear selection
-          </button>
-        </div>
-      )}
 
       {loading ? (
         <div className="space-y-3" role="status" aria-label="Loading bookings">

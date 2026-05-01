@@ -44,6 +44,9 @@ export const TABLE_STATUS_SEQUENCE: Record<TableServiceStatus, TableServiceStatu
  */
 export const BOOKING_ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
+/** Bookings shown on the dashboard timeline grid (includes historical Completed rows). */
+export const BOOKING_TIMELINE_GRID_STATUSES = [...BOOKING_ACTIVE_STATUSES, 'Completed'] as const;
+
 /**
  * Statuses that count as "the booking is held and the slot is consumed but the
  * guest has not yet arrived" — i.e. anything between creation and seating.

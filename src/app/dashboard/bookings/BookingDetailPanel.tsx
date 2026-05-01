@@ -18,6 +18,8 @@ import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChan
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
+import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 
 function detailStatusPillVariant(status: string): PillVariant {
   switch (status) {
@@ -213,6 +215,7 @@ export function BookingDetailPanel({
   bookingId,
   onClose,
   onUpdated,
+  onStatusChange,
   venueId,
   venueCurrency,
   initialSnapshot,
@@ -223,6 +226,7 @@ export function BookingDetailPanel({
   bookingId: string;
   onClose: () => void;
   onUpdated: () => void;
+  onStatusChange?: (bookingId: string, currentStatus: BookingStatus, nextStatus: BookingStatus) => Promise<void> | void;
   /** Required for optimistic placeholder from grid/floor views. */
   venueId?: string;
   venueCurrency?: string;
@@ -266,41 +270,23 @@ export function BookingDetailPanel({
     return buildPlaceholderDetail(bookingId, venueId, initialSnapshot);
   }, [bookingId, venueId, initialSnapshot]);
 
+  const viewport = useViewportBounds();
   const displayDetail = detail ?? optimisticDetail;
   const isHydrated = detail !== null;
   const isPopover = presentation === 'popover';
   const popoverStyle = useMemo((): CSSProperties | undefined => {
     if (!isPopover) return undefined;
 
-    const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
-    const panelWidth = Math.min(640, viewportWidth - 24);
-    const anchorX = anchor?.x ?? viewportWidth / 2;
+    const anchorX = anchor?.x ?? viewport.width / 2;
     const anchorY = anchor?.y ?? 120;
-    const canOpenRight = anchorX + panelWidth + 22 <= viewportWidth;
-    const leftCandidate = canOpenRight ? anchorX + 10 : anchorX - panelWidth - 10;
-    const left = Math.min(Math.max(12, leftCandidate), Math.max(12, viewportWidth - panelWidth - 12));
-    const spaceAbove = anchorY - 18;
-    const top = Math.max(12, anchorY + 10);
-    const spaceBelow = viewportHeight - top - 12;
-    const openAbove = spaceBelow < 520 && spaceAbove > spaceBelow;
-
-    if (openAbove) {
-      return {
-        left,
-        bottom: Math.max(12, viewportHeight - anchorY + 10),
-        width: panelWidth,
-        maxHeight: Math.max(220, spaceAbove),
-      };
-    }
-
-    return {
-      left,
-      top,
-      width: panelWidth,
-      maxHeight: Math.max(220, spaceBelow),
-    };
-  }, [anchor?.x, anchor?.y, isPopover]);
+    return computePopoverPanelStyle({
+      anchorX,
+      anchorY,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+      maxPanelWidth: 640,
+    });
+  }, [anchor?.x, anchor?.y, isPopover, viewport.width, viewport.height]);
 
   const notesVariant: BookingNotesVariant = useMemo(() => {
     const m = displayDetail?.inferred_booking_model;
@@ -424,37 +410,61 @@ export function BookingDetailPanel({
   useEffect(() => {
     if (!isPopover) return;
 
-    const onPointerDown = (event: PointerEvent) => {
+    /** Capture phase so the underneath grid/floor booking never receives this pointer gesture (would open another booking or drag). */
+    const onPointerDownCapture = (event: PointerEvent) => {
+      if (confirmDialog) return;
       if (panelRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const onClickCapture = (event: MouseEvent) => {
+      if (confirmDialog) return;
+      if (panelRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       onClose();
     };
 
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [isPopover, onClose]);
+    document.addEventListener('pointerdown', onPointerDownCapture, true);
+    document.addEventListener('click', onClickCapture, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDownCapture, true);
+      document.removeEventListener('click', onClickCapture, true);
+    };
+  }, [confirmDialog, isPopover, onClose]);
 
-  const executeStatusChange = useCallback(async (newStatus: string) => {
+  const executeStatusChange = useCallback(async (newStatus: BookingStatus) => {
     if (!detail) return;
-    const previous = detail.status;
+    const previous = detail.status as BookingStatus;
     setActionLoading(true);
     setDetail((prev) => prev ? { ...prev, status: newStatus } : prev);
     try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed');
-        setDetail((prev) => prev ? { ...prev, status: previous } : prev);
-        return;
+      if (onStatusChange) {
+        await onStatusChange(bookingId, previous, newStatus);
+      } else {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          setError(j.error ?? 'Failed');
+          setDetail((prev) => prev ? { ...prev, status: previous } : prev);
+          return;
+        }
       }
       setError(null);
       await load();
       onUpdated();
+    } catch (err) {
+      console.error('Booking detail status update failed:', err);
+      setError('Failed to update booking status');
+      setDetail((prev) => prev ? { ...prev, status: previous } : prev);
     } finally { setActionLoading(false); }
-  }, [bookingId, detail, load, onUpdated]);
+  }, [bookingId, detail, load, onStatusChange, onUpdated]);
 
   const executePermanentDelete = useCallback(async () => {
     setActionLoading(true);
@@ -473,7 +483,7 @@ export function BookingDetailPanel({
     }
   }, [bookingId, onUpdated, onClose]);
 
-  const updateStatus = useCallback(async (newStatus: string) => {
+  const updateStatus = useCallback(async (newStatus: BookingStatus) => {
     if (!detail) return;
     if (newStatus === 'No-Show' && !canMarkNoShowForSlot(detail.booking_date, detail.booking_time?.slice(0, 5) ?? '12:00', 0)) {
       setError('No-show can only be marked after the booking start time');
@@ -638,48 +648,69 @@ export function BookingDetailPanel({
     }
   }, [bookingId, load, onUpdated]);
 
+  const popoverDismissLayer = isPopover ? (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Close booking details"
+      className="fixed inset-0 z-40 cursor-default bg-transparent p-0"
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    />
+  ) : null;
+
   if (!displayDetail) {
     return (
-      <div
-        className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
-        style={popoverStyle}
-        onClick={isPopover ? undefined : onClose}
-      >
+      <>
+        {popoverDismissLayer}
         <div
-          ref={panelRef}
-          role="dialog"
-          aria-modal={!isPopover}
-          aria-label="Booking detail panel"
-          className={
-            isPopover
-              ? 'flex max-h-[inherit] w-full flex-col overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
-              : 'flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
-          }
-          onClick={(e) => e.stopPropagation()}
+          className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
+          style={popoverStyle}
+          onClick={isPopover ? undefined : onClose}
         >
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
-            <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100" />
-          </div>
-          <div className="animate-pulse space-y-3 p-4">
-            <div className="h-20 rounded-xl bg-slate-100" />
-            <div className="grid grid-cols-2 gap-2">
-              <div className="h-14 rounded-lg bg-slate-100" />
-              <div className="h-14 rounded-lg bg-slate-100" />
-              <div className="h-14 rounded-lg bg-slate-100" />
-              <div className="h-14 rounded-lg bg-slate-100" />
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal={!isPopover}
+            aria-label="Booking detail panel"
+            className={
+              isPopover
+                ? 'flex max-h-[inherit] min-w-0 max-w-full w-full flex-col overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
+                : 'flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
+              <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100" />
             </div>
-          </div>
-          {error && (
-            <div className="mx-4 mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              {error}
-              <button type="button" onClick={onClose} className="mt-2 block text-[11px] font-medium text-brand-600 hover:text-brand-700">
-                Close
-              </button>
+            <div className="animate-pulse space-y-3 p-4">
+              <div className="h-20 rounded-xl bg-slate-100" />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="h-14 rounded-lg bg-slate-100" />
+                <div className="h-14 rounded-lg bg-slate-100" />
+                <div className="h-14 rounded-lg bg-slate-100" />
+                <div className="h-14 rounded-lg bg-slate-100" />
+              </div>
             </div>
-          )}
+            {error && (
+              <div className="mx-4 mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+                <button type="button" onClick={onClose} className="mt-2 block text-[11px] font-medium text-brand-600 hover:text-brand-700">
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -727,25 +758,27 @@ export function BookingDetailPanel({
   const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
 
   return (
-    <div
-      className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
-      style={popoverStyle}
-      onClick={isPopover ? undefined : onClose}
-    >
+    <>
+      {popoverDismissLayer}
       <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal={!isPopover}
-        aria-label="Booking detail panel"
-        className={
-          isPopover
-            ? 'max-h-[inherit] w-full overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
-            : 'w-full max-w-md overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
-        }
-        onClick={(e) => e.stopPropagation()}
+        className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
+        style={popoverStyle}
+        onClick={isPopover ? undefined : onClose}
       >
-        {/* Header - compact */}
-        <div className={`sticky top-0 z-10 border-b border-slate-100 bg-gradient-to-br from-white via-white to-brand-50/70 backdrop-blur ${isPopover ? 'px-2.5 py-1.5' : 'px-4 py-3'}`}>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal={!isPopover}
+          aria-label="Booking detail panel"
+          className={
+            isPopover
+              ? 'flex max-h-[inherit] min-w-0 max-w-full w-full flex-col overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
+              : 'w-full max-w-md overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
+          }
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header - compact */}
+          <div className={`sticky top-0 z-10 border-b border-slate-100 bg-gradient-to-br from-white via-white to-brand-50/70 backdrop-blur ${isPopover ? 'px-2.5 py-1.5' : 'px-4 py-3'}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -1523,7 +1556,8 @@ export function BookingDetailPanel({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

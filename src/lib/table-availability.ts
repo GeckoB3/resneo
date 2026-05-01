@@ -11,7 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenueTable, TableAvailabilityCandidate, TableGridData, TableGridCell } from '@/types/table-management';
 import type { BookingModel } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
-import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
+import { BOOKING_ACTIVE_STATUSES, BOOKING_TIMELINE_GRID_STATUSES } from '@/lib/table-management/constants';
 import { inferBookingRowModel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   detectAdjacentTables,
@@ -35,6 +35,7 @@ interface BookingWithTime {
   guest_name: string;
   dietary_notes: string | null;
   occasion: string | null;
+  actual_departed_time?: string | null;
   table_ids: string[];
 }
 
@@ -333,11 +334,11 @@ export async function getTableAvailabilityGrid(
   let bookingsQuery = supabase
     .from('bookings')
     .select(
-      'id, booking_time, estimated_end_time, party_size, status, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+      'id, booking_time, estimated_end_time, party_size, status, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, actual_departed_time, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
     )
     .eq('venue_id', venueId)
     .eq('booking_date', date)
-    .in('status', [...BOOKING_ACTIVE_STATUSES]);
+    .in('status', [...BOOKING_TIMELINE_GRID_STATUSES]);
   if (areaId) {
     bookingsQuery = bookingsQuery.eq('area_id', areaId);
   }
@@ -368,6 +369,7 @@ export async function getTableAvailabilityGrid(
     deposit_status?: string | null;
     guest_attendance_confirmed_at?: string | null;
     staff_attendance_confirmed_at?: string | null;
+    actual_departed_time?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
     experience_event_id?: string | null;
@@ -421,9 +423,11 @@ export async function getTableAvailabilityGrid(
       guest_name: guestName,
       dietary_notes: b.dietary_notes,
       occasion: b.occasion,
+      actual_departed_time: b.actual_departed_time ?? null,
       table_ids: bookingToTables.get(b.id) ?? [],
     };
   });
+  const tableNameById = new Map(tables.map((table) => [table.id, table.name]));
 
   const startMin = serviceStartTime ? timeToMinutes(serviceStartTime) : 9 * 60;
   const configuredEndMin = serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60;
@@ -440,10 +444,18 @@ export async function getTableAvailabilityGrid(
   const cells: TableGridCell[] = [];
   const tablesInUse = new Set<string>();
   let totalCoversBooked = 0;
+  const activeBookingStatusSet = new Set<string>(BOOKING_ACTIVE_STATUSES);
 
   for (const table of tables) {
     const tableBookingIds = assignmentMap.get(table.id) ?? [];
-    const tableBookings = bookings.filter((b) => tableBookingIds.includes(b.id));
+    const tableBookings = bookings
+      .filter((b) => tableBookingIds.includes(b.id))
+      .sort((a, b) => {
+        const rank = (s: string) => (activeBookingStatusSet.has(s) ? 0 : 1);
+        const dr = rank(a.status) - rank(b.status);
+        if (dr !== 0) return dr;
+        return a.booking_time.localeCompare(b.booking_time);
+      });
 
     const tableBlocks = blocks.filter((block) => block.table_id === table.id);
     for (let m = startMin; m < endMin; m += slotInterval) {
@@ -494,20 +506,27 @@ export async function getTableAvailabilityGrid(
               staff_attendance_confirmed_at: matchedBooking.staff_attendance_confirmed_at ?? null,
               start_time: matchedBooking.booking_time,
               end_time: minutesToTime(getBookingTimeRange(matchedBooking).endMin),
+              actual_departed_time: matchedBooking.actual_departed_time ?? null,
+              table_ids: matchedBooking.table_ids,
+              table_names: matchedBooking.table_ids.map((tableId) => tableNameById.get(tableId) ?? tableId),
               dietary_notes: matchedBooking.dietary_notes,
               occasion: matchedBooking.occasion,
             }
           : null,
       });
 
-      if (matchedBooking) tablesInUse.add(table.id);
+      if (
+        matchedBooking &&
+        BOOKING_ACTIVE_STATUSES.includes(matchedBooking.status as (typeof BOOKING_ACTIVE_STATUSES)[number])
+      ) {
+        tablesInUse.add(table.id);
+      }
     }
   }
 
   const assignedBookingIds = new Set(
     Array.from(bookingToTables.keys()),
   );
-  const comboBookingsInUse = Array.from(bookingToTables.values()).filter((tableIds) => tableIds.length > 1).length;
   /** Only Model A table reservations need a physical table; appointments/C/D/E do not. */
   const tableReservationIds = new Set(
     rawBookings.filter((row) => isTableReservationBooking(row)).map((row) => row.id),
@@ -527,12 +546,24 @@ export async function getTableAvailabilityGrid(
         staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
         dietary_notes: b.dietary_notes,
         occasion: b.occasion,
+        actual_departed_time: b.actual_departed_time ?? null,
       };
     });
 
   for (const b of bookings) {
-    totalCoversBooked += b.party_size;
+    if (BOOKING_ACTIVE_STATUSES.includes(b.status as (typeof BOOKING_ACTIVE_STATUSES)[number])) {
+      totalCoversBooked += b.party_size;
+    }
   }
+
+  const activeBookingIds = new Set(
+    bookings
+      .filter((b) => BOOKING_ACTIVE_STATUSES.includes(b.status as (typeof BOOKING_ACTIVE_STATUSES)[number]))
+      .map((b) => b.id),
+  );
+  const comboBookingsInUse = Array.from(bookingToTables.entries()).filter(
+    ([bid, tableIds]) => tableIds.length > 1 && activeBookingIds.has(bid),
+  ).length;
 
   const totalCapacity = tables.reduce((sum, t) => sum + t.max_covers, 0);
 

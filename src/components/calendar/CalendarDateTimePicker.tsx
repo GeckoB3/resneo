@@ -343,7 +343,8 @@ export function CalendarDateTimePicker({
           </button>
 
           {openDropdown === 'calendar' && (
-            <div className="absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+            <div className="absolute inset-x-0 top-full z-50 mt-1 flex justify-center px-1">
+              <div className="max-h-[min(70vh,24rem)] max-w-[calc(100vw-1rem)] min-w-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
               <MiniMonthGrid
                 month={calMonth}
                 year={calYear}
@@ -353,6 +354,7 @@ export function CalendarDateTimePicker({
                 onPrevMonth={prevMonth}
                 onNextMonth={nextMonth}
               />
+            </div>
             </div>
           )}
         </div>
@@ -383,7 +385,8 @@ export function CalendarDateTimePicker({
           </button>
 
           {openDropdown === 'time' && (
-            <div className="absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+            <div className="absolute inset-x-0 top-full z-50 mt-1 flex justify-center px-1">
+              <div className="max-h-[min(70vh,28rem)] max-w-[calc(100vw-1rem)] min-w-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
               <TimeRangeDropdown
                 key={`${startHour}-${endHour}`}
                 startHour={startHour}
@@ -391,6 +394,7 @@ export function CalendarDateTimePicker({
                 onApply={onTimeRangeChange}
                 onClose={() => setOpenDropdown(null)}
               />
+            </div>
             </div>
           )}
         </div>

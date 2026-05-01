@@ -16,6 +16,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
   type DragMoveEvent,
+  MeasuringStrategy,
 } from '@dnd-kit/core';
 import {
   BOOKING_STATUSES,
@@ -30,6 +31,16 @@ import {
 } from '@/lib/table-management/booking-status';
 import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
+import { computePointAnchoredMenuStyle } from '@/lib/ui/clamped-floating-styles';
+import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
+import {
+  detectAdjacentTables,
+  findValidCombinations,
+  type CombinationBlock,
+  type CombinationBooking,
+  type CombinationTable,
+  type ManualCombination,
+} from '@/lib/table-management/combination-engine';
 
 const STATUS_COLORS: Record<string, string> = {
   Pending: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
@@ -37,7 +48,7 @@ const STATUS_COLORS: Record<string, string> = {
   Confirmed: 'bg-[#ECFDF5] border-[#A7F3D0] border-l-[#059669] text-[#065F46]',
   Seated: 'bg-[#F5F3FF] border-[#DDD6FE] border-l-[#8B5CF6] text-[#5B21B6]',
   Arrived: 'bg-[#FFFBEB] border-[#FDE68A] border-l-[#F59E0B] text-[#92400E]',
-  Completed: 'bg-[#FEE2E2] border-[#FCA5A5] border-l-[#EF4444] text-[#991B1B]',
+  Completed: 'bg-slate-100 border-slate-200/90 border-l-emerald-500 text-slate-700 ring-1 ring-inset ring-slate-200/60',
   'No-Show': 'bg-[#FEF2F2] border-[#FECACA] border-l-[#EF4444] text-[#991B1B]',
   Cancelled: 'bg-[#F3F4F6] border-[#E5E7EB] border-l-[#6B7280] text-[#6B7280]',
   'Deposit Pending': 'bg-orange-100 border-orange-300 text-orange-800',
@@ -52,7 +63,7 @@ const STATUS_DOTS: Record<string, string> = {
   Confirmed: 'bg-[#059669]',
   Seated: 'bg-[#8B5CF6]',
   Arrived: 'bg-[#F59E0B]',
-  Completed: 'bg-[#EF4444]',
+  Completed: 'bg-emerald-500',
   'No-Show': 'bg-[#EF4444]',
   Cancelled: 'bg-[#6B7280]',
   'Deposit Pending': 'bg-orange-500',
@@ -69,6 +80,34 @@ function minutesToTime(m: number): string {
   return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 }
 
+function timelineGridLineClass(minutes: number, palette: 'slate' | 'emerald' = 'slate'): string {
+  if (minutes % 60 === 0) {
+    return palette === 'emerald'
+      ? 'border-l border-l-emerald-500/70'
+      : 'border-l border-l-slate-400';
+  }
+  if (minutes % 30 === 0) {
+    return palette === 'emerald'
+      ? 'border-l border-l-emerald-300/80'
+      : 'border-l border-l-slate-300';
+  }
+  return '';
+}
+
+function timelineTimeBlockBandClass(
+  minutes: number,
+  startMinutes: number,
+  slotIntervalMinutes: number,
+  palette: 'slate' | 'emerald' = 'slate',
+): string {
+  const slotIndex = Math.max(0, Math.floor((minutes - startMinutes) / slotIntervalMinutes));
+  const isAltBlock = slotIndex % 2 === 1;
+  if (palette === 'emerald') {
+    return isAltBlock ? 'bg-emerald-50/55' : 'bg-emerald-50/25';
+  }
+  return isAltBlock ? 'bg-slate-50/55' : 'bg-white';
+}
+
 function endMinutesAfterStart(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
   const startMin = timeToMinutes(start);
   if (!end) return startMin + fallbackMinutes;
@@ -79,16 +118,33 @@ function endMinutesAfterStart(start: string, end: string | null | undefined, fal
   return endMin;
 }
 
+function departedWallMinutes(departedIso: string): number {
+  const d = new Date(departedIso);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
 function effectiveBookingEndMinutes(
   status: string,
   start: string,
   end: string | null | undefined,
   isToday: boolean,
   nowMinutes: number,
+  actualDepartedTime?: string | null,
 ): number {
   const scheduledEnd = endMinutesAfterStart(start, end);
+  const startMin = timeToMinutes(start.slice(0, 5));
+
+  if (status === 'Completed') {
+    if (actualDepartedTime) {
+      return Math.max(startMin, departedWallMinutes(actualDepartedTime));
+    }
+    if (isToday) {
+      return Math.max(startMin, nowMinutes);
+    }
+    return scheduledEnd;
+  }
+
   if ((status === 'Seated' || status === 'Arrived') && isToday) {
-    const startMin = timeToMinutes(start);
     if (nowMinutes > startMin) {
       return Math.max(scheduledEnd, nowMinutes);
     }
@@ -123,10 +179,21 @@ interface BookingBlock {
   leftPx: number;
   widthPx: number;
   _startMin: number;
+  _scheduledEndMin: number;
   _endMin: number;
   rowSpan: number;
   laneIndex: number;
   laneCount: number;
+}
+
+interface MoveSuggestion {
+  id: string;
+  bookingId: string;
+  guestName: string;
+  targetTableIds: string[];
+  targetTableName: string;
+  dotClassName: string;
+  buttonClassName: string;
 }
 
 function statusColorKeyForBooking(block: BookingBlock): string {
@@ -150,8 +217,10 @@ interface Props {
     staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
+    actual_departed_time?: string | null;
   }>;
   combinations?: CombinationInfo[];
+  combinationThreshold?: number;
   serviceStartTime?: string;
   serviceEndTime?: string;
   slotIntervalMinutes?: number;
@@ -197,10 +266,60 @@ const cellFirstTimelineCollision: CollisionDetection = (args) => {
 };
 
 const CELL_DROP_ID_REGEX = /^cell_(.+)_(\d{1,2}:\d{2})$/;
+const TABLE_GRID_VISUAL_INTERACTION_EVENT = 'table-grid-visual-interaction';
+const MOVE_SUGGESTION_STYLES = [
+  {
+    dot: 'bg-sky-500 ring-sky-100',
+    button: 'bg-sky-600 text-white hover:bg-sky-700 focus:ring-sky-300',
+  },
+  {
+    dot: 'bg-violet-500 ring-violet-100',
+    button: 'bg-violet-600 text-white hover:bg-violet-700 focus:ring-violet-300',
+  },
+  {
+    dot: 'bg-fuchsia-500 ring-fuchsia-100',
+    button: 'bg-fuchsia-600 text-white hover:bg-fuchsia-700 focus:ring-fuchsia-300',
+  },
+  {
+    dot: 'bg-amber-500 ring-amber-100',
+    button: 'bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-300',
+  },
+  {
+    dot: 'bg-teal-500 ring-teal-100',
+    button: 'bg-teal-600 text-white hover:bg-teal-700 focus:ring-teal-300',
+  },
+  {
+    dot: 'bg-rose-500 ring-rose-100',
+    button: 'bg-rose-600 text-white hover:bg-rose-700 focus:ring-rose-300',
+  },
+] as const;
 
 type DragDropPreview =
   | { kind: 'time'; time: string; invalid: boolean }
   | { kind: 'table'; label: string; invalid: boolean };
+
+interface TimeDragTarget {
+  tableIds: string[];
+  startMin: number;
+  endMin: number;
+  invalid: boolean;
+}
+
+function sameDragDropPreview(a: DragDropPreview | null, b: DragDropPreview | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.kind !== b.kind || a.invalid !== b.invalid) return false;
+  if (a.kind === 'time' && b.kind === 'time') return a.time === b.time;
+  if (a.kind === 'table' && b.kind === 'table') return a.label === b.label;
+  return false;
+}
+
+function emitVisualInteraction(active: boolean): void {
+  window.dispatchEvent(
+    new CustomEvent(TABLE_GRID_VISUAL_INTERACTION_EVENT, {
+      detail: { active },
+    }),
+  );
+}
 
 function formatTargetTableLabel(
   targetTableIds: string[] | null | undefined,
@@ -218,6 +337,7 @@ export function TimelineGrid({
   cells,
   unassignedBookings,
   combinations,
+  combinationThreshold = 80,
   serviceStartTime,
   serviceEndTime,
   slotIntervalMinutes,
@@ -256,12 +376,65 @@ export function TimelineGrid({
   /** Touch/pen start position for a booking - used to avoid opening the context menu after a drag-intent move. */
   const bookingPointerDownRef = useRef<{ bookingId: string; x: number; y: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; booking: BookingBlock } | null>(null);
+  const viewportBounds = useViewportBounds();
+  const bookingContextMenuStyle = useMemo(() => {
+    if (!contextMenu) return undefined;
+    return computePointAnchoredMenuStyle({
+      anchorX: contextMenu.x,
+      anchorY: contextMenu.y,
+      viewportWidth: viewportBounds.width,
+      viewportHeight: viewportBounds.height,
+      minWidth: 200,
+      maxWidth: Math.min(340, viewportBounds.width - 16),
+    });
+  }, [contextMenu, viewportBounds.width, viewportBounds.height]);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; resolve: (value: boolean) => void } | null>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaPx: number } | null>(null);
   /** Hovered drop target while dragging - time (same table) or table/combination name (table move). */
   const [dragDropPreview, setDragDropPreview] = useState<DragDropPreview | null>(null);
+  const [timeDragTarget, setTimeDragTarget] = useState<TimeDragTarget | null>(null);
+  const dragDropPreviewRef = useRef<DragDropPreview | null>(null);
+  const pendingDragDropPreviewRef = useRef<DragDropPreview | null>(null);
+  const dragDropPreviewFrameRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
+
+  useEffect(() => {
+    dragDropPreviewRef.current = dragDropPreview;
+  }, [dragDropPreview]);
+
+  useEffect(() => {
+    return () => {
+      if (dragDropPreviewFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragDropPreviewFrameRef.current);
+      }
+    };
+  }, []);
+
+  const cancelQueuedDragPreview = useCallback(() => {
+    if (dragDropPreviewFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragDropPreviewFrameRef.current);
+      dragDropPreviewFrameRef.current = null;
+    }
+    pendingDragDropPreviewRef.current = null;
+    dragDropPreviewRef.current = null;
+    setDragDropPreview(null);
+  }, []);
+
+  const queueDragDropPreview = useCallback((next: DragDropPreview | null) => {
+    if (sameDragDropPreview(pendingDragDropPreviewRef.current ?? dragDropPreviewRef.current, next)) return;
+    pendingDragDropPreviewRef.current = next;
+    if (dragDropPreviewFrameRef.current !== null) return;
+
+    dragDropPreviewFrameRef.current = window.requestAnimationFrame(() => {
+      dragDropPreviewFrameRef.current = null;
+      const queued = pendingDragDropPreviewRef.current;
+      pendingDragDropPreviewRef.current = null;
+      if (sameDragDropPreview(dragDropPreviewRef.current, queued)) return;
+      dragDropPreviewRef.current = queued;
+      setDragDropPreview(queued);
+    });
+  }, []);
 
   const startMin = useMemo(() => serviceStartTime ? timeToMinutes(serviceStartTime) : 9 * 60, [serviceStartTime]);
   const endMin = useMemo(() => serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60, [serviceEndTime]);
@@ -280,6 +453,14 @@ export function TimelineGrid({
     }
     return slots;
   }, [startMin, endMin, slotInterval]);
+  const hourMarkers = useMemo(() => {
+    return timeSlots
+      .filter((time) => timeToMinutes(time) % 60 === 0)
+      .map((time) => ({
+        time,
+        leftPx: ((timeToMinutes(time) - startMin) / slotInterval) * SLOT_WIDTH,
+      }));
+  }, [SLOT_WIDTH, slotInterval, startMin, timeSlots]);
 
   const bookingBlocks = useMemo(() => {
     const blocks: BookingBlock[] = [];
@@ -299,12 +480,14 @@ export function TimelineGrid({
       seenBookings.add(cell.booking_id);
 
       const bStart = timeToMinutes(cell.booking_details.start_time);
+      const scheduledEnd = endMinutesAfterStart(cell.booking_details.start_time, cell.booking_details.end_time);
       const bEnd = effectiveBookingEndMinutes(
         cell.booking_details.status,
         cell.booking_details.start_time,
         cell.booking_details.end_time,
         isToday,
         nowMinutes,
+        cell.booking_details.actual_departed_time ?? null,
       );
 
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
@@ -315,8 +498,13 @@ export function TimelineGrid({
       const leftPx = ((clampedStart - startMin) / slotInterval) * SLOT_WIDTH;
       const widthPx = Math.max(SLOT_WIDTH * 0.25, ((bEnd - clampedStart) / slotInterval) * SLOT_WIDTH);
 
-      const allTableIds = bookingTableMap.get(cell.booking_id) ?? [cell.table_id];
-      const tableNames = allTableIds.map((tid) => tableNameById.get(tid) ?? tid);
+      const assignedTableIds = cell.booking_details.table_ids?.filter((tableId) => tableNameById.has(tableId)) ?? [];
+      const allTableIds = assignedTableIds.length > 0
+        ? Array.from(new Set(assignedTableIds))
+        : bookingTableMap.get(cell.booking_id) ?? [cell.table_id];
+      const tableNames = cell.booking_details.table_names && cell.booking_details.table_names.length === allTableIds.length
+        ? cell.booking_details.table_names
+        : allTableIds.map((tid) => tableNameById.get(tid) ?? tid);
       for (const tableId of allTableIds) {
         blocks.push({
           id: cell.booking_id,
@@ -338,6 +526,7 @@ export function TimelineGrid({
           leftPx,
           widthPx,
           _startMin: bStart,
+          _scheduledEndMin: scheduledEnd,
           _endMin: bEnd,
           rowSpan: 1,
           laneIndex: 0,
@@ -351,7 +540,15 @@ export function TimelineGrid({
       seenBookings.add(b.id);
 
       const bStart = timeToMinutes(b.start_time);
-      const bEnd = effectiveBookingEndMinutes(b.status, b.start_time, b.end_time, isToday, nowMinutes);
+      const scheduledEnd = endMinutesAfterStart(b.start_time, b.end_time);
+      const bEnd = effectiveBookingEndMinutes(
+        b.status,
+        b.start_time,
+        b.end_time,
+        isToday,
+        nowMinutes,
+        b.actual_departed_time ?? null,
+      );
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
       const endCol = Math.ceil((bEnd - startMin) / slotInterval);
 
@@ -379,6 +576,7 @@ export function TimelineGrid({
         leftPx: uLeftPx,
         widthPx: uWidthPx,
         _startMin: bStart,
+        _scheduledEndMin: scheduledEnd,
         _endMin: bEnd,
         rowSpan: 1,
         laneIndex: 0,
@@ -424,6 +622,139 @@ export function TimelineGrid({
     if (statusFilter) blocks = blocks.filter((b) => b.status === statusFilter);
     return blocks;
   }, [bookingBlocks, statusFilter]);
+
+  const moveSuggestionsByBookingId = useMemo(() => {
+    const suggestions = new Map<string, MoveSuggestion>();
+    if (!isToday) return suggestions;
+
+    const activeBlocks = bookingBlocks.filter((block) => block.status !== 'Cancelled' && block.status !== 'No-Show');
+    const blocksByTable = new Map<string, BookingBlock[]>();
+    for (const block of activeBlocks) {
+      if (!block.table_id) continue;
+      const list = blocksByTable.get(block.table_id) ?? [];
+      list.push(block);
+      blocksByTable.set(block.table_id, list);
+    }
+    for (const list of blocksByTable.values()) {
+      list.sort((a, b) => a._startMin - b._startMin || a._endMin - b._endMin);
+    }
+
+    const isLiveOverrun = (block: BookingBlock) =>
+      (block.status === 'Seated' || block.status === 'Arrived') &&
+      block._endMin > block._scheduledEndMin;
+
+    const combinationTables: CombinationTable[] = tables.map((table) => ({
+      id: table.id,
+      name: table.name,
+      max_covers: table.max_covers,
+      is_active: table.is_active,
+      position_x: table.position_x,
+      position_y: table.position_y,
+      width: table.width,
+      height: table.height,
+      rotation: table.rotation,
+    }));
+    const adjacencyMap = detectAdjacentTables(combinationTables, combinationThreshold);
+    const manualCombinations: ManualCombination[] = (combinations ?? [])
+      .filter((combo) => !combo.id.startsWith('auto_'))
+      .map((combo) => ({
+        id: combo.id,
+        name: combo.name,
+        table_ids: combo.table_ids,
+        combined_min_covers: combo.combined_min_covers ?? 1,
+        combined_max_covers: combo.combined_max_covers,
+        is_active: true,
+      }));
+    const combinationBookingsById = new Map<string, CombinationBooking>();
+    for (const block of activeBlocks) {
+      if (!block.table_id) continue;
+      const booking = combinationBookingsById.get(block.id) ?? {
+        id: block.id,
+        status: block.status,
+        booking_time: block.start_time,
+        estimated_end_time: minutesToTime(block._endMin),
+        table_ids: [],
+      };
+      for (const tableId of block.table_ids.length > 0 ? block.table_ids : [block.table_id]) {
+        if (!booking.table_ids.includes(tableId)) booking.table_ids.push(tableId);
+      }
+      combinationBookingsById.set(block.id, booking);
+    }
+    const combinationBlocks: CombinationBlock[] = cells
+      .filter((cell) => cell.is_blocked)
+      .map((cell) => ({
+        table_id: cell.table_id,
+        start_at: `${currentDate}T${cell.time.slice(0, 5)}:00.000Z`,
+        end_at: `${currentDate}T${minutesToTime(timeToMinutes(cell.time.slice(0, 5)) + slotInterval)}:00.000Z`,
+      }));
+
+    const findTargetCandidate = (booking: BookingBlock) => {
+      const durationMinutes = Math.max(slotInterval, booking._scheduledEndMin - booking._startMin);
+      return findValidCombinations({
+        partySize: booking.party_size,
+        datetime: `${currentDate}T${booking.start_time.slice(0, 5)}:00.000Z`,
+        durationMinutes,
+        tables: combinationTables,
+        bookings: Array.from(combinationBookingsById.values()),
+        blocks: combinationBlocks,
+        adjacencyMap,
+        manualCombinations,
+        bookingContext: {
+          bookingDate: currentDate,
+          bookingTime: booking.start_time.slice(0, 5),
+          bookingModel: 'table_reservation',
+        },
+        excludeBookingId: booking.id,
+      }).find((candidate) => !candidate.requires_manager_approval);
+    };
+
+    for (const rowBlocks of blocksByTable.values()) {
+      for (let index = 1; index < rowBlocks.length; index += 1) {
+        const next = rowBlocks[index]!;
+        if (suggestions.has(next.id)) continue;
+        if (next.status === 'Completed') continue;
+        const previousOverrun = rowBlocks
+          .slice(0, index)
+          .reverse()
+          .find((previous) =>
+            previous.id !== next.id &&
+            isLiveOverrun(previous) &&
+            previous._scheduledEndMin <= next._startMin &&
+            previous._endMin > next._startMin
+          );
+        if (!previousOverrun) continue;
+
+        const target = findTargetCandidate(next);
+        if (!target) continue;
+        const style = MOVE_SUGGESTION_STYLES[suggestions.size % MOVE_SUGGESTION_STYLES.length]!;
+        suggestions.set(next.id, {
+          id: `${next.id}-${target.table_ids.join('-')}`,
+          bookingId: next.id,
+          guestName: next.guest_name,
+          targetTableIds: target.table_ids,
+          targetTableName: target.table_names.join(' + '),
+          dotClassName: style.dot,
+          buttonClassName: style.button,
+        });
+      }
+    }
+
+    return suggestions;
+  }, [bookingBlocks, cells, combinationThreshold, combinations, currentDate, isToday, slotInterval, tables]);
+
+  const tableMoveSuggestionIndicators = useMemo(() => {
+    const indicators = new Map<string, MoveSuggestion[]>();
+    const visibleBookingIds = new Set(filteredBlocks.map((block) => block.id));
+    for (const suggestion of moveSuggestionsByBookingId.values()) {
+      if (!visibleBookingIds.has(suggestion.bookingId)) continue;
+      for (const tableId of suggestion.targetTableIds) {
+        const list = indicators.get(tableId) ?? [];
+        list.push(suggestion);
+        indicators.set(tableId, list);
+      }
+    }
+    return indicators;
+  }, [filteredBlocks, moveSuggestionsByBookingId]);
 
   const unassignedBlocks = useMemo(() => {
     const list = filteredBlocks.filter((b) => !b.table_id);
@@ -526,6 +857,7 @@ export function TimelineGrid({
   const currentTimeOffset = useMemo(() => {
     return ((nowMinutes - startMin) / slotInterval) * SLOT_WIDTH;
   }, [nowMinutes, startMin, slotInterval, SLOT_WIDTH]);
+  const currentTimeLabel = useMemo(() => minutesToTime(nowMinutes), [nowMinutes]);
 
   /** Stricter touch activation reduces accidental moves while panning the timeline on phones/tablets. */
   const sensors = useSensors(
@@ -552,23 +884,32 @@ export function TimelineGrid({
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setContextMenu(null);
-    setDragDropPreview(null);
+    cancelQueuedDragPreview();
     const bookingId = String(event.active.id).split('__')[0] ?? String(event.active.id);
     const block = filteredBlocks.find((b) => b.id === bookingId);
     if (block) {
+      emitVisualInteraction(true);
       activeDragRef.current = block;
       setActiveDrag(block);
       onDragValidation(block);
     }
-  }, [filteredBlocks, onDragValidation]);
+  }, [cancelQueuedDragPreview, filteredBlocks, onDragValidation]);
 
   const handleDragCancel = useCallback(() => {
     setContextMenu(null);
-    setDragDropPreview(null);
+    cancelQueuedDragPreview();
+    setTimeDragTarget(null);
     activeDragRef.current = null;
     setActiveDrag(null);
+    emitVisualInteraction(false);
     onDragValidation(null);
-  }, [onDragValidation]);
+  }, [cancelQueuedDragPreview, onDragValidation]);
+
+  const getBlockDurationMinutes = useCallback((block: BookingBlock) => {
+    const start = timeToMinutes(block.start_time);
+    const end = block.end_time ? timeToMinutes(block.end_time) : start + 90;
+    return Math.max(15, end - start);
+  }, []);
 
   const confirmAction = useCallback((message: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -577,9 +918,7 @@ export function TimelineGrid({
   }, []);
 
   const isInvalidTimeTarget = useCallback((tableId: string, time: string, block: BookingBlock): boolean => {
-    const start = timeToMinutes(block.start_time);
-    const end = block.end_time ? timeToMinutes(block.end_time) : start + 90;
-    const duration = Math.max(15, end - start);
+    const duration = getBlockDurationMinutes(block);
     const candidateStart = timeToMinutes(time);
     const candidateEnd = candidateStart + duration;
 
@@ -601,7 +940,7 @@ export function TimelineGrid({
     }
 
     return false;
-  }, [cells, cellMap]);
+  }, [cells, cellMap, getBlockDurationMinutes]);
 
   const resolveTargetTableIds = useCallback((targetTableId: string, block: BookingBlock): string[] | null => {
     const context = {
@@ -618,6 +957,12 @@ export function TimelineGrid({
     return resolveDropTarget(targetTableId, context, tableInfos, cells, combinations ?? []);
   }, [tables, cells, combinations]);
 
+  const snappedTimeFromDragDelta = useCallback((block: BookingBlock, deltaX: number): string => {
+    const rawLeftPx = Math.max(0, block.leftPx + deltaX);
+    const slotIndex = Math.max(0, Math.min(timeSlots.length - 1, Math.floor(rawLeftPx / SLOT_WIDTH)));
+    return minutesToTime(startMin + slotIndex * slotInterval);
+  }, [SLOT_WIDTH, slotInterval, startMin, timeSlots.length]);
+
   const handleDragMove = useCallback((event: DragMoveEvent) => {
     setContextMenu((prev) => (prev ? null : prev));
 
@@ -625,14 +970,16 @@ export function TimelineGrid({
     const overId = event.over?.id != null ? String(event.over.id) : '';
 
     if (!block || !overId) {
-      setDragDropPreview(null);
+      queueDragDropPreview(null);
+      setTimeDragTarget(null);
       return;
     }
 
     if (overId.startsWith('cell_')) {
       const m = overId.match(CELL_DROP_ID_REGEX);
       if (!m) {
-        setDragDropPreview(null);
+        queueDragDropPreview(null);
+        setTimeDragTarget(null);
         return;
       }
 
@@ -646,41 +993,60 @@ export function TimelineGrid({
         const targetTableIds = resolveTargetTableIds(tableId, block);
         const invalid = blocked || !targetTableIds || targetTableIds.length === 0;
         const label = formatTargetTableLabel(targetTableIds, tableId, tables);
-        setDragDropPreview({ kind: 'table', label, invalid });
+        queueDragDropPreview({ kind: 'table', label, invalid });
+        setTimeDragTarget(null);
         return;
       }
 
-      const invalid = blocked || isInvalidTimeTarget(tableId, time, block);
-      setDragDropPreview({ kind: 'time', time, invalid });
+      const snappedTime = snappedTimeFromDragDelta(block, event.delta.x);
+      const previewTableIds = block.table_ids.length > 0 ? block.table_ids : [tableId];
+      const invalid = previewTableIds.some((previewTableId) => {
+        const snappedCell = cellMap.get(`${previewTableId}__${snappedTime}`);
+        return Boolean(snappedCell?.is_blocked) || isInvalidTimeTarget(previewTableId, snappedTime, block);
+      });
+      queueDragDropPreview({ kind: 'time', time: snappedTime, invalid });
+      const start = timeToMinutes(snappedTime);
+      setTimeDragTarget({
+        tableIds: previewTableIds,
+        startMin: start,
+        endMin: start + getBlockDurationMinutes(block),
+        invalid,
+      });
       return;
     }
 
     if (overId.startsWith('table_')) {
       const tableId = overId.replace('table_', '');
       if (!tableId) {
-        setDragDropPreview(null);
+        queueDragDropPreview(null);
+        setTimeDragTarget(null);
         return;
       }
       const isTableMove = !block.table_ids.includes(tableId);
       if (!isTableMove) {
-        setDragDropPreview(null);
+        queueDragDropPreview(null);
+        setTimeDragTarget(null);
         return;
       }
       const targetTableIds = resolveTargetTableIds(tableId, block);
       const invalid = !targetTableIds || targetTableIds.length === 0;
       const label = formatTargetTableLabel(targetTableIds, tableId, tables);
-      setDragDropPreview({ kind: 'table', label, invalid });
+      queueDragDropPreview({ kind: 'table', label, invalid });
+      setTimeDragTarget(null);
       return;
     }
 
-    setDragDropPreview(null);
-  }, [cellMap, isInvalidTimeTarget, resolveTargetTableIds, tables]);
+    queueDragDropPreview(null);
+    setTimeDragTarget(null);
+  }, [cellMap, getBlockDurationMinutes, isInvalidTimeTarget, queueDragDropPreview, resolveTargetTableIds, snappedTimeFromDragDelta, tables]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setContextMenu(null);
-    setDragDropPreview(null);
+    cancelQueuedDragPreview();
+    setTimeDragTarget(null);
     activeDragRef.current = null;
     setActiveDrag(null);
+    emitVisualInteraction(false);
     onDragValidation(null);
     const { active, over } = event;
     if (!over) return;
@@ -716,8 +1082,14 @@ export function TimelineGrid({
         return;
       }
 
-      if (time !== block.start_time.slice(0, 5)) {
-        onTimeChange(bookingId, time);
+      const snappedTime = snappedTimeFromDragDelta(block, event.delta.x);
+      const snappedCell = cellMap.get(`${tableId}__${snappedTime}`);
+      if (snappedCell?.is_blocked || isInvalidTimeTarget(tableId, snappedTime, block)) {
+        onError('Target time is not available');
+        return;
+      }
+      if (snappedTime !== block.start_time.slice(0, 5)) {
+        onTimeChange(bookingId, snappedTime);
       }
       return;
     }
@@ -740,7 +1112,7 @@ export function TimelineGrid({
         onAssign(bookingId, targetTableIds);
       }
     }
-  }, [filteredBlocks, tables, onReassign, onTimeChange, onAssign, onError, onDragValidation, cellMap, resolveTargetTableIds]);
+  }, [cancelQueuedDragPreview, filteredBlocks, tables, onReassign, onTimeChange, onAssign, onError, onDragValidation, cellMap, resolveTargetTableIds, snappedTimeFromDragDelta, isInvalidTimeTarget]);
 
   const handleBookingPointerDown = useCallback((block: BookingBlock, clientX: number, clientY: number) => {
     bookingPointerDownRef.current = { bookingId: block.id, x: clientX, y: clientY };
@@ -795,6 +1167,14 @@ export function TimelineGrid({
     setContextMenu(null);
     onUnassign(bookingId);
   }, [onUnassign]);
+
+  const handleSuggestedMove = useCallback((block: BookingBlock, suggestion: MoveSuggestion) => {
+    if (block.table_ids.length > 0) {
+      onReassign(block.id, block.table_ids, suggestion.targetTableIds);
+      return;
+    }
+    onAssign(block.id, suggestion.targetTableIds);
+  }, [onAssign, onReassign]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -912,14 +1292,15 @@ export function TimelineGrid({
     <DndContext
       sensors={sensors}
       collisionDetection={cellFirstTimelineCollision}
+      measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
     >
       <div ref={timelineRootRef} className="flex w-full min-w-0">
-        <div className="flex w-20 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-28 md:w-[140px]">
-          <div className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
+        <div className="flex w-20 shrink-0 flex-col border-r border-slate-300 bg-gradient-to-r from-slate-100/90 to-slate-50/80 shadow-[4px_0_14px_rgba(15,23,42,0.05)] sm:w-28 md:w-[140px]">
+          <div className="flex h-10 shrink-0 items-center border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/80 px-3 text-xs font-bold uppercase tracking-wide text-slate-500">
             Tables
           </div>
           <div className="flex flex-col">
@@ -927,15 +1308,24 @@ export function TimelineGrid({
             {visibleRowEntries.map((entry) => {
               if (entry.type === 'zone') {
                 return (
-                  <div key={entry.key} className="flex h-6 items-center bg-slate-100 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <div key={entry.key} className="flex h-6 items-center border-b border-slate-200 bg-gradient-to-r from-slate-100 via-slate-50 to-white px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     {entry.zone}
                   </div>
                 );
               }
               const table = entry.table!;
-              const isValid = validDropTargets ? validDropTargets.has(table.id) : null;
+              const isSourceTable = activeDrag ? activeDrag.table_ids.includes(table.id) : false;
+              const isValid = validDropTargets && !isSourceTable ? validDropTargets.has(table.id) : null;
               const comboLabel = validDropCombos?.get(table.id);
-              return <TableRowHeader key={entry.key} table={table} isValidTarget={isValid} comboLabel={comboLabel} />;
+              return (
+                <TableRowHeader
+                  key={entry.key}
+                  table={table}
+                  isValidTarget={isValid}
+                  comboLabel={comboLabel}
+                  moveIndicators={tableMoveSuggestionIndicators.get(table.id) ?? []}
+                />
+              );
             })}
             <div style={{ height: bottomSpacerHeight }} />
             {unassignedBlocks.length > 0 && (
@@ -978,27 +1368,57 @@ export function TimelineGrid({
           className="min-w-0 flex-1 touch-pan-x touch-manipulation overflow-x-auto overscroll-x-contain"
         >
           <div style={{ width: gridWidth, position: 'relative' }}>
-            <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white" style={{ height: HEADER_HEIGHT }}>
-              {timeSlots.map((time, i) => (
-                <div
-                  key={time}
-                  className="flex shrink-0 items-center justify-center border-r border-slate-100 text-xs font-medium text-slate-500"
-                  style={{ width: SLOT_WIDTH }}
-                >
-                  {i % 4 === 0 ? time : ''}
-                </div>
-              ))}
+            <div
+              className="sticky top-0 z-10 border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/90 shadow-sm shadow-slate-900/5"
+              style={{ height: HEADER_HEIGHT }}
+            >
+              <div className="flex h-full">
+                {timeSlots.map((time) => {
+                  const minutes = timeToMinutes(time);
+                  const isHourStart = minutes % 60 === 0;
+                  const isHalfHourStart = minutes % 30 === 0;
+                  return (
+                    <div
+                      key={time}
+                      className={`shrink-0 border-r ${
+                        isHourStart
+                          ? 'border-l border-l-slate-400 border-r-slate-200'
+                          : isHalfHourStart
+                            ? 'border-l border-l-slate-300 border-r-slate-200/80'
+                            : 'border-slate-200/70'
+                      }`}
+                      style={{ width: SLOT_WIDTH }}
+                      aria-hidden
+                    />
+                  );
+                })}
+              </div>
+              <div className="pointer-events-none absolute inset-0">
+                {hourMarkers.map((marker) => (
+                  <span
+                    key={marker.time}
+                    className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-slate-200/80 bg-white/90 px-1.5 py-0.5 text-xs font-bold tabular-nums text-slate-600 shadow-sm shadow-slate-900/5"
+                    style={{ left: marker.leftPx }}
+                  >
+                    {marker.time}
+                  </span>
+                ))}
+              </div>
             </div>
 
             {isToday && currentTimeOffset > 0 && currentTimeOffset < gridWidth && (
               <div
-                className="absolute z-20 w-0.5 bg-red-500"
+                className="pointer-events-none absolute z-20 w-px bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.45)]"
                 style={{
                   left: currentTimeOffset,
-                  top: HEADER_HEIGHT,
-                  height: timelineBodyScrollHeight,
+                  top: 0,
+                  height: HEADER_HEIGHT + timelineBodyScrollHeight,
                 }}
-              />
+              >
+                <span className="absolute top-1 -translate-x-1/2 whitespace-nowrap rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold tabular-nums text-white shadow-md shadow-red-600/20">
+                  Now {currentTimeLabel}
+                </span>
+              </div>
             )}
 
             <div style={{ height: topSpacerHeight }} />
@@ -1008,7 +1428,8 @@ export function TimelineGrid({
               }
               const table = entry.table!;
               const tableBlocks = filteredBlocks.filter((b) => b.table_id === table.id);
-              const isValid = validDropTargets ? validDropTargets.has(table.id) : null;
+              const isSourceTable = activeDrag ? activeDrag.table_ids.includes(table.id) : false;
+              const isValid = validDropTargets && !isSourceTable ? validDropTargets.has(table.id) : null;
               return (
                 <DroppableRow key={entry.key} tableId={table.id} width={gridWidth} height={ROW_HEIGHT} isValidTarget={isValid}>
                   {timeSlots.map((time) => (
@@ -1020,6 +1441,15 @@ export function TimelineGrid({
                         activeDrag.table_id === table.id &&
                         isInvalidTimeTarget(table.id, time, activeDrag)
                       );
+                      const cellStartMin = timeToMinutes(time);
+                      const dropPreview = timeDragTarget;
+                      const isTimeDropPreview =
+                        dropPreview !== null &&
+                        dropPreview.tableIds.includes(table.id) &&
+                        cellStartMin >= dropPreview.startMin &&
+                        cellStartMin < dropPreview.endMin;
+                      const gridLineClass = timelineGridLineClass(cellStartMin);
+                      const timeBlockBandClass = timelineTimeBlockBandClass(cellStartMin, startMin, slotInterval);
                       return (
                         <DroppableCell
                           key={time}
@@ -1037,12 +1467,16 @@ export function TimelineGrid({
                             e.preventDefault();
                             onCellContextMenu(table.id, time, e.clientX, e.clientY);
                           }}
-                          className={`shrink-0 border-b border-r ${
-                            blocked
+                          className={`shrink-0 border-b border-r ${gridLineClass} transition-colors ${
+                            isTimeDropPreview
+                              ? dropPreview.invalid
+                                ? 'border-amber-300 bg-amber-100/90 ring-1 ring-inset ring-amber-400'
+                                : 'border-emerald-300 bg-emerald-100/90 ring-1 ring-inset ring-emerald-400'
+                            : blocked
                               ? 'border-slate-300 bg-slate-200/80'
                               : dragInvalid
                                 ? 'border-red-200 bg-red-50/70'
-                              : 'border-slate-50 hover:bg-brand-50/30'
+                              : `border-slate-200/70 ${timeBlockBandClass} hover:bg-brand-50/40`
                           }`}
                           style={{
                             width: SLOT_WIDTH,
@@ -1074,6 +1508,8 @@ export function TimelineGrid({
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
                       activeDragBookingId={activeDrag?.id ?? null}
+                      moveSuggestion={moveSuggestionsByBookingId.get(block.id)}
+                      onSuggestedMove={handleSuggestedMove}
                     />
                   ))}
                 </DroppableRow>
@@ -1084,26 +1520,48 @@ export function TimelineGrid({
             {unassignedBlocks.length > 0 && (
               <>
                 <div
-                  className="flex shrink-0 border-b border-emerald-100 bg-emerald-50"
+                  className="flex shrink-0 border-b border-emerald-200 bg-emerald-50"
                   style={{ width: gridWidth, height: UNASSIGNED_HEADER_HEIGHT }}
                 >
-                  {timeSlots.map((time) => (
+                  {timeSlots.map((time) => {
+                    const cellStartMin = timeToMinutes(time);
+                    const gridLineClass = timelineGridLineClass(cellStartMin, 'emerald');
+                    const timeBlockBandClass = timelineTimeBlockBandClass(cellStartMin, startMin, slotInterval, 'emerald');
+                    return (
                     <div
                       key={time}
-                      className="shrink-0 border-r border-emerald-100/70"
+                      className={`shrink-0 border-r border-emerald-200/70 ${gridLineClass} ${timeBlockBandClass}`}
                       style={{ width: SLOT_WIDTH, height: UNASSIGNED_HEADER_HEIGHT }}
                     />
-                  ))}
+                    );
+                  })}
                 </div>
                 {unassignedBlocks.map((block) => (
                   <div key={block.id} className="relative flex shrink-0 bg-emerald-50/30" style={{ width: gridWidth, height: ROW_HEIGHT }}>
-                    {timeSlots.map((time) => (
-                      <div
-                        key={time}
-                        className="shrink-0 border-b border-r border-emerald-100/60"
-                        style={{ width: SLOT_WIDTH, height: ROW_HEIGHT }}
-                      />
-                    ))}
+                    {timeSlots.map((time) => {
+                      const cellStartMin = timeToMinutes(time);
+                      const dropPreview = timeDragTarget;
+                      const isTimeDropPreview =
+                        dropPreview !== null &&
+                        dropPreview.tableIds.includes('__unassigned__') &&
+                        cellStartMin >= dropPreview.startMin &&
+                        cellStartMin < dropPreview.endMin;
+                      const gridLineClass = timelineGridLineClass(cellStartMin, 'emerald');
+                      const timeBlockBandClass = timelineTimeBlockBandClass(cellStartMin, startMin, slotInterval, 'emerald');
+                      return (
+                        <div
+                          key={time}
+                          className={`shrink-0 border-b border-r ${gridLineClass} transition-colors ${
+                            isTimeDropPreview
+                              ? dropPreview.invalid
+                                ? 'border-amber-300 bg-amber-100/90 ring-1 ring-inset ring-amber-400'
+                                : 'border-emerald-300 bg-emerald-100/90 ring-1 ring-inset ring-emerald-400'
+                              : `border-emerald-200/70 ${timeBlockBandClass}`
+                          }`}
+                          style={{ width: SLOT_WIDTH, height: ROW_HEIGHT }}
+                        />
+                      );
+                    })}
                     <DraggableBlock
                       block={{ ...block, laneIndex: 0, laneCount: 1, rowSpan: 1 }}
                       dragId={`${block.id}__unassigned`}
@@ -1120,6 +1578,8 @@ export function TimelineGrid({
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
                       activeDragBookingId={activeDrag?.id ?? null}
+                      moveSuggestion={moveSuggestionsByBookingId.get(block.id)}
+                      onSuggestedMove={handleSuggestedMove}
                     />
                   </div>
                 ))}
@@ -1175,12 +1635,12 @@ export function TimelineGrid({
         )}
       </DragOverlay>
 
-      {contextMenu && (
+      {contextMenu && bookingContextMenuStyle ? (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
           <div
             className="fixed z-50 rounded-2xl border border-slate-200/80 bg-white py-1 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
-            style={{ left: contextMenu.x, top: contextMenu.y, minWidth: 200 }}
+            style={bookingContextMenuStyle}
           >
             <div className="border-b border-slate-100 px-3 py-2">
               <p className="text-xs font-semibold text-slate-900">{contextMenu.booking.guest_name}</p>
@@ -1312,7 +1772,7 @@ export function TimelineGrid({
             )}
           </div>
         </>
-      )}
+      ) : null}
       {confirmDialog && (
         <>
           <div
@@ -1322,7 +1782,7 @@ export function TimelineGrid({
               setConfirmDialog(null);
             }}
           />
-          <div className="fixed left-1/2 top-1/2 z-[61] w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
+          <div className="fixed left-1/2 top-1/2 z-[61] w-[min(calc(100vw-2rem),20rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
             <p className="text-sm text-slate-800">{confirmDialog.message}</p>
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -1353,14 +1813,27 @@ export function TimelineGrid({
   );
 }
 
-function TableRowHeader({ table, isValidTarget, comboLabel }: { table: VenueTable; isValidTarget: boolean | null; comboLabel?: string }) {
+function TableRowHeader({
+  table,
+  isValidTarget,
+  comboLabel,
+  moveIndicators,
+}: {
+  table: VenueTable;
+  isValidTarget: boolean | null;
+  comboLabel?: string;
+  moveIndicators: MoveSuggestion[];
+}) {
+  const targetStateClass =
+    isValidTarget === true
+      ? 'border-emerald-300/80 bg-emerald-100/90 shadow-[inset_3px_0_0_rgba(16,185,129,0.75)]'
+      : isValidTarget === false
+        ? 'border-slate-200/90 bg-slate-100/70 opacity-50'
+        : 'border-slate-200/90 bg-white/60 hover:bg-white';
+
   return (
     <div
-      className={`flex flex-col justify-center border-b border-slate-100 px-1.5 transition-colors sm:px-3 ${
-        isValidTarget === true ? 'bg-green-100/80' :
-        isValidTarget === false ? 'bg-slate-100/50 opacity-50' :
-        ''
-      }`}
+      className={`flex flex-col justify-center border-b px-1.5 transition-colors sm:px-3 ${targetStateClass}`}
       style={{ height: ROW_HEIGHT }}
     >
       <div className="flex items-center gap-1 sm:gap-2">
@@ -1368,6 +1841,18 @@ function TableRowHeader({ table, isValidTarget, comboLabel }: { table: VenueTabl
         <span className="hidden rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 sm:inline-block">
           {table.max_covers}
         </span>
+        {moveIndicators.length > 0 ? (
+          <span className="flex shrink-0 items-center gap-0.5" aria-label="Suggested move destination">
+            {moveIndicators.map((indicator) => (
+              <span
+                key={indicator.id}
+                className={`h-2.5 w-2.5 rounded-full ring-2 ${indicator.dotClassName}`}
+                title={`Move ${indicator.guestName} here`}
+                aria-label={`Suggested destination for ${indicator.guestName}`}
+              />
+            ))}
+          </span>
+        ) : null}
       </div>
       {isValidTarget && comboLabel && (
         <span className="mt-0.5 text-[9px] font-semibold leading-tight text-green-700">
@@ -1397,7 +1882,7 @@ function DroppableRow({ tableId, width, height, children, isValidTarget }: {
   return (
     <div
       ref={setNodeRef}
-      className={`relative flex ${bgClass}`}
+      className={`group/row relative flex ${bgClass} transition-shadow hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.10),inset_0_-1px_0_rgba(59,130,246,0.10)]`}
       style={{ width, height }}
     >
       {children}
@@ -1449,6 +1934,8 @@ function DraggableBlock({
   resizeVisual,
   onResizeVisual,
   activeDragBookingId,
+  moveSuggestion,
+  onSuggestedMove,
 }: {
   block: BookingBlock;
   dragId: string;
@@ -1467,8 +1954,13 @@ function DraggableBlock({
   resizeVisual: { bookingId: string; deltaPx: number } | null;
   onResizeVisual: (state: { bookingId: string; deltaPx: number } | null) => void;
   activeDragBookingId: string | null;
+  moveSuggestion?: MoveSuggestion;
+  onSuggestedMove: (block: BookingBlock, suggestion: MoveSuggestion) => void;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: dragId });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
+    id: dragId,
+    disabled: block.status === 'Completed',
+  });
   const resizingRef = useRef(false);
   const justResizedRef = useRef(false);
   const resizeStartXRef = useRef(0);
@@ -1501,8 +1993,10 @@ function DraggableBlock({
   const canShowPrimaryAction =
     Boolean(primaryAction) &&
     width >= (canConfirmBooking && block.status === 'Booked' ? 184 : 132);
+  const canShowMoveSuggestion = Boolean(moveSuggestion) && width >= 104;
 
   const startResize = (e: React.PointerEvent<HTMLSpanElement>) => {
+    if (block.status === 'Completed') return;
     e.stopPropagation();
     e.preventDefault();
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -1514,6 +2008,7 @@ function DraggableBlock({
     const minEnd = start + slotMinutes;
 
     resizingRef.current = true;
+    emitVisualInteraction(true);
     resizeStartXRef.current = e.clientX;
     resizeStartEndRef.current = currentEnd;
     resizePreviewEndRef.current = null;
@@ -1587,6 +2082,7 @@ function DraggableBlock({
           detail: { bookingId: block.id, endTime: endStr },
         }),
       );
+      emitVisualInteraction(false);
 
       window.requestAnimationFrame(() => {
         resizePendingVisualRef.current = null;
@@ -1612,8 +2108,9 @@ function DraggableBlock({
     );
   }
 
-  const dragRootAttrs = useDragHandle ? {} : { ...attributes };
-  const dragListeners = useDragHandle ? {} : { ...listeners };
+  const dragDisabled = block.status === 'Completed';
+  const dragRootAttrs = dragDisabled ? {} : useDragHandle ? {} : { ...attributes };
+  const dragListeners = dragDisabled ? {} : useDragHandle ? {} : { ...listeners };
 
   return (
     <div
@@ -1629,15 +2126,15 @@ function DraggableBlock({
           onClick(block.id, { x: e.clientX, y: e.clientY });
         }
       }}
-      className={`absolute flex select-none items-center gap-0 overflow-hidden rounded-md border border-l-[3px] text-xs font-medium transition-shadow ${colorClass} ${
-        useDragHandle ? 'touch-manipulation' : 'touch-none cursor-grab active:cursor-grabbing'
+      className={`absolute flex select-none items-center gap-0 overflow-hidden rounded-md border border-l-[3px] text-xs font-medium transition-colors duration-200 ease-out ${colorClass} ${
+        dragDisabled ? 'cursor-default' : useDragHandle ? 'touch-manipulation' : 'touch-none cursor-grab active:cursor-grabbing'
       } ${isDragging ? 'z-30 opacity-50' : ''} ${highlighted ? 'ring-2 ring-amber-400 ring-offset-1' : ''} ${
         isMultiTable ? 'border-l-[3px] border-l-purple-500' : ''
       }`}
       style={{ left, top, width, height, WebkitTapHighlightColor: 'transparent' }}
-      title={`${block.guest_name} · Party of ${block.party_size} · ${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}${isMultiTable ? ' · Table combination' : ''}`}
+      title={`${block.guest_name} · Party of ${block.party_size} · ${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}${block.status === 'Completed' ? ' · Completed' : ''}${isMultiTable ? ' · Table combination' : ''}`}
     >
-      {useDragHandle && (
+      {useDragHandle && !dragDisabled && (
         <button
           type="button"
           ref={setActivatorNodeRef}
@@ -1655,7 +2152,7 @@ function DraggableBlock({
       )}
       <div
         {...dragListeners}
-        className={`flex min-h-0 flex-1 items-center gap-1 overflow-hidden px-2 py-0.5 pr-1 ${useDragHandle ? 'touch-manipulation' : 'touch-none'}`}
+        className={`flex min-h-0 flex-1 items-center gap-1 overflow-hidden px-2 py-0.5 pr-1 ${useDragHandle || dragDisabled ? 'touch-manipulation' : 'touch-none'}`}
       >
         {isCondensed ? (
           <>
@@ -1710,8 +2207,26 @@ function DraggableBlock({
           </>
         )}
       </div>
-      {(canConfirmBooking || canShowPrimaryAction) && (
+      {(canShowMoveSuggestion || canConfirmBooking || canShowPrimaryAction) && (
         <div className="flex shrink-0 items-center gap-1 pr-1">
+          {moveSuggestion && canShowMoveSuggestion && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSuggestedMove(block, moveSuggestion);
+              }}
+              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold shadow-sm ring-1 ring-black/5 transition-colors focus:outline-none focus:ring-2 ${moveSuggestion.buttonClassName}`}
+              aria-label={`Move ${block.guest_name} to ${moveSuggestion.targetTableName}`}
+              title={`Move to ${moveSuggestion.targetTableName}`}
+            >
+              <span className={`h-2 w-2 rounded-full ring-1 ring-white/70 ${moveSuggestion.dotClassName}`} aria-hidden />
+              Move
+            </button>
+          )}
           {canConfirmBooking && (
             <button
               type="button"
@@ -1746,6 +2261,7 @@ function DraggableBlock({
           )}
         </div>
       )}
+      {!dragDisabled && (
       <span
         role="separator"
         aria-orientation="vertical"
@@ -1755,7 +2271,8 @@ function DraggableBlock({
         style={{ touchAction: 'none' }}
         title="Drag to resize end"
       />
-      {resizePreviewEnd && (
+      )}
+      {!dragDisabled && resizePreviewEnd && (
         <span className="absolute -top-5 right-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">
           {resizePreviewEnd}
         </span>

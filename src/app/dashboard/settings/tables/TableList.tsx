@@ -12,7 +12,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { VenueTable, TableShape, TableType } from '@/types/table-management';
-import { getTableDimensions, TABLE_TYPES } from '@/types/table-management';
+import { computeGridPositions, getTableDimensions, TABLE_TYPES } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
@@ -379,16 +379,33 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
     setSaving(true);
     setError(null);
 
-    const newTables = Array.from({ length: batchCount }, (_, i) => {
+    const batchSpecs = Array.from({ length: batchCount }, () => {
       const shape = batchShape;
       const dims = getTableDimensions(batchMaxCovers, shape);
       return {
-        name: `${batchPrefix} ${tables.length + i + 1}`,
         min_covers: 1,
         max_covers: batchMaxCovers,
         shape,
         width: dims.width,
         height: dims.height,
+      };
+    });
+    const existingPositionSpecs = tables.map((table) => ({
+      max_covers: table.max_covers,
+      shape: table.shape,
+      width: table.width,
+      height: table.height,
+    }));
+    const batchPositions = computeGridPositions([...existingPositionSpecs, ...batchSpecs]).slice(tables.length);
+    const newTables = batchSpecs.map((spec, i) => {
+      const position = batchPositions[i];
+      return {
+        name: `${batchPrefix} ${tables.length + i + 1}`,
+        ...spec,
+        position_x: position?.position_x ?? null,
+        position_y: position?.position_y ?? null,
+        width: position?.width ?? spec.width,
+        height: position?.height ?? spec.height,
         sort_order: tables.length + i,
       };
     });

@@ -34,6 +34,18 @@ import {
 } from '@/lib/booking/booking-flow-api';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 
+/** One bookable variant of a service. Mirrors the public catalog's `AppointmentCatalogVariant`. */
+interface CatalogVariant {
+  id: string;
+  name: string;
+  description?: string | null;
+  duration_minutes: number;
+  buffer_minutes: number;
+  price_pence: number | null;
+  deposit_pence: number | null;
+  sort_order: number;
+}
+
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
   id: string;
@@ -48,6 +60,8 @@ interface CatalogPractitioner {
     payment_requirement?: ClassPaymentRequirement;
     /** From service_items / appointment_services; used for deposit refund copy before booking completes. */
     cancellation_notice_hours?: number;
+    /** Optional sub-options. When present, the customer must pick one before slot selection. */
+    variants?: CatalogVariant[];
   }>;
 }
 
@@ -74,6 +88,8 @@ interface PersonSelection {
 /** Consecutive services for one practitioner (multi-service booking). */
 export interface MultiServiceSegment {
   serviceId: string;
+  /** When the parent service has variants, the picked sub-option id. */
+  serviceVariantId?: string | null;
   serviceName: string;
   practitionerId: string;
   practitionerName: string;
@@ -96,14 +112,14 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
 
 type Step =
   | 'mode_choice'
-  | 'service' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
-  | 'group_person_label' | 'group_service' | 'group_practitioner' | 'group_slot'
+  | 'service' | 'variant' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
+  | 'group_person_label' | 'group_service' | 'group_variant' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
-const SINGLE_STEPS: Step[] = ['service', 'practitioner', 'slot', 'multi_service', 'details'];
-const SINGLE_STEPS_LOCKED: Step[] = ['service', 'slot', 'multi_service', 'details'];
+const SINGLE_STEPS: Step[] = ['service', 'variant', 'practitioner', 'slot', 'multi_service', 'details'];
+const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'slot', 'multi_service', 'details'];
 const STEP_LABELS: Record<string, string> = {
-  service: 'Service', practitioner: 'Staff', slot: 'Time', multi_service: 'Services', details: 'Details',
+  service: 'Service', variant: 'Option', practitioner: 'Staff', slot: 'Time', multi_service: 'Services', details: 'Details',
 };
 
 interface AppointmentBookingFlowProps {
@@ -191,6 +207,8 @@ export function AppointmentBookingFlow({
 
   // Single booking state
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  /** When the chosen service has variants, this is the picked variant id; null otherwise. */
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null,
   );
@@ -239,6 +257,7 @@ export function AppointmentBookingFlow({
   const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
   const calendarCacheRef = useRef(calendarCache);
   calendarCacheRef.current = calendarCache;
+  const calendarInFlightRef = useRef<Map<string, Promise<Set<string>>>>(new Map());
   const calendarMonthRef = useRef(calendarMonth);
   calendarMonthRef.current = calendarMonth;
 
@@ -259,6 +278,7 @@ export function AppointmentBookingFlow({
       setLoading(false);
       setError(null);
       setSelectedServiceId(null);
+      setSelectedVariantId(null);
       setSelectedTime(null);
       setGuestDetails(null);
       setCreateResult(null);
@@ -325,12 +345,13 @@ export function AppointmentBookingFlow({
   }, [preselectedPractitionerId, catalogStaff, lockedPractitioner]);
 
   const fetchAvailability = useCallback(
-    async (opts: { serviceId: string; practitionerId: string }) => {
+    async (opts: { serviceId: string; practitionerId: string; variantId?: string | null }) => {
       setLoading(true);
       try {
         const params = new URLSearchParams({ venue_id: venue.id, date });
         params.set('service_id', opts.serviceId);
         params.set('practitioner_id', opts.practitionerId);
+        if (opts.variantId) params.set('variant_id', opts.variantId);
         if (phantomBookings.length > 0) {
           params.set('phantoms', JSON.stringify(phantomBookings));
         }
@@ -351,6 +372,7 @@ export function AppointmentBookingFlow({
     async (opts: {
       practitionerId: string;
       serviceId: string;
+      variantId?: string | null;
       year: number;
       month: number;
       signal?: AbortSignal;
@@ -362,6 +384,7 @@ export function AppointmentBookingFlow({
         opts.serviceId,
         opts.year,
         opts.month,
+        opts.variantId ?? null,
       );
       const res = await fetch(url, { signal: opts.signal });
       const data = (await res.json()) as { available_dates?: string[]; error?: string };
@@ -369,6 +392,47 @@ export function AppointmentBookingFlow({
       return new Set(data.available_dates ?? []);
     },
     [bookingAudience, venue.id],
+  );
+
+  const loadAppointmentCalendarMonth = useCallback(
+    (opts: {
+      practitionerId: string;
+      serviceId: string;
+      variantId?: string | null;
+      year: number;
+      month: number;
+    }): Promise<Set<string>> => {
+      const key = appointmentCalendarCacheKey(
+        opts.practitionerId,
+        opts.serviceId,
+        opts.year,
+        opts.month,
+        opts.variantId ?? null,
+      );
+      const cached = calendarCacheRef.current.get(key);
+      if (cached) return Promise.resolve(cached);
+
+      const inFlight = calendarInFlightRef.current.get(key);
+      if (inFlight) return inFlight;
+
+      const promise = fetchAppointmentCalendarMonth(opts)
+        .then((nextSet) => {
+          setCalendarCache((prev) => {
+            if (prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.set(key, nextSet);
+            return next;
+          });
+          return nextSet;
+        })
+        .finally(() => {
+          calendarInFlightRef.current.delete(key);
+        });
+
+      calendarInFlightRef.current.set(key, promise);
+      return promise;
+    },
+    [fetchAppointmentCalendarMonth],
   );
 
   /** Best-effort month prefetch with a small concurrency cap to avoid hammering the API/DB. */
@@ -396,12 +460,11 @@ export function AppointmentBookingFlow({
           const key = appointmentCalendarCacheKey(t.practitionerId, t.serviceId, year, month);
           if (calendarCacheRef.current.has(key)) continue;
           try {
-            const nextSet = await fetchAppointmentCalendarMonth({
+            const nextSet = await loadAppointmentCalendarMonth({
               practitionerId: t.practitionerId,
               serviceId: t.serviceId,
               year,
               month,
-              signal,
             });
             if (signal?.aborted) return;
             setCalendarCache((prev) => {
@@ -419,7 +482,17 @@ export function AppointmentBookingFlow({
       const nWorkers = Math.min(concurrency, pending.length);
       await Promise.all(Array.from({ length: nWorkers }, () => worker()));
     },
-    [fetchAppointmentCalendarMonth],
+    [loadAppointmentCalendarMonth],
+  );
+
+  const primeSelectedAppointmentCalendar = useCallback(
+    (practitionerId: string, serviceId: string) => {
+      const { year, month } = calendarMonthRef.current;
+      void loadAppointmentCalendarMonth({ practitionerId, serviceId, year, month }).catch(() => {
+        /* best-effort: the mounted calendar effect will surface an empty state if needed */
+      });
+    },
+    [loadAppointmentCalendarMonth],
   );
 
   /** Start loading month grids as soon as a service is chosen (before the slot step mounts). */
@@ -443,12 +516,14 @@ export function AppointmentBookingFlow({
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
+    const variantId = isGroup ? null : selectedVariantId;
     if (!svc || !prac) return;
-    fetchAvailability({ serviceId: svc, practitionerId: prac });
+    fetchAvailability({ serviceId: svc, practitionerId: prac, variantId });
   }, [
     step,
     date,
     selectedServiceId,
+    selectedVariantId,
     selectedPractitionerId,
     groupServiceId,
     groupPractitionerId,
@@ -511,9 +586,10 @@ export function AppointmentBookingFlow({
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
+    const variantId = isGroup ? null : selectedVariantId;
     if (!svc || !prac) return;
 
-    const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month);
+    const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month, variantId);
     const cached = calendarCache.get(key);
     if (cached) {
       setAvailableDates(cached);
@@ -521,27 +597,21 @@ export function AppointmentBookingFlow({
       return;
     }
 
-    const ac = new AbortController();
     let cancelled = false;
     (async () => {
       setLoadingCalendar(true);
       try {
-        const nextSet = await fetchAppointmentCalendarMonth({
+        const nextSet = await loadAppointmentCalendarMonth({
           practitionerId: prac,
           serviceId: svc,
+          variantId,
           year: calendarMonth.year,
           month: calendarMonth.month,
-          signal: ac.signal,
         });
         if (cancelled) return;
-        setCalendarCache((prev) => {
-          const next = new Map(prev);
-          next.set(key, nextSet);
-          return next;
-        });
         setAvailableDates(nextSet);
-      } catch (e) {
-        if (cancelled || (e instanceof Error && e.name === 'AbortError')) return;
+      } catch {
+        if (cancelled) return;
         setAvailableDates(new Set());
       } finally {
         if (!cancelled) setLoadingCalendar(false);
@@ -549,18 +619,18 @@ export function AppointmentBookingFlow({
     })();
     return () => {
       cancelled = true;
-      ac.abort();
     };
   }, [
     step,
     selectedServiceId,
+    selectedVariantId,
     selectedPractitionerId,
     groupServiceId,
     groupPractitionerId,
     calendarMonth.year,
     calendarMonth.month,
     calendarCache,
-    fetchAppointmentCalendarMonth,
+    loadAppointmentCalendarMonth,
   ]);
 
   /** Reset the displayed month whenever the user changes service or practitioner. */
@@ -569,7 +639,7 @@ export function AppointmentBookingFlow({
     const [y, m] = base.split('-').map(Number);
     if (!y || !m) return;
     setCalendarMonth((prev) => (prev.year === y && prev.month === m ? prev : { year: y, month: m }));
-  }, [selectedServiceId, selectedPractitionerId, groupServiceId, groupPractitionerId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedServiceId, selectedVariantId, selectedPractitionerId, groupServiceId, groupPractitionerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goPrevMonth = useCallback(() => {
     setCalendarMonth((prev) => {
@@ -686,6 +756,36 @@ export function AppointmentBookingFlow({
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
   const selectedServiceForPractitioner =
     selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
+  /** Variants the customer can pick from for the currently selected service (active only). */
+  const variantsForSelectedService = useMemo<CatalogVariant[]>(() => {
+    if (!selectedServiceId) return [];
+    for (const p of catalogStaff) {
+      const offer = p.services.find((s) => s.id === selectedServiceId);
+      if (offer?.variants && offer.variants.length > 0) return offer.variants;
+    }
+    return [];
+  }, [catalogStaff, selectedServiceId]);
+  const serviceHasVariants = variantsForSelectedService.length > 0;
+  const selectedVariant = useMemo<CatalogVariant | null>(() => {
+    if (!selectedVariantId) return null;
+    return variantsForSelectedService.find((v) => v.id === selectedVariantId) ?? null;
+  }, [variantsForSelectedService, selectedVariantId]);
+  /**
+   * Practitioner offer with variant overrides applied. Used everywhere price / duration / deposit
+   * needs to reflect the chosen sub-option (summary copy, online charge, end-time previews).
+   */
+  const effectiveOfferForBooking = useMemo(() => {
+    if (!selectedServiceForPractitioner) return null;
+    if (!selectedVariant) return selectedServiceForPractitioner;
+    return {
+      ...selectedServiceForPractitioner,
+      name: `${selectedServiceForPractitioner.name} - ${selectedVariant.name}`,
+      duration_minutes: selectedVariant.duration_minutes,
+      buffer_minutes: selectedVariant.buffer_minutes,
+      price_pence: selectedVariant.price_pence,
+      deposit_pence: selectedVariant.deposit_pence ?? selectedServiceForPractitioner.deposit_pence ?? null,
+    };
+  }, [selectedServiceForPractitioner, selectedVariant]);
   const groupedSlots = groupSlotsByPeriod(availableSlots);
 
   // Group flow helpers
@@ -743,6 +843,7 @@ export function AppointmentBookingFlow({
             booking_date: date,
             practitioner_id: seg.practitionerId,
             service_id: seg.serviceId,
+            ...(seg.serviceVariantId ? { variant_id: seg.serviceVariantId } : {}),
             start_time: seg.startTime,
             phantoms,
           }),
@@ -845,6 +946,7 @@ export function AppointmentBookingFlow({
                 service_id: s.serviceId,
                 practitioner_id: s.practitionerId,
                 start_time: s.startTime,
+                ...(s.serviceVariantId ? { service_variant_id: s.serviceVariantId } : {}),
               })),
             }),
           });
@@ -877,9 +979,8 @@ export function AppointmentBookingFlow({
       setSubmitting(true);
       try {
         if (isStaff) {
-          const online = selectedServiceForPractitioner
-            ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
-            : null;
+          const offerForCharge = effectiveOfferForBooking ?? selectedServiceForPractitioner;
+          const online = offerForCharge ? onlineChargeFromCatalogOffer(offerForCharge) : null;
           const require_deposit =
             !isStaffWalkInAppointment &&
             online != null &&
@@ -900,6 +1001,7 @@ export function AppointmentBookingFlow({
               require_deposit,
               practitioner_id: selectedPractitionerId,
               appointment_service_id: selectedServiceId,
+              service_variant_id: selectedVariantId ?? undefined,
               source: staffBookingSource,
             }),
           });
@@ -931,6 +1033,7 @@ export function AppointmentBookingFlow({
             source: 'booking_page',
             practitioner_id: selectedPractitionerId,
             appointment_service_id: selectedServiceId,
+            service_variant_id: selectedVariantId ?? undefined,
             dietary_notes: details.dietary_notes,
             occasion: details.occasion,
           }),
@@ -959,6 +1062,8 @@ export function AppointmentBookingFlow({
       selectedTime,
       selectedPractitionerId,
       selectedServiceId,
+      selectedVariantId,
+      effectiveOfferForBooking,
       refundNoticeHours,
       multiServiceSegments,
       validateMultiServiceChain,
@@ -1293,6 +1398,22 @@ export function AppointmentBookingFlow({
                   onClick={() => {
                     queuePrefetchForServicePractitioners(svc.id);
                     setSelectedServiceId(svc.id);
+                    setSelectedVariantId(null);
+                    /** Hop to the variant picker first when this service offers sub-options. */
+                    const variantsForSvc = (() => {
+                      for (const p of catalogStaff) {
+                        const offer = p.services.find((s) => s.id === svc.id);
+                        if (offer?.variants && offer.variants.length > 0) return offer.variants;
+                      }
+                      return [];
+                    })();
+                    if (variantsForSvc.length > 0) {
+                      setStep('variant');
+                      return;
+                    }
+                    if (isLockedPractitionerFlow && selectedPractitionerId) {
+                      primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id);
+                    }
                     setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
@@ -1314,9 +1435,80 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {step === 'variant' && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedVariantId(null);
+              if (isLockedPractitionerFlow) {
+                setSelectedServiceId(null);
+              }
+              setStep('service');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            Back
+          </button>
+          {selectedService && (
+            <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
+              <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span></div>
+            </div>
+          )}
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose your option</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            This service has a few variations to choose from. Pick one to continue.
+          </p>
+          <div className="space-y-2">
+            {variantsForSelectedService.map((variant) => (
+              <button
+                key={variant.id}
+                type="button"
+                onClick={() => {
+                  setSelectedVariantId(variant.id);
+                  if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                    primeSelectedAppointmentCalendar(selectedPractitionerId, selectedServiceId);
+                  }
+                  setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-900">{variant.name}</div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {variant.duration_minutes} min
+                      {variant.description ? ` · ${variant.description}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-sm font-semibold text-brand-600">{formatPrice(variant.price_pence)}</span>
+                    <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {step === 'practitioner' && (
         <div>
-          <button onClick={() => { setSelectedServiceId(null); setSelectedPractitionerId(null); setStep('service'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            onClick={() => {
+              if (serviceHasVariants) {
+                setStep('variant');
+                return;
+              }
+              setSelectedServiceId(null);
+              setSelectedVariantId(null);
+              setSelectedPractitionerId(null);
+              setStep('service');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
@@ -1340,7 +1532,17 @@ export function AppointmentBookingFlow({
               {practitionersForSelectedService.map((prac) => {
                 const offer = prac.services.find((s) => s.id === selectedServiceId);
                 return (
-                  <button key={prac.id} onClick={() => { setSelectedPractitionerId(prac.id); setStep('slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                  <button
+                    key={prac.id}
+                    onClick={() => {
+                      if (selectedServiceId) {
+                        primeSelectedAppointmentCalendar(prac.id, selectedServiceId);
+                      }
+                      setSelectedPractitionerId(prac.id);
+                      setStep('slot');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
@@ -1367,7 +1569,12 @@ export function AppointmentBookingFlow({
               setSelectedTime(null);
               setMultiServiceSegments(null);
               if (isLockedPractitionerFlow) {
+                if (serviceHasVariants) {
+                  setStep('variant');
+                  return;
+                }
                 setSelectedServiceId(null);
+                setSelectedVariantId(null);
                 setStep('service');
               } else {
                 setSelectedPractitionerId(null);
@@ -1381,9 +1588,18 @@ export function AppointmentBookingFlow({
           </button>
           <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
             <div className="flex items-center gap-2 text-brand-700">
-              <span className="font-medium">{selectedService?.name}</span>
+              <span className="font-medium">
+                {selectedService?.name}
+                {selectedVariant ? ` - ${selectedVariant.name}` : ''}
+              </span>
               <span className="text-brand-400">&middot;</span>
               <span>{selectedPrac?.name}</span>
+              {effectiveOfferForBooking?.duration_minutes ? (
+                <>
+                  <span className="text-brand-400">&middot;</span>
+                  <span>{effectiveOfferForBooking.duration_minutes} min</span>
+                </>
+              ) : null}
             </div>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
@@ -1408,12 +1624,13 @@ export function AppointmentBookingFlow({
                 onClick={() => {
                   const { dateYmd, timeHHmmss } = getVenueLocalDateTimeForBooking(venue.timezone);
                   setDate(dateYmd);
-                  const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+                  const offer = effectiveOfferForBooking ?? selectedPrac?.services.find((s) => s.id === selectedServiceId);
                   const firstOnline = offer ? onlineChargeFromCatalogOffer(offer) : null;
                   setSelectedTime(timeHHmmss);
                   setMultiServiceSegments([
                     {
                       serviceId: selectedServiceId!,
+                      serviceVariantId: selectedVariantId,
                       serviceName: offer?.name ?? '',
                       practitionerId: selectedPractitionerId!,
                       practitionerName: selectedPrac?.name ?? '',
@@ -1444,12 +1661,14 @@ export function AppointmentBookingFlow({
             </div>
           ) : (
             renderTimeSlots(groupedSlots, (time) => {
-              const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+              /** Use the variant-overridden offer for duration / price / deposit when one was chosen. */
+              const offer = effectiveOfferForBooking ?? selectedPrac?.services.find((s) => s.id === selectedServiceId);
               const firstOnline = offer ? onlineChargeFromCatalogOffer(offer) : null;
               setSelectedTime(time);
               setMultiServiceSegments([
                 {
                   serviceId: selectedServiceId!,
+                  serviceVariantId: selectedVariantId,
                   serviceName: offer?.name ?? '',
                   practitionerId: selectedPractitionerId!,
                   practitionerName: selectedPrac?.name ?? '',
@@ -1946,7 +2165,17 @@ export function AppointmentBookingFlow({
               {practitionersForGroupService.map((prac) => {
                 const offer = prac.services.find((s) => s.id === groupServiceId);
                 return (
-                  <button key={prac.id} onClick={() => { setGroupPractitionerId(prac.id); setStep('group_slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                  <button
+                    key={prac.id}
+                    onClick={() => {
+                      if (groupServiceId) {
+                        primeSelectedAppointmentCalendar(prac.id, groupServiceId);
+                      }
+                      setGroupPractitionerId(prac.id);
+                      setStep('group_slot');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>

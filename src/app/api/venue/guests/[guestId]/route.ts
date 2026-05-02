@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff } from '@/lib/venue-auth';
+import { calendarDateInTimeZone, getVenueTimeZone } from '@/lib/guests/guest-contacts-list';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { validateAndCoerceCustomFields, mergeCustomFieldsJson } from '@/lib/guests/custom-field-validation';
+import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import type { CustomClientFieldDefinition } from '@/types/contacts';
 
 const patchSchema = z
   .object({
@@ -13,6 +17,9 @@ const patchSchema = z
     phone: z.string().max(24).optional().or(z.literal('')),
     tags: z.array(z.string()).optional(),
     customer_profile_notes: z.string().max(8000).nullable().optional(),
+    custom_fields: z.record(z.string(), z.unknown()).optional(),
+    marketing_opt_out: z.boolean().optional(),
+    marketing_consent: z.boolean().optional(),
   })
   .refine(
     (d) =>
@@ -20,7 +27,10 @@ const patchSchema = z
       d.email !== undefined ||
       d.phone !== undefined ||
       d.tags !== undefined ||
-      d.customer_profile_notes !== undefined,
+      d.customer_profile_notes !== undefined ||
+      d.custom_fields !== undefined ||
+      d.marketing_opt_out !== undefined ||
+      d.marketing_consent !== undefined,
     { message: 'At least one field required' },
   );
 
@@ -34,11 +44,22 @@ function partySizeShort(ps: number | null): string {
   return String(ps);
 }
 
+function isoDateFromTimestamp(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+/** Whole calendar days from date A to date B (A <= B), using YYYY-MM-DD strings. */
+function wholeDaysBetweenDates(fromDate: string, toDate: string): number {
+  const a = new Date(`${fromDate}T12:00:00.000Z`);
+  const b = new Date(`${toDate}T12:00:00.000Z`);
+  return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
+}
+
 /**
- * GET /api/venue/guests/[guestId] - guest profile, stats, recent bookings (admin only).
+ * GET /api/venue/guests/[guestId] - guest profile, stats, bookings, communications (venue staff).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ guestId: string }> },
 ) {
   try {
@@ -47,16 +68,15 @@ export async function GET(
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
-    if (!requireAdmin(staff)) {
-      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
-    }
 
     const { guestId } = await params;
+    const bhLimitRaw = Number.parseInt(request.nextUrl.searchParams.get('booking_history_limit') ?? '75', 10);
+    const bookingHistoryLimit = Math.min(100, Math.max(1, Number.isFinite(bhLimitRaw) ? bhLimitRaw : 75));
 
     const { data: guest, error: gErr } = await staff.db
       .from('guests')
       .select(
-        'id, venue_id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at',
+        'id, venue_id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
       )
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -68,7 +88,7 @@ export async function GET(
 
     const { data: statBookings, error: sbErr } = await staff.db
       .from('bookings')
-      .select('booking_date, status, deposit_status, deposit_amount_pence')
+      .select('id, booking_date, status, deposit_status, deposit_amount_pence')
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id);
 
@@ -82,6 +102,7 @@ export async function GET(
     let depositTotalPence = 0;
     let firstVisit: string | null = null;
     let lastVisit: string | null = null;
+    let totalBookingsExcludingCancelled = 0;
 
     for (const b of statBookings ?? []) {
       const row = b as {
@@ -90,7 +111,11 @@ export async function GET(
         deposit_status?: string | null;
         deposit_amount_pence?: number | null;
       };
-      if (row.status === 'Cancelled') cancellations += 1;
+      if (row.status === 'Cancelled') {
+        cancellations += 1;
+      } else {
+        totalBookingsExcludingCancelled += 1;
+      }
       if (row.status === 'No-Show') noShows += 1;
       if (row.deposit_status === 'Paid' && typeof row.deposit_amount_pence === 'number') {
         depositTotalPence += row.deposit_amount_pence;
@@ -105,13 +130,13 @@ export async function GET(
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, deposit_status, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id',
+        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id',
       )
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: false })
       .order('booking_time', { ascending: false })
-      .limit(20);
+      .limit(bookingHistoryLimit);
 
     if (rbErr) {
       console.error('GET guest recent bookings failed:', rbErr);
@@ -199,6 +224,7 @@ export async function GET(
         party_size: number | null;
         status: string;
         deposit_status: string | null;
+        deposit_amount_pence?: number | null;
         practitioner_id: string | null;
         appointment_service_id: string | null;
         calendar_id?: string | null;
@@ -239,6 +265,10 @@ export async function GET(
         party_size: row.party_size,
         status: row.status,
         deposit_status: row.deposit_status,
+        deposit_amount_pence:
+          typeof row.deposit_amount_pence === 'number' && Number.isFinite(row.deposit_amount_pence)
+            ? row.deposit_amount_pence
+            : null,
         booking_model: model,
         kind_label: bookingModelShortLabel(model),
         detail_label,
@@ -247,9 +277,75 @@ export async function GET(
       };
     });
 
+    const bookingIdsForComms = [...new Set((statBookings ?? []).map((b) => (b as { id?: string }).id).filter(Boolean))] as string[];
+    const commsOrParts: string[] = [`guest_id.eq.${guestId}`];
+    if (bookingIdsForComms.length > 0) {
+      const cap = 300;
+      const slice = bookingIdsForComms.slice(0, cap);
+      commsOrParts.push(`booking_id.in.(${slice.join(',')})`);
+    }
+    const { data: commRows, error: commErr } = await staff.db
+      .from('communications')
+      .select('id, message_type, channel, status, created_at, booking_id, guest_id')
+      .eq('venue_id', staff.venue_id)
+      .or(commsOrParts.join(','))
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (commErr) {
+      console.error('GET guest communications failed:', commErr);
+      return NextResponse.json({ error: 'Failed to load communications' }, { status: 500 });
+    }
+
+    const communications = (commRows ?? []).map((c) => {
+      const row = c as {
+        id: string;
+        message_type: string;
+        channel: string;
+        status: string;
+        created_at: string;
+        booking_id: string | null;
+        guest_id: string | null;
+      };
+      return {
+        id: row.id,
+        message_type: row.message_type,
+        channel: row.channel,
+        status: row.status,
+        created_at: row.created_at,
+        booking_id: row.booking_id,
+        guest_id: row.guest_id,
+      };
+    });
+
     const tags = Array.isArray((guest as { tags?: string[] }).tags)
       ? (guest as { tags: string[] }).tags
       : [];
+
+    const { data: fieldDefs, error: cfErr } = await staff.db
+      .from('custom_client_fields')
+      .select('id, venue_id, field_name, field_key, field_type, is_active, created_at')
+      .eq('venue_id', staff.venue_id)
+      .order('created_at', { ascending: true });
+
+    if (cfErr) {
+      console.error('GET guest custom field defs failed:', cfErr);
+      return NextResponse.json({ error: 'Failed to load custom field definitions' }, { status: 500 });
+    }
+
+    const custom_field_definitions = (fieldDefs ?? []) as CustomClientFieldDefinition[];
+
+    const rawCf = (guest as { custom_fields?: unknown }).custom_fields;
+    const custom_fields =
+      rawCf && typeof rawCf === 'object' && !Array.isArray(rawCf) ? (rawCf as Record<string, unknown>) : {};
+
+    const tz = await getVenueTimeZone(staff.db, staff.venue_id);
+    const todayCal = calendarDateInTimeZone(new Date(), tz);
+    const createdDate = isoDateFromTimestamp((guest as { created_at: string }).created_at);
+    const lastVisitDate = (guest as { last_visit_date?: string | null }).last_visit_date ?? null;
+    const days_since_last_visit =
+      lastVisitDate && lastVisitDate <= todayCal ? wholeDaysBetweenDates(lastVisitDate, todayCal) : null;
+    const days_as_customer = wholeDaysBetweenDates(createdDate, todayCal);
 
     return NextResponse.json({
       guest: {
@@ -264,16 +360,24 @@ export async function GET(
         customer_profile_notes: (guest as { customer_profile_notes?: string | null }).customer_profile_notes ?? null,
         created_at: (guest as { created_at?: string }).created_at,
         updated_at: (guest as { updated_at?: string }).updated_at,
+        marketing_opt_out: Boolean((guest as { marketing_opt_out?: boolean }).marketing_opt_out),
+        marketing_consent: Boolean((guest as { marketing_consent?: boolean }).marketing_consent),
+        marketing_consent_at: (guest as { marketing_consent_at?: string | null }).marketing_consent_at ?? null,
+        custom_fields,
       },
       stats: {
-        total_bookings: statBookings?.length ?? 0,
+        total_bookings: totalBookingsExcludingCancelled,
         cancellations,
         no_shows: noShows,
         total_deposit_pence_paid: depositTotalPence,
         first_visit_date: firstVisit,
         last_visit_date: lastVisit,
+        days_since_last_visit,
+        days_as_customer,
       },
       booking_history,
+      communications,
+      custom_field_definitions,
     });
   } catch (err) {
     console.error('GET /api/venue/guests/[guestId] failed:', err);
@@ -304,7 +408,9 @@ export async function PATCH(
 
     const { data: existing, error: exErr } = await staff.db
       .from('guests')
-      .select('id')
+      .select(
+        'id, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
+      )
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
@@ -312,6 +418,13 @@ export async function PATCH(
     if (exErr || !existing) {
       return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
     }
+
+    const prev = existing as {
+      marketing_opt_out: boolean;
+      marketing_consent: boolean;
+      marketing_consent_at: string | null;
+      custom_fields: unknown;
+    };
 
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
@@ -342,6 +455,54 @@ export async function PATCH(
       update.customer_profile_notes = t === null || t.trim() === '' ? null : t.trim();
     }
 
+    let nextOptOut = Boolean(prev.marketing_opt_out);
+    let nextConsent = Boolean(prev.marketing_consent);
+    let nextConsentAt: string | null = prev.marketing_consent_at;
+
+    if (parsed.data.marketing_opt_out !== undefined) {
+      nextOptOut = parsed.data.marketing_opt_out;
+      update.marketing_opt_out = nextOptOut;
+    }
+    if (parsed.data.marketing_consent !== undefined) {
+      nextConsent = parsed.data.marketing_consent;
+      update.marketing_consent = nextConsent;
+      if (nextConsent) {
+        nextConsentAt = new Date().toISOString();
+        update.marketing_consent_at = nextConsentAt;
+      } else {
+        nextConsentAt = null;
+        update.marketing_consent_at = null;
+      }
+    }
+
+    if (parsed.data.custom_fields !== undefined) {
+      const { data: defs, error: defErr } = await staff.db
+        .from('custom_client_fields')
+        .select('id, venue_id, field_name, field_key, field_type, is_active, created_at')
+        .eq('venue_id', staff.venue_id);
+
+      if (defErr) {
+        console.error('PATCH guest custom field defs failed:', defErr);
+        return NextResponse.json({ error: 'Failed to load custom field definitions' }, { status: 500 });
+      }
+
+      const definitions = (defs ?? []) as CustomClientFieldDefinition[];
+      const existingCf =
+        prev.custom_fields && typeof prev.custom_fields === 'object' && !Array.isArray(prev.custom_fields)
+          ? (prev.custom_fields as Record<string, unknown>)
+          : {};
+
+      const validated = validateAndCoerceCustomFields(parsed.data.custom_fields, definitions);
+      if (!validated.ok) {
+        return NextResponse.json({ error: validated.error }, { status: 400 });
+      }
+
+      update.custom_fields = mergeCustomFieldsJson(existingCf, validated.value);
+    }
+
+    const marketingChanged =
+      parsed.data.marketing_opt_out !== undefined || parsed.data.marketing_consent !== undefined;
+
     const dataKeys = Object.keys(update).filter((k) => k !== 'updated_at');
     if (dataKeys.length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
@@ -353,7 +514,7 @@ export async function PATCH(
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
       .select(
-        'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at',
+        'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields',
       )
       .single();
 
@@ -361,6 +522,27 @@ export async function PATCH(
       console.error('PATCH /api/venue/guests/[guestId] failed:', upErr);
       return NextResponse.json({ error: 'Failed to update guest' }, { status: 500 });
     }
+
+    if (marketingChanged) {
+      await staff.db.from('guest_marketing_consent_events').insert({
+        venue_id: staff.venue_id,
+        guest_id: guestId,
+        actor_staff_id: staff.id,
+        marketing_consent: nextConsent,
+        marketing_opt_out: nextOptOut,
+      });
+    }
+
+    await insertContactAuditEvent(staff.db, {
+      venue_id: staff.venue_id,
+      guest_id: guestId,
+      actor_staff_id: staff.id,
+      event_type: 'guest_profile_updated',
+      metadata: {
+        keys: dataKeys.filter((k) => k !== 'updated_at'),
+        marketing_changed: marketingChanged,
+      },
+    });
 
     return NextResponse.json({ guest: updated });
   } catch (err) {

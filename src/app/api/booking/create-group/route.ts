@@ -16,6 +16,11 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import {
+  applyVariantToAppointmentInput,
+  resolveBookableServiceWithVariant,
+} from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
@@ -31,6 +36,8 @@ const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
   practitioner_id: z.string().uuid(),
   appointment_service_id: z.string().uuid(),
+  /** Optional sub-option for the parent service. */
+  service_variant_id: z.string().uuid().optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
 });
@@ -155,6 +162,7 @@ export async function POST(request: NextRequest) {
       person_label: string;
       practitioner_id: string;
       appointment_service_id: string;
+      service_variant_id: string | null;
       booking_date: string;
       booking_time: string;
       duration_minutes: number;
@@ -181,6 +189,27 @@ export async function POST(request: NextRequest) {
 
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
+
+      let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
+      if (person.service_variant_id) {
+        chosenVariant = await loadActiveVariantForService({
+          admin: supabase,
+          venueId: venue_id,
+          serviceId: person.appointment_service_id,
+          variantId: person.service_variant_id,
+        });
+        if (!chosenVariant) {
+          return NextResponse.json(
+            { error: `Invalid service_variant_id for ${person.person_label}` },
+            { status: 400 },
+          );
+        }
+        applyVariantToAppointmentInput({
+          services: input.services,
+          serviceId: person.appointment_service_id,
+          variant: chosenVariant,
+        });
+      }
 
       const svcWindow = await loadServiceEntityBookingWindow(
         supabase,
@@ -210,7 +239,8 @@ export async function POST(request: NextRequest) {
       const ps = input.practitionerServices.find(
         (row) => row.practitioner_id === person.practitioner_id && row.service_id === person.appointment_service_id,
       );
-      const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
       const durationMins = svc?.duration_minutes ?? 30;
       const bufferMins = svc?.buffer_minutes ?? 0;
       let estimatedEndTime: string | null = null;
@@ -233,6 +263,7 @@ export async function POST(request: NextRequest) {
         person_label: person.person_label,
         practitioner_id: person.practitioner_id,
         appointment_service_id: person.appointment_service_id,
+        service_variant_id: person.service_variant_id ?? null,
         booking_date: person.booking_date,
         booking_time: timeStr,
         duration_minutes: durationMins,
@@ -337,6 +368,7 @@ export async function POST(request: NextRequest) {
         estimated_end_time: person.estimated_end_time,
         practitioner_id: useUnifiedBookingRows ? null : person.practitioner_id,
         appointment_service_id: useUnifiedBookingRows ? null : person.appointment_service_id,
+        service_variant_id: person.service_variant_id,
         group_booking_id: groupBookingId,
         person_label: person.person_label,
         ...(useUnifiedBookingRows

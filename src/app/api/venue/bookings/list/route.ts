@@ -8,7 +8,7 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
- * Optional: service=<uuid> filters table reservations by venue_services.id.
+ * Optional: service=<uuid>[,<uuid>...] filters table reservations by venue_services.id.
  * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
  *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
@@ -73,8 +73,16 @@ export async function GET(request: NextRequest) {
       query = query.eq('area_id', areaIdParam);
     }
 
-    if (serviceIdParam && guestUuidRe.test(serviceIdParam)) {
-      query = query.eq('service_id', serviceIdParam);
+    if (serviceIdParam) {
+      const serviceIds = serviceIdParam
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => guestUuidRe.test(id));
+      if (serviceIds.length === 1) {
+        query = query.eq('service_id', serviceIds[0]!);
+      } else if (serviceIds.length > 1) {
+        query = query.in('service_id', serviceIds);
+      }
     }
 
     if (calendarIdParam && guestUuidRe.test(calendarIdParam)) {

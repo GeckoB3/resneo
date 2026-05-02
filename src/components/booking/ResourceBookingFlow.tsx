@@ -112,6 +112,9 @@ export function ResourceBookingFlow({
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   /** Month availability keyed by `resourceId:year:month` — populated by prefetch after resource list loads and by fetches. */
   const [calendarPrefetchByKey, setCalendarPrefetchByKey] = useState<Map<string, Set<string>>>(() => new Map());
+  const calendarPrefetchByKeyRef = useRef(calendarPrefetchByKey);
+  calendarPrefetchByKeyRef.current = calendarPrefetchByKey;
+  const calendarInFlightRef = useRef<Map<string, Promise<Set<string>>>>(new Map());
 
   const [date, setDate] = useState('');
   const [selectedResource, setSelectedResource] = useState<ResourceAvail | null>(null);
@@ -187,40 +190,39 @@ export function ResourceBookingFlow({
     };
   }, [venue.id, bookingAudience]);
 
-  /** After resources load, prefetch current month availability for every resource so the calendar step often hits cache. */
-  useEffect(() => {
-    if (resourceOptions.length === 0) return;
-    let cancelled = false;
-    const n = new Date();
-    const y = n.getFullYear();
-    const m = n.getMonth() + 1;
-    void Promise.all(
-      resourceOptions.map((r) =>
-        fetch(resourceCalendarUrl(bookingAudience, venue.id, r.id, y, m, 'any'))
-          .then((res) => {
-            if (!res.ok) throw new Error('calendar');
-            return res.json();
-          })
-          .then((data) => {
-            const list = (data.available_dates ?? []) as string[];
-            return { key: resourceCalendarCacheKey(r.id, y, m), dates: new Set(list) };
-          })
-          .catch(() => ({ key: resourceCalendarCacheKey(r.id, y, m), dates: new Set<string>() })),
-      ),
-    ).then((entries) => {
-      if (cancelled) return;
-      setCalendarPrefetchByKey((prev) => {
-        const next = new Map(prev);
-        for (const e of entries) {
-          next.set(e.key, e.dates);
-        }
-        return next;
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [resourceOptions, venue.id, bookingAudience]);
+  const loadResourceCalendarMonth = useCallback(
+    (resourceId: string, year: number, month: number): Promise<Set<string>> => {
+      const key = resourceCalendarCacheKey(resourceId, year, month);
+      const cached = calendarPrefetchByKeyRef.current.get(key);
+      if (cached) return Promise.resolve(cached);
+
+      const inFlight = calendarInFlightRef.current.get(key);
+      if (inFlight) return inFlight;
+
+      const promise = fetch(resourceCalendarUrl(bookingAudience, venue.id, resourceId, year, month, 'any'))
+        .then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
+          return new Set((data.available_dates ?? []) as string[]);
+        })
+        .then((nextSet) => {
+          setCalendarPrefetchByKey((prev) => {
+            if (prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.set(key, nextSet);
+            return next;
+          });
+          return nextSet;
+        })
+        .finally(() => {
+          calendarInFlightRef.current.delete(key);
+        });
+
+      calendarInFlightRef.current.set(key, promise);
+      return promise;
+    },
+    [bookingAudience, venue.id],
+  );
 
   const cachedMonthForSelection = useMemo(() => {
     if (!selectedMeta) return undefined;
@@ -237,35 +239,16 @@ export function ResourceBookingFlow({
       return;
     }
 
-    const ac = new AbortController();
     let cancelled = false;
-    const key = resourceCalendarCacheKey(selectedMeta.id, calendarMonth.year, calendarMonth.month);
 
     (async () => {
       setLoadingCalendar(true);
       try {
-        const url = resourceCalendarUrl(
-          bookingAudience,
-          venue.id,
-          selectedMeta.id,
-          calendarMonth.year,
-          calendarMonth.month,
-          'any',
-        );
-        const res = await fetch(url, { signal: ac.signal });
-        const data = await res.json();
+        const nextSet = await loadResourceCalendarMonth(selectedMeta.id, calendarMonth.year, calendarMonth.month);
         if (cancelled) return;
-        if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
-        const list = (data.available_dates ?? []) as string[];
-        const nextSet = new Set(list);
         setAvailableDates(nextSet);
-        setCalendarPrefetchByKey((prev) => {
-          const next = new Map(prev);
-          next.set(key, nextSet);
-          return next;
-        });
       } catch (e) {
-        if (cancelled || (e instanceof Error && e.name === 'AbortError')) return;
+        if (cancelled) return;
         setAvailableDates(new Set());
         setError('Could not load availability for this month.');
       } finally {
@@ -275,16 +258,14 @@ export function ResourceBookingFlow({
 
     return () => {
       cancelled = true;
-      ac.abort();
     };
   }, [
     step,
-    venue.id,
     selectedMeta,
     calendarMonth.year,
     calendarMonth.month,
-    bookingAudience,
     cachedMonthForSelection,
+    loadResourceCalendarMonth,
   ]);
 
   useEffect(() => {
@@ -491,10 +472,14 @@ export function ResourceBookingFlow({
     setError(null);
     setSelectedMeta(r);
     const n = new Date();
-    setCalendarMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
+    const nextMonth = { year: n.getFullYear(), month: n.getMonth() + 1 };
+    setCalendarMonth(nextMonth);
     setDate('');
     setSelectedTime(null);
     setSelectedResource(null);
+    void loadResourceCalendarMonth(r.id, nextMonth.year, nextMonth.month).catch(() => {
+      /* The mounted calendar effect will show the error state if the priority load fails. */
+    });
     setStep('pick_date');
   }
 

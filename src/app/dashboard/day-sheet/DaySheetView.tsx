@@ -7,7 +7,6 @@ import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
 import {
   BOOKING_PRIMARY_ACTIONS,
-  BOOKING_REVERT_ACTIONS,
   canMarkNoShowForSlot,
   canTransitionBookingStatus,
   isDestructiveBookingStatus,
@@ -17,12 +16,16 @@ import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import type { BookingModel } from '@/types/booking-models';
-import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
-import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
-import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
-import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBookingContent';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import {
-  attendanceConfirmationSources,
+  bookingStatusDisplayLabel,
+  inferBookingRowModel,
+  isTableReservationBooking,
+} from '@/lib/booking/infer-booking-row-model';
+import {
   showAttendanceConfirmedPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
@@ -32,10 +35,6 @@ import {
 } from '@/lib/table-management/next-bookings-slot';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap } from '@/components/table-tracking/TableSelector';
-import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
-import { normalizeToE164 } from '@/lib/phone/e164';
-import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
-import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -80,6 +79,11 @@ interface DaySheetBooking {
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   area_name?: string | null;
+}
+
+interface DaySheetBookingRow extends DaySheetBooking {
+  booking_date: string;
+  inferred_booking_model?: BookingModel;
 }
 
 interface ActiveTable {
@@ -128,8 +132,32 @@ interface DaySheetData {
   selected_area_id?: string | null;
 }
 
-interface BookingDetail {
+interface BookingDetailLite {
+  id: string;
+  special_requests: string | null;
+  internal_notes: string | null;
+  cancellation_deadline: string | null;
+  checked_in_at?: string | null;
+  table_assignments?: Array<{ id: string; name: string }>;
+  guest: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    visit_count: number;
+    last_visit_date?: string | null;
+    tags?: string[];
+    customer_profile_notes?: string | null;
+  } | null;
   communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
+  events: Array<{ id: string; event_type: string; created_at: string }>;
+  combination_staff_notes?: string | null;
+  cde_context?: {
+    inferred_model: BookingModel;
+    title: string;
+    subtitle?: string | null;
+  } | null;
+  inferred_booking_model?: BookingModel;
 }
 
 interface ConfirmState {
@@ -159,16 +187,6 @@ const POLL_INTERVAL_MS = 30_000;
 const AREA_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring: string }> = {
-  Pending:   { dot: 'bg-amber-500',   bg: 'bg-amber-50',   text: 'text-amber-700',   ring: 'ring-amber-200' },
-  Booked:    { dot: 'bg-sky-500',     bg: 'bg-sky-50',     text: 'text-sky-700',     ring: 'ring-sky-200' },
-  Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' },
-  Seated:    { dot: 'bg-brand-600',    bg: 'bg-brand-50',    text: 'text-brand-800',    ring: 'ring-brand-200' },
-  Completed: { dot: 'bg-slate-400',   bg: 'bg-slate-50',   text: 'text-slate-500',   ring: 'ring-slate-200' },
-  'No-Show': { dot: 'bg-red-500',     bg: 'bg-red-50',     text: 'text-red-700',     ring: 'ring-red-200' },
-  Cancelled: { dot: 'bg-slate-300',   bg: 'bg-slate-50',   text: 'text-slate-400',   ring: 'ring-slate-200' },
-};
-
 const PRIMARY_ACTIONS: Record<string, { label: string; target: BookingStatus }> = {
   Pending:   BOOKING_PRIMARY_ACTIONS.Pending!,
   Booked:    BOOKING_PRIMARY_ACTIONS.Booked!,
@@ -187,26 +205,66 @@ function formatDateFull(date: string): string {
   const d = new Date(date + 'T12:00:00');
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
-/** Relative day label - matches dashboard/bookings concertina. */
-function formatDateNice(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+function statusBorderClass(status: string): string {
+  switch (status) {
+    case 'Pending': return 'border-l-amber-400';
+    case 'Booked': return 'border-l-sky-400';
+    case 'Confirmed': return 'border-l-emerald-500';
+    case 'Seated': return 'border-l-brand-500';
+    case 'Completed': return 'border-l-slate-300';
+    case 'Cancelled': return 'border-l-red-300';
+    case 'No-Show': return 'border-l-rose-500';
+    default: return 'border-l-transparent';
+  }
 }
-function timeToMinutes(t: string): number {
-  const [h, m] = t.split(':').map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
+
+function statusPillVariant(status: string): PillVariant {
+  switch (status) {
+    case 'Pending': return 'warning';
+    case 'Booked': return 'info';
+    case 'Confirmed': return 'success';
+    case 'Seated': return 'brand';
+    case 'Completed': return 'neutral';
+    case 'Cancelled': return 'neutral';
+    case 'No-Show': return 'danger';
+    default: return 'neutral';
+  }
 }
-function minutesToTime(m: number): string {
-  return `${Math.floor(m / 60).toString().padStart(2, '0')}:${(m % 60).toString().padStart(2, '0')}`;
+
+function sourceBadge(source: string) {
+  const key = source.toLowerCase();
+  const variantMap: Record<string, PillVariant> = {
+    online: 'brand',
+    phone: 'neutral',
+    'walk-in': 'warning',
+    staff: 'neutral',
+    booking_page: 'brand',
+  };
+  const label = key === 'booking_page' ? 'online' : source;
+  return <Pill variant={variantMap[key] ?? 'neutral'} size="sm">{label}</Pill>;
 }
-function formatPence(pence: number): string {
-  return `£${(pence / 100).toFixed(2)}`;
+
+function depositBadge(status: string, amountPence: number | null) {
+  if (status === 'Not Required' || status === 'N/A') return null;
+  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
+  const variantMap: Record<string, PillVariant> = {
+    Paid: 'success',
+    Refunded: 'brand',
+    Pending: 'warning',
+    Requested: 'warning',
+    Unpaid: 'warning',
+  };
+  const labelMap: Record<string, string> = {
+    Paid: amt ? `${amt} paid` : 'Deposit paid',
+    Refunded: amt ? `${amt} refunded` : 'Refunded',
+    Pending: 'Deposit pending',
+    Requested: 'Deposit requested',
+    Unpaid: 'Deposit due',
+    Waived: 'Waived',
+  };
+  const variant = variantMap[status] ?? 'neutral';
+  const label = labelMap[status] ?? status;
+  return <Pill variant={variant} size="sm" dot={status === 'Pending' || status === 'Requested' || status === 'Unpaid'}>{label}</Pill>;
 }
 
 /**
@@ -250,9 +308,9 @@ function FillBar({ booked, capacity }: { booked: number; capacity: number }) {
   );
 }
 
-// ─── Day sheet stats row (same card language as table grid / floor plan SummaryBar) ──
+// ─── Day sheet toolbar summary ───────────────────────────────────────────────
 
-function DaySheetStatsRow({
+function DaySheetToolbarSummary({
   summary,
   periods,
 }: {
@@ -260,7 +318,6 @@ function DaySheetStatsRow({
   periods: DaySheetPeriod[];
 }) {
   const isTodayView = summary.is_today;
-
   const bookingRows = periods.flatMap((p) =>
     p.bookings.map((b) => ({
       id: b.id,
@@ -276,118 +333,55 @@ function DaySheetStatsRow({
   const cap = summary.venue_max_capacity;
   const coversPct =
     cap != null && cap > 0 ? Math.round((summary.covers_in_use / cap) * 100) : 0;
-
-  const avail = summary.covers_available_now;
-
-  if (isTodayView) {
-    return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-4">
-        <DashboardStatCard
-          label="Covers in use"
-          value={cap != null ? `${summary.covers_in_use}/${cap}` : summary.covers_in_use}
-          color="blue"
-          subValue={cap != null && cap > 0 ? `${coversPct}% of capacity` : undefined}
-        />
-        <DashboardStatCard
-          label="Available now"
-          value={avail != null ? avail : '-'}
-          color="violet"
-        />
-        <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
-        <DashboardStatCard
-          value={nextBookings.primaryValue}
-          color="amber"
-          subValue={nextBookings.guestsLine}
-          subValue2={nextBookings.bookingsLine}
-        />
-      </div>
-    );
-  }
-
-  const rem = summary.covers_remaining;
-  return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-4">
-      <DashboardStatCard label="Total covers" value={summary.total_covers} color="blue" />
-      <DashboardStatCard
-        label="Remaining"
-        value={rem != null ? rem : '-'}
-        color="violet"
-      />
-      <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
-      <DashboardStatCard
-        value={nextBookings.primaryValue}
-        color="amber"
-        subValue={nextBookings.guestsLine}
-        subValue2={nextBookings.bookingsLine}
-      />
-    </div>
-  );
-}
-
-// ─── TimelineBreakdown ──────────────────────────────────────────────────────
-
-function TimelineBreakdown({ periods, date }: { periods: DaySheetPeriod[]; date: string }) {
-  const isToday = date === todayISO();
-  const now = new Date();
-  const currentMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : -1;
-
-  const allBookings = periods.flatMap((p) => p.bookings).filter((b) => !isTerminal(b.status));
-  const totalCapacity = periods.reduce((s, p) => s + (p.max_covers ?? 0), 0);
-
-  let earliest = 24 * 60;
-  let latest = 0;
-  for (const p of periods) {
-    earliest = Math.min(earliest, timeToMinutes(p.start_time));
-    latest = Math.max(latest, timeToMinutes(p.end_time));
-  }
-  if (earliest >= latest) { earliest = 8 * 60; latest = 23 * 60; }
-
-  const slots: Array<{ time: string; minutes: number; arriving: number; inHouse: number }> = [];
-  for (let m = earliest; m < latest; m += 30) {
-    const timeLabel = minutesToTime(m);
-    let arriving = 0;
-    let inHouse = 0;
-    for (const b of allBookings) {
-      const bStart = timeToMinutes(b.booking_time);
-      const bEnd = b.estimated_end_time ? timeToMinutes(b.estimated_end_time) : bStart + 90;
-      if (bStart >= m && bStart < m + 30) arriving += b.party_size;
-      if (bStart <= m && bEnd > m) inHouse += b.party_size;
-    }
-    slots.push({ time: timeLabel, minutes: m, arriving, inHouse });
-  }
+  const coversValue = isTodayView
+    ? cap != null
+      ? `${summary.covers_in_use}/${cap}`
+      : String(summary.covers_in_use)
+    : String(summary.total_covers);
+  const availableValue = isTodayView
+    ? summary.covers_available_now != null
+      ? String(summary.covers_available_now)
+      : '-'
+    : summary.covers_remaining != null
+      ? String(summary.covers_remaining)
+      : '-';
+  const chip =
+    'inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800';
+  const label = 'text-slate-500 font-normal';
 
   return (
-    <div>
-      <HorizontalScrollHint />
-      <div className="touch-pan-x overflow-x-auto rounded-lg border border-slate-200 bg-white print:hidden">
-      <div className="flex min-w-max">
-        {slots.map((slot) => {
-          const isCurrent = isToday && currentMinutes >= slot.minutes && currentMinutes < slot.minutes + 30;
-          const fillPct = totalCapacity > 0 ? Math.min(100, Math.round((slot.inHouse / totalCapacity) * 100)) : 0;
-          return (
-            <div
-              key={slot.time}
-              className={`flex w-16 flex-shrink-0 flex-col items-center border-r border-slate-50 px-1 py-2 text-center ${
-                isCurrent ? 'bg-brand-50 ring-1 ring-inset ring-brand-300' : ''
-              }`}
-            >
-              <span className={`text-[10px] font-semibold tabular-nums ${isCurrent ? 'text-brand-700' : 'text-slate-500'}`}>
-                {slot.time}
-              </span>
-              <div className="mt-1 h-8 w-4 overflow-hidden rounded-sm bg-slate-100">
-                <div
-                  className={`w-full rounded-sm transition-all ${fillPct >= 90 ? 'bg-red-400' : fillPct >= 75 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                  style={{ height: `${fillPct}%`, marginTop: `${100 - fillPct}%` }}
-                />
-              </div>
-              <span className="mt-1 text-[10px] font-bold tabular-nums text-slate-700">{slot.inHouse}</span>
-              {slot.arriving > 0 && (
-                <span className="text-[9px] tabular-nums text-emerald-600">+{slot.arriving}</span>
-              )}
-            </div>
-          );
-        })}
+    <div className="space-y-2" aria-label="Day sheet summary">
+      <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs">
+        <span className={chip}>
+          <span className={label}>{isTodayView ? 'Live' : 'Covers'}</span>
+          <span className="tabular-nums">{coversValue}</span>
+          {isTodayView && cap != null && cap > 0 ? <span className="text-slate-400">({coversPct}%)</span> : null}
+        </span>
+        <span className={chip}>
+          <span className={label}>{isTodayView ? 'Available' : 'Remaining'}</span>
+          <span className="tabular-nums">{availableValue}</span>
+        </span>
+        <span className={chip}>
+          <span className={label}>Bookings</span>
+          <span className="tabular-nums">{summary.total_bookings}</span>
+        </span>
+        <span className={chip} title={`${nextBookings.guestsLine}; ${nextBookings.bookingsLine}`}>
+          <span className={label}>Next</span>
+          <span className="tabular-nums">{nextBookings.primaryValue}</span>
+        </span>
+        {summary.covers_available_now != null || cap != null ? (
+          <span className={chip}>
+            <span className={label}>Capacity</span>
+            <span className="tabular-nums">{cap ?? '-'}</span>
+          </span>
+        ) : null}
       </div>
+      <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-600 sm:grid-cols-4">
+        <span>Pending <strong className="font-semibold text-slate-800">{summary.pending_count}</strong></span>
+        <span>Seated <strong className="font-semibold text-slate-800">{summary.seated_covers}</strong></span>
+        <span>Completed <strong className="font-semibold text-slate-800">{summary.completed_covers}</strong></span>
+        <span>No-show <strong className="font-semibold text-slate-800">{summary.no_show_covers}</strong></span>
+        <span>Cancelled <strong className="font-semibold text-slate-800">{summary.cancelled_covers}</strong></span>
       </div>
     </div>
   );
@@ -420,310 +414,6 @@ function ConfirmDialog({ state, onClose }: { state: ConfirmState; onClose: () =>
   );
 }
 
-// ─── SendMessageDialog ──────────────────────────────────────────────────────
-
-function SendMessageDialog({ bookingId, onClose, onSent }: { bookingId: string; onClose: () => void; onSent: () => void }) {
-  const [message, setMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [channel, setChannel] = useState<GuestMessageChannel>('both');
-
-  const send = async () => {
-    if (!message.trim()) return;
-    setSending(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message.trim(), channel }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed to send');
-        return;
-      }
-      onSent();
-      onClose();
-    } catch {
-      setError('Failed to send message');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-semibold text-slate-900">Send Message to Guest</h3>
-        <label htmlFor="day-sheet-msg-channel" className="mt-3 block text-xs font-medium text-slate-600">
-          Channel
-        </label>
-        <div className="mt-1">
-          <GuestMessageChannelSelect
-            id="day-sheet-msg-channel"
-            value={channel}
-            onChange={setChannel}
-            disabled={sending}
-            className="w-full min-h-[40px] text-sm"
-          />
-        </div>
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type your message..."
-          rows={4}
-          className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          autoFocus
-        />
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-        <div className="mt-4 flex gap-3">
-          <button type="button" disabled={sending || !message.trim()} onClick={() => void send()} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-            {sending ? 'Sending...' : 'Send'}
-          </button>
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── EditBookingModal ───────────────────────────────────────────────────────
-
-function EditBookingModal({
-  booking,
-  date,
-  venueId,
-  onSaved,
-  onClose,
-}: {
-  booking: DaySheetBooking;
-  date: string;
-  venueId: string;
-  onSaved: () => void;
-  onClose: () => void;
-}) {
-  const [guestName, setGuestName] = useState(booking.guest_name);
-  const [phone, setPhone] = useState(booking.guest_phone ?? '');
-  const [email, setEmail] = useState(booking.guest_email ?? '');
-  const [specialRequests, setSpecialRequests] = useState(booking.special_requests ?? '');
-  const [internalNotes, setInternalNotes] = useState(booking.internal_notes ?? '');
-  const [dietaryNotes, setDietaryNotes] = useState(booking.dietary_notes ?? '');
-  const [occasion, setOccasion] = useState(booking.occasion ?? '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dateTimeSaved, setDateTimeSaved] = useState(false);
-
-  const saveGuestDetails = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      if (phone.trim() && !normalizeToE164(phone, 'GB')) {
-        setError('Enter a valid phone number');
-        setSaving(false);
-        return;
-      }
-      const resolvedPhone = phone.trim() ? (normalizeToE164(phone, 'GB') ?? phone.trim()) : '';
-      const body: Record<string, unknown> = {};
-      if (guestName !== booking.guest_name) body.guest_name = guestName;
-      if (resolvedPhone !== (booking.guest_phone ?? '')) body.guest_phone = resolvedPhone || null;
-      if (email !== (booking.guest_email ?? '')) body.guest_email = email || null;
-      if (specialRequests !== (booking.special_requests ?? '')) body.special_requests = specialRequests;
-      if (internalNotes !== (booking.internal_notes ?? '')) body.internal_notes = internalNotes;
-      if (dietaryNotes !== (booking.dietary_notes ?? '')) body.dietary_notes = dietaryNotes;
-      if (occasion !== (booking.occasion ?? '')) body.occasion = occasion;
-
-      if (Object.keys(body).length === 0 && !dateTimeSaved) {
-        onClose();
-        return;
-      }
-
-      if (Object.keys(body).length > 0) {
-        const res = await fetch(`/api/venue/bookings/${booking.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          setError(j.error ?? 'Failed to save');
-          return;
-        }
-      }
-
-      onSaved();
-      onClose();
-    } catch {
-      setError('Failed to save changes');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
-    >
-      <div
-        className="my-8 w-full max-w-lg rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-semibold text-slate-900">Edit Booking</h3>
-        <div className="mt-4 space-y-4">
-          {/* Date / Time / Party Size via availability-aware component */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
-            <p className="mb-2.5 text-xs font-semibold text-slate-700">Date / Time / Party Size</p>
-            <ModifyBookingInline
-              bookingId={booking.id}
-              venueId={venueId}
-              currentDate={date}
-              currentTime={booking.booking_time}
-              currentPartySize={booking.party_size}
-              onSaved={() => { setDateTimeSaved(true); onSaved(); }}
-              onCancel={() => {}}
-            />
-          </div>
-
-          {/* Guest details */}
-          <div className="space-y-3">
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
-                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-                <PhoneWithCountryField
-                  value={phone}
-                  onChange={setPhone}
-                  inputClassName="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Occasion</label>
-              <input value={occasion} onChange={(e) => setOccasion(e.target.value)} placeholder="e.g. Birthday, Anniversary" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Dietary Notes</label>
-              <input value={dietaryNotes} onChange={(e) => setDietaryNotes(e.target.value)} placeholder="Allergies, dietary requirements" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Special Requests</label>
-              <textarea value={specialRequests} onChange={(e) => setSpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Internal Staff Notes</label>
-              <textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} placeholder="Staff-only notes (not shown to guest)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-          </div>
-        </div>
-        <div className="mt-5 flex gap-3">
-          <button type="button" disabled={saving} onClick={() => void saveGuestDetails()} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-            {saving ? 'Saving...' : 'Save Guest Details'}
-          </button>
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── DepositActions ─────────────────────────────────────────────────────────
-
-function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAction: () => void }) {
-  const [loading, setLoading] = useState(false);
-  const { addToast } = useToast();
-  const isWalkIn = booking.source === 'walk-in' || booking.source === 'Walk-in';
-
-  const doAction = async (action: string, extra?: Record<string, unknown>) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/venue/bookings/${booking.id}/deposit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...extra }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast(j.error ?? 'Action failed', 'error');
-        return;
-      }
-      addToast('Deposit action completed', 'success');
-      onAction();
-    } catch {
-      addToast('Action failed', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const ds = booking.deposit_status;
-  const amount = booking.deposit_amount_pence;
-
-  if (ds === 'Paid') {
-    return (
-      <div className="space-y-1.5">
-        <p className="text-sm text-emerald-700">Deposit of {amount ? formatPence(amount) : '-'} paid ✓</p>
-        <button type="button" disabled={loading} onClick={() => void doAction('refund')} className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50">
-          Issue Refund
-        </button>
-      </div>
-    );
-  }
-
-  if (ds === 'Waived') {
-    return <p className="text-sm text-slate-500">Deposit waived</p>;
-  }
-
-  if (ds === 'Refunded') {
-    return <p className="text-sm text-slate-500">Deposit of {amount ? formatPence(amount) : '-'} refunded</p>;
-  }
-
-  if (ds === 'Pending' || ds === 'Requested' || ds === 'Unpaid') {
-    return (
-      <div className="space-y-1.5">
-        <p className="text-sm text-amber-700">Deposit of {amount ? formatPence(amount) : '-'} requested - not yet paid</p>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={loading} onClick={() => void doAction('send_link')} className="rounded-md bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50">Send Payment Link</button>
-          <button type="button" disabled={loading} onClick={() => void doAction('waive')} className="rounded-md bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">Mark as Waived</button>
-          <button type="button" disabled={loading} onClick={() => void doAction('record_cash')} className="rounded-md bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">Record Cash</button>
-        </div>
-      </div>
-    );
-  }
-
-  // Walk-ins and "Not Required" - no deposit actions needed
-  if (isWalkIn || ds === 'Not Required') {
-    return <p className="text-sm text-slate-400">No deposit required</p>;
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-sm text-slate-500">No deposit required</p>
-      <button type="button" disabled={loading} onClick={() => void doAction('send_link')} className="text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50">
-        Request Deposit
-      </button>
-    </div>
-  );
-}
-
 // ─── Main: DaySheetView ─────────────────────────────────────────────────────
 
 export function DaySheetView({
@@ -750,14 +440,14 @@ export function DaySheetView({
 
   // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedComms, setExpandedComms] = useState<BookingDetail['communications'] | null>(null);
+  const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
+  const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
+  const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
+  const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmState | null>(null);
-  const [showTimeline, setShowTimeline] = useState(false);
   const [showWalkIn, setShowWalkIn] = useState(false);
   const [showNewBooking, setShowNewBooking] = useState(false);
-  const [editBooking, setEditBooking] = useState<DaySheetBooking | null>(null);
-  const [sendMessageId, setSendMessageId] = useState<string | null>(null);
   const [dietaryOpen, setDietaryOpen] = useState(false);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
@@ -770,7 +460,6 @@ export function DaySheetView({
   const [seatSelectedTableIds, setSeatSelectedTableIds] = useState<string[]>([]);
   const [changeTableBookingId, setChangeTableBookingId] = useState<string | null>(null);
   const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
-  const [highlightBookingId, setHighlightBookingId] = useState<string | null>(null);
   const [staffAttendanceLoadingId, setStaffAttendanceLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -829,12 +518,6 @@ export function DaySheetView({
     showCancelled: false,
     showNoShow: false,
   });
-  const hasActiveFilters = useMemo(() => {
-    const defaultStatuses = new Set(DEFAULT_STATUSES);
-    const sameStatuses = filters.statuses.size === defaultStatuses.size &&
-      [...filters.statuses].every((s) => defaultStatuses.has(s));
-    return filters.periodKey !== 'all' || !sameStatuses || filters.search !== '' || filters.showCancelled || filters.showNoShow;
-  }, [filters]);
 
   const activeTables = useMemo(() => data?.active_tables ?? [], [data]);
 
@@ -958,20 +641,90 @@ export function DaySheetView({
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [connection, fetchDaySheet]);
 
-  // Expand booking - fetch comms
-  useEffect(() => {
-    if (!expandedId) { setExpandedComms(null); return; }
-    let cancelled = false;
-    (async () => {
+  const loadBookingDetail = useCallback(async (bookingId: string, force = false) => {
+    if (!force && detailById[bookingId]) return;
+    if (detailLoadingIds.includes(bookingId)) return;
+    setDetailLoadingIds((prev) => [...prev, bookingId]);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`);
+      if (!res.ok) return;
+      const detail = await res.json();
+      setDetailById((prev) => ({ ...prev, [bookingId]: detail as BookingDetailLite }));
+    } finally {
+      setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
+    }
+  }, [detailById, detailLoadingIds]);
+
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => {
+      if (detailById[bookingId] || detailLoadingIds.includes(bookingId)) return;
+      void fetch(`/api/venue/bookings/${bookingId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((detail) => {
+          if (!detail) return;
+          setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: detail as BookingDetailLite }));
+        })
+        .catch(() => {});
+    },
+    [detailById, detailLoadingIds],
+  );
+
+  const toggleExpand = useCallback(
+    (bookingId: string) => {
+      setExpandedId((current) => (current === bookingId ? null : bookingId));
+      void loadBookingDetail(bookingId);
+    },
+    [loadBookingDetail],
+  );
+
+  const handleDetailUpdated = useCallback(
+    (bookingId: string) => {
+      setDetailById((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        return next;
+      });
+      void loadBookingDetail(bookingId, true);
+      void fetchDaySheet();
+    },
+    [fetchDaySheet, loadBookingDetail],
+  );
+
+  const sendMessageToBooking = useCallback(
+    async (bookingId: string, message: string, channel: GuestMessageChannel = 'both') => {
+      const trimmedMessage = message.trim();
+      if (trimmedMessage.length === 0) return;
+      setSendingMessageIds((prev) => [...prev, bookingId]);
       try {
-        const res = await fetch(`/api/venue/bookings/${expandedId}`);
-        if (!res.ok || cancelled) return;
-        const detail = await res.json();
-        if (!cancelled) setExpandedComms(detail.communications ?? []);
-      } catch { /* ignore */ }
-    })();
-    return () => { cancelled = true; };
-  }, [expandedId]);
+        const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmedMessage, channel }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+          errors?: string[];
+        };
+        if (!res.ok || !payload.success) {
+          addToast(payload.error ?? 'Failed to send message.', 'error');
+          return;
+        }
+        if (payload.errors && payload.errors.length > 0) {
+          addToast(`Sent with issues - ${payload.errors.join('; ')}`, 'error');
+        } else {
+          addToast('Message sent', 'success');
+        }
+        setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        handleDetailUpdated(bookingId);
+      } catch {
+        addToast('Failed to send message.', 'error');
+      } finally {
+        setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
+      }
+    },
+    [addToast, handleDetailUpdated],
+  );
 
   const patchStaffAttendance = useCallback(
     async (bookingId: string, hasStaffAttendance: boolean) => {
@@ -1086,6 +839,23 @@ export function DaySheetView({
     }
   }, [data, addToast, fetchDaySheet]);
 
+  const requestStatusChange = useCallback(
+    (booking: DaySheetBooking, nextStatus: BookingStatus) => {
+      if (!canTransitionBookingStatus(booking.status, nextStatus)) return;
+      if (nextStatus === 'No-Show' && data && !canMarkNoShowForSlot(date, booking.booking_time, data.no_show_grace_minutes)) {
+        addToast(`No-show can only be marked ${data.no_show_grace_minutes} minutes after the booking start time.`, 'error');
+        return;
+      }
+      if (nextStatus === 'Seated' && activeTables.length > 0) {
+        setSeatWithTableBookingId(booking.id);
+        setSeatSelectedTableIds([]);
+        return;
+      }
+      void changeStatus(booking.id, nextStatus);
+    },
+    [activeTables.length, addToast, changeStatus, data, date],
+  );
+
   const undoStatusChange = useCallback(async () => {
     if (!undoAction || undoAction.type !== 'change_status') return;
     const bookingId = String(undoAction.previous_state.bookingId ?? '');
@@ -1171,120 +941,226 @@ export function DaySheetView({
     );
   }
 
-  return (
-    <div className="daysheet-root space-y-4">
-      {/* Row 1 - matches table grid / live floor (Operations + primary actions) */}
-      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Operations</p>
-          <h1 className="truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Day sheet</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setDate(todayISO())}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            Print
-          </button>
+  const selectedAreaId =
+    searchParams.get('area') && data.areas?.some((x) => x.id === searchParams.get('area'))
+      ? searchParams.get('area')!
+      : '';
+  const settingsActive =
+    Boolean(selectedAreaId) ||
+    filters.periodKey !== 'all' ||
+    filters.statuses.has('Completed') ||
+    filters.showCancelled ||
+    filters.showNoShow ||
+    timeRangeFilterActive;
+  const activeFilterCount =
+    (selectedAreaId ? 1 : 0) +
+    (filters.periodKey !== 'all' ? 1 : 0) +
+    (filters.statuses.has('Completed') ? 1 : 0) +
+    (filters.showCancelled ? 1 : 0) +
+    (filters.showNoShow ? 1 : 0) +
+    (timeRangeFilterActive ? 1 : 0);
+  const daySheetToolbarSummary: ViewToolbarSummary = {
+    total_covers_booked: data.summary.is_today ? data.summary.covers_in_use : data.summary.total_covers,
+    total_covers_capacity: data.summary.venue_max_capacity ?? data.summary.total_covers,
+    tables_in_use: activeTables.filter((table) => occupancyMap[table.id] !== null).length,
+    tables_total: activeTables.length,
+    unassigned_count: data.summary.pending_count,
+    covers_in_use_now: data.summary.is_today ? data.summary.covers_in_use : undefined,
+  };
+  const daySheetDatePanel = (
+    <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+      <CalendarDateTimePicker
+        date={date}
+        onDateChange={setDate}
+        startHour={pickerStartHour}
+        endHour={pickerEndHour}
+        onTimeRangeChange={(start, end) => {
+          setStartHourOverride(start);
+          setEndHourOverride(end);
+          setTimeRangeFilterActive(true);
+        }}
+      />
+      {timeRangeFilterActive && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+          <p className="text-xs text-slate-600">
+            Showing bookings from <span className="font-medium text-slate-800">{String(pickerStartHour).padStart(2, '0')}:00</span> to{' '}
+            <span className="font-medium text-slate-800">{String(pickerEndHour).padStart(2, '0')}:00</span>.
+          </p>
           <button
             type="button"
             onClick={() => {
-              setLoading(true);
-              void fetchDaySheet();
+              setStartHourOverride(null);
+              setEndHourOverride(null);
+              setTimeRangeFilterActive(false);
             }}
-            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700"
-            aria-label="Refresh"
+            className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-            </svg>
-          </button>
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
-              connection === 'green'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                : connection === 'amber'
-                  ? 'border-amber-200 bg-amber-50 text-amber-700'
-                  : 'border-red-200 bg-red-50 text-red-700'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                connection === 'green' ? 'bg-emerald-500' : connection === 'amber' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 animate-pulse'
-              }`}
-            />
-            {connection === 'green' ? 'Live' : connection === 'amber' ? 'Polling' : 'Offline'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowNewBooking(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            New Booking
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowWalkIn(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-            </svg>
-            Walk-in
+            Clear time filter
           </button>
         </div>
+      )}
+    </div>
+  );
+  const daySheetSettingsPanel = (
+    <div className="space-y-4">
+      {bookingModel === 'table_reservation' && data.areas && data.areas.length > 1 && (
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Area</span>
+          <select
+            value={selectedAreaId}
+            onChange={(e) => setAreaFilter(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="">All areas</option>
+            {data.areas.map((ar) => (
+              <option key={ar.id} value={ar.id}>
+                {ar.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service period</span>
+        <select
+          value={filters.periodKey}
+          onChange={(e) => setFilters((f) => ({ ...f, periodKey: e.target.value }))}
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        >
+          <option value="all">All periods</option>
+          {data.periods.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Include statuses</p>
+        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
+          {[
+            { key: 'Completed', label: 'Completed' },
+            { key: 'Cancelled', label: 'Cancelled' },
+            { key: 'No-Show', label: 'No-show' },
+          ].map((option) => (
+            <label key={option.key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={option.key === 'Completed' ? filters.statuses.has('Completed') : option.key === 'Cancelled' ? filters.showCancelled : filters.showNoShow}
+                onChange={(e) => {
+                  if (option.key === 'Completed') {
+                    setFilters((f) => {
+                      const s = new Set(f.statuses);
+                      if (e.target.checked) s.add('Completed');
+                      else s.delete('Completed');
+                      return { ...f, statuses: s };
+                    });
+                    return;
+                  }
+                  if (option.key === 'Cancelled') {
+                    setFilters((f) => ({ ...f, showCancelled: e.target.checked }));
+                    return;
+                  }
+                  setFilters((f) => ({ ...f, showNoShow: e.target.checked }));
+                }}
+                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
       </div>
-
-      {/* Row 2 - date + time-range picker (same bar used on the bookings dashboard) */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm print:hidden">
-        <CalendarDateTimePicker
-          date={date}
-          onDateChange={setDate}
-          startHour={pickerStartHour}
-          endHour={pickerEndHour}
-          onTimeRangeChange={(start, end) => {
-            setStartHourOverride(start);
-            setEndHourOverride(end);
-            setTimeRangeFilterActive(true);
+      {settingsActive ? (
+        <button
+          type="button"
+          onClick={() => {
+            setAreaFilter('');
+            setStartHourOverride(null);
+            setEndHourOverride(null);
+            setTimeRangeFilterActive(false);
+            setFilters({
+              periodKey: 'all',
+              statuses: new Set(DEFAULT_STATUSES),
+              search: filters.search,
+              showCancelled: false,
+              showNoShow: false,
+            });
           }}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear settings
+        </button>
+      ) : null}
+    </div>
+  );
+  const daySheetSearchPanel = (
+    <div className="space-y-2">
+      <label htmlFor="day-sheet-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Search
+      </label>
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+        </div>
+        <input
+          id="day-sheet-toolbar-search"
+          type="text"
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+          placeholder="Search guest or party size..."
+          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
         />
-        {timeRangeFilterActive && (
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-            <p className="text-xs text-slate-600">
-              Showing bookings with start times from{' '}
-              <span className="font-medium text-slate-800">
-                {String(pickerStartHour).padStart(2, '0')}:00
-              </span>{' '}
-              up to{' '}
-              <span className="font-medium text-slate-800">
-                {String(pickerEndHour).padStart(2, '0')}:00
-              </span>{' '}
-              (not including the end hour).
-            </p>
+      </div>
+      {filters.search.trim() ? (
+        <button
+          type="button"
+          onClick={() => setFilters((f) => ({ ...f, search: '' }))}
+          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          Clear search
+        </button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="daysheet-root space-y-4">
+      <div className="print:hidden">
+        <OperationsWorkspaceToolbar
+          title="Day sheet"
+          summary={daySheetToolbarSummary}
+          summaryContent={<DaySheetToolbarSummary summary={data.summary} periods={data.periods} />}
+          date={date}
+          dateLabel={formatDateFull(date)}
+          onDateChange={setDate}
+          liveState={connection === 'green' ? 'live' : 'reconnecting'}
+          onRefresh={() => {
+            setLoading(true);
+            void fetchDaySheet();
+          }}
+          onNewBooking={() => setShowNewBooking(true)}
+          onWalkIn={() => setShowWalkIn(true)}
+          compact
+          controlsLabel={activeFilterCount > 0 ? `Settings (${activeFilterCount})` : 'Settings'}
+          controlsPanel={daySheetSettingsPanel}
+          datePickerPanel={daySheetDatePanel}
+          searchActive={filters.search.trim().length > 0}
+          searchPanel={daySheetSearchPanel}
+          trailingActions={
             <button
               type="button"
-              onClick={() => {
-                setStartHourOverride(null);
-                setEndHourOverride(null);
-                setTimeRangeFilterActive(false);
-              }}
-              className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+              onClick={() => window.print()}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800"
+              aria-label="Print day sheet"
             >
-              Clear time filter
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 9V3.75h10.5V9m-10.5 8.25h10.5v3H6.75v-3ZM6 17.25H4.5A1.5 1.5 0 0 1 3 15.75v-5.25A1.5 1.5 0 0 1 4.5 9h15a1.5 1.5 0 0 1 1.5 1.5v5.25a1.5 1.5 0 0 1-1.5 1.5H18" />
+              </svg>
             </button>
-          </div>
-        )}
+          }
+        />
       </div>
 
       {/* Connection warning */}
@@ -1310,131 +1186,6 @@ export function DaySheetView({
         </div>
         <p className="text-sm font-medium text-slate-700">{formatDateFull(date)}</p>
       </div>
-
-      {/* Row 3 - stat cards (aligned with table grid / floor plan) */}
-      <DaySheetStatsRow summary={data.summary} periods={data.periods} />
-
-      {/* Row 4 - filters (toolbar tools card, same as grid/floor filter strip) */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm print:hidden sm:flex-row sm:flex-wrap sm:items-center">
-        {bookingModel === 'table_reservation' && data.areas && data.areas.length > 1 && (
-          <select
-            value={searchParams.get('area') && data.areas.some((x) => x.id === searchParams.get('area')) ? searchParams.get('area')! : ''}
-            onChange={(e) => setAreaFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            aria-label="Filter by dining area"
-          >
-            <option value="">All areas</option>
-            {data.areas.map((ar) => (
-              <option key={ar.id} value={ar.id}>
-                {ar.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <select
-          value={filters.periodKey}
-          onChange={(e) => setFilters((f) => ({ ...f, periodKey: e.target.value }))}
-          className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-        >
-          <option value="all">All periods</option>
-          {data.periods.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <input
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-          placeholder="Search guest / party size…"
-          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 sm:min-w-[10rem] sm:max-w-xs"
-        />
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={filters.statuses.has('Completed')}
-            onChange={(e) =>
-              setFilters((f) => {
-                const s = new Set(f.statuses);
-                if (e.target.checked) s.add('Completed');
-                else s.delete('Completed');
-                return { ...f, statuses: s };
-              })
-            }
-            className="rounded border-slate-300"
-          />
-          Completed
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={filters.showCancelled}
-            onChange={(e) => setFilters((f) => ({ ...f, showCancelled: e.target.checked }))}
-            className="rounded border-slate-300"
-          />
-          Cancelled
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={filters.showNoShow}
-            onChange={(e) => setFilters((f) => ({ ...f, showNoShow: e.target.checked }))}
-            className="rounded border-slate-300"
-          />
-          No-show
-        </label>
-        {hasActiveFilters && (
-          <button
-            type="button"
-            onClick={() =>
-              setFilters({
-                periodKey: 'all',
-                statuses: new Set(DEFAULT_STATUSES),
-                search: '',
-                showCancelled: false,
-                showNoShow: false,
-              })
-            }
-            className="text-sm font-medium text-brand-600 hover:text-brand-700"
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      {/* ── Table Status Strip ── */}
-      {activeTables.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm print:hidden">
-          <span className="mr-1 text-xs font-semibold text-slate-500">Tables</span>
-          {activeTables.map((table) => {
-            const occupant = occupancyMap[table.id] ?? null;
-            const isOccupied = occupant !== null;
-            return (
-              <button
-                key={table.id}
-                type="button"
-                title={isOccupied ? `${table.name} - ${occupant.guestName}` : `${table.name} (${table.max_covers} seats) - available`}
-                onClick={() => {
-                  if (isOccupied) {
-                    setHighlightBookingId(occupant.bookingId);
-                    const el = document.getElementById(`booking-row-${occupant.bookingId}`);
-                    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    setTimeout(() => setHighlightBookingId(null), 2000);
-                  }
-                }}
-                className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  isOccupied
-                    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 cursor-pointer'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-700 cursor-default'
-                }`}
-              >
-                {table.name}
-                <span className="ml-1 text-[10px] opacity-60">({table.max_covers})</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* ── Dietary Summary ── */}
       {data.dietary_summary.length > 0 && (
@@ -1472,21 +1223,6 @@ export function DaySheetView({
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── Timeline Breakdown ── */}
-      {data.periods.length > 0 && (
-        <div className="print:hidden">
-          <button
-            type="button"
-            onClick={() => setShowTimeline((v) => !v)}
-            className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700"
-          >
-            {showTimeline ? 'Hide' : 'Show'} capacity timeline
-            <svg className={`h-3 w-3 transition-transform ${showTimeline ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
-          </button>
-          {showTimeline && <TimelineBreakdown periods={data.periods} date={date} />}
         </div>
       )}
 
@@ -1542,97 +1278,76 @@ export function DaySheetView({
                   No {period.label.toLowerCase()} bookings yet.
                 </div>
               ) : (
-                <ul className="divide-y divide-slate-50">
+                <ul className="divide-y divide-slate-200/70">
                   {period.bookings.map((b) => {
-                    const tags = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests);
-                    const crmTags = Array.isArray(b.guest_tags) ? b.guest_tags : [];
-                    const crmVisible = crmTags.slice(0, 3);
-                    const crmMore = crmTags.length > 3 ? crmTags.length - 3 : 0;
-                    const hasAllergy = tags.some((t) => t.isAllergy) || hasAllergyKeywords([b.dietary_notes, b.special_requests].filter(Boolean).join(' '));
+                    const hasAllergy = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests).some((t) => t.isAllergy) || hasAllergyKeywords([b.dietary_notes, b.special_requests].filter(Boolean).join(' '));
                     const isExpanded = expandedId === b.id;
                     const isTerminalStatus = isTerminal(b.status);
                     const primaryAction = PRIMARY_ACTIONS[b.status];
-                    const sStyle = STATUS_STYLE[b.status] ?? STATUS_STYLE.Pending!;
                     const isReturning = b.visit_count > 0;
+                    const bookingRow: DaySheetBookingRow = { ...b, booking_date: date, inferred_booking_model: 'table_reservation' };
+                    const inferredModel = inferBookingRowModel(bookingRow);
+                    const isTableBooking = inferredModel === 'table_reservation';
+                    const tableLabel = isTableBooking && b.table_assignments && b.table_assignments.length > 0
+                      ? b.table_assignments.length === 1
+                        ? b.table_assignments[0]!.name
+                        : b.table_assignments.map((t) => t.name).join(', ')
+                      : null;
 
                     return (
-                      <li key={b.id} id={`booking-row-${b.id}`} className={`transition-colors ${isTerminalStatus ? 'bg-slate-50/50 opacity-70' : ''} ${hasAllergy ? 'border-l-4 border-l-red-400' : ''} ${highlightBookingId === b.id ? 'ring-2 ring-brand-400 ring-inset bg-brand-50/30' : ''}`}>
+                      <li key={b.id} id={`booking-row-${b.id}`} className={`transition-colors even:bg-slate-50/30 ${isTerminalStatus ? 'bg-slate-50/50 opacity-70' : ''}`}>
                         {/* Collapsed row */}
                         <div
                           role="button"
                           tabIndex={0}
-                          onClick={() => setExpandedId(isExpanded ? null : b.id)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedId(isExpanded ? null : b.id); } }}
-                          className={`flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left transition-colors ${isExpanded ? 'bg-brand-50/40' : 'hover:bg-slate-50/80'}`}
+                          aria-expanded={isExpanded}
+                          aria-controls={`booking-expand-${b.id}`}
+                          onClick={() => toggleExpand(b.id)}
+                          onPointerEnter={() => prefetchBookingDetail(b.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(b.id); } }}
+                          className={`flex w-full cursor-pointer items-center gap-1.5 border-l-[3px] py-2 pl-2 pr-2 text-left transition-colors sm:gap-2 sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(b.status)} ${hasAllergy ? 'border-l-red-400' : ''} ${isExpanded ? 'bg-brand-50/25' : 'hover:bg-slate-50/70'}`}
                         >
-                          {/* Status badge */}
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sStyle.bg} ${sStyle.text}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${sStyle.dot}`} />
-                            {bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))}
-                          </span>
-
-                          {/* Time */}
-                          <span className="w-12 text-xs font-semibold tabular-nums text-slate-600">{b.booking_time}</span>
-
-                          {/* Guest name + indicators */}
-                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                            <span className={`truncate text-sm font-medium ${b.status === 'Cancelled' ? 'line-through text-slate-400' : 'text-slate-900'}`}>
-                              {b.guest_name}
-                            </span>
-                            {b.area_name && (
-                              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600 print:hidden">
-                                {b.area_name}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs sm:text-sm">
+                              <span className={`min-w-0 max-w-[9.5rem] truncate font-semibold sm:max-w-[14rem] ${b.status === 'Cancelled' ? 'line-through text-slate-400' : 'text-slate-900'}`}>
+                                {b.guest_name}
                               </span>
-                            )}
-                            {isReturning && <span className="text-amber-500" title={`${ordinal(b.visit_count + 1)} visit`}>★</span>}
-                            {b.internal_notes && <span className="text-slate-400" title="Staff notes">📝</span>}
-                            {b.source === 'Walk-in' && <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500 print:hidden">Walk-in</span>}
-                            {b.source === 'Online' && <span className="rounded bg-blue-50 px-1 py-0.5 text-[9px] font-medium text-blue-600 print:hidden">Online</span>}
-                            {b.source === 'Phone' && <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500 print:hidden">Phone</span>}
-                            {b.source === 'Staff' && <span className="rounded bg-purple-50 px-1 py-0.5 text-[9px] font-medium text-purple-600 print:hidden">Staff</span>}
-                            {showDepositPendingPill(b) && (
-                              <span
-                                className="rounded-full bg-orange-100 px-2 py-0.5 text-[9px] font-semibold text-orange-950 ring-1 ring-orange-200/80 print:hidden"
-                                title="Deposit not yet paid"
-                              >
-                                Deposit pending
+                              <span className="shrink-0 font-semibold tabular-nums text-slate-700">{b.booking_time.slice(0, 5)}</span>
+                              <span className="shrink-0 text-slate-300">·</span>
+                              <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
+                                {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
                               </span>
-                            )}
-                            {showAttendanceConfirmedPill(b) && (
-                              <span
-                                className="rounded-full bg-teal-100 px-2 py-0.5 text-[9px] font-semibold text-teal-900 ring-1 ring-teal-200/80 print:hidden"
-                                title="Confirmed"
-                              >
-                                Confirmed
+                              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
+                              <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
+                              <Pill variant={statusPillVariant(b.status)} size="sm">{bookingStatusDisplayLabel(b.status, true)}</Pill>
+                              {b.area_name ? (
+                                <span className="hidden sm:inline-flex">
+                                  <Pill variant="neutral" size="sm">{b.area_name}</Pill>
+                                </span>
+                              ) : null}
+                              {isReturning ? <Pill variant="warning" size="sm">{ordinal(b.visit_count + 1)} visit</Pill> : null}
+                              {showDepositPendingPill(b) ? (
+                                <Pill variant="warning" size="sm" dot>
+                                  <span className="sm:hidden">Deposit</span>
+                                  <span className="hidden sm:inline">Deposit pending</span>
+                                </Pill>
+                              ) : null}
+                              {showAttendanceConfirmedPill(b) ? <Pill variant="success" size="sm" dot>Confirmed</Pill> : null}
+                              {b.dietary_notes || hasAllergy ? (
+                                <span className="hidden sm:inline-flex">
+                                  <Pill variant="warning" size="sm" dot>Dietary</Pill>
+                                </span>
+                              ) : null}
+                              {tableLabel ? (
+                                <span className="hidden max-w-[10rem] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 sm:inline-block">
+                                  {tableLabel}
+                                </span>
+                              ) : null}
+                              <span className="hidden sm:inline-flex">
+                                {depositBadge(b.deposit_status, b.deposit_amount_pence)}
                               </span>
-                            )}
+                            </div>
                           </div>
-
-                          {/* Party size */}
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-sm font-bold tabular-nums text-slate-800">
-                            {b.party_size}
-                          </span>
-
-                          {/* Deposit badge (hidden in print per spec, hidden for walk-ins/not required) */}
-                          {b.deposit_status && !['N/A', 'Not Required'].includes(b.deposit_status) && b.source !== 'walk-in' && b.source !== 'Walk-in' && (
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold print:hidden ${
-                              b.deposit_status === 'Paid' ? 'bg-emerald-100 text-emerald-700' :
-                              b.deposit_status === 'Waived' ? 'bg-slate-100 text-slate-600' :
-                              b.deposit_status === 'Refunded' ? 'bg-slate-100 text-slate-500' :
-                              'bg-red-100 text-red-700'
-                            }`}>
-                              {b.deposit_status === 'Paid' ? '£ Paid' : b.deposit_status === 'Waived' ? 'Waived' : b.deposit_status === 'Refunded' ? 'Refunded' : '£ Due'}
-                            </span>
-                          )}
-
-                          {/* Table badge */}
-                          {b.status === 'Seated' && b.table_assignments && b.table_assignments.length > 0 && (
-                            <span className="rounded-full border border-indigo-200 bg-indigo-50/90 px-2 py-0.5 text-[10px] font-semibold text-indigo-800 shadow-sm print:hidden">
-                              {b.table_assignments.length === 1
-                                ? `Table ${b.table_assignments[0]!.name}`
-                                : `Tables ${b.table_assignments.map((t) => t.name).join(', ')}`}
-                            </span>
-                          )}
 
                           {/* Primary action */}
                           {primaryAction && !isTerminalStatus && (
@@ -1641,29 +1356,11 @@ export function DaySheetView({
                               disabled={actionLoading === b.id}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (primaryAction.target === 'Completed') {
-                                  setConfirmDialog({
-                                    title: 'Complete Booking',
-                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked Completed.`,
-                                    confirmLabel: 'Mark Completed',
-                                    onConfirm: () => void changeStatus(b.id, primaryAction.target),
-                                  });
-                                  return;
-                                }
-                                if (primaryAction.target === 'Seated' && activeTables.length > 0) {
-                                  e.stopPropagation();
-                                  setSeatWithTableBookingId(b.id);
-                                  setSeatSelectedTableIds([]);
-                                  return;
-                                }
-                                void changeStatus(b.id, primaryAction.target);
+                                requestStatusChange(b, primaryAction.target);
                               }}
-                              className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50 print:hidden ${
-                                primaryAction.target === 'Booked' ? 'bg-sky-600 hover:bg-sky-700' :
-                                primaryAction.target === 'Confirmed' ? 'bg-emerald-600 hover:bg-emerald-700' :
-                                primaryAction.target === 'Seated' ? 'bg-brand-600 hover:bg-brand-700' :
-                                'bg-slate-600 hover:bg-slate-700'
-                              }`}
+                              className="inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg bg-brand-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 active:bg-brand-800 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs print:hidden"
+                              aria-label={`${primaryAction.label} booking for ${b.guest_name}`}
+                              aria-busy={actionLoading === b.id}
                             >
                               {actionLoading === b.id ? '...' : primaryAction.label}
                             </button>
@@ -1677,9 +1374,11 @@ export function DaySheetView({
                                 setChangeTableBookingId(b.id);
                                 setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
                               }}
-                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 print:hidden"
+                              className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 active:bg-slate-100 disabled:opacity-60 sm:px-2.5 sm:text-xs print:hidden"
+                              aria-label={`Change table for ${b.guest_name}`}
                             >
-                              Change table
+                              <span className="sm:hidden">Table</span>
+                              <span className="hidden sm:inline">Change table</span>
                             </button>
                           )}
                           {canShowDaySheetStaffAttendanceToggle(b) && (
@@ -1690,340 +1389,55 @@ export function DaySheetView({
                                 e.stopPropagation();
                                 void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at));
                               }}
-                              className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm hover:bg-teal-100 disabled:opacity-50 print:hidden"
+                              className={`${b.staff_attendance_confirmed_at ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400/30' : 'border-teal-200 bg-teal-50 text-teal-900 hover:bg-teal-100 focus:ring-teal-400/30'} inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs print:hidden`}
+                              aria-label={`${b.staff_attendance_confirmed_at ? 'Cancel staff attendance confirmation' : 'Confirm attendance'} for ${b.guest_name}`}
+                              aria-busy={staffAttendanceLoadingId === b.id}
                             >
-                              {staffAttendanceLoadingId === b.id
-                                ? '…'
-                                : b.staff_attendance_confirmed_at
-                                  ? 'Cancel confirmation'
-                                  : 'Confirm Booking'}
+                              {staffAttendanceLoadingId === b.id ? (
+                                <span
+                                  className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${b.staff_attendance_confirmed_at ? 'border-slate-400/30 border-t-slate-600' : 'border-teal-700/25 border-t-teal-800'}`}
+                                  aria-hidden
+                                />
+                              ) : null}
+                              {b.staff_attendance_confirmed_at ? (
+                                <>
+                                  <span className="sm:hidden">Undo</span>
+                                  <span className="hidden sm:inline">Cancel confirmation</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="sm:hidden">Confirm</span>
+                                  <span className="hidden sm:inline">Confirm Booking</span>
+                                </>
+                              )}
                             </button>
                           )}
 
                           {/* Expand indicator */}
-                          <span className="text-slate-300 print:hidden" aria-hidden="true">›</span>
+                          <svg className={`h-4 w-4 shrink-0 text-slate-400 transition-transform print:hidden ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                          </svg>
                         </div>
 
-                        {/* Dietary/special requests line */}
-                        {(tags.length > 0 || b.special_requests || crmTags.length > 0) && (
-                          <div className={`px-4 pb-2 space-y-1 ${isTerminalStatus ? 'opacity-60' : ''}`}>
-                            {crmTags.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {crmVisible.map((tag, ti) => (
-                                  <span
-                                    key={`crm-${tag}-${ti}`}
-                                    className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-800 ring-1 ring-violet-200"
-                                  >
-                                    {tag}
-                                  </span>
-                                ))}
-                                {crmMore > 0 && (
-                                  <span className="text-[10px] font-semibold text-violet-700">+{crmMore}</span>
-                                )}
-                              </div>
-                            )}
-                            {tags.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {tags.map((t) => (
-                                  <span key={t.label} className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                    t.isAllergy ? 'bg-red-100 text-red-800 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
-                                  }`}>
-                                    {t.isAllergy && <span className="text-red-500">⚠</span>}
-                                    {t.icon} {t.label}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            {b.special_requests && (
-                              <p className={`text-xs ${hasAllergy ? 'font-semibold text-red-800' : 'text-slate-500 italic'}`}>
-                                {b.special_requests}
-                              </p>
-                            )}
-                          </div>
+                        {isExpanded && (
+                          <ExpandedBookingContent
+                            booking={bookingRow}
+                            detail={detailById[b.id]}
+                            detailLoading={detailLoadingIds.includes(b.id)}
+                            tableManagementEnabled={tableManagementEnabled}
+                            venueId={venueId}
+                            draftMessage={messageDraftById[b.id] ?? ''}
+                            sendingMessage={sendingMessageIds.includes(b.id)}
+                            onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
+                            onSendMessage={(channel) => { void sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel); }}
+                            onStatusAction={(status) => { requestStatusChange(b, status); }}
+                            onDetailUpdated={() => handleDetailUpdated(b.id)}
+                            onRequestChangeTable={!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {
+                              setChangeTableBookingId(b.id);
+                              setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
+                            } : undefined}
+                          />
                         )}
-
-                        {/* Internal notes for print only */}
-                        {b.internal_notes && (
-                          <div className="hidden print:block px-4 pb-2">
-                            <p className="text-xs text-slate-600 italic">Internal note: {b.internal_notes}</p>
-                          </div>
-                        )}
-
-                        {/* ── Expanded detail (layout aligned with dashboard/bookings concertina) ── */}
-                        {isExpanded && (() => {
-                          const guestName = b.guest_name || 'Guest';
-                          const depositAmtStr = b.deposit_amount_pence ? `£${(b.deposit_amount_pence / 100).toFixed(2)}` : null;
-                          const tableNames = (b.table_assignments ?? []).map((t) => t.name);
-                          return (
-                             
-                            <div
-                              className="border-t border-slate-100 bg-slate-50/40"
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <div className="space-y-3 px-2 py-3 sm:px-3 lg:px-1 lg:py-3">
-                                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                                  {/* Guest card */}
-                                  <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                                    <div className="flex items-center gap-3">
-                                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
-                                        {guestName.charAt(0).toUpperCase()}
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-semibold text-slate-900">{guestName}</p>
-                                        <p className="text-[11px] text-slate-500">
-                                          {b.visit_count > 0 ? `${b.visit_count} visit${b.visit_count !== 1 ? 's' : ''}` : 'First visit'}
-                                          {b.no_show_count > 0 && (
-                                            <span className="ml-1 text-red-500">({b.no_show_count} no-show{b.no_show_count > 1 ? 's' : ''})</span>
-                                          )}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="mt-2.5 space-y-1">
-                                      {b.guest_phone ? (
-                                        <a href={`tel:${b.guest_phone}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
-                                          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
-                                          {b.guest_phone}
-                                        </a>
-                                      ) : null}
-                                      {b.guest_email ? (
-                                        <a href={`mailto:${b.guest_email}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
-                                          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
-                                          <span className="truncate">{b.guest_email}</span>
-                                        </a>
-                                      ) : null}
-                                      {!b.guest_phone && !b.guest_email && (
-                                        <p className="text-xs italic text-slate-400">No contact details</p>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Booking summary */}
-                                  <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</p>
-                                        <p className="text-sm font-medium text-slate-800">{formatDateNice(date)}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Time</p>
-                                        <p className="text-sm font-medium text-slate-800">
-                                          {b.booking_time.slice(0, 5)}
-                                          {b.estimated_end_time ? (
-                                            <span className="text-slate-500"> – {b.estimated_end_time}</span>
-                                          ) : null}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Covers</p>
-                                        <p className="text-sm font-medium text-slate-800">{b.party_size}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit</p>
-                                        <p className={`text-sm font-medium ${b.deposit_status === 'Paid' ? 'text-emerald-700' : b.deposit_status === 'Pending' || b.deposit_status === 'Requested' || b.deposit_status === 'Unpaid' ? 'text-amber-700' : 'text-slate-500'}`}>
-                                          {b.deposit_status === 'Paid' && depositAmtStr ? `${depositAmtStr} Paid` : b.deposit_status === 'Not Required' ? 'None' : b.deposit_status}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    {(tableManagementEnabled || tableNames.length > 0) && (
-                                      <div className="mt-2.5 border-t border-slate-100 pt-2">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Table</p>
-                                        <p className={`text-sm font-medium ${tableNames.length > 0 ? 'text-slate-800' : 'text-amber-600'}`}>
-                                          {tableNames.length > 0 ? tableNames.join(' + ') : 'Unassigned'}
-                                        </p>
-                                      </div>
-                                    )}
-                                    {b.occasion && (
-                                      <div className="mt-2.5 border-t border-slate-100 pt-2">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
-                                        <p className="text-sm font-medium text-violet-900">{b.occasion}</p>
-                                      </div>
-                                    )}
-                                    <div className="mt-2.5 border-t border-slate-100 pt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-x-3">
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Source</p>
-                                        <p className="text-sm font-medium text-slate-700">{b.source}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Created</p>
-                                        <p className="text-xs font-medium text-slate-600">{new Date(b.created_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Visit history</p>
-                                        <p className="text-sm font-medium text-slate-700">
-                                          {b.visit_count === 0 ? 'First visit' : `${ordinal(b.visit_count + 1)} visit`}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="mt-2.5 border-t border-slate-100 pt-2">
-                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit actions</p>
-                                      <DepositActions booking={b} onAction={() => void fetchDaySheet()} />
-                                    </div>
-                                    <div className="mt-2.5 border-t border-slate-100 pt-2">
-                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Attendance</p>
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        {showDepositPendingPill(b) && (
-                                          <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-950 ring-1 ring-orange-200/80">
-                                            Deposit pending
-                                          </span>
-                                        )}
-                                        {showAttendanceConfirmedPill(b) && (
-                                          <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80">
-                                            Confirmed
-                                          </span>
-                                        )}
-                                        {!showDepositPendingPill(b) && !showAttendanceConfirmedPill(b) && (
-                                          <span className="text-xs text-slate-500">No attendance flags yet</span>
-                                        )}
-                                      </div>
-                                      {(() => {
-                                        const { guestAt, staffAt } = attendanceConfirmationSources(b);
-                                        if (!guestAt && !staffAt) return null;
-                                        return (
-                                          <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
-                                            {guestAt && (
-                                              <li>
-                                                Guest confirmed:{' '}
-                                                {new Date(guestAt).toLocaleString('en-GB')}
-                                              </li>
-                                            )}
-                                            {staffAt && (
-                                              <li>
-                                                Staff marked:{' '}
-                                                {new Date(staffAt).toLocaleString('en-GB')}
-                                              </li>
-                                            )}
-                                          </ul>
-                                        );
-                                      })()}
-                                      {canShowDaySheetStaffAttendanceToggle(b) && (
-                                        <button
-                                          type="button"
-                                          disabled={staffAttendanceLoadingId === b.id}
-                                          onClick={() =>
-                                            void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at))
-                                          }
-                                          className="mt-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
-                                        >
-                                          {staffAttendanceLoadingId === b.id
-                                            ? '…'
-                                            : b.staff_attendance_confirmed_at
-                                              ? 'Cancel confirmation'
-                                              : 'Confirm Booking'}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <BookingNotesEditablePanel
-                                    bookingId={b.id}
-                                    dietaryNotes={b.dietary_notes}
-                                    guestRequests={b.special_requests}
-                                    staffNotes={b.internal_notes}
-                                    onSaved={() => {
-                                      void fetchDaySheet();
-                                    }}
-                                  />
-                                </div>
-
-                                {/* Actions bar - matches bookings concertina toolbar */}
-                                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 print:hidden">
-                                  <button type="button" onClick={() => setEditBooking(b)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                    Edit Booking
-                                  </button>
-                                  {!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 && (
-                                    <button
-                                      type="button"
-                                      disabled={actionLoading === b.id}
-                                      onClick={() => {
-                                        setChangeTableBookingId(b.id);
-                                        setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
-                                      }}
-                                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                    >
-                                      Change table
-                                    </button>
-                                  )}
-                                  <button type="button" onClick={() => setSendMessageId(b.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                    Send Message
-                                  </button>
-                                  {BOOKING_REVERT_ACTIONS[b.status as BookingStatus] && (
-                                    <button
-                                      type="button"
-                                      disabled={actionLoading === b.id}
-                                      onClick={() => {
-                                        const ra = BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!;
-                                        setConfirmDialog({
-                                          title: ra.label,
-                                          message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))} back to ${bookingStatusDisplayLabel(ra.target, isTableReservationBooking(b))}.`,
-                                          confirmLabel: ra.label,
-                                          onConfirm: () => void changeStatus(b.id, ra.target),
-                                        });
-                                      }}
-                                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                                    >
-                                      {BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!.label}
-                                    </button>
-                                  )}
-                                  {(b.status === 'Confirmed' || b.status === 'Booked') && (
-                                    <button
-                                      type="button"
-                                      disabled={actionLoading === b.id || !canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes)}
-                                      title={!canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes) ? `Available ${data.no_show_grace_minutes} min after booking time` : undefined}
-                                      onClick={() => setConfirmDialog({
-                                        title: 'Mark as No-Show',
-                                        message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked No-Show.`,
-                                        confirmLabel: 'Mark No-Show',
-                                        onConfirm: () => void changeStatus(b.id, 'No-Show'),
-                                      })}
-                                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                    >
-                                      No-Show
-                                    </button>
-                                  )}
-                                  {(b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') && (
-                                    <button
-                                      type="button"
-                                      disabled={actionLoading === b.id}
-                                      onClick={() => setConfirmDialog({
-                                        title: 'Cancel Booking',
-                                        message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be cancelled. A cancellation message will be sent to the guest.`,
-                                        confirmLabel: 'Cancel Booking',
-                                        onConfirm: () => void changeStatus(b.id, 'Cancelled'),
-                                      })}
-                                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                    >
-                                      Cancel Booking
-                                    </button>
-                                  )}
-                                </div>
-
-                                <div className="rounded-xl border border-slate-200 bg-white p-3">
-                                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Communications</p>
-                                  {expandedComms == null ? (
-                                    <div className="space-y-2" role="status" aria-label="Loading communications">
-                                      <Skeleton.Line className="h-3 w-full" />
-                                      <Skeleton.Line className="h-3 w-4/5" />
-                                    </div>
-                                  ) : expandedComms.length === 0 ? (
-                                    <p className="text-xs text-slate-400">No messages sent</p>
-                                  ) : (
-                                    <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
-                                      {expandedComms.map((c) => (
-                                        <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-600">
-                                          <span className={`rounded px-1.5 py-0.5 font-medium ${c.channel === 'sms' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-600'}`}>{c.channel.toUpperCase()}</span>
-                                          <span>{c.message_type.replace(/_/g, ' ')}</span>
-                                          <span className={c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}>{c.status}</span>
-                                          <span className="text-slate-400">{new Date(c.created_at).toLocaleString()}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
                       </li>
                     );
                   })}
@@ -2070,28 +1484,6 @@ export function DaySheetView({
           enabledModels={enabledModels}
           advancedMode={tableManagementEnabled}
           initialDate={date}
-        />
-      )}
-      {editBooking && (
-        <EditBookingModal
-          booking={editBooking}
-          date={date}
-          venueId={venueId}
-          onSaved={() => {
-            addToast('Booking updated', 'success');
-            void fetchDaySheet();
-          }}
-          onClose={() => setEditBooking(null)}
-        />
-      )}
-      {sendMessageId && (
-        <SendMessageDialog
-          bookingId={sendMessageId}
-          onClose={() => setSendMessageId(null)}
-          onSent={() => {
-            addToast('Message sent', 'success');
-            void fetchDaySheet();
-          }}
         />
       )}
       {confirmDialog && (

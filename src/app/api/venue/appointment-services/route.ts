@@ -17,6 +17,11 @@ import { customWorkingHoursRequestSchema } from '@/lib/service-custom-schedule-z
 import { isServiceCustomScheduleEmpty, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import {
+  loadVariantsForServices,
+  replaceServiceVariants,
+  variantsArraySchema,
+} from '@/lib/venue/service-variants';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -395,8 +400,20 @@ export async function GET() {
 
       const services = (servicesRes.data ?? []).map((s) => mapServiceItemRowForDashboard(s as Record<string, unknown>));
 
+      const serviceIds = services.map((s) => s.id as string);
+      const variantMap = await loadVariantsForServices({
+        admin,
+        venueId: staff.venue_id,
+        schema: 'service_item',
+        parentIds: serviceIds,
+      });
+      const servicesWithVariants = services.map((s) => ({
+        ...s,
+        variants: variantMap.get(s.id as string) ?? [],
+      }));
+
       return NextResponse.json({
-        services,
+        services: servicesWithVariants,
         practitioner_services,
       });
     }
@@ -424,8 +441,21 @@ export async function GET() {
 
     const practitioner_services = linksRes.data ?? [];
 
+    const services = (servicesRes.data ?? []) as Array<Record<string, unknown>>;
+    const serviceIds = services.map((s) => s.id as string);
+    const variantMap = await loadVariantsForServices({
+      admin,
+      venueId: staff.venue_id,
+      schema: 'appointment_service',
+      parentIds: serviceIds,
+    });
+    const servicesWithVariants = services.map((s) => ({
+      ...s,
+      variants: variantMap.get(s.id as string) ?? [],
+    }));
+
     return NextResponse.json({
-      services: servicesRes.data,
+      services: servicesWithVariants,
       practitioner_services,
     });
   } catch (err) {
@@ -447,6 +477,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    const variantsRaw = (body as { variants?: unknown }).variants;
+    const variantsProvided = variantsRaw !== undefined;
+    let parsedVariants: z.infer<typeof variantsArraySchema> = [];
+    if (variantsProvided) {
+      const variantsParsed = variantsArraySchema.safeParse(variantsRaw);
+      if (!variantsParsed.success) {
+        return NextResponse.json(
+          { error: 'Invalid variants', details: variantsParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      parsedVariants = variantsParsed.data;
+    }
+
     if (staff.role !== 'admin') {
       if (
         Object.prototype.hasOwnProperty.call(body, 'custom_availability_enabled') ||
@@ -454,6 +498,12 @@ export async function POST(request: NextRequest) {
       ) {
         return NextResponse.json(
           { error: 'Only venue admins can set per-service availability hours.' },
+          { status: 403 },
+        );
+      }
+      if (variantsProvided) {
+        return NextResponse.json(
+          { error: 'Only venue admins can manage service variants.' },
           { status: 403 },
         );
       }
@@ -559,7 +609,25 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>), { status: 201 });
+      let savedVariants: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
+      if (variantsProvided) {
+        savedVariants = await replaceServiceVariants({
+          admin,
+          venueId: staff.venue_id,
+          parent: { kind: 'service_item', service_item_id: data.id as string },
+          variants: parsedVariants,
+        });
+        if (!savedVariants.ok) {
+          await admin.from('service_items').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
+          return NextResponse.json({ error: savedVariants.error }, { status: 500 });
+        }
+      }
+
+      const dashboardRow = mapServiceItemRowForDashboard(data as Record<string, unknown>);
+      return NextResponse.json(
+        { ...dashboardRow, variants: savedVariants?.ok ? savedVariants.variants : [] },
+        { status: 201 },
+      );
     }
 
     if (practitionerIdsForLinks.length > 0) {
@@ -605,7 +673,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json(data, { status: 201 });
+    let savedVariantsLegacy: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
+    if (variantsProvided) {
+      savedVariantsLegacy = await replaceServiceVariants({
+        admin,
+        venueId: staff.venue_id,
+        parent: { kind: 'appointment_service', appointment_service_id: data.id as string },
+        variants: parsedVariants,
+      });
+      if (!savedVariantsLegacy.ok) {
+        await admin.from('appointment_services').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
+        return NextResponse.json({ error: savedVariantsLegacy.error }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json(
+      { ...(data as Record<string, unknown>), variants: savedVariantsLegacy?.ok ? savedVariantsLegacy.variants : [] },
+      { status: 201 },
+    );
   } catch (err) {
     console.error('POST /api/venue/appointment-services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -620,13 +705,26 @@ export async function PATCH(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const body = await request.json();
-    const { id, practitioner_ids: rawPractitionerIds, ...rest } = body;
+    const { id, practitioner_ids: rawPractitionerIds, variants: variantsRaw, ...rest } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const parsed = servicePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    const variantsProvided = variantsRaw !== undefined;
+    let parsedVariants: z.infer<typeof variantsArraySchema> = [];
+    if (variantsProvided) {
+      const variantsParsed = variantsArraySchema.safeParse(variantsRaw);
+      if (!variantsParsed.success) {
+        return NextResponse.json(
+          { error: 'Invalid variants', details: variantsParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      parsedVariants = variantsParsed.data;
     }
 
     if (staff.role !== 'admin') {
@@ -646,6 +744,12 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
+      }
+      if (variantsProvided) {
+        return NextResponse.json(
+          { error: 'Only venue admins can manage service variants.' },
+          { status: 403 },
+        );
       }
     }
 
@@ -811,11 +915,34 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
         }
         savedRow = (data as Record<string, unknown>) ?? savedRow;
-      } else if (requestedManagedCalendarIds === undefined) {
+      } else if (requestedManagedCalendarIds === undefined && !variantsProvided) {
         return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
       }
 
-      return NextResponse.json(mapServiceItemRowForDashboard(savedRow));
+      let savedVariants: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
+      if (variantsProvided) {
+        savedVariants = await replaceServiceVariants({
+          admin,
+          venueId: staff.venue_id,
+          parent: { kind: 'service_item', service_item_id: id as string },
+          variants: parsedVariants,
+        });
+        if (!savedVariants.ok) {
+          return NextResponse.json({ error: savedVariants.error }, { status: 500 });
+        }
+      }
+
+      const variantMap = await loadVariantsForServices({
+        admin,
+        venueId: staff.venue_id,
+        schema: 'service_item',
+        parentIds: [id as string],
+      });
+
+      return NextResponse.json({
+        ...mapServiceItemRowForDashboard(savedRow),
+        variants: variantMap.get(id as string) ?? [],
+      });
     }
 
     const { data: serviceRow, error: serviceErr } = await admin
@@ -973,11 +1100,34 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
       }
       savedRow = (data as Record<string, unknown>) ?? savedRow;
-    } else if (requestedPractitionerIds === undefined) {
+    } else if (requestedPractitionerIds === undefined && !variantsProvided) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    return NextResponse.json(savedRow);
+    let savedVariantsLegacy: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
+    if (variantsProvided) {
+      savedVariantsLegacy = await replaceServiceVariants({
+        admin,
+        venueId: staff.venue_id,
+        parent: { kind: 'appointment_service', appointment_service_id: id as string },
+        variants: parsedVariants,
+      });
+      if (!savedVariantsLegacy.ok) {
+        return NextResponse.json({ error: savedVariantsLegacy.error }, { status: 500 });
+      }
+    }
+
+    const variantMapLegacy = await loadVariantsForServices({
+      admin,
+      venueId: staff.venue_id,
+      schema: 'appointment_service',
+      parentIds: [id as string],
+    });
+
+    return NextResponse.json({
+      ...savedRow,
+      variants: variantMapLegacy.get(id as string) ?? [],
+    });
   } catch (err) {
     console.error('PATCH /api/venue/appointment-services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

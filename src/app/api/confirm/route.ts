@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from("bookings")
       .select(
-        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
       )
       .eq("id", bookingId)
       .single();
@@ -103,6 +103,7 @@ export async function GET(request: NextRequest) {
       appointment_service_id?: string | null;
       calendar_id?: string | null;
       service_item_id?: string | null;
+      service_variant_id?: string | null;
       experience_event_id?: string | null;
       class_instance_id?: string | null;
       resource_id?: string | null;
@@ -170,8 +171,16 @@ export async function GET(request: NextRequest) {
       booking_end_label = String(bookingRow.booking_end_time).slice(0, 5);
     }
 
+    const variantPromise = bookingRow.service_variant_id
+      ? supabase
+          .from("service_variants")
+          .select("name")
+          .eq("id", bookingRow.service_variant_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null });
+
     if (unifiedAppt) {
-      const [{ data: uc }, { data: si }] = await Promise.all([
+      const [{ data: uc }, { data: si }, { data: variant }] = await Promise.all([
         supabase
           .from("unified_calendars")
           .select("name")
@@ -182,11 +191,15 @@ export async function GET(request: NextRequest) {
           .select("name")
           .eq("id", bookingRow.service_item_id as string)
           .maybeSingle(),
+        variantPromise,
       ]);
       practitioner_name = (uc as { name?: string } | null)?.name ?? null;
-      appointment_service_name = (si as { name?: string } | null)?.name ?? null;
+      const baseName = (si as { name?: string } | null)?.name ?? null;
+      const variantName = (variant as { name?: string } | null)?.name ?? null;
+      appointment_service_name =
+        baseName && variantName ? `${baseName} - ${variantName}` : baseName ?? variantName;
     } else if (legacyAppt) {
-      const [{ data: pr }, { data: svc }] = await Promise.all([
+      const [{ data: pr }, { data: svc }, { data: variant }] = await Promise.all([
         supabase
           .from("practitioners")
           .select("name")
@@ -197,9 +210,13 @@ export async function GET(request: NextRequest) {
           .select("name")
           .eq("id", bookingRow.appointment_service_id as string)
           .maybeSingle(),
+        variantPromise,
       ]);
       practitioner_name = pr?.name ?? null;
-      appointment_service_name = svc?.name ?? null;
+      const baseName = (svc as { name?: string } | null)?.name ?? null;
+      const variantName = (variant as { name?: string } | null)?.name ?? null;
+      appointment_service_name =
+        baseName && variantName ? `${baseName} - ${variantName}` : baseName ?? variantName;
     }
 
     const practitionerIdForUi = (bookingRow.practitioner_id ??

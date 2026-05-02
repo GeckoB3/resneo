@@ -16,6 +16,11 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import {
+  applyVariantToAppointmentInput,
+  resolveBookableServiceWithVariant,
+} from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
@@ -32,6 +37,8 @@ const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
   practitioner_id: z.string().uuid(),
   start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
+  /** Optional sub-option for the parent service. */
+  service_variant_id: z.string().uuid().optional(),
 });
 
 const createMultiServiceSchema = z.object({
@@ -159,6 +166,7 @@ export async function POST(request: NextRequest) {
     type ValidatedSeg = {
       practitioner_id: string;
       appointment_service_id: string;
+      service_variant_id: string | null;
       booking_date: string;
       booking_time: string;
       duration_minutes: number;
@@ -185,6 +193,27 @@ export async function POST(request: NextRequest) {
       });
       input.phantomBookings = [...phantoms];
 
+      let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
+      if (seg.service_variant_id) {
+        chosenVariant = await loadActiveVariantForService({
+          admin: supabase,
+          venueId: venue_id,
+          serviceId: seg.service_id,
+          variantId: seg.service_variant_id,
+        });
+        if (!chosenVariant) {
+          return NextResponse.json(
+            { error: 'Invalid service_variant_id for this service' },
+            { status: 400 },
+          );
+        }
+        applyVariantToAppointmentInput({
+          services: input.services,
+          serviceId: seg.service_id,
+          variant: chosenVariant,
+        });
+      }
+
       const svcWindow = await loadServiceEntityBookingWindow(supabase, venue_id, venueMode.bookingModel, seg.service_id);
       attachVenueClockToAppointmentInput(
         input,
@@ -203,7 +232,8 @@ export async function POST(request: NextRequest) {
       const ps = input.practitionerServices.find(
         (row) => row.practitioner_id === practitionerId && row.service_id === seg.service_id,
       );
-      const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
       const durationMins = svc?.duration_minutes ?? 30;
       const bufferMins = svc?.buffer_minutes ?? 0;
 
@@ -240,6 +270,7 @@ export async function POST(request: NextRequest) {
       validated.push({
         practitioner_id: practitionerId,
         appointment_service_id: seg.service_id,
+        service_variant_id: seg.service_variant_id ?? null,
         booking_date,
         booking_time: timeStr,
         duration_minutes: durationMins,
@@ -337,6 +368,7 @@ export async function POST(request: NextRequest) {
         estimated_end_time: seg.estimated_end_time,
         practitioner_id: useUnifiedBookingRows ? null : seg.practitioner_id,
         appointment_service_id: useUnifiedBookingRows ? null : seg.appointment_service_id,
+        service_variant_id: seg.service_variant_id,
         group_booking_id: groupBookingId,
         person_label: null,
         ...(useUnifiedBookingRows

@@ -8,6 +8,7 @@ import {
   venueUsesUnifiedAppointmentData,
 } from '@/lib/booking/unified-scheduling';
 import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 
 /**
  * GET /api/venue/appointment-calendar?practitioner_id=&service_id=&year=&month=
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
     const serviceId = searchParams.get('service_id');
     const yearParam = searchParams.get('year');
     const monthParam = searchParams.get('month');
+    const variantId = searchParams.get('variant_id');
 
     if (!practitionerId || !serviceId) {
       return NextResponse.json(
@@ -55,6 +57,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const variantOverride = variantId
+      ? await loadActiveVariantForService({
+          admin,
+          venueId: staff.venue_id,
+          serviceId,
+          variantId,
+        })
+      : null;
+    if (variantId && !variantOverride) {
+      return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
+    }
+
     const available_dates = await computeAppointmentAvailableDatesInMonth(
       admin,
       staff.venue_id,
@@ -62,7 +76,7 @@ export async function GET(request: NextRequest) {
       serviceId,
       year,
       month,
-      { audience: 'staff' },
+      { audience: 'staff', variantOverride },
     );
 
     return NextResponse.json(

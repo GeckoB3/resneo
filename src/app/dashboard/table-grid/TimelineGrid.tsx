@@ -1507,6 +1507,7 @@ export function TimelineGrid({
                       onQuickStatusChange={(nextStatus) => { void handleStatusChange(block.id, block.status, nextStatus); }}
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
+                      onResizeBooking={onResizeBooking}
                       activeDragBookingId={activeDrag?.id ?? null}
                       moveSuggestion={moveSuggestionsByBookingId.get(block.id)}
                       onSuggestedMove={handleSuggestedMove}
@@ -1577,6 +1578,7 @@ export function TimelineGrid({
                       onQuickStatusChange={(nextStatus) => { void handleStatusChange(block.id, block.status, nextStatus); }}
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
+                      onResizeBooking={onResizeBooking}
                       activeDragBookingId={activeDrag?.id ?? null}
                       moveSuggestion={moveSuggestionsByBookingId.get(block.id)}
                       onSuggestedMove={handleSuggestedMove}
@@ -1933,6 +1935,7 @@ function DraggableBlock({
   onQuickStatusChange,
   resizeVisual,
   onResizeVisual,
+  onResizeBooking,
   activeDragBookingId,
   moveSuggestion,
   onSuggestedMove,
@@ -1953,6 +1956,7 @@ function DraggableBlock({
   onQuickStatusChange: (nextStatus: BookingStatus) => void;
   resizeVisual: { bookingId: string; deltaPx: number } | null;
   onResizeVisual: (state: { bookingId: string; deltaPx: number } | null) => void;
+  onResizeBooking: (bookingId: string, newEndTime: string) => void;
   activeDragBookingId: string | null;
   moveSuggestion?: MoveSuggestion;
   onSuggestedMove: (block: BookingBlock, suggestion: MoveSuggestion) => void;
@@ -2032,7 +2036,8 @@ function DraggableBlock({
     const applyDeltaX = (clientX: number) => {
       const deltaX = clientX - resizeStartXRef.current;
       const minutesPerPixel = slotMinutes / slotWidth;
-      const nextEnd = Math.max(minEnd, Math.round(resizeStartEndRef.current + deltaX * minutesPerPixel));
+      const rawEnd = resizeStartEndRef.current + deltaX * minutesPerPixel;
+      const nextEnd = Math.max(minEnd, Math.round(rawEnd));
       const minDeltaPx = ((minEnd - resizeStartEndRef.current) / slotMinutes) * slotWidth;
       const clampedDeltaPx = Math.max(minDeltaPx, deltaX);
       const endStr = minutesToTime(nextEnd);
@@ -2077,11 +2082,7 @@ function DraggableBlock({
         justResizedRef.current = false;
       }, 200);
 
-      window.dispatchEvent(
-        new CustomEvent('timeline-resize-booking', {
-          detail: { bookingId: block.id, endTime: endStr },
-        }),
-      );
+      onResizeBooking(block.id, endStr);
       emitVisualInteraction(false);
 
       window.requestAnimationFrame(() => {
@@ -2208,7 +2209,7 @@ function DraggableBlock({
         )}
       </div>
       {(canShowMoveSuggestion || canConfirmBooking || canShowPrimaryAction) && (
-        <div className="flex shrink-0 items-center gap-1 pr-1">
+        <div className="relative z-[2] flex shrink-0 items-center gap-1 pr-4 sm:pr-3">
           {moveSuggestion && canShowMoveSuggestion && (
             <button
               type="button"
@@ -2219,7 +2220,7 @@ function DraggableBlock({
                 e.stopPropagation();
                 onSuggestedMove(block, moveSuggestion);
               }}
-              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold shadow-sm ring-1 ring-black/5 transition-colors focus:outline-none focus:ring-2 ${moveSuggestion.buttonClassName}`}
+              className={`inline-flex min-h-7 items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold shadow-sm ring-1 ring-black/5 transition-colors touch-manipulation focus:outline-none focus:ring-2 sm:min-h-0 sm:px-1.5 sm:py-0.5 ${moveSuggestion.buttonClassName}`}
               aria-label={`Move ${block.guest_name} to ${moveSuggestion.targetTableName}`}
               title={`Move to ${moveSuggestion.targetTableName}`}
             >
@@ -2237,7 +2238,7 @@ function DraggableBlock({
                 e.stopPropagation();
                 onQuickStatusChange('Confirmed');
               }}
-              className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-emerald-700/10 transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
+              className="min-h-7 rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-emerald-700/10 transition-colors touch-manipulation hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 sm:min-h-0 sm:px-1.5 sm:py-0.5"
               aria-label={`Confirm booking for ${block.guest_name}`}
             >
               Confirm
@@ -2253,7 +2254,7 @@ function DraggableBlock({
                 e.stopPropagation();
                 onQuickStatusChange(primaryAction.target);
               }}
-              className="rounded-md bg-white/80 px-1.5 py-0.5 text-[10px] font-bold text-slate-800 shadow-sm ring-1 ring-black/5 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400/40"
+              className="min-h-7 rounded-md bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-800 shadow-sm ring-1 ring-black/5 transition-colors touch-manipulation hover:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:min-h-0 sm:px-1.5 sm:py-0.5"
               aria-label={`${primaryActionLabel} booking for ${block.guest_name}`}
             >
               {primaryActionLabel}
@@ -2262,15 +2263,17 @@ function DraggableBlock({
         </div>
       )}
       {!dragDisabled && (
-      <span
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={`Resize end time for ${block.guest_name}`}
-        onPointerDown={startResize}
-        className="absolute right-0 top-0 z-[1] flex h-full min-h-[44px] min-w-[44px] max-w-[44px] cursor-ew-resize touch-none items-stretch justify-end bg-gradient-to-l from-black/25 to-transparent opacity-70 transition-opacity hover:opacity-100 sm:min-h-0 sm:min-w-0 sm:max-w-none sm:w-2 sm:bg-black/20"
-        style={{ touchAction: 'none' }}
-        title="Drag to resize end"
-      />
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize end time for ${block.guest_name}`}
+          onPointerDown={startResize}
+          className="absolute right-0 top-0 z-[3] flex h-full min-h-[44px] w-[15px] cursor-ew-resize touch-none items-stretch justify-end opacity-70 transition-opacity hover:opacity-100 sm:min-h-0"
+          style={{ touchAction: 'none' }}
+          title="Drag to resize end"
+        >
+          <span className="h-full w-2 bg-black/20" aria-hidden />
+        </span>
       )}
       {!dragDisabled && resizePreviewEnd && (
         <span className="absolute -top-5 right-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">

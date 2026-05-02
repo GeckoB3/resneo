@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useLayoutEffect, useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 interface HelpTooltipProps {
   content: string;
@@ -85,22 +86,11 @@ export function HelpTooltip({ content, maxWidth = 280, icon = 'i' }: HelpTooltip
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const handleClickOutside = useCallback((e: MouseEvent | TouchEvent) => {
-    const t = e.target as Node;
-    if (rootRef.current?.contains(t)) return;
-    if (panelRef.current?.contains(t)) return;
-    setOpen(false);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('touchstart', handleClickOutside);
-    };
-  }, [open, handleClickOutside]);
+  useDismissibleLayer({
+    open,
+    refs: [rootRef, panelRef],
+    onDismiss: () => setOpen(false),
+  });
 
   const fallbackWidth =
     typeof window !== 'undefined' ? Math.min(maxWidth, window.innerWidth - 24) : maxWidth;

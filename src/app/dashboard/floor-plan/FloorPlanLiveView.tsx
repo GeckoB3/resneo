@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, type RefObject } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type RefObject } from 'react';
 import dynamic from 'next/dynamic';
 import type { VenueTable, TableGridData, TableBlock, UndoAction } from '@/types/table-management';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
@@ -31,8 +31,41 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
+import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+interface FloorPlanLivePreferences {
+  selectedDate?: string;
+  selectedTime?: string;
+  startHourOverride?: number | null;
+  endHourOverride?: number | null;
+  timeRangeFilterActive?: boolean;
+}
+
+function floorPlanLivePreferencesKey(venueId: string): string {
+  return `reserve:dashboard:floor-plan:${venueId}:live-preferences`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableHour(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 24);
+}
+
+function isFloorPlanLivePreferences(value: unknown): value is FloorPlanLivePreferences {
+  if (!isRecord(value)) return false;
+  if (value.selectedDate !== undefined && (typeof value.selectedDate !== 'string' || !ISO_DATE_RE.test(value.selectedDate))) return false;
+  if (value.selectedTime !== undefined && (typeof value.selectedTime !== 'string' || !TIME_RE.test(value.selectedTime))) return false;
+  if (value.startHourOverride !== undefined && !isNullableHour(value.startHourOverride)) return false;
+  if (value.endHourOverride !== undefined && !isNullableHour(value.endHourOverride)) return false;
+  if (value.timeRangeFilterActive !== undefined && typeof value.timeRangeFilterActive !== 'boolean') return false;
+  return true;
+}
 
 interface BookingOnTable {
   id: string;
@@ -121,6 +154,11 @@ export function FloorPlanLiveView({
 }) {
   const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
+  const preferencesKey = floorPlanLivePreferencesKey(venueId);
+  const rememberedPreferences = useMemo(
+    () => readSessionPreference<FloorPlanLivePreferences>(preferencesKey, {}, isFloorPlanLivePreferences),
+    [preferencesKey],
+  );
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
   const [blocks, setBlocks] = useState<TableBlock[]>([]);
@@ -132,8 +170,9 @@ export function FloorPlanLiveView({
   const [tableDetailSheetExpanded, setTableDetailSheetExpanded] = useState(false);
   const [combinedTableGroups, setCombinedTableGroups] = useState<Map<string, string[]>>(new Map());
   const [manualCombinations, setManualCombinations] = useState<CombinationInfo[]>([]);
-  const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
+  const [selectedDate, setSelectedDate] = useState(rememberedPreferences.selectedDate ?? formatDateInput(new Date()));
   const [selectedTime, setSelectedTime] = useState(() => {
+    if (rememberedPreferences.selectedTime) return rememberedPreferences.selectedTime;
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   });
@@ -160,9 +199,9 @@ export function FloorPlanLiveView({
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
-  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
-  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
-  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(rememberedPreferences.timeRangeFilterActive ?? false);
 
   // Drag/drop & reassign
   const [reassignMode, setReassignMode] = useState<{ bookingId: string; guestName: string; oldTableIds: string[] } | null>(null);
@@ -206,11 +245,26 @@ export function FloorPlanLiveView({
     };
   }, [venueBootstrap]);
 
+  const selectedDateHydrated = useRef(false);
   useEffect(() => {
+    if (!selectedDateHydrated.current) {
+      selectedDateHydrated.current = true;
+      return;
+    }
     setStartHourOverride(null);
     setEndHourOverride(null);
     setTimeRangeFilterActive(false);
   }, [selectedDate]);
+
+  useEffect(() => {
+    writeSessionPreference<FloorPlanLivePreferences>(preferencesKey, {
+      selectedDate,
+      selectedTime,
+      startHourOverride,
+      endHourOverride,
+      timeRangeFilterActive,
+    });
+  }, [preferencesKey, selectedDate, selectedTime, startHourOverride, endHourOverride, timeRangeFilterActive]);
 
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => getCalendarGridBounds(selectedDate, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),

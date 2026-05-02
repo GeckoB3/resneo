@@ -7,8 +7,8 @@ import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 interface Props {
   weekDays: string[];
   blocksByDate: Map<string, ScheduleBlockDTO[]>;
-  onBookingClick: (bookingId: string) => void;
-  onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
+  onBookingClick: (bookingId: string, anchor: { x: number; y: number }) => void;
+  onClassInstanceClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
   onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
 }
 
@@ -90,7 +90,7 @@ export function WeekScheduleCdeStrip({
                       <button
                         key={b.id}
                         type="button"
-                        onClick={() => onBookingClick(b.booking_id!)}
+                        onClick={(e) => onBookingClick(b.booking_id!, { x: e.clientX, y: e.clientY })}
                         className="block w-full text-left"
                       >
                         {body}
@@ -109,7 +109,7 @@ export function WeekScheduleCdeStrip({
                       <button
                         key={b.id}
                         type="button"
-                        onClick={() => onClassInstanceClick(b)}
+                        onClick={(e) => onClassInstanceClick(b, { x: e.clientX, y: e.clientY })}
                         className="block w-full text-left"
                       >
                         {body}

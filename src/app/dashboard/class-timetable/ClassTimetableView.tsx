@@ -16,6 +16,8 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
+import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 
 interface PractitionerOption {
   id: string;
@@ -70,33 +72,6 @@ interface ClassInstance {
   booked_spots?: number;
 }
 
-interface ClassTypeDetail {
-  id: string;
-  name: string;
-  duration_minutes: number;
-  capacity: number;
-  price_pence: number | null;
-  colour: string;
-}
-
-interface InstanceDetail extends ClassInstance {
-  class_type: ClassTypeDetail;
-}
-
-interface AttendeeRow {
-  booking_id: string;
-  status: string;
-  party_size: number;
-  deposit_amount_pence: number | null;
-  deposit_status: string | null;
-  booking_date: string;
-  booking_time: string;
-  checked_in_at: string | null;
-  guest_name: string | null;
-  guest_email: string | null;
-  guest_phone: string | null;
-}
-
 type Notice = { kind: 'success' | 'error'; message: string };
 
 const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -138,11 +113,35 @@ const INITIAL_TIMETABLE_FORM = {
   total_occurrences: '',
 };
 
-function escapeCsvCell(s: string | number | null | undefined): string {
-  if (s == null || s === '') return '';
-  const str = String(s);
-  if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
-  return str;
+function addMinutesToTimeHm(startHm: string, addMinutes: number): string {
+  const parts = startHm.slice(0, 5).split(':');
+  const h = Number.parseInt(parts[0] ?? '0', 10);
+  const m = Number.parseInt(parts[1] ?? '0', 10);
+  const total = h * 60 + m + addMinutes;
+  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hh = Math.floor(wrapped / 60);
+  const mm = wrapped % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/** Synthetic schedule block so Upcoming sessions uses the same detail sheet as dashboard/calendar. */
+function buildAgendaClassBlock(inst: ClassInstance, ct: ClassType | undefined): ScheduleBlockDTO {
+  const start = inst.start_time.length >= 5 ? inst.start_time.slice(0, 5) : inst.start_time;
+  const duration = ct?.duration_minutes ?? 60;
+  const cap = inst.capacity_override ?? ct?.capacity ?? 0;
+  return {
+    id: `class-agenda-${inst.id}`,
+    kind: 'class_session',
+    date: inst.instance_date,
+    start_time: start,
+    end_time: addMinutesToTimeHm(start, duration),
+    title: ct?.name ?? 'Class',
+    subtitle: null,
+    class_instance_id: inst.id,
+    class_capacity: cap,
+    class_booked_spots: inst.booked_spots ?? 0,
+    accent_colour: ct?.colour ?? null,
+  };
 }
 
 export function ClassTimetableView({
@@ -172,12 +171,12 @@ export function ClassTimetableView({
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<InstanceDetail | null>(null);
-  const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [cancelLoading, setCancelLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [scheduledClassFilterId, setScheduledClassFilterId] = useState('all');
+  const [classInstanceSheet, setClassInstanceSheet] = useState<{
+    instanceId: string;
+    block: ScheduleBlockDTO;
+  } | null>(null);
+  const [classSheetRefresh, setClassSheetRefresh] = useState(0);
 
   const [showClassTypeForm, setShowClassTypeForm] = useState(false);
   const [editingClassTypeId, setEditingClassTypeId] = useState<string | null>(null);
@@ -307,66 +306,17 @@ export function ClassTimetableView({
     }
   }, [newCalendarName, fetchData, refreshCalendarEntitlement]);
 
-  /** If a session row is removed (e.g. deleted elsewhere), drop selection and detail. */
+  /** If a session row is removed (e.g. deleted elsewhere), close the detail sheet. */
   useEffect(() => {
-    if (selectedId && !instances.some((i) => i.id === selectedId)) {
-      setSelectedId(null);
+    if (classInstanceSheet && !instances.some((i) => i.id === classInstanceSheet.instanceId)) {
+      setClassInstanceSheet(null);
     }
-  }, [instances, selectedId]);
-
-  useEffect(() => {
-    if (detail && !instances.some((i) => i.id === detail.id)) {
-      setDetail(null);
-      setAttendees([]);
-    }
-  }, [instances, detail]);
+  }, [instances, classInstanceSheet]);
 
   const removeInstanceFromList = useCallback((id: string) => {
     setInstances((prev) => prev.filter((i) => i.id !== id));
-    setSelectedId((sid) => (sid === id ? null : sid));
+    setClassInstanceSheet((s) => (s?.instanceId === id ? null : s));
   }, []);
-
-  const loadDetail = useCallback(async (id: string) => {
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const [instRes, attRes] = await Promise.all([
-        fetch(`/api/venue/class-instances/${id}`),
-        fetch(`/api/venue/class-instances/${id}/attendees`),
-      ]);
-      const instJson = await instRes.json();
-      const attJson = await attRes.json();
-      if (!instRes.ok) {
-        setDetailError(instJson.error ?? 'Failed to load instance');
-        setDetail(null);
-        setAttendees([]);
-        return;
-      }
-      if (!attRes.ok) {
-        setDetailError(attJson.error ?? 'Failed to load roster');
-        setDetail(instJson as InstanceDetail);
-        setAttendees([]);
-        return;
-      }
-      setDetail(instJson as InstanceDetail);
-      setAttendees((attJson.attendees ?? []) as AttendeeRow[]);
-    } catch {
-      setDetailError('Failed to load instance');
-      setDetail(null);
-      setAttendees([]);
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      setAttendees([]);
-      return;
-    }
-    void loadDetail(selectedId);
-  }, [selectedId, loadDetail]);
 
   useEffect(() => {
     if (!showClassTypeForm) return;
@@ -391,6 +341,26 @@ export function ClassTimetableView({
   }, [showClassTypeForm]);
 
   const typeMap = useMemo(() => new Map(classTypes.map((ct) => [ct.id, ct])), [classTypes]);
+
+  const filteredInstances = useMemo(() => {
+    if (scheduledClassFilterId === 'all') return instances;
+    return instances.filter((inst) => inst.class_type_id === scheduledClassFilterId);
+  }, [instances, scheduledClassFilterId]);
+
+  useEffect(() => {
+    if (scheduledClassFilterId === 'all') return;
+    if (classTypes.some((ct) => ct.id === scheduledClassFilterId)) return;
+    setScheduledClassFilterId('all');
+  }, [classTypes, scheduledClassFilterId]);
+
+  useEffect(() => {
+    if (
+      classInstanceSheet &&
+      !filteredInstances.some((i) => i.id === classInstanceSheet.instanceId)
+    ) {
+      setClassInstanceSheet(null);
+    }
+  }, [filteredInstances, classInstanceSheet]);
 
   const staffManagesClassType = useCallback(
     (ct: ClassType | undefined): boolean => {
@@ -441,7 +411,7 @@ export function ClassTimetableView({
 
   const groupedAgendaInstances = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const sorted = [...instances]
+    const sorted = [...filteredInstances]
       .filter((i) => i.instance_date >= today)
       .sort(
         (a, b) =>
@@ -460,7 +430,7 @@ export function ClassTimetableView({
       }
     }
     return groups;
-  }, [instances]);
+  }, [filteredInstances]);
 
   /** Instructor id no longer in calendar/practitioner lists (deleted); keep selectable in the dropdown. */
   const orphanInstructorOption = useMemo(() => {
@@ -708,67 +678,14 @@ export function ClassTimetableView({
       setEditingInstance(null);
       setNotice({ kind: 'success', message: 'Session updated.' });
       await fetchData({ silent: true });
-      if (selectedId === editingInstance.id) void loadDetail(editingInstance.id);
+      if (classInstanceSheet?.instanceId === editingInstance.id) {
+        setClassSheetRefresh((n) => n + 1);
+      }
     } catch {
       setNotice({ kind: 'error', message: 'Failed to update session' });
     } finally {
       setPatchSaving(false);
     }
-  };
-
-  const handleCancelInstance = async () => {
-    if (!selectedId || !detail) return;
-    const ok = window.confirm(
-      `Cancel this "${detail.class_type.name}" class on ${detail.instance_date}? Enrolled guests will be notified and refunds follow your policy.`,
-    );
-    if (!ok) return;
-    setCancelLoading(true);
-    try {
-      const res = await fetch(`/api/venue/class-instances/${selectedId}/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setNotice({ kind: 'error', message: data.error ?? 'Could not cancel class' });
-        return;
-      }
-      setSelectedId(null);
-      setNotice({ kind: 'success', message: 'Class cancelled.' });
-      await fetchData({ silent: true });
-    } catch {
-      setNotice({ kind: 'error', message: 'Could not cancel class' });
-    } finally {
-      setCancelLoading(false);
-    }
-  };
-
-  const downloadCsv = () => {
-    if (!detail || attendees.length === 0) return;
-    const headers = ['Guest name', 'Email', 'Phone', 'Party size', 'Status', 'Deposit (pence)', 'Deposit status', 'Checked in'];
-    const lines = [
-      headers.join(','),
-      ...attendees.map((a) =>
-        [
-          escapeCsvCell(a.guest_name),
-          escapeCsvCell(a.guest_email),
-          escapeCsvCell(a.guest_phone),
-          escapeCsvCell(a.party_size),
-          escapeCsvCell(a.status),
-          escapeCsvCell(a.deposit_amount_pence),
-          escapeCsvCell(a.deposit_status),
-          escapeCsvCell(a.checked_in_at ? new Date(a.checked_in_at).toISOString() : ''),
-        ].join(','),
-      ),
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `class-roster-${detail.id}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const openEditTimetable = (e: TimetableEntry) => {
@@ -877,8 +794,24 @@ export function ClassTimetableView({
 
       <ClassTimetableStatsRow loading={loading} classTypesLength={classTypes.length} stats={stats} />
 
-      <SectionCard>
-        <SectionCard.Header eyebrow="Workflow" title="How this page works" />
+      <details className="group overflow-hidden rounded-2xl border border-slate-200/95 bg-white text-slate-900 shadow-sm shadow-slate-900/[0.04]">
+        <summary className="flex cursor-pointer list-none items-start justify-between gap-3 border-b border-transparent bg-gradient-to-r from-slate-50/80 to-white px-4 py-4 marker:hidden group-open:border-slate-100/90 sm:px-6 sm:py-5">
+          <span className="min-w-0">
+            <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Workflow</span>
+            <span className="mt-1 block text-lg font-bold tracking-tight text-slate-900 sm:text-xl">How this page works</span>
+            <span className="mt-1 block text-sm font-normal text-slate-600">Expand for workflow guidance.</span>
+          </span>
+          <svg
+            className="mt-1 h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </summary>
         <SectionCard.Body className="space-y-4 text-sm leading-relaxed text-slate-600">
           <ol className="list-decimal space-y-2 pl-5 marker:font-semibold marker:text-slate-800">
             <li>
@@ -910,15 +843,17 @@ export function ClassTimetableView({
             </div>
           )}
         </SectionCard.Body>
-      </SectionCard>
+      </details>
 
       <SectionCard elevated>
-          <SectionCard.Header
-            eyebrow="Catalogue"
-            title="Class types"
-            description="Templates guests book against. Session times live on the calendar below."
-          />
-          <SectionCard.Body className="p-0">
+        <div className="border-b border-slate-100/90 bg-gradient-to-r from-slate-50/80 to-white px-3 py-2.5 sm:px-4 sm:py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Catalogue</p>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <h2 className="text-base font-bold tracking-tight text-slate-900">Class types</h2>
+            <p className="text-xs leading-4 text-slate-600">Templates guests book against.</p>
+          </div>
+        </div>
+        <SectionCard.Body className="p-0">
           {loading ? (
             <div className="m-4 space-y-2" role="status" aria-label="Loading class types">
               <Skeleton.Line className="h-4 w-48" />
@@ -955,20 +890,20 @@ export function ClassTimetableView({
               Finish your first class type in the form that opened.
             </div>
           ) : (
-            <div className="space-y-3 p-4 sm:p-5">
+            <div className="space-y-1.5 p-2 sm:p-3">
               {classTypes.map((ct) => {
                 const entries = timetable.filter((e) => e.class_type_id === ct.id && e.is_active);
                 const calLabel = resolveCalendarColumnLabel(ct);
                 return (
                   <div
                     key={ct.id}
-                    className="rounded-xl border border-slate-100 bg-slate-50/40 p-4 ring-1 ring-slate-100/70 transition-colors hover:border-slate-200/90"
+                    className="rounded-lg border border-slate-100 bg-slate-50/40 p-2.5 ring-1 ring-slate-100/70 transition-colors hover:border-slate-200/90 sm:p-3"
                   >
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1">
                           <span
-                            className="h-3 w-3 shrink-0 rounded-full ring-1 ring-black/5"
+                            className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/5"
                             style={{ backgroundColor: ct.colour ?? '#94a3b8' }}
                             aria-hidden
                           />
@@ -983,7 +918,7 @@ export function ClassTimetableView({
                             </Pill>
                           )}
                         </div>
-                        <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-slate-600">
+                        <p className="flex flex-wrap gap-x-1.5 gap-y-0.5 text-[11px] leading-4 text-slate-600 sm:text-xs">
                           <span>{ct.duration_minutes} min</span>
                           <span className="text-slate-300" aria-hidden>
                             ·
@@ -1007,14 +942,16 @@ export function ClassTimetableView({
                           <span className="text-slate-500">Column: {calLabel}</span>
                         </p>
                         {ct.description ? (
-                          <p className="line-clamp-2 text-xs text-slate-500">{ct.description}</p>
+                          <p className="line-clamp-1 text-[11px] leading-4 text-slate-500 sm:text-xs">
+                            {ct.description}
+                          </p>
                         ) : null}
                         {entries.length > 0 && (
-                          <div className="flex flex-wrap gap-2 pt-1">
+                          <div className="flex gap-1 overflow-x-auto pt-0.5">
                             {entries.map((e) => (
                               <span
                                 key={e.id}
-                                className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs text-slate-600"
+                                className="flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] leading-4 text-slate-600 sm:text-xs"
                               >
                                 {DAY_LABELS_FULL[e.day_of_week]} {e.start_time.slice(0, 5)}
                                 {(e.interval_weeks ?? 1) > 1 && (
@@ -1054,20 +991,20 @@ export function ClassTimetableView({
                           </div>
                         )}
                       </div>
-                      <div className="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
+                      <div className="flex shrink-0 flex-col gap-1 sm:items-end">
                         {(isAdmin || staffManagesClassType(ct)) && (
                           <>
                             <button
                               type="button"
                               onClick={() => handleEditClassType(ct)}
-                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium leading-4 text-slate-700 hover:bg-slate-50"
                             >
                               Edit
                             </button>
                             <button
                               type="button"
                               onClick={() => void handleDeleteClassType(ct.id)}
-                              className="rounded-lg border border-transparent px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                              className="rounded-md border border-transparent px-2 py-1 text-xs font-medium leading-4 text-red-600 hover:bg-red-50"
                             >
                               Delete
                             </button>
@@ -1080,8 +1017,7 @@ export function ClassTimetableView({
               })}
             </div>
           )}
-
-          </SectionCard.Body>
+        </SectionCard.Body>
       </SectionCard>
 
       {loading ? (
@@ -1111,7 +1047,9 @@ export function ClassTimetableView({
               name: ct.name,
               colour: ct.colour ?? '#6366f1',
             }))}
-            instances={instances}
+            instances={filteredInstances}
+            filterClassTypeId={scheduledClassFilterId}
+            onFilterClassTypeIdChange={setScheduledClassFilterId}
             isAdmin={isAdmin}
             onEditInstance={
               canOpenScheduleModal
@@ -1142,8 +1080,10 @@ export function ClassTimetableView({
               <SectionCard.Body className="space-y-5">
                 {groupedAgendaInstances.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    No sessions from today onward. Open <span className="font-medium text-slate-700">Schedule classes</span>{' '}
-                    above to add dates.
+                    {scheduledClassFilterId === 'all'
+                      ? 'No sessions from today onward.'
+                      : `No upcoming sessions for ${typeMap.get(scheduledClassFilterId)?.name ?? 'this class'}.`}{' '}
+                    Open <span className="font-medium text-slate-700">Schedule classes</span> above to add dates.
                   </p>
                 ) : (
                   groupedAgendaInstances.map((g) => (
@@ -1165,14 +1105,23 @@ export function ClassTimetableView({
                             <div
                               key={inst.id}
                               className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left text-sm shadow-sm transition-colors ${
-                                selectedId === inst.id
+                                classInstanceSheet?.instanceId === inst.id
                                   ? 'border-brand-200 bg-brand-50/40 ring-1 ring-brand-200'
                                   : 'border-slate-100 bg-white hover:border-brand-200/80 hover:bg-slate-50/80'
                               }`}
                             >
                               <button
                                 type="button"
-                                onClick={() => setSelectedId(selectedId === inst.id ? null : inst.id)}
+                                onClick={() => {
+                                  if (classInstanceSheet?.instanceId === inst.id) {
+                                    setClassInstanceSheet(null);
+                                  } else {
+                                    setClassInstanceSheet({
+                                      instanceId: inst.id,
+                                      block: buildAgendaClassBlock(inst, ct),
+                                    });
+                                  }
+                                }}
                                 className="flex min-w-0 flex-1 items-center gap-3 text-left"
                               >
                                 <span
@@ -1909,98 +1858,16 @@ export function ClassTimetableView({
         </div>
       )}
 
-      {selectedId && (
-        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          {detailLoading && <p className="text-sm text-slate-500">Loading roster…</p>}
-          {detailError && <p className="text-sm text-red-600">{detailError}</p>}
-          {!detailLoading && detail && (
-            <>
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{detail.class_type.name}</h3>
-                  <p className="text-sm text-slate-500">
-                    {detail.instance_date} · {String(detail.start_time).slice(0, 5)} · {detail.class_type.duration_minutes}{' '}
-                    min · capacity {detail.class_type.capacity}
-                  </p>
-                  {detail.is_cancelled && (
-                    <span className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                      Cancelled
-                    </span>
-                  )}
-                  {!isAdmin && !detail.is_cancelled && (
-                    <p className="mt-2 max-w-md text-xs text-slate-500">
-                      Only venue admins can cancel a session and notify enrolled guests.
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {attendees.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={downloadCsv}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-                    >
-                      Download CSV
-                    </button>
-                  )}
-                  {isAdmin && !detail.is_cancelled && (
-                    <button
-                      type="button"
-                      onClick={() => void handleCancelInstance()}
-                      disabled={cancelLoading}
-                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
-                    >
-                      {cancelLoading ? 'Cancelling…' : 'Cancel class & notify guests'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <h4 className="mb-2 text-sm font-medium text-slate-700">Roster</h4>
-              {attendees.length === 0 ? (
-                <p className="text-sm text-slate-500">No bookings for this instance.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500">
-                        <th className="py-2 pr-3 font-medium">Guest</th>
-                        <th className="py-2 pr-3 font-medium">Contact</th>
-                        <th className="py-2 pr-3 font-medium">Qty</th>
-                        <th className="py-2 pr-3 font-medium">Status</th>
-                        <th className="py-2 pr-3 font-medium">Deposit</th>
-                        <th className="py-2 font-medium">Checked in</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attendees.map((a) => (
-                        <tr key={a.booking_id} className="border-b border-slate-100">
-                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '-'}</td>
-                          <td className="py-2 pr-3 text-slate-600">
-                            <div className="max-w-[200px] truncate">{a.guest_email ?? '-'}</div>
-                            <div className="text-xs text-slate-500">{a.guest_phone ?? ''}</div>
-                          </td>
-                          <td className="py-2 pr-3">{a.party_size}</td>
-                          <td className="py-2 pr-3">{a.status}</td>
-                          <td className="py-2 pr-3">
-                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '-'}
-                            {a.deposit_status ? (
-                              <span className="ml-1 text-xs text-slate-500">({a.deposit_status})</span>
-                            ) : null}
-                          </td>
-                          <td className="py-2 text-slate-600">
-                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      <ClassInstanceDetailSheet
+        selection={classInstanceSheet}
+        onClose={() => setClassInstanceSheet(null)}
+        currency={currency}
+        timetableContext
+        isAdmin={isAdmin}
+        refreshSignal={classSheetRefresh}
+        onSessionMutated={() => void fetchData({ silent: true })}
+        onNotice={(n) => setNotice(n)}
+      />
     </div>
   );
 }

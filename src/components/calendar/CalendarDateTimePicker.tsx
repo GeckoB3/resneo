@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
@@ -267,20 +268,11 @@ export function CalendarDateTimePicker({
   }, [date]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Close dropdowns on outside click
-  useEffect(() => {
-    if (!openDropdown) return;
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      if (calendarRef.current && !calendarRef.current.contains(target)) {
-        if (timeRef.current && !timeRef.current.contains(target)) {
-          setOpenDropdown(null);
-        }
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [openDropdown]);
+  useDismissibleLayer({
+    open: openDropdown !== null,
+    refs: [calendarRef, timeRef],
+    onDismiss: () => setOpenDropdown(null),
+  });
 
   function toggleDropdown(which: OpenDropdown) {
     setOpenDropdown((prev) => (prev === which ? null : which));

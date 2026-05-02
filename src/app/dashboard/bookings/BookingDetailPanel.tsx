@@ -11,6 +11,7 @@ import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
+import { ExpandedBookingContent } from './ExpandedBookingContent';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
@@ -296,10 +297,9 @@ export function BookingDetailPanel({
   }, [displayDetail?.inferred_booking_model, isAppointment]);
 
   const load = useCallback(async () => {
-    const [bookingRes, tablesRes] = await Promise.all([
-      fetch(`/api/venue/bookings/${bookingId}`),
-      fetch('/api/venue/tables'),
-    ]);
+    const bookingPromise = fetch(`/api/venue/bookings/${bookingId}`);
+    const tablesPromise = fetch('/api/venue/tables').catch(() => null);
+    const bookingRes = await bookingPromise;
 
     if (!bookingRes.ok) {
       setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
@@ -322,7 +322,8 @@ export function BookingDetailPanel({
     setModifyTableIds((data.table_assignments ?? []).map((t: { id: string }) => t.id));
 
     try {
-      if (tablesRes.ok) {
+      const tablesRes = await tablesPromise;
+      if (tablesRes?.ok) {
         const tablesData = await tablesRes.json();
         setTableManagementEnabled(tablesData.settings?.table_management_enabled ?? false);
         setAllTables((tablesData.tables ?? []).filter((t: { is_active: boolean }) => t.is_active).map((t: { id: string; name: string; max_covers: number }) => ({ id: t.id, name: t.name, max_covers: t.max_covers })));
@@ -715,6 +716,7 @@ export function BookingDetailPanel({
   }
 
   const d = displayDetail;
+  const shouldHoldPopoverForFullDetail = isPopover && !isHydrated;
   const optimisticTableLabel =
     !isHydrated && initialSnapshot?.tableNames && initialSnapshot.tableNames.length > 0
       ? initialSnapshot.tableNames.join(' + ')
@@ -756,6 +758,350 @@ export function BookingDetailPanel({
   const hasAssignedTable = Boolean(tableLine);
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';
   const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
+
+  if (isPopover && shouldHoldPopoverForFullDetail) {
+    return (
+      <>
+        {popoverDismissLayer}
+        <div className="fixed z-50" style={popoverStyle}>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal={false}
+            aria-label="Booking detail panel"
+            className="max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-end border-b border-slate-100 bg-white/95 px-2 py-1.5">
+              <button
+                type="button"
+                aria-label="Close booking detail"
+                onClick={onClose}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <ExpandedBookingContent
+              booking={{
+                id: d.id,
+                booking_date: d.booking_date,
+                booking_time: d.booking_time,
+                estimated_end_time: d.estimated_end_time,
+                created_at: d.created_at ?? null,
+                party_size: d.party_size,
+                status: d.status,
+                source: d.source,
+                deposit_status: d.deposit_status,
+                deposit_amount_pence: d.deposit_amount_pence,
+                dietary_notes: d.dietary_notes,
+                occasion: d.occasion,
+                guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
+                guest_email: d.guest?.email ?? null,
+                guest_phone: d.guest?.phone ?? null,
+                table_assignments: initialSnapshot?.tableNames?.map((name, index) => ({ id: `snapshot-table-${index}`, name })),
+                service_id: d.service_id,
+                area_id: d.area_id,
+                area_name: d.area_name,
+                inferred_booking_model: d.inferred_booking_model,
+              }}
+              detail={undefined}
+              detailLoading
+              tableManagementEnabled={tableManagementEnabled}
+              venueId={d.venue_id || venueId || ''}
+              draftMessage=""
+              sendingMessage={false}
+              onMessageDraftChange={() => {}}
+              onSendMessage={() => {}}
+              onStatusAction={() => {}}
+              onDetailUpdated={() => {}}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (isPopover) {
+    const bookingForExpanded = {
+      id: d.id,
+      booking_date: d.booking_date,
+      booking_time: d.booking_time,
+      estimated_end_time: d.estimated_end_time,
+      created_at: d.created_at ?? null,
+      party_size: d.party_size,
+      status: d.status,
+      source: d.source,
+      deposit_status: d.deposit_status,
+      deposit_amount_pence: d.deposit_amount_pence,
+      dietary_notes: d.dietary_notes,
+      occasion: d.occasion,
+      guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
+      guest_email: d.guest?.email ?? null,
+      guest_phone: d.guest?.phone ?? null,
+      table_assignments:
+        assignedTables.length > 0
+          ? assignedTables
+          : initialSnapshot?.tableNames?.map((name, index) => ({ id: `snapshot-table-${index}`, name })),
+      service_id: d.service_id,
+      area_id: d.area_id,
+      area_name: d.area_name,
+      inferred_booking_model: d.inferred_booking_model,
+    };
+    const detailForExpanded = {
+      id: d.id,
+      special_requests: d.special_requests,
+      internal_notes: d.internal_notes,
+      cancellation_deadline: d.cancellation_deadline,
+      table_assignments: assignedTables,
+      guest: d.guest
+        ? {
+            id: d.guest.id,
+            name: d.guest.name,
+            email: d.guest.email,
+            phone: d.guest.phone,
+            visit_count: d.guest.visit_count,
+            tags: d.guest.tags,
+            customer_profile_notes: d.guest.customer_profile_notes,
+          }
+        : null,
+      communications: d.communications,
+      events: d.events.map((event) => ({
+        id: event.id,
+        event_type: event.event_type,
+        created_at: event.created_at,
+      })),
+      combination_staff_notes: d.combination_staff_notes,
+      inferred_booking_model: d.inferred_booking_model,
+    };
+
+    return (
+      <>
+        {popoverDismissLayer}
+        <div className="fixed z-50" style={popoverStyle}>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal={false}
+            aria-label="Booking detail panel"
+            className="max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-end border-b border-slate-100 bg-white/95 px-2 py-1.5 backdrop-blur">
+              <button
+                type="button"
+                aria-label="Close booking detail"
+                onClick={onClose}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {error ? (
+              <div className="mx-2 mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+              </div>
+            ) : null}
+            <ExpandedBookingContent
+              booking={bookingForExpanded}
+              detail={detailForExpanded}
+              detailLoading={false}
+              tableManagementEnabled={tableManagementEnabled}
+              venueId={d.venue_id || venueId || ''}
+              draftMessage={customMessage}
+              sendingMessage={actionLoading}
+              onMessageDraftChange={setCustomMessage}
+              onSendMessage={(channel) => {
+                void (async () => {
+                  setActionLoading(true);
+                  try {
+                    const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ message: customMessage, channel }),
+                    });
+                    const payload = (await res.json().catch(() => ({}))) as {
+                      success?: boolean;
+                      error?: string;
+                      errors?: string[];
+                    };
+                    if (!res.ok || !payload.success) {
+                      setError(payload.errors?.join('; ') ?? payload.error ?? 'Failed to send message');
+                      return;
+                    }
+                    setError(payload.errors?.length ? `Partially sent - ${payload.errors.join('; ')}` : null);
+                    setCustomMessage('');
+                    await load();
+                  } finally {
+                    setActionLoading(false);
+                  }
+                })();
+              }}
+              onStatusAction={(status) => {
+                if (status === 'No-Show' && !canMarkNoShowForSlot(d.booking_date, d.booking_time?.slice(0, 5) ?? '12:00', 0)) {
+                  setError('No-show can only be marked after the booking start time');
+                  return;
+                }
+                void executeStatusChange(status);
+              }}
+              onDetailUpdated={() => {
+                void (async () => {
+                  await load();
+                  onUpdated();
+                })();
+              }}
+              onRequestChangeTable={
+                bookingStyleIsTable && d.status === 'Seated'
+                  ? () => setShowAssignModal(true)
+                  : undefined
+              }
+            />
+            {showAssignModal ? (
+              <div className="mx-2 mb-2 rounded-xl border border-brand-200 bg-brand-50/30 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-slate-900">Table assignment</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowAssignModal(false)}
+                    className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-white/70"
+                  >
+                    Close
+                  </button>
+                </div>
+                {suggestionsLoading ? (
+                  <p className="mb-3 text-xs text-slate-500">Finding best table options...</p>
+                ) : assignmentSuggestions.length > 0 ? (
+                  <div className="mb-3 space-y-2">
+                    {assignmentSuggestions.slice(0, 6).map((suggestion, idx) => (
+                      <button
+                        key={`${suggestion.table_ids.join('|')}-${suggestion.source}`}
+                        type="button"
+                        disabled={actionLoading}
+                        onClick={async () => {
+                          setActionLoading(true);
+                          try {
+                            const assignRes = await fetch('/api/venue/tables/assignments', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(assignedTables.length > 0
+                                ? {
+                                    action: 'reassign',
+                                    booking_id: bookingId,
+                                    old_table_ids: assignedTables.map((x) => x.id),
+                                    new_table_ids: suggestion.table_ids,
+                                  }
+                                : { booking_id: bookingId, table_ids: suggestion.table_ids }
+                              ),
+                            });
+                            if (!assignRes.ok) {
+                              const payload = await assignRes.json().catch(() => ({}));
+                              setError(payload.error ?? 'Failed to assign tables');
+                              return;
+                            }
+                            setShowAssignModal(false);
+                            await load();
+                            onUpdated();
+                          } finally {
+                            setActionLoading(false);
+                          }
+                        }}
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                          idx === 0
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{suggestion.table_names.join(' + ')}</span>
+                          <span className="text-[10px] uppercase">
+                            {suggestion.source === 'manual' ? 'Pre-configured' : suggestion.source === 'auto' ? 'Auto-detected' : 'Single'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px]">
+                          Capacity {suggestion.combined_capacity} - Spare {suggestion.spare_covers}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mb-3 text-xs text-slate-500">No ranked suggestions available. Choose manually below.</p>
+                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {allTables.map((table) => (
+                    <button
+                      key={table.id}
+                      type="button"
+                      onClick={async () => {
+                        setActionLoading(true);
+                        try {
+                          const assignRes = await fetch('/api/venue/tables/assignments', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(assignedTables.length > 0
+                              ? { action: 'reassign', booking_id: bookingId, old_table_ids: assignedTables.map((x) => x.id), new_table_ids: [table.id] }
+                              : { booking_id: bookingId, table_ids: [table.id] }
+                            ),
+                          });
+                          if (!assignRes.ok) {
+                            const payload = await assignRes.json().catch(() => ({}));
+                            setError(payload.error ?? 'Failed to assign table');
+                            return;
+                          }
+                          setShowAssignModal(false);
+                          await load();
+                          onUpdated();
+                        } finally {
+                          setActionLoading(false);
+                        }
+                      }}
+                      disabled={actionLoading}
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        assignedTables.some((assigned) => assigned.id === table.id)
+                          ? 'border-brand-300 bg-brand-50 text-brand-700'
+                          : recommendedTableIds.includes(table.id)
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {table.name} ({table.max_covers}){recommendedTableIds.includes(table.id) ? ' - Recommended' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {confirmDialog && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]" onClick={() => setConfirmDialog(null)}>
+            <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100" onClick={(event) => event.stopPropagation()}>
+              <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
+              <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
+              <div className="mt-5 flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+                  className="flex-1 rounded-xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                >
+                  {confirmDialog.confirmLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>

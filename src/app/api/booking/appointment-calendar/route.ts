@@ -7,6 +7,7 @@ import {
 } from '@/lib/booking/unified-scheduling';
 import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 
 /**
  * GET /api/booking/appointment-calendar?venue_id=&practitioner_id=&service_id=&year=&month=
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
     const serviceId = searchParams.get('service_id');
     const yearParam = searchParams.get('year');
     const monthParam = searchParams.get('month');
+    const variantId = searchParams.get('variant_id');
 
     if (!venueId || !practitionerId || !serviceId) {
       return NextResponse.json(
@@ -55,6 +57,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const variantOverride = variantId
+      ? await loadActiveVariantForService({ admin: supabase, venueId, serviceId, variantId })
+      : null;
+    if (variantId && !variantOverride) {
+      return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
+    }
+
     const available_dates = await computeAppointmentAvailableDatesInMonth(
       supabase,
       venueId,
@@ -62,7 +71,7 @@ export async function GET(request: NextRequest) {
       serviceId,
       year,
       month,
-      { audience: 'public' },
+      { audience: 'public', variantOverride },
     );
 
     return NextResponse.json(

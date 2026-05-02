@@ -5,6 +5,25 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FloorPlanLiveView, type FloorPlanAreaNavConfig } from './FloorPlanLiveView';
 import type { BookingModel } from '@/types/booking-models';
 import type { VenueArea } from '@/types/areas';
+import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
+
+interface FloorPlanPreferences {
+  diningAreaId?: string | null;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function floorPlanPreferencesKey(venueId: string): string {
+  return `reserve:dashboard:floor-plan:${venueId}:preferences`;
+}
+
+function isFloorPlanPreferences(value: unknown): value is FloorPlanPreferences {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.diningAreaId === undefined || record.diningAreaId === null || (
+    typeof record.diningAreaId === 'string' && UUID_RE.test(record.diningAreaId)
+  );
+}
 
 export function UnifiedFloorPlanView({
   isAdmin,
@@ -21,6 +40,11 @@ export function UnifiedFloorPlanView({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const preferencesKey = floorPlanPreferencesKey(venueId);
+  const rememberedPreferences = useMemo(
+    () => readSessionPreference<FloorPlanPreferences>(preferencesKey, {}, isFloorPlanPreferences),
+    [preferencesKey],
+  );
   const [diningAreas, setDiningAreas] = useState<VenueArea[]>([]);
   const [diningAreaId, setDiningAreaId] = useState<string | null>(null);
   const [areasLoaded, setAreasLoaded] = useState(bookingModel !== 'table_reservation');
@@ -59,6 +83,7 @@ export function UnifiedFloorPlanView({
     } catch {
       /* ignore */
     }
+    const rememberedAreaId = rememberedPreferences.diningAreaId;
     queueMicrotask(() => {
       if (active.length === 0) {
         setDiningAreaId(null);
@@ -71,12 +96,14 @@ export function UnifiedFloorPlanView({
       const pick =
         fromUrl && active.some((a) => a.id === fromUrl)
           ? fromUrl
-          : fromLs && active.some((a) => a.id === fromLs)
-            ? fromLs
-            : active[0]!.id;
+          : rememberedAreaId && active.some((a) => a.id === rememberedAreaId)
+            ? rememberedAreaId
+            : fromLs && active.some((a) => a.id === fromLs)
+              ? fromLs
+              : active[0]!.id;
       setDiningAreaId(pick);
     });
-  }, [bookingModel, areasLoaded, diningAreas, searchParams, venueId]);
+  }, [bookingModel, areasLoaded, diningAreas, rememberedPreferences.diningAreaId, searchParams, venueId]);
 
   const effectiveDiningAreaId = bookingModel === 'table_reservation' ? diningAreaId : null;
   const activeDiningAreas = useMemo(() => diningAreas.filter((a) => a.is_active), [diningAreas]);
@@ -87,6 +114,7 @@ export function UnifiedFloorPlanView({
   const setDiningAreaFilter = useCallback(
     (id: string) => {
       setDiningAreaId(id);
+      writeSessionPreference<FloorPlanPreferences>(preferencesKey, { diningAreaId: id });
       try {
         window.localStorage.setItem(`diningArea:${venueId}`, id);
       } catch {
@@ -96,7 +124,7 @@ export function UnifiedFloorPlanView({
       next.set('area', id);
       router.replace(`/dashboard/floor-plan?${next}`, { scroll: false });
     },
-    [router, searchParams, venueId],
+    [preferencesKey, router, searchParams, venueId],
   );
 
   const editLayoutHref =

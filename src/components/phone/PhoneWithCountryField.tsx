@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import {
   getSortedCountryCodes,
   getDialCodeForCountry,
@@ -268,20 +269,11 @@ export function PhoneWithCountryField({
     [handleCountryChange, closeDropdown, id],
   );
 
-  /* click outside */
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        !triggerRef.current?.contains(e.target as Node) &&
-        !dropdownRef.current?.contains(e.target as Node)
-      ) {
-        closeDropdown();
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open, closeDropdown]);
+  useDismissibleLayer({
+    open,
+    refs: [triggerRef, dropdownRef],
+    onDismiss: closeDropdown,
+  });
 
   /* close on scroll / escape */
   useEffect(() => {

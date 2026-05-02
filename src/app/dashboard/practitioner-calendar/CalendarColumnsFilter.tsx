@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 interface Column {
   id: string;
@@ -39,23 +40,11 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
 
   const isAll = value === null;
 
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: PointerEvent) {
-      const el = rootRef.current;
-      if (!el || el.contains(e.target as Node)) return;
-      setOpen(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [open]);
+  useDismissibleLayer({
+    open,
+    refs: [rootRef],
+    onDismiss: () => setOpen(false),
+  });
 
   if (columns.length === 0) {
     return (

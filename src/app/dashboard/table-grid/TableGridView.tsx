@@ -31,6 +31,7 @@ import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkelet
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { computePointAnchoredMenuStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
+import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -68,6 +69,50 @@ const VISUAL_RECONCILE_MIN_INTERVAL_MS = 350;
 const VISUAL_RECONCILE_FOLLOW_UP_DELAY_MS = 80;
 const SETTLED_VISUAL_HOLD_MS = 1_500;
 const TABLE_GRID_VISUAL_INTERACTION_EVENT = 'table-grid-visual-interaction';
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface TableGridPreferences {
+  date?: string;
+  diningAreaId?: string | null;
+  serviceId?: string | null;
+  zoneFilter?: string | null;
+  statusFilter?: string | null;
+  search?: string;
+  startHourOverride?: number | null;
+  endHourOverride?: number | null;
+  timeRangeFilterActive?: boolean;
+}
+
+function tableGridPreferencesKey(venueId: string): string {
+  return `reserve:dashboard:table-grid:${venueId}:preferences`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableHour(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 24);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+function isTableGridPreferences(value: unknown): value is TableGridPreferences {
+  if (!isRecord(value)) return false;
+  if (value.date !== undefined && (typeof value.date !== 'string' || !ISO_DATE_RE.test(value.date))) return false;
+  if (value.diningAreaId !== undefined && value.diningAreaId !== null && (typeof value.diningAreaId !== 'string' || !UUID_RE.test(value.diningAreaId))) return false;
+  if (value.serviceId !== undefined && value.serviceId !== null && (typeof value.serviceId !== 'string' || !UUID_RE.test(value.serviceId))) return false;
+  if (value.zoneFilter !== undefined && !isNullableString(value.zoneFilter)) return false;
+  if (value.statusFilter !== undefined && !isNullableString(value.statusFilter)) return false;
+  if (value.search !== undefined && typeof value.search !== 'string') return false;
+  if (value.startHourOverride !== undefined && !isNullableHour(value.startHourOverride)) return false;
+  if (value.endHourOverride !== undefined && !isNullableHour(value.endHourOverride)) return false;
+  if (value.timeRangeFilterActive !== undefined && typeof value.timeRangeFilterActive !== 'boolean') return false;
+  return true;
+}
 
 function timelinePercentToSlotWidthPx(percent: number): number {
   const raw = Math.round(TIMELINE_SLOT_BASE_PX * (percent / 100));
@@ -443,18 +488,24 @@ export function TableGridView({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const preferencesKey = tableGridPreferencesKey(venueId);
+  const rememberedPreferences = useMemo(
+    () => readSessionPreference<TableGridPreferences>(preferencesKey, {}, isTableGridPreferences),
+    [preferencesKey],
+  );
   const [diningAreas, setDiningAreas] = useState<VenueArea[]>([]);
   const [diningAreaId, setDiningAreaId] = useState<string | null>(null);
+  const [areasLoaded, setAreasLoaded] = useState(bookingModel !== 'table_reservation');
 
-  const [date, setDate] = useState(formatDateInput(new Date()));
-  const [serviceId, setServiceId] = useState<string | null>(null);
+  const [date, setDate] = useState(rememberedPreferences.date ?? formatDateInput(new Date()));
+  const [serviceId, setServiceId] = useState<string | null>(rememberedPreferences.serviceId ?? null);
   const [services, setServices] = useState<Array<{ id: string; name: string; start_time: string; end_time: string }>>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
   const [combinations, setCombinations] = useState<CombinationInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [zoneFilter, setZoneFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [zoneFilter, setZoneFilter] = useState<string | null>(rememberedPreferences.zoneFilter ?? null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(rememberedPreferences.statusFilter ?? null);
+  const [search, setSearch] = useState(rememberedPreferences.search ?? '');
   const [searchOpen, setSearchOpen] = useState(false);
   const searchPopoverRef = useRef<HTMLDivElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
@@ -516,9 +567,9 @@ export function TableGridView({
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
-  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
-  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
-  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(rememberedPreferences.timeRangeFilterActive ?? false);
 
   const rememberPendingVisualMutation = useCallback((mutation: PendingVisualMutationInput): string => {
     const id = crypto.randomUUID();
@@ -628,8 +679,11 @@ export function TableGridView({
     };
   }, [searchOpen]);
 
-  const showDiningAreaChrome =
-    bookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
+  const activeDiningAreas = useMemo(() => diningAreas.filter((a) => a.is_active), [diningAreas]);
+  const showDiningAreaChrome = bookingModel === 'table_reservation' && activeDiningAreas.length > 1;
+  const waitingForDiningArea =
+    bookingModel === 'table_reservation' &&
+    (!areasLoaded || (activeDiningAreas.length > 0 && !diningAreaId));
 
   useEffect(() => {
     if (bookingModel !== 'table_reservation') return;
@@ -637,10 +691,14 @@ export function TableGridView({
     void fetch('/api/venue/areas')
       .then((res) => (res.ok ? res.json() : null))
       .then((j) => {
-        if (cancelled || !j?.areas) return;
-        setDiningAreas(j.areas as VenueArea[]);
+        if (cancelled) return;
+        setDiningAreas(Array.isArray(j?.areas) ? (j.areas as VenueArea[]) : []);
+        setAreasLoaded(true);
       })
-      .catch((e) => console.error('[TableGridView] /api/venue/areas preload failed:', e));
+      .catch((e) => {
+        console.error('[TableGridView] /api/venue/areas preload failed:', e);
+        if (!cancelled) setAreasLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -651,7 +709,8 @@ export function TableGridView({
       setDiningAreaId(null);
       return;
     }
-    const active = diningAreas.filter((a) => a.is_active);
+    if (!areasLoaded) return;
+    const active = activeDiningAreas;
     if (active.length === 0) {
       setDiningAreaId(null);
       return;
@@ -667,19 +726,27 @@ export function TableGridView({
     } catch {
       /* ignore */
     }
+    const rememberedAreaId = rememberedPreferences.diningAreaId;
     const pick =
       fromUrl && active.some((a) => a.id === fromUrl)
         ? fromUrl
-        : fromLs && active.some((a) => a.id === fromLs)
-          ? fromLs
-          : active[0]!.id;
+        : rememberedAreaId && active.some((a) => a.id === rememberedAreaId)
+          ? rememberedAreaId
+          : fromLs && active.some((a) => a.id === fromLs)
+            ? fromLs
+            : active[0]!.id;
     setDiningAreaId(pick);
-  }, [bookingModel, diningAreas, searchParams, venueId]);
+  }, [bookingModel, areasLoaded, activeDiningAreas, rememberedPreferences.diningAreaId, searchParams, venueId]);
 
   const setDiningAreaFilter = useCallback(
     (id: string) => {
       setDiningAreaId(id);
       setServiceId(null);
+      writeSessionPreference<TableGridPreferences>(preferencesKey, {
+        ...rememberedPreferences,
+        diningAreaId: id,
+        serviceId: null,
+      });
       try {
         window.localStorage.setItem(`diningArea:${venueId}`, id);
       } catch {
@@ -689,7 +756,7 @@ export function TableGridView({
       next.set('area', id);
       router.replace(`/dashboard/table-grid?${next}`, { scroll: false });
     },
-    [router, searchParams, venueId],
+    [preferencesKey, rememberedPreferences, router, searchParams, venueId],
   );
 
   const selectedBookingSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
@@ -748,6 +815,8 @@ export function TableGridView({
   }, [gridData]);
 
   const fetchServices = useCallback(async () => {
+    if (waitingForDiningArea) return;
+
     try {
       const qs =
         bookingModel === 'table_reservation' && diningAreaId
@@ -762,7 +831,7 @@ export function TableGridView({
     } catch (err) {
       console.error('Fetch services failed:', err);
     }
-  }, [bookingModel, diningAreaId]);
+  }, [bookingModel, diningAreaId, waitingForDiningArea]);
 
   useEffect(() => {
     let cancelled = false;
@@ -780,13 +849,50 @@ export function TableGridView({
     };
   }, []);
 
+  const dateHydrated = useRef(false);
   useEffect(() => {
+    if (!dateHydrated.current) {
+      dateHydrated.current = true;
+      return;
+    }
     setStartHourOverride(null);
     setEndHourOverride(null);
     setTimeRangeFilterActive(false);
   }, [date]);
 
+  useEffect(() => {
+    writeSessionPreference<TableGridPreferences>(preferencesKey, {
+      date,
+      diningAreaId,
+      serviceId,
+      zoneFilter,
+      statusFilter,
+      search,
+      startHourOverride,
+      endHourOverride,
+      timeRangeFilterActive,
+    });
+  }, [
+    preferencesKey,
+    date,
+    diningAreaId,
+    serviceId,
+    zoneFilter,
+    statusFilter,
+    search,
+    startHourOverride,
+    endHourOverride,
+    timeRangeFilterActive,
+  ]);
+
+  useEffect(() => {
+    if (!serviceId || services.length === 0) return;
+    if (!services.some((service) => service.id === serviceId)) setServiceId(null);
+  }, [serviceId, services]);
+
   const fetchGrid = useCallback(async (options?: FetchGridOptions) => {
+    if (waitingForDiningArea) return;
+
     const silent = options?.silent ?? false;
     const showBlockingLoader = !silent || !gridDataRef.current;
     if (showBlockingLoader) {
@@ -811,7 +917,7 @@ export function TableGridView({
         setLoading(false);
       }
     }
-  }, [applyPendingVisuals, bookingModel, date, diningAreaId, serviceId]);
+  }, [applyPendingVisuals, bookingModel, date, diningAreaId, serviceId, waitingForDiningArea]);
 
   const runSilentReconcile = useCallback(async () => {
     if (visualInteractionCountRef.current > 0) {
@@ -891,6 +997,8 @@ export function TableGridView({
   }, [scheduleReconcile]);
 
   const fetchCombinations = useCallback(async () => {
+    if (waitingForDiningArea) return;
+
     try {
       const areaQs =
         bookingModel === 'table_reservation' && diningAreaId
@@ -913,9 +1021,11 @@ export function TableGridView({
     } catch (err) {
       console.error('Fetch combinations failed:', err);
     }
-  }, [bookingModel, diningAreaId]);
+  }, [bookingModel, diningAreaId, waitingForDiningArea]);
 
   useEffect(() => {
+    if (waitingForDiningArea) return;
+
     const areaQs =
       bookingModel === 'table_reservation' && diningAreaId
         ? `?area_id=${encodeURIComponent(diningAreaId)}`
@@ -929,7 +1039,7 @@ export function TableGridView({
         }
       })
       .catch((e) => console.error('[TableGridView] /api/venue/tables preload failed:', e));
-  }, [bookingModel, diningAreaId]);
+  }, [bookingModel, diningAreaId, waitingForDiningArea]);
   useEffect(() => { fetchServices(); }, [fetchServices]);
   useEffect(() => { fetchGrid(); }, [fetchGrid]);
   useEffect(() => { fetchCombinations(); }, [fetchCombinations]);
@@ -1496,16 +1606,6 @@ export function TableGridView({
     }
   }, [assignAllUnassignedLoading, addToast, scheduleReconcile]);
 
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const custom = event as CustomEvent<{ bookingId: string; endTime: string }>;
-      if (!custom.detail?.bookingId || !custom.detail?.endTime) return;
-      void handleResizeBooking(custom.detail.bookingId, custom.detail.endTime);
-    };
-    window.addEventListener('timeline-resize-booking', handler as EventListener);
-    return () => window.removeEventListener('timeline-resize-booking', handler as EventListener);
-  }, [handleResizeBooking]);
-
   const handleUndo = useCallback(async () => {
     const last = undoStack[undoStack.length - 1];
     if (!last) return;
@@ -1822,6 +1922,7 @@ export function TableGridView({
                   gapPx={4}
                   align="start"
                   maxWidthPx={272}
+                  onDismiss={() => setSearchOpen(false)}
                   className="animate-fade-in z-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
                   <div className="relative">
@@ -1856,7 +1957,7 @@ export function TableGridView({
               </div>
               {showDiningAreaChrome && diningAreaId ? (
                 <DiningAreaPicker
-                  areas={diningAreas}
+                  areas={activeDiningAreas}
                   value={diningAreaId}
                   onChange={setDiningAreaFilter}
                   verticalAnchorRef={toolbarPanelAnchorRef}
@@ -1894,6 +1995,7 @@ export function TableGridView({
                   gapPx={4}
                   align="start"
                   maxWidthPx={272}
+                  onDismiss={() => setFilterOpen(false)}
                   className="animate-fade-in z-40 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
                   <div className="space-y-2">

@@ -27,6 +27,9 @@ export function bookingAvailabilityUrl(params: URLSearchParams): string {
 /**
  * Month view of appointment availability (dates with at least one bookable slot
  * for a given practitioner + service). Powers the visual date picker.
+ *
+ * `variantId` narrows availability to a chosen sub-option's duration so the calendar
+ * never shows dates that fit the base service but not the longer variant.
  */
 export function appointmentCalendarUrl(
   audience: BookingFlowAudience,
@@ -35,6 +38,7 @@ export function appointmentCalendarUrl(
   serviceId: string,
   year: number,
   month: number,
+  variantId?: string | null,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -42,6 +46,9 @@ export function appointmentCalendarUrl(
     year: String(year),
     month: String(month),
   });
+  if (variantId) {
+    params.set('variant_id', variantId);
+  }
   if (audience === 'public') {
     params.set('venue_id', venueId);
     return `/api/booking/appointment-calendar?${params}`;
@@ -54,8 +61,10 @@ export function appointmentCalendarCacheKey(
   serviceId: string,
   year: number,
   month: number,
+  variantId?: string | null,
 ): string {
-  return `${practitionerId}:${serviceId}:${year}:${month}`;
+  const v = variantId ? `:${variantId}` : '';
+  return `${practitionerId}:${serviceId}${v}:${year}:${month}`;
 }
 
 export function validateAppointmentSlotUrl(): string {

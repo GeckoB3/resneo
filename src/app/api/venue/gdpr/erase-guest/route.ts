@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { eraseGuestVenuePii } from '@/lib/guests/gdpr-erase-guest';
+import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
 
 const bodySchema = z.object({
   guest_id: z.string().uuid(),
@@ -10,8 +12,7 @@ const bodySchema = z.object({
 
 /**
  * POST /api/venue/gdpr/erase-guest
- * Staff-only. Anonymises guest PII and clears identifiable fields on related bookings.
- * Bookings are retained for venue records; guest row is kept with placeholders (FK RESTRICT on bookings).
+ * Staff-only admin. Anonymises guest PII and clears identifiable fields on related bookings.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -43,45 +44,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
     }
 
-    await admin.from('communications').delete().eq('guest_id', guestId);
-
-    const { data: bookingIdsRows } = await admin.from('bookings').select('id').eq('guest_id', guestId);
-    const bookingIds = (bookingIdsRows ?? []).map((r: { id: string }) => r.id);
-    if (bookingIds.length > 0) {
-      await admin.from('communication_logs').delete().in('booking_id', bookingIds);
-    }
-
-    await admin
-      .from('bookings')
-      .update({
-        dietary_notes: null,
-        occasion: null,
-        special_requests: null,
-        internal_notes: null,
-        guest_email: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('guest_id', guestId);
-
-    const { error: updErr } = await admin
-      .from('guests')
-      .update({
-        name: '[Erased]',
-        email: null,
-        phone: null,
-        global_guest_hash: null,
-        dietary_preferences: null,
-        customer_profile_notes: null,
-        marketing_opt_out: true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', guestId)
-      .eq('venue_id', staff.venue_id);
-
-    if (updErr) {
-      console.error('erase-guest: guest update failed:', updErr);
+    try {
+      await eraseGuestVenuePii(admin, staff.venue_id, guestId);
+    } catch (e) {
+      console.error('erase-guest: eraseGuestVenuePii failed:', e);
       return NextResponse.json({ error: 'Failed to erase guest data' }, { status: 500 });
     }
+
+    await insertContactAuditEvent(staff.db, {
+      venue_id: staff.venue_id,
+      guest_id: guestId,
+      actor_staff_id: staff.id,
+      event_type: 'gdpr_erase_guest',
+      metadata: {},
+    });
 
     return NextResponse.json({ success: true, guest_id: guestId });
   } catch (err) {

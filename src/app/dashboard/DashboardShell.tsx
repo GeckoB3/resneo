@@ -132,6 +132,7 @@ export function DashboardShell({
     const today = new Date().toISOString().slice(0, 10);
     router.prefetch('/dashboard/bookings');
     router.prefetch('/dashboard/bookings/new');
+    router.prefetch('/dashboard/contacts');
     router.prefetch('/dashboard/calendar');
     router.prefetch('/dashboard/day-sheet');
     void fetch(`/api/venue/bookings/list?date=${encodeURIComponent(today)}`, { credentials: 'same-origin' }).catch(

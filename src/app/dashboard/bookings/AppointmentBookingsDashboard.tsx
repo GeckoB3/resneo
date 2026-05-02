@@ -186,6 +186,22 @@ function statusPillVariant(status: string): PillVariant {
   }
 }
 
+function bookingTypePillVariant(model: BookingModel): PillVariant {
+  switch (model) {
+    case 'unified_scheduling':
+    case 'practitioner_appointment':
+      return 'brand';
+    case 'event_ticket':
+      return 'info';
+    case 'class_session':
+      return 'success';
+    case 'resource_booking':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
 function sourcePillVariant(source: string): PillVariant {
   if (source === 'online' || source === 'booking_page') return 'brand';
   if (source === 'walk-in') return 'warning';
@@ -1137,7 +1153,8 @@ export function AppointmentBookingsDashboard({
     const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
     const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
     const svc = sid ? serviceMap.get(sid) ?? null : null;
-    const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
+    const bookingModel = inferRegistryModel(b);
+    const typeLabel = bookingModelShortLabel(bookingModel);
     const expanded = expandedIds.includes(b.id);
     const startTime = b.booking_time.slice(0, 5);
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
@@ -1213,7 +1230,7 @@ export function AppointmentBookingsDashboard({
                   Confirmed
                 </Pill>
               )}
-              <Pill variant="neutral" size="sm">
+              <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
                 {typeLabel}
               </Pill>
               {duration != null && (
@@ -1300,7 +1317,6 @@ export function AppointmentBookingsDashboard({
               svcName,
               pracName,
               duration,
-              typeLabel,
               priceDisplay,
               draftMessage,
               sendingMessage,
@@ -1318,14 +1334,13 @@ export function AppointmentBookingsDashboard({
       svcName: string;
       pracName: string;
       duration: number | null;
-      typeLabel: string;
       priceDisplay: string | null;
       draftMessage: string;
       sendingMessage: boolean;
       messageChannel: GuestMessageChannel;
     },
   ) {
-    const { svcName, pracName, duration, typeLabel, priceDisplay, draftMessage, sendingMessage, messageChannel } = ctx;
+    const { svcName, pracName, duration, priceDisplay, draftMessage, sendingMessage, messageChannel } = ctx;
     const showConfirm = canShowConfirmBookingAttendance(b);
     const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
@@ -1372,7 +1387,6 @@ export function AppointmentBookingsDashboard({
                       ? `${b.guest_visit_count} visit${b.guest_visit_count === 1 ? '' : 's'}`
                       : 'First visit'}
                   </Pill>
-                  <Pill variant="neutral" size="sm">{typeLabel}</Pill>
                 </div>
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   <span className="font-medium text-slate-700">{formatDayHeader(b.booking_date)}</span>
@@ -1872,6 +1886,7 @@ export function AppointmentBookingsDashboard({
           align="start"
           maxWidthPx={288}
           id={viewRangePanelId}
+          onDismiss={() => setViewRangePopoverOpen(false)}
           aria-label="Choose view range"
           className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
         >

@@ -2,6 +2,7 @@
 
 import {
   useLayoutEffect,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -10,6 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { computeAnchoredDropdownStyle } from '@/lib/ui/clamped-floating-styles';
 import { getViewportBounds } from '@/lib/ui/viewport-bounds';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 /**
  * Fixed-position dropdown clamped to the visual viewport, aligned to a trigger element.
@@ -26,6 +28,7 @@ export function ClampedFixedDropdown({
   className,
   children,
   id,
+  onDismiss,
   'aria-label': ariaLabel,
 }: {
   open: boolean;
@@ -39,9 +42,17 @@ export function ClampedFixedDropdown({
   className?: string;
   children: ReactNode;
   id?: string;
+  onDismiss?: () => void;
   'aria-label'?: string;
 }) {
   const [style, setStyle] = useState<CSSProperties>({});
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useDismissibleLayer({
+    open: open && Boolean(onDismiss),
+    refs: [triggerRef, panelRef],
+    onDismiss: onDismiss ?? (() => {}),
+  });
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -88,6 +99,7 @@ export function ClampedFixedDropdown({
 
   return createPortal(
     <div
+      ref={panelRef}
       id={id}
       role="dialog"
       aria-label={ariaLabel}

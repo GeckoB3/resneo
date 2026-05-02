@@ -15,6 +15,7 @@ import type { LayoutResizeAnchor } from '@/app/dashboard/settings/floor-plan/Kon
 import Link from 'next/link';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 const KonvaCanvas = dynamic(() => import('./KonvaCanvas'), { ssr: false });
 
@@ -82,6 +83,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
   const [activeFloorPlanId, setActiveFloorPlanId] = useState<string | null>(null);
   const [showFloorPlanMenu, setShowFloorPlanMenu] = useState(false);
+  const floorPlanMenuRef = useRef<HTMLDivElement>(null);
   const [newPlanName, setNewPlanName] = useState('');
   const [floorPlanMenuAction, setFloorPlanMenuAction] = useState<'add' | 'rename' | null>(null);
   const [floorPlanSaving, setFloorPlanSaving] = useState(false);
@@ -301,18 +303,11 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
     };
   }, []);
 
-  // Close floor plan menu when clicking outside
-  useEffect(() => {
-    if (!showFloorPlanMenu) return;
-    const close = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-floor-plan-menu]')) {
-        setShowFloorPlanMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [showFloorPlanMenu]);
+  useDismissibleLayer({
+    open: showFloorPlanMenu,
+    refs: [floorPlanMenuRef],
+    onDismiss: () => setShowFloorPlanMenu(false),
+  });
 
   // Sync propEdits when selection changes
   useEffect(() => {
@@ -1642,7 +1637,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         )}
 
         {/* Floor plan selector */}
-        <div className="relative" data-floor-plan-menu>
+        <div ref={floorPlanMenuRef} className="relative" data-floor-plan-menu>
           <button
             onClick={() => { setShowFloorPlanMenu((v) => !v); setFloorPlanMenuAction(null); setNewPlanName(''); }}
             className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"

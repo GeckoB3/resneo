@@ -7,6 +7,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import type { CountryCode } from 'libphonenumber-js';
 import type { TableForSelector, OccupancyMap } from '@/components/table-tracking/TableSelector';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 interface Suggestion {
   source: 'single' | 'auto' | 'manual';
@@ -80,16 +81,11 @@ export function WalkInModal({
     setBookingTime(initialTime ?? currentTime());
   }, [initialDate, initialTime]);
 
-  useEffect(() => {
-    if (!partyPanelOpen) return;
-    function handler(e: MouseEvent) {
-      if (partyPanelRef.current && !partyPanelRef.current.contains(e.target as Node)) {
-        setPartyPanelOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [partyPanelOpen]);
+  useDismissibleLayer({
+    open: partyPanelOpen,
+    refs: [partyPanelRef],
+    onDismiss: () => setPartyPanelOpen(false),
+  });
 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);

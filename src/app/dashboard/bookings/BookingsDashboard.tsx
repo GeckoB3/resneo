@@ -47,6 +47,7 @@ import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModa
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
+import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 
 interface BookingRow {
   id: string;
@@ -115,6 +116,21 @@ interface BookingDetailLite {
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
+interface BookingsDashboardPreferences {
+  viewMode?: ViewMode;
+  anchorDate?: string;
+  customFrom?: string;
+  customTo?: string;
+  statusFilter?: string;
+  modelFilter?: 'all' | BookingModel;
+  serviceFilterIds?: string[];
+  calendarFilter?: string;
+  areaId?: string | null;
+  startHourOverride?: number | null;
+  endHourOverride?: number | null;
+  timeRangeFilterActive?: boolean;
+}
+
 const VIEW_MODE_OPTIONS: { id: ViewMode; label: string }[] = [
   { id: 'day', label: 'Day' },
   { id: 'week', label: 'Week' },
@@ -147,6 +163,37 @@ const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
 const GUEST_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function bookingsPreferencesKey(venueId: string): string {
+  return `reserve:dashboard:bookings:${venueId}:preferences`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableHour(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 24);
+}
+
+function isBookingsDashboardPreferences(value: unknown): value is BookingsDashboardPreferences {
+  if (!isRecord(value)) return false;
+  if (value.viewMode !== undefined && !VIEW_MODE_OPTIONS.some((option) => option.id === value.viewMode)) return false;
+  if (value.anchorDate !== undefined && (typeof value.anchorDate !== 'string' || !ISO_DATE_RE.test(value.anchorDate))) return false;
+  if (value.customFrom !== undefined && (typeof value.customFrom !== 'string' || !ISO_DATE_RE.test(value.customFrom))) return false;
+  if (value.customTo !== undefined && (typeof value.customTo !== 'string' || !ISO_DATE_RE.test(value.customTo))) return false;
+  if (value.statusFilter !== undefined && (typeof value.statusFilter !== 'string' || !STATUS_FILTER_OPTIONS.some((option) => option.label === value.statusFilter))) return false;
+  if (value.modelFilter !== undefined && value.modelFilter !== 'all' && !BOOKING_MODEL_ORDER.includes(value.modelFilter as BookingModel)) return false;
+  if (value.serviceFilterIds !== undefined && (!Array.isArray(value.serviceFilterIds) || !value.serviceFilterIds.every((id) => typeof id === 'string' && GUEST_UUID_RE.test(id)))) return false;
+  if (value.calendarFilter !== undefined && (typeof value.calendarFilter !== 'string' || (value.calendarFilter !== 'all' && !GUEST_UUID_RE.test(value.calendarFilter)))) return false;
+  if (value.areaId !== undefined && value.areaId !== null && (typeof value.areaId !== 'string' || !GUEST_UUID_RE.test(value.areaId))) return false;
+  if (value.startHourOverride !== undefined && !isNullableHour(value.startHourOverride)) return false;
+  if (value.endHourOverride !== undefined && !isNullableHour(value.endHourOverride)) return false;
+  if (value.timeRangeFilterActive !== undefined && typeof value.timeRangeFilterActive !== 'boolean') return false;
+  return true;
+}
+
 function bookingTypeFilterLabel(model: BookingModel): string {
   switch (model) {
     case 'table_reservation':
@@ -165,6 +212,22 @@ function bookingTypeFilterLabel(model: BookingModel): string {
   }
 }
 
+function bookingTypePillVariant(model: BookingModel): PillVariant {
+  switch (model) {
+    case 'unified_scheduling':
+    case 'practitioner_appointment':
+      return 'brand';
+    case 'event_ticket':
+      return 'info';
+    case 'class_session':
+      return 'success';
+    case 'resource_booking':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
 interface FetchBookingsOptions {
   silent?: boolean;
   ids?: string[];
@@ -175,6 +238,10 @@ interface DiningService {
   name: string;
   is_active: boolean;
   area_id?: string | null;
+}
+
+interface DiningServiceFilterOption extends DiningService {
+  label: string;
 }
 
 interface BookingCalendarFilterOption {
@@ -269,19 +336,24 @@ export function BookingsDashboard({
 }) {
   const { addToast } = useToast();
   const venueBootstrap = useDashboardVenueBootstrap();
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
-  const [anchorDate, setAnchorDate] = useState(todayISO);
-  const [customFrom, setCustomFrom] = useState(todayISO);
-  const [customTo, setCustomTo] = useState(todayISO);
-  const [statusFilter, setStatusFilter] = useState<string>('All');
-  const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
+  const preferencesKey = bookingsPreferencesKey(venueId);
+  const rememberedPreferences = useMemo(
+    () => readSessionPreference<BookingsDashboardPreferences>(preferencesKey, {}, isBookingsDashboardPreferences),
+    [preferencesKey],
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>(rememberedPreferences.viewMode ?? 'day');
+  const [anchorDate, setAnchorDate] = useState(rememberedPreferences.anchorDate ?? todayISO);
+  const [customFrom, setCustomFrom] = useState(rememberedPreferences.customFrom ?? todayISO);
+  const [customTo, setCustomTo] = useState(rememberedPreferences.customTo ?? todayISO);
+  const [statusFilter, setStatusFilter] = useState<string>(rememberedPreferences.statusFilter ?? 'All');
+  const [modelFilter, setModelFilter] = useState<'all' | BookingModel>(rememberedPreferences.modelFilter ?? 'all');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewRangePopoverOpen, setViewRangePopoverOpen] = useState(false);
   const viewRangeTriggerRef = useRef<HTMLButtonElement>(null);
   const viewRangeWrapRef = useRef<HTMLDivElement>(null);
   const viewRangePanelId = useId();
-  const [serviceFilter, setServiceFilter] = useState<string>('all');
-  const [calendarFilter, setCalendarFilter] = useState<string>('all');
+  const [serviceFilterIds, setServiceFilterIds] = useState<string[]>(rememberedPreferences.serviceFilterIds ?? []);
+  const [calendarFilter, setCalendarFilter] = useState<string>(rememberedPreferences.calendarFilter ?? 'all');
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -312,9 +384,9 @@ export function BookingsDashboard({
   const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
-  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
-  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
-  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(rememberedPreferences.timeRangeFilterActive ?? false);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -334,7 +406,12 @@ export function BookingsDashboard({
   const pickerStartHour = startHourOverride ?? derivedStartHour;
   const pickerEndHour = endHourOverride ?? derivedEndHour;
 
+  const anchorDateHydrated = useRef(false);
   useEffect(() => {
+    if (!anchorDateHydrated.current) {
+      anchorDateHydrated.current = true;
+      return;
+    }
     setStartHourOverride(null);
     setEndHourOverride(null);
     setTimeRangeFilterActive(false);
@@ -404,6 +481,20 @@ export function BookingsDashboard({
     () => diningServices.filter((service) => service.is_active),
     [diningServices],
   );
+  const activeAreaNameById = useMemo(
+    () => new Map(diningAreas.filter((area) => area.is_active).map((area) => [area.id, area.name])),
+    [diningAreas],
+  );
+  const activeDiningServiceOptions = useMemo<DiningServiceFilterOption[]>(() => {
+    const showArea = activeAreaNameById.size > 1;
+    return activeDiningServices.map((service) => {
+      const areaName = service.area_id ? activeAreaNameById.get(service.area_id) : null;
+      return {
+        ...service,
+        label: showArea && areaName ? `${service.name} (${areaName})` : service.name,
+      };
+    });
+  }, [activeAreaNameById, activeDiningServices]);
   const activeBookingCalendars = useMemo(
     () => bookingCalendars.filter((calendar) => calendar.is_active !== false),
     [bookingCalendars],
@@ -417,6 +508,10 @@ export function BookingsDashboard({
       const next = new URLSearchParams(searchParams.toString());
       if (!value) next.delete('area');
       else next.set('area', value);
+      writeSessionPreference<BookingsDashboardPreferences>(preferencesKey, {
+        ...rememberedPreferences,
+        areaId: value || null,
+      });
       try {
         window.localStorage.setItem(`bookingsArea:${venueId}`, value || '');
       } catch {
@@ -425,7 +520,7 @@ export function BookingsDashboard({
       const qs = next.toString();
       router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
     },
-    [router, searchParams, venueId],
+    [preferencesKey, rememberedPreferences, router, searchParams, venueId],
   );
 
   const areaHydrated = useRef(false);
@@ -437,23 +532,61 @@ export function BookingsDashboard({
       return;
     }
     try {
+      const rememberedAreaId = rememberedPreferences.areaId;
       const saved = window.localStorage.getItem(`bookingsArea:${venueId}`);
-      if (saved && GUEST_UUID_RE.test(saved)) {
+      const areaId = rememberedAreaId && GUEST_UUID_RE.test(rememberedAreaId)
+        ? rememberedAreaId
+        : saved && GUEST_UUID_RE.test(saved)
+          ? saved
+          : null;
+      if (areaId) {
         const next = new URLSearchParams(searchParams.toString());
-        next.set('area', saved);
+        next.set('area', areaId);
         router.replace(`/dashboard/bookings?${next}`, { scroll: false });
       }
     } catch {
       /* ignore */
     }
     areaHydrated.current = true;
-  }, [router, searchParams, showAreaBookingsChrome, venueId]);
+  }, [rememberedPreferences.areaId, router, searchParams, showAreaBookingsChrome, venueId]);
 
   useEffect(() => {
-    if (serviceFilter === 'all') return;
-    if (activeDiningServices.some((service) => service.id === serviceFilter)) return;
-    setServiceFilter('all');
-  }, [activeDiningServices, serviceFilter]);
+    writeSessionPreference<BookingsDashboardPreferences>(preferencesKey, {
+      viewMode,
+      anchorDate,
+      customFrom,
+      customTo,
+      statusFilter,
+      modelFilter,
+      serviceFilterIds,
+      calendarFilter,
+      areaId: filterAreaId,
+      startHourOverride,
+      endHourOverride,
+      timeRangeFilterActive,
+    });
+  }, [
+    preferencesKey,
+    viewMode,
+    anchorDate,
+    customFrom,
+    customTo,
+    statusFilter,
+    modelFilter,
+    serviceFilterIds,
+    calendarFilter,
+    filterAreaId,
+    startHourOverride,
+    endHourOverride,
+    timeRangeFilterActive,
+  ]);
+
+  useEffect(() => {
+    if (serviceFilterIds.length === 0) return;
+    const activeIds = new Set(activeDiningServices.map((service) => service.id));
+    const next = serviceFilterIds.filter((id) => activeIds.has(id));
+    if (next.length !== serviceFilterIds.length) setServiceFilterIds(next);
+  }, [activeDiningServices, serviceFilterIds]);
 
   useEffect(() => {
     if (calendarFilter === 'all') return;
@@ -584,7 +717,7 @@ export function BookingsDashboard({
       }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       if (!ids && filterAreaId) params.set('area', filterAreaId);
-      if (!ids && serviceFilter !== 'all') params.set('service', serviceFilter);
+      if (!ids && serviceFilterIds.length > 0) params.set('service', serviceFilterIds.join(','));
       if (!ids && calendarFilter !== 'all') params.set('calendar', calendarFilter);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
@@ -613,7 +746,7 @@ export function BookingsDashboard({
       if (silent) setIsRefreshing(false);
       else setLoading(false);
     }
-  }, [calendarFilter, filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilter, statusFilter, to, viewMode]);
+  }, [calendarFilter, filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilterIds, statusFilter, to, viewMode]);
 
   const changeTableSaveLock = useRef(false);
 
@@ -940,16 +1073,19 @@ export function BookingsDashboard({
       setError(`No-show can only be marked ${noShowGraceMinutes} minutes after the booking start time.`);
       return;
     }
+    const tableStyle = isTableReservationBooking(booking);
+    const partyLabel = `${booking.party_size} ${
+      tableStyle ? `cover${booking.party_size === 1 ? '' : 's'}` : `person${booking.party_size === 1 ? '' : 's'}`
+    }`;
     if (isRevertTransition(booking.status, nextStatus)) {
       const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
-      const tableStyle = isTableReservationBooking(booking);
       const confirmLabel =
         booking.status === 'Seated' && (nextStatus === 'Booked' || nextStatus === 'Confirmed') && !tableStyle
           ? 'Undo Start'
           : revertAction?.label ?? `Revert to ${nextStatus}`;
       setConfirmDialog({
         title: confirmLabel,
-        message: `${booking.guest_name} (${booking.party_size}) at ${booking.booking_time.slice(0, 5)} will be changed from ${booking.status} back to ${nextStatus}.`,
+        message: `${booking.guest_name} (${partyLabel}) at ${booking.booking_time.slice(0, 5)} will be changed from ${booking.status} back to ${nextStatus}.`,
         confirmLabel,
         onConfirm: () => { void updateBookingStatus(booking.id, nextStatus); },
       });
@@ -958,7 +1094,7 @@ export function BookingsDashboard({
     if (isDestructiveBookingStatus(nextStatus)) {
       setConfirmDialog({
         title: `Mark ${nextStatus}`,
-        message: `${booking.guest_name} (${booking.party_size}) at ${booking.booking_time.slice(0, 5)} will be marked ${nextStatus}.`,
+        message: `${booking.guest_name} (${partyLabel}) at ${booking.booking_time.slice(0, 5)} will be marked ${nextStatus}.`,
         confirmLabel: `Mark ${nextStatus}`,
         onConfirm: () => { void updateBookingStatus(booking.id, nextStatus); },
       });
@@ -1161,6 +1297,14 @@ export function BookingsDashboard({
     }
   };
 
+  const toggleServiceFilter = useCallback((serviceId: string) => {
+    setServiceFilterIds((current) =>
+      current.includes(serviceId)
+        ? current.filter((id) => id !== serviceId)
+        : [...current, serviceId],
+    );
+  }, []);
+
   const modelScopedBookings = useMemo(() => {
     if (modelFilter === 'all') return bookings;
     return bookings.filter((b) => inferBookingRowModel(b) === modelFilter);
@@ -1202,7 +1346,10 @@ export function BookingsDashboard({
 
   const stats = useMemo(() => {
     const total = filteredBookings.length;
-    const totalCovers = filteredBookings.reduce((sum, b) => sum + b.party_size, 0);
+    const totalCovers = filteredBookings.reduce(
+      (sum, b) => sum + (isTableReservationBooking(b) ? b.party_size : 0),
+      0,
+    );
     /** Active = anything not pending/cancelled/no-show. Includes Booked, Confirmed, Seated, Completed. */
     const active = filteredBookings.filter(
       (b) => b.status === 'Booked' || b.status === 'Confirmed' || b.status === 'Seated' || b.status === 'Completed',
@@ -1250,7 +1397,7 @@ export function BookingsDashboard({
   const filterCount =
     (statusFilter !== 'All' ? 1 : 0) +
     (modelFilter !== 'all' ? 1 : 0) +
-    (serviceFilter !== 'all' ? 1 : 0) +
+    (serviceFilterIds.length > 0 ? 1 : 0) +
     (calendarFilter !== 'all' ? 1 : 0) +
     (filterAreaId ? 1 : 0);
 
@@ -1340,19 +1487,46 @@ export function BookingsDashboard({
         </div>
       )}
       {showServiceBookingsChrome && (
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</span>
-          <select
-            value={serviceFilter}
-            onChange={(e) => setServiceFilter(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          >
-            <option value="all">All services</option>
-            {activeDiningServices.map((service) => (
-              <option key={service.id} value={service.id}>{service.name}</option>
-            ))}
-          </select>
-        </label>
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Service</span>
+            {serviceFilterIds.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setServiceFilterIds([])}
+                className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                All services
+              </button>
+            ) : null}
+          </div>
+          <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5">
+            {activeDiningServiceOptions.map((service) => {
+              const checked = serviceFilterIds.includes(service.id);
+              return (
+                <label
+                  key={service.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
+                    checked ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleServiceFilter(service.id)}
+                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <span className="min-w-0 truncate">{service.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500">
+            {serviceFilterIds.length === 0
+              ? 'Showing all services.'
+              : `${serviceFilterIds.length} service${serviceFilterIds.length === 1 ? '' : 's'} selected.`}
+          </p>
+        </div>
       )}
       {showAreaBookingsChrome && (
         <label className="block">
@@ -1411,7 +1585,7 @@ export function BookingsDashboard({
           onClick={() => {
             setStatusFilter('All');
             setModelFilter('all');
-            setServiceFilter('all');
+            setServiceFilterIds([]);
             setCalendarFilter('all');
             if (filterAreaId) setAreaFilter('');
           }}
@@ -1475,6 +1649,7 @@ export function BookingsDashboard({
           align="start"
           maxWidthPx={288}
           id={viewRangePanelId}
+          onDismiss={() => setViewRangePopoverOpen(false)}
           aria-label="Choose view range"
           className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
         >
@@ -1645,7 +1820,6 @@ export function BookingsDashboard({
           onSendMessage={sendMessageToBooking}
           onStatusAction={requestStatusChange}
           onDetailUpdated={handleDetailUpdated}
-          showModelBadges={showModelFilters}
           showAreaBadge={showAreaBookingsChrome && !filterAreaId}
           confirmAttendanceLoadingId={confirmAttendanceLoadingId}
           onConfirmBookingAttendance={confirmBookingAttendance}
@@ -1662,7 +1836,11 @@ export function BookingsDashboard({
                   <span>
                     {dayBookings.length} booking{dayBookings.length !== 1 ? 's' : ''}
                   </span>
-                  <span>{dayBookings.reduce((s, b) => s + b.party_size, 0)} covers</span>
+                  {dayBookings.some(isTableReservationBooking) ? (
+                    <span>
+                      {dayBookings.reduce((s, b) => s + (isTableReservationBooking(b) ? b.party_size : 0), 0)} covers
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <BookingsAccordionList
@@ -1683,7 +1861,6 @@ export function BookingsDashboard({
                 onSendMessage={sendMessageToBooking}
                 onStatusAction={requestStatusChange}
                 onDetailUpdated={handleDetailUpdated}
-                showModelBadges={showModelFilters}
                 showAreaBadge={showAreaBookingsChrome && !filterAreaId}
                 confirmAttendanceLoadingId={confirmAttendanceLoadingId}
                 onConfirmBookingAttendance={confirmBookingAttendance}
@@ -1956,7 +2133,6 @@ function BookingsAccordionList({
   onSendMessage,
   onStatusAction,
   onDetailUpdated,
-  showModelBadges = false,
   showAreaBadge = false,
   confirmAttendanceLoadingId,
   onConfirmBookingAttendance,
@@ -1980,7 +2156,6 @@ function BookingsAccordionList({
   onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
-  showModelBadges?: boolean;
   showAreaBadge?: boolean;
   confirmAttendanceLoadingId: string | null;
   onConfirmBookingAttendance: (bookingId: string) => void;
@@ -2007,19 +2182,20 @@ function BookingsAccordionList({
           <span className="text-[11px] font-medium text-slate-400">{bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}</span>
         </div>
       </div>
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y divide-slate-200/70">
         {bookings.map((booking) => {
           const expanded = expandedIds.includes(booking.id);
           const detail = detailById[booking.id];
           const detailLoading = detailLoadingIds.includes(booking.id);
           const draftMessage = messageDraftById[booking.id] ?? '';
           const sendingMessage = sendingMessageIds.includes(booking.id);
-          const tableLabel = booking.table_assignments && booking.table_assignments.length > 0
+          const inferredModel = inferBookingRowModel(booking);
+          const isTableBooking = inferredModel === 'table_reservation';
+          const tableLabel = isTableBooking && booking.table_assignments && booking.table_assignments.length > 0
             ? booking.table_assignments.length === 1
               ? booking.table_assignments[0]!.name
               : booking.table_assignments.map((t) => t.name).join(', ')
             : null;
-          const inferredModel = inferBookingRowModel(booking);
           const displayStatus = bookingStatusDisplayLabel(booking.status, inferredModel === 'table_reservation');
           return (
             <div
@@ -2033,7 +2209,7 @@ function BookingsAccordionList({
                 onPrefetchBookingDetail?.(booking.id);
               }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
-              className={`cursor-pointer border-l-[3px] py-2 pl-2 pr-2 transition-colors sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(booking.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
+              className={`cursor-pointer border-l-[3px] py-2 pl-2 pr-2 transition-colors even:bg-slate-50/30 sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(booking.status)} ${expanded ? 'bg-brand-50/25 even:bg-brand-50/25' : 'hover:bg-slate-50/70'}`}
             >
               <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
                 <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
@@ -2053,14 +2229,25 @@ function BookingsAccordionList({
                       {booking.guest_name}
                     </span>
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
-                    <span className="shrink-0 text-slate-300">·</span>
-                    <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
-                      {booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}
-                    </span>
+                    {isTableBooking ? (
+                      <>
+                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
+                          {booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}
+                        </span>
+                      </>
+                    ) : booking.party_size > 1 ? (
+                      <>
+                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
+                          {booking.party_size} people
+                        </span>
+                      </>
+                    ) : null}
                     <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
                     <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(booking.source)}</span>
                     <Pill variant={statusPillVariant(booking.status)} size="sm">{displayStatus}</Pill>
-                    {showAreaBadge && booking.area_name && (
+                    {isTableBooking && showAreaBadge && booking.area_name && (
                       <span className="hidden sm:inline-flex">
                         <Pill variant="neutral" size="sm">{booking.area_name}</Pill>
                       </span>
@@ -2074,10 +2261,10 @@ function BookingsAccordionList({
                     {showAttendanceConfirmedPill(booking) && (
                       <Pill variant="success" size="sm" dot>Confirmed</Pill>
                     )}
-                    {showModelBadges && (
-                      <span className="hidden sm:inline-flex">
-                        <Pill variant="neutral" size="sm">{bookingModelShortLabel(inferredModel)}</Pill>
-                      </span>
+                    {!isTableBooking && (
+                      <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
+                        {bookingTypeFilterLabel(inferredModel)}
+                      </Pill>
                     )}
                     {booking.dietary_notes && (
                       <span className="hidden sm:inline-flex">
@@ -2101,12 +2288,12 @@ function BookingsAccordionList({
                 </div>
                 {(() => {
                   const action = BOOKING_PRIMARY_ACTIONS[booking.status as BookingStatus];
-                  const tableStyle = isTableReservationBooking(booking);
+                  const tableStyle = isTableBooking;
                   const primaryLabel =
                     action && action.target === 'Seated' && !tableStyle ? 'Start' : action?.label;
                   const showUndoStart =
                     booking.status === 'Seated' && !tableStyle;
-                  const showChangeTable = coversChangeTableEnabled && booking.status === 'Seated';
+                  const showChangeTable = isTableBooking && coversChangeTableEnabled && booking.status === 'Seated';
                   const showAttendanceConfirm = canShowConfirmBookingAttendanceRow(booking);
                   const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationRow(booking);
                   if (!action && !showChangeTable && !showUndoStart && !showAttendanceConfirm && !showAttendanceCancel) {
@@ -2204,7 +2391,7 @@ function BookingsAccordionList({
                   onSendMessage={(ch) => { void onSendMessage(booking.id, draftMessage, ch); }}
                   onStatusAction={(status) => { onStatusAction(booking, status); }}
                   onDetailUpdated={() => onDetailUpdated(booking.id)}
-                  onRequestChangeTable={coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
+                  onRequestChangeTable={isTableBooking && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
                 />
               )}
             </div>

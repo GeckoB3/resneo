@@ -20,6 +20,8 @@ import {
   fetchAppointmentInput,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
@@ -505,6 +507,21 @@ async function handleAppointmentAvailability(
   if (phantomBookings.length > 0) {
     input.phantomBookings = phantomBookings;
   }
+
+  const variantId = searchParams.get('variant_id');
+  if (variantId && serviceId) {
+    const variant = await loadActiveVariantForService({
+      admin: supabase,
+      venueId,
+      serviceId,
+      variantId,
+    });
+    if (!variant) {
+      return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
+    }
+    applyVariantToAppointmentInput({ services: input.services, serviceId, variant });
+  }
+
   const { data: venueClock } = await supabase
     .from('venues')
     .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')

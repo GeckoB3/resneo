@@ -9,6 +9,7 @@ import {
   memo,
   type CSSProperties,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
@@ -16,11 +17,14 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   useDraggable,
   useDroppable,
+  type DragCancelEvent,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -28,9 +32,9 @@ import { createClient } from '@/lib/supabase/browser';
 import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import {
-  AppointmentDetailSheet,
-  type AppointmentDetailPrefetch,
-} from '@/components/booking/AppointmentDetailSheet';
+  BookingDetailPanel,
+  type BookingDetailPanelSnapshot,
+} from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
 import { useToast } from '@/components/ui/Toast';
@@ -72,6 +76,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 
 interface Practitioner {
   id: string;
@@ -214,10 +219,50 @@ type ViewMode = 'day' | 'week' | 'month';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface PractitionerCalendarPreferences {
+  viewMode?: ViewMode;
+  date?: string;
+  weekStart?: string;
+  monthAnchor?: string;
+  visibleCalendarIdsState?: string[] | null;
+  filterStatus?: string;
+  startHourOverride?: number | null;
+  endHourOverride?: number | null;
+}
+
+function practitionerCalendarPreferencesKey(venueId: string): string {
+  return `reserve:dashboard:calendar:${venueId}:preferences`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableHour(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 24);
+}
+
+function isPractitionerCalendarPreferences(value: unknown): value is PractitionerCalendarPreferences {
+  if (!isRecord(value)) return false;
+  if (value.viewMode !== undefined && value.viewMode !== 'day' && value.viewMode !== 'week' && value.viewMode !== 'month') return false;
+  if (value.date !== undefined && (typeof value.date !== 'string' || !ISO_DATE_RE.test(value.date))) return false;
+  if (value.weekStart !== undefined && (typeof value.weekStart !== 'string' || !ISO_DATE_RE.test(value.weekStart))) return false;
+  if (value.monthAnchor !== undefined && (typeof value.monthAnchor !== 'string' || !ISO_DATE_RE.test(value.monthAnchor))) return false;
+  if (value.visibleCalendarIdsState !== undefined && value.visibleCalendarIdsState !== null) {
+    if (!Array.isArray(value.visibleCalendarIdsState) || !value.visibleCalendarIdsState.every((id) => typeof id === 'string' && UUID_RE.test(id))) return false;
+  }
+  if (value.filterStatus !== undefined && (typeof value.filterStatus !== 'string' || !CALENDAR_STATUS_FILTERS.some((status) => status.value === value.filterStatus))) return false;
+  if (value.startHourOverride !== undefined && !isNullableHour(value.startHourOverride)) return false;
+  if (value.endHourOverride !== undefined && !isNullableHour(value.endHourOverride)) return false;
+  return true;
+}
 
 /**
  * Staff calendar booking blocks — product palette (`accent` = 3px left stripe; fill/text/border are light tints).
- * Booked #3B82F6 · Confirmed #0D9488 · Arrived #F59E0B · Started #8B5CF6 · Completed red #FEE2E2 · No show #FEF2F2 · Cancelled #6B7280
+ * Booked #3B82F6 · Confirmed #0D9488 · Arrived #F59E0B · Started #22C55E · Completed #6B7280 · No show #FEF2F2 · Cancelled #6B7280
  */
 interface BookingBlockPalette {
   bg: string;
@@ -245,16 +290,16 @@ const BOOKING_PALETTE_ARRIVED_WAITING: BookingBlockPalette = {
   accent: '#F59E0B',
 };
 const BOOKING_PALETTE_STARTED: BookingBlockPalette = {
-  bg: '#F5F3FF',
-  text: '#5B21B6',
-  border: '#DDD6FE',
-  accent: '#8B5CF6',
+  bg: '#F0FDF4',
+  text: '#166534',
+  border: '#BBF7D0',
+  accent: '#22C55E',
 };
 const BOOKING_PALETTE_COMPLETED: BookingBlockPalette = {
-  bg: '#FEE2E2',
-  text: '#991B1B',
-  border: '#FCA5A5',
-  accent: '#EF4444',
+  bg: '#F3F4F6',
+  text: '#374151',
+  border: '#D1D5DB',
+  accent: '#6B7280',
 };
 const BOOKING_PALETTE_NO_SHOW: BookingBlockPalette = {
   bg: '#FEF2F2',
@@ -368,6 +413,11 @@ function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean 
 
 type BookingCluster = { kind: 'single'; booking: Booking } | { kind: 'group'; items: Booking[] };
 
+interface BookingClusterLayout {
+  laneIndex: number;
+  laneCount: number;
+}
+
 /** Merge consecutive multi-service rows (same group_booking_id) into one visual stack. */
 function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
   const sorted = [...bookings].sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
@@ -401,28 +451,49 @@ function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
   return out;
 }
 
-function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
-  return {
-    id: b.id,
-    booking_date: b.booking_date,
-    booking_time: b.booking_time,
-    booking_end_time: b.booking_end_time,
-    status: b.status,
-    practitioner_id: b.practitioner_id,
-    appointment_service_id: serviceIdForBooking(b),
-    special_requests: b.special_requests,
-    internal_notes: b.internal_notes,
-    client_arrived_at: b.client_arrived_at,
-    guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
-    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
-    deposit_amount_pence: b.deposit_amount_pence,
-    deposit_status: b.deposit_status,
-    party_size: b.party_size,
-    guest_name: b.guest_name,
-    guest_email: b.guest_email,
-    guest_phone: b.guest_phone,
-    guest_visit_count: b.guest_visit_count,
-  };
+function clusterKey(cluster: BookingCluster): string {
+  return cluster.kind === 'single' ? cluster.booking.id : cluster.items[0]!.id;
+}
+
+function clusterTimeRange(cluster: BookingCluster, getDuration: (booking: Booking) => number): { start: number; end: number } {
+  if (cluster.kind === 'single') {
+    const start = timeToMinutes(cluster.booking.booking_time);
+    return { start, end: start + getDuration(cluster.booking) };
+  }
+
+  const start = timeToMinutes(cluster.items[0]!.booking_time);
+  const last = cluster.items[cluster.items.length - 1]!;
+  const end = timeToMinutes(last.booking_time) + getDuration(last);
+  return { start, end };
+}
+
+function computeBookingClusterLayouts(
+  clusters: BookingCluster[],
+  getDuration: (booking: Booking) => number,
+): Map<string, BookingClusterLayout> {
+  const layouts = new Map<string, BookingClusterLayout>();
+  const sorted = clusters
+    .map((cluster) => ({ cluster, key: clusterKey(cluster), ...clusterTimeRange(cluster, getDuration) }))
+    .sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      return a.end - b.end;
+    });
+  const laneEnds: number[] = [];
+  for (const item of sorted) {
+    let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= item.start);
+    if (laneIndex === -1) {
+      laneEnds.push(item.end);
+      laneIndex = laneEnds.length - 1;
+    } else {
+      laneEnds[laneIndex] = item.end;
+    }
+    layouts.set(item.key, { laneIndex, laneCount: 1 });
+  }
+  const laneCount = Math.max(1, laneEnds.length);
+  for (const value of layouts.values()) {
+    value.laneCount = laneCount;
+  }
+  return layouts;
 }
 
 /** Deposit + attendance “Confirmed” pill — bottom-left; pill uses white + indigo ring to read on any block hue. */
@@ -448,26 +519,44 @@ function BookingBlockPills({ b }: { b: Booking }) {
   );
 }
 
-function BookingMetaLine({
+/** Service / resource on their own row, then time — avoids pills and times crowding the title row. */
+function BookingBlockInfoStack({
   serviceName,
   resourceName,
   start,
   end,
+  statusBadge,
   showService = true,
 }: {
   serviceName?: string | null;
   resourceName?: string | null;
   start: string;
   end: string;
+  statusBadge?: ReactNode;
   showService?: boolean;
 }) {
+  const subtitleParts = [resourceName, showService && serviceName].filter(Boolean) as string[];
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : null;
   return (
-    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium text-slate-600/90">
-      <span className="rounded-full bg-white/60 px-1.5 py-0.5 font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
-        {start}–{end}
-      </span>
-      {resourceName ? <span className="truncate">{resourceName}</span> : null}
-      {showService && serviceName ? <span className="truncate">{serviceName}</span> : null}
+    <div className="mt-0.5 flex min-w-0 flex-col gap-1">
+      {subtitle ? (
+        <p
+          className="min-w-0 truncate text-[10px] font-medium leading-snug text-slate-600/90"
+          title={subtitle}
+        >
+          {subtitle}
+        </p>
+      ) : null}
+      <div className="shrink-0">
+        <span className="inline-flex rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
+          {start}–{end}
+        </span>
+      </div>
+      {statusBadge ? (
+        <div className="min-w-0">
+          {statusBadge}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -546,6 +635,7 @@ function CalendarBookingRightColumnActions({
   baseClass,
   fontSizePx,
   compact,
+  narrow = false,
 }: {
   b: Booking;
   busy: boolean;
@@ -556,6 +646,7 @@ function CalendarBookingRightColumnActions({
   baseClass: string;
   fontSizePx: number;
   compact: boolean;
+  narrow?: boolean;
 }) {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return null;
 
@@ -582,7 +673,7 @@ function CalendarBookingRightColumnActions({
           className={`${baseClass} rounded-lg border border-[#0D9488] bg-[#F0FDFA] font-semibold text-[#134E4A] shadow-sm transition hover:bg-[#CCFBF1] disabled:opacity-50`}
           title="Confirm booking attendance"
         >
-          Confirm Booking
+          {narrow ? 'Confirm' : 'Confirm Booking'}
         </button>
       )}
       {showAttendanceCancel && (
@@ -594,7 +685,7 @@ function CalendarBookingRightColumnActions({
           className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
           title="Cancel staff attendance confirmation"
         >
-          Cancel confirmation
+          {narrow ? 'Undo confirm' : 'Cancel confirmation'}
         </button>
       )}
       {b.status === 'Completed' && (
@@ -667,7 +758,7 @@ function CalendarBookingRightColumnActions({
                 className={`${baseClass} rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
                 title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
               >
-                Undo start
+                {narrow ? 'Undo' : 'Undo start'}
               </button>
               <button
                 type="button"
@@ -706,6 +797,7 @@ function CalendarBookingRightColumn({
   onStatus,
   onArrived,
   onStaffAttendance,
+  narrow = false,
 }: {
   b: Booking;
   busy: boolean;
@@ -714,13 +806,23 @@ function CalendarBookingRightColumn({
   onStatus: (id: string, next: BookingStatus) => void;
   onArrived: (id: string, arrived: boolean) => void;
   onStaffAttendance: (id: string, confirmed: boolean) => void;
+  narrow?: boolean;
 }) {
   const actionCount = countBookingRightColumnActions(b, graceMinutes);
-  const { compact, fontSizePx, baseClass } = bookingRightColumnCompactStyle(blockHeightPx, actionCount);
+  const buttonStyle = bookingRightColumnCompactStyle(blockHeightPx, actionCount);
+  const compact = narrow || buttonStyle.compact;
+  const fontSizePx = narrow ? Math.min(9, buttonStyle.fontSizePx) : buttonStyle.fontSizePx;
+  const baseClass = narrow
+    ? 'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-0.5 text-center text-[9px] leading-tight [overflow-wrap:anywhere]'
+    : buttonStyle.baseClass;
+  const widthClass = narrow
+    ? 'mb-2 w-full min-w-0 max-w-none px-1 pb-0.5'
+    : 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] py-1.5 pl-1.5 pr-1';
+  const heightClass = narrow ? 'h-auto' : 'h-full';
 
   return (
     <div
-      className="flex h-full min-h-0 w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] shrink-0 flex-col self-stretch overflow-hidden py-1.5 pl-1.5 pr-1"
+      className={`flex ${heightClass} min-h-0 shrink-0 flex-col self-stretch overflow-hidden ${widthClass}`}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
@@ -736,6 +838,7 @@ function CalendarBookingRightColumn({
           baseClass={baseClass}
           fontSizePx={fontSizePx}
           compact={compact}
+          narrow={narrow}
         />
       </div>
     </div>
@@ -752,20 +855,25 @@ function slotOccupied(
   classScheduleBlocks: ScheduleBlockDTO[] = [],
   eventColumnBlocks: ScheduleBlockDTO[] = [],
   resourceParentById: Map<string, string>,
+  excludeBookingId?: string | null,
+  options?: { ignoreBookings?: boolean },
 ): boolean {
-  for (const b of bookings) {
-    if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
-    if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
-    const sid = serviceIdForBooking(b);
-    const dur =
-      b.booking_end_time != null
-        ? Math.max(SLOT_MINUTES, timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time))
-        : sid
-          ? serviceMap.get(sid)?.duration_minutes ?? 30
-          : 30;
-    const b0 = timeToMinutes(b.booking_time);
-    const b1 = b0 + Math.max(dur, SLOT_MINUTES);
-    if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+  if (!options?.ignoreBookings) {
+    for (const b of bookings) {
+      if (excludeBookingId && b.id === excludeBookingId) continue;
+      if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
+      if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
+      const sid = serviceIdForBooking(b);
+      const dur =
+        b.booking_end_time != null
+          ? Math.max(SLOT_MINUTES, timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time))
+          : sid
+            ? serviceMap.get(sid)?.duration_minutes ?? 30
+            : 30;
+      const b0 = timeToMinutes(b.booking_time);
+      const b1 = b0 + Math.max(dur, SLOT_MINUTES);
+      if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+    }
   }
   for (const bl of blocks) {
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
@@ -784,6 +892,60 @@ function slotOccupied(
     const b0 = timeToMinutes(eb.start_time);
     const b1 = timeToMinutes(eb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+  }
+  return false;
+}
+
+/** True if [startMin, endMin) overlaps another booking, block, class, or event on this column (half-open end). */
+function appointmentWindowCollides(
+  startMin: number,
+  endMin: number,
+  pracId: string,
+  dateStr: string,
+  excludeBookingId: string | undefined,
+  bookings: Booking[],
+  blocks: CalendarBlock[],
+  serviceMap: Map<string, AppointmentService>,
+  classScheduleBlocks: ScheduleBlockDTO[],
+  eventColumnBlocks: ScheduleBlockDTO[],
+  resourceParentById: Map<string, string>,
+  options?: { ignoreBookings?: boolean },
+): boolean {
+  if (endMin <= startMin) return true;
+  if (!options?.ignoreBookings) {
+    for (const b of bookings) {
+      if (excludeBookingId && b.id === excludeBookingId) continue;
+      if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
+      if (['Cancelled', 'No-Show'].includes(b.status)) continue;
+      const sid = serviceIdForBooking(b);
+      const dur =
+        b.booking_end_time != null
+          ? Math.max(SLOT_MINUTES, timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time))
+          : sid
+            ? serviceMap.get(sid)?.duration_minutes ?? 30
+            : 30;
+      const b0 = timeToMinutes(b.booking_time);
+      const b1 = b0 + Math.max(dur, SLOT_MINUTES);
+      if (overlapsRange(startMin, endMin, b0, b1)) return true;
+    }
+  }
+  for (const bl of blocks) {
+    if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
+    const b0 = timeToMinutes(bl.start_time);
+    const b1 = timeToMinutes(bl.end_time);
+    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+  }
+  for (const cb of classScheduleBlocks) {
+    if (cb.kind !== 'class_session') continue;
+    const b0 = timeToMinutes(cb.start_time);
+    const b1 = timeToMinutes(cb.end_time);
+    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+  }
+  for (const eb of eventColumnBlocks) {
+    if (eb.kind !== 'event_ticket') continue;
+    const b0 = timeToMinutes(eb.start_time);
+    const b1 = timeToMinutes(eb.end_time);
+    if (overlapsRange(startMin, endMin, b0, b1)) return true;
   }
   return false;
 }
@@ -822,7 +984,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       onClick={(e) => {
         if (!disabled) onEmptyClick(e, pracId, dateStr, tlabel);
       }}
-      className={`absolute left-0 right-0 z-0 border-t ${gridLineClass} ${slotBandClass} transition-colors ${
+      className={`absolute left-0 right-0 z-0 touch-manipulation border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
       style={{ top, height: SLOT_HEIGHT }}
@@ -836,14 +998,31 @@ type DraggableHandleProps = {
   attributes: ReturnType<typeof useDraggable>['attributes'] | undefined;
 };
 
-function DragBookingPreview({ booking }: { booking: Booking }) {
+function DragBookingPreview({
+  booking,
+  movePreview,
+}: {
+  booking: Booking;
+  /** Target time / column while dragging; shown on the preview card (not a global banner). */
+  movePreview?: { label: string; invalid: boolean } | null;
+}) {
   const p = bookingCalendarBlockStyle(booking);
   return (
     <div
-      className="rounded-xl border-2 border-dashed border-brand-200/90 bg-white/95 px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xl shadow-slate-900/15 ring-1 ring-brand-100/70"
+      className="flex max-w-[min(90vw,20rem)] flex-col overflow-hidden rounded-xl border-2 border-dashed border-brand-200/90 bg-white/95 shadow-2xl shadow-slate-900/15 ring-1 ring-brand-100/70"
       style={{ borderLeftWidth: 4, borderLeftStyle: 'solid', borderLeftColor: p.accent }}
     >
-      {booking.guest_name}
+      {movePreview ? (
+        <div
+          className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
+            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+          }`}
+          aria-live="polite"
+        >
+          <span className="line-clamp-3">{movePreview.label}</span>
+        </div>
+      ) : null}
+      <div className="px-2.5 py-1.5 text-xs font-semibold text-slate-800">{booking.guest_name}</div>
     </div>
   );
 }
@@ -852,12 +1031,19 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   booking,
   top,
   height,
+  heightExtraPx = 0,
+  laneIndex = 0,
+  laneCount = 1,
   canDrag,
   children,
 }: {
   booking: Booking;
   top: number;
   height: number;
+  /** Live vertical stretch while resizing (pixels). */
+  heightExtraPx?: number;
+  laneIndex?: number;
+  laneCount?: number;
   canDrag: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
@@ -866,18 +1052,22 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     disabled: !canDrag,
     data: { booking },
   });
+  const totalHeight = Math.max(SLOT_HEIGHT, height + heightExtraPx);
+  const widthPct = 100 / Math.max(1, laneCount);
   const style = {
     top,
-    height,
+    height: totalHeight,
+    left: `calc(${laneIndex * widthPct}% + 0.25rem)`,
+    width: `calc(${widthPct}% - 0.5rem)`,
     transform: CSS.Translate.toString(transform),
-    zIndex: isDragging ? 50 : 20,
+    zIndex: isDragging ? 50 : 20 + laneIndex,
     opacity: isDragging ? 0.85 : 1,
-  };
+  } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
     ? { listeners, attributes }
     : { listeners: undefined, attributes: undefined };
   return (
-    <div ref={setNodeRef} className="absolute left-1 right-1" style={style}>
+    <div ref={setNodeRef} className="absolute" style={style}>
       {children(handleProps)}
     </div>
   );
@@ -906,16 +1096,28 @@ export function PractitionerCalendarView({
     () => linkedPractitionerIds ?? [],
     [linkedPractitionerIds],
   );
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const preferencesKey = practitionerCalendarPreferencesKey(venueId);
+  const rememberedPreferences = useMemo(
+    () => readSessionPreference<PractitionerCalendarPreferences>(
+      preferencesKey,
+      {},
+      isPractitionerCalendarPreferences,
+    ),
+    [preferencesKey],
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>(rememberedPreferences.viewMode ?? 'day');
   const [date, setDate] = useState(() => {
+    if (rememberedPreferences.date) return rememberedPreferences.date;
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   });
   const [weekStart, setWeekStart] = useState(() => {
+    if (rememberedPreferences.weekStart) return rememberedPreferences.weekStart;
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   });
   const [monthAnchor, setMonthAnchor] = useState(() => {
+    if (rememberedPreferences.monthAnchor) return rememberedPreferences.monthAnchor;
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   });
@@ -929,18 +1131,22 @@ export function PractitionerCalendarView({
   const [venueResources, setVenueResources] = useState<VenueResourceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [detailBookingAnchor, setDetailBookingAnchor] = useState<{ x: number; y: number } | null>(null);
   const [classInstanceSheet, setClassInstanceSheet] = useState<{
     instanceId: string;
     block: ScheduleBlockDTO;
   } | null>(null);
+  const [classInstanceAnchor, setClassInstanceAnchor] = useState<{ x: number; y: number } | null>(null);
   const [eventInstanceSheet, setEventInstanceSheet] = useState<{
     eventId: string;
     block: ScheduleBlockDTO;
   } | null>(null);
   const [visibleCalendarIdsState, setVisibleCalendarIdsState] = useState<string[] | null>(() =>
-    defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
+    rememberedPreferences.visibleCalendarIdsState !== undefined
+      ? rememberedPreferences.visibleCalendarIdsState
+      : defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
   );
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>(rememberedPreferences.filterStatus ?? 'all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
@@ -967,6 +1173,19 @@ export function PractitionerCalendarView({
   } | null>(null);
   const [blockSaving, setBlockSaving] = useState(false);
   const [dragBooking, setDragBooking] = useState<Booking | null>(null);
+  /** While dragging, droppable occupancy ignores this booking so slots under it stay valid targets. */
+  const [dragExcludeBookingId, setDragExcludeBookingId] = useState<string | null>(null);
+  const [calendarDragPreview, setCalendarDragPreview] = useState<{ label: string; invalid: boolean } | null>(null);
+  const [calendarDragTarget, setCalendarDragTarget] = useState<{
+    pracId: string;
+    startMin: number;
+    endMin: number;
+    invalid: boolean;
+  } | null>(null);
+  const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
+  const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
+  const [resizePreviewEnd, setResizePreviewEnd] = useState<{ bookingId: string; endHm: string } | null>(null);
+  const justResizedBookingIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
@@ -984,7 +1203,16 @@ export function PractitionerCalendarView({
   } | null>(null);
   const [mousePanning, setMousePanning] = useState(false);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 12 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 450, tolerance: 4 },
+    }),
+  );
+
+  useEffect(() => {
+    calendarDragTargetRef.current = calendarDragTarget;
+  }, [calendarDragTarget]);
 
   const handleCalendarMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -1116,14 +1344,37 @@ export function PractitionerCalendarView({
     },
     [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, venueTimezone, viewMode],
   );
-  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
-  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
   const startHour = startHourOverride ?? derivedStartHour;
   const endHour = endHourOverride ?? derivedEndHour;
   const TOTAL_SLOTS = (() => {
     const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
   })();
+
+  useEffect(() => {
+    writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, {
+      viewMode,
+      date,
+      weekStart,
+      monthAnchor,
+      visibleCalendarIdsState,
+      filterStatus,
+      startHourOverride,
+      endHourOverride,
+    });
+  }, [
+    preferencesKey,
+    viewMode,
+    date,
+    weekStart,
+    monthAnchor,
+    visibleCalendarIdsState,
+    filterStatus,
+    startHourOverride,
+    endHourOverride,
+  ]);
 
   const listFromTo = useMemo(() => {
     if (viewMode === 'day') return { from: date, to: date };
@@ -1440,7 +1691,7 @@ export function PractitionerCalendarView({
         for (const slot of res0.slots) {
           const startM = timeToMinutes(slot.start_time);
           const top = ((startM - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT;
-          const height = Math.max((dur / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.75);
+          const height = Math.max((dur / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
           mint.push({ top, height, resourceName: r.name });
         }
       }
@@ -1479,7 +1730,8 @@ export function PractitionerCalendarView({
   }
 
   function slotHeightFromDuration(durationMins: number): number {
-    return Math.max((durationMins / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.75);
+    /** At least one grid row so label + actions + optional resize strip do not overlap. */
+    return Math.max((durationMins / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
   }
 
   function clearTimeRangeOverridesForDayChange() {
@@ -1628,13 +1880,19 @@ export function PractitionerCalendarView({
 
   async function patchBookingMove(booking: Booking, newDate: string, newTime: string, newPracId: string) {
     const prev = { ...booking };
+    const timeHm = newTime.length === 5 ? newTime : newTime.slice(0, 5);
+    const timeForStore = newTime.length === 5 ? `${newTime}:00` : newTime;
+    const dur = getBookingDuration(booking);
+    const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
+    const bookingEndForStore = `${endHm}:00`;
     setBookings((rows) =>
       rows.map((b) =>
         b.id === booking.id
           ? {
               ...b,
               booking_date: newDate,
-              booking_time: newTime.length === 5 ? `${newTime}:00` : newTime,
+              booking_time: timeForStore,
+              booking_end_time: bookingEndForStore,
               ...(b.calendar_id != null ? { calendar_id: newPracId } : { practitioner_id: newPracId }),
             }
           : b,
@@ -1646,8 +1904,10 @@ export function PractitionerCalendarView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           booking_date: newDate,
-          booking_time: newTime.length === 5 ? `${newTime}:00` : newTime,
+          booking_time: timeForStore,
           practitioner_id: newPracId,
+          booking_end_time: bookingEndForStore,
+          allow_manual_overlap: true,
         }),
       });
       if (!res.ok) {
@@ -1659,6 +1919,34 @@ export function PractitionerCalendarView({
       void fetchData({ silent: true });
     } catch {
       addToast('Could not move appointment', 'error');
+      setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+    }
+  }
+
+  async function patchBookingResize(booking: Booking, newEndHm: string) {
+    const prev = { ...booking };
+    const startHm = booking.booking_time.slice(0, 5);
+    const endLen5 = newEndHm.slice(0, 5);
+    if (timeToMinutes(endLen5) <= timeToMinutes(startHm)) return;
+    const bookingEndForStore = `${endLen5}:00`;
+    setBookings((rows) =>
+      rows.map((b) => (b.id === booking.id ? { ...b, booking_end_time: bookingEndForStore } : b)),
+    );
+    try {
+      const res = await fetch(`/api/venue/bookings/${booking.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_end_time: bookingEndForStore, allow_manual_overlap: true }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
+        setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+        return;
+      }
+      void fetchData({ silent: true });
+    } catch {
+      addToast('Could not update duration', 'error');
       setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
     }
   }
@@ -1706,16 +1994,100 @@ export function PractitionerCalendarView({
     }
   }
 
+  function clearCalendarDragUi() {
+    setDragBooking(null);
+    setDragExcludeBookingId(null);
+    setCalendarDragPreview(null);
+    setCalendarDragTarget(null);
+    calendarDragTargetRef.current = null;
+  }
+
+  const scheduleBlocksInVisibleColumns = useMemo(() => {
+    if (calendarFilterIds === null) return scheduleBlocks;
+    const allowed = new Set(calendarFilterIds);
+    return scheduleBlocks.filter((b) => !b.calendar_id || allowed.has(b.calendar_id));
+  }, [scheduleBlocks, calendarFilterIds]);
+
+  const classBlocksForGrid = useMemo(
+    () =>
+      scheduleBlocksInVisibleColumns.filter(
+        (b) => b.kind === 'class_session' && b.status !== 'Cancelled' && b.calendar_id,
+      ),
+    [scheduleBlocksInVisibleColumns],
+  );
+
+  const eventBlocksForGrid = useMemo(
+    () =>
+      scheduleBlocksInVisibleColumns.filter(
+        (b) => b.kind === 'event_ticket' && b.status !== 'Cancelled' && b.calendar_id,
+      ),
+    [scheduleBlocksInVisibleColumns],
+  );
+
   function handleDragStart(e: DragStartEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
     setDragBooking(b ?? null);
+    setDragExcludeBookingId(b?.id ?? null);
+  }
+
+  function handleDragMove(e: DragMoveEvent) {
+    const b = e.active.data.current?.booking as Booking | undefined;
+    const over = e.over;
+    if (!b || !over?.data?.current) {
+      setCalendarDragPreview(null);
+      setCalendarDragTarget(null);
+      return;
+    }
+    const { pracId, dateStr, slotStartMins } = over.data.current as {
+      pracId: string;
+      dateStr: string;
+      slotStartMins: number;
+    };
+    const duration = getBookingDuration(b);
+    const endMin = slotStartMins + duration;
+    const dayStartMin = startHour * 60;
+    const dayEndMin = endHour * 60;
+    const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
+    const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
+    const invalid =
+      slotStartMins < dayStartMin ||
+      endMin > dayEndMin ||
+      appointmentWindowCollides(
+        slotStartMins,
+        endMin,
+        pracId,
+        dateStr,
+        b.id,
+        bookings,
+        blocks,
+        serviceMap,
+        pracClassBlocks,
+        pracEventBlocks,
+        resourceParentById,
+        { ignoreBookings: true },
+      );
+    const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
+    const timeLabel = minutesToTime(slotStartMins);
+    const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
+    const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
+    setCalendarDragPreview({ label, invalid });
+    setCalendarDragTarget({ pracId, startMin: slotStartMins, endMin, invalid });
+  }
+
+  function handleDragCancel(_e: DragCancelEvent) {
+    clearCalendarDragUi();
   }
 
   function handleDragEnd(e: DragEndEvent) {
-    setDragBooking(null);
     const b = e.active.data.current?.booking as Booking | undefined;
     const over = e.over;
+    const target = calendarDragTargetRef.current;
+    clearCalendarDragUi();
     if (!b || !over?.data?.current) return;
+    if (target?.invalid) {
+      addToast('That time is not available', 'error');
+      return;
+    }
     const { pracId, dateStr, slotStartMins } = over.data.current as {
       pracId: string;
       dateStr: string;
@@ -1733,6 +2105,98 @@ export function PractitionerCalendarView({
     if (b.resource_id) return;
     void patchBookingMove(b, dateStr, newTime, pracId);
   }
+
+  const beginAppointmentResize = useCallback(
+    (booking: Booking) => (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
+      if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(booking.status) || booking.resource_id) return;
+      downEvent.stopPropagation();
+      downEvent.preventDefault();
+      if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+
+      const pointerId = downEvent.pointerId;
+      const startY = downEvent.clientY;
+      const startM = timeToMinutes(booking.booking_time.slice(0, 5));
+      const sid = serviceIdForBooking(booking);
+      const dur0 =
+        booking.booking_end_time != null
+          ? Math.max(SLOT_MINUTES, timeToMinutes(booking.booking_end_time) - timeToMinutes(booking.booking_time))
+          : sid
+            ? serviceMap.get(sid)?.duration_minutes ?? 30
+            : 30;
+      const endM0 = startM + dur0;
+      const minEnd = startM + SLOT_MINUTES;
+      const gridEndMax = endHour * 60;
+      const target = downEvent.currentTarget;
+
+      setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
+      setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
+
+      /** Max / min pointer delta (px) so implied end stays in [minEnd, gridEndMax]. */
+      const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+      const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+
+      const clampDeltaY = (clientY: number) => {
+        const raw = clientY - startY;
+        return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+      };
+
+      /** Continuous end (minutes); used while dragging for smooth height. */
+      const endMinutesFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+      };
+
+      const applyFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+        setResizeVisual({ bookingId: booking.id, deltaYPx: dY });
+        setResizePreviewEnd({
+          bookingId: booking.id,
+          endHm: minutesToTime(Math.round(endFloat)),
+        });
+      };
+
+      try {
+        target.setPointerCapture(pointerId);
+      } catch {
+        /* ignore */
+      }
+
+      const onMove = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        ev.preventDefault();
+        applyFromClientY(ev.clientY);
+      };
+
+      const finish = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        const endFloat = endMinutesFromClientY(ev.clientY);
+        const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
+        const endStr = minutesToTime(committedEndMin);
+        setResizeVisual(null);
+        setResizePreviewEnd(null);
+        if (committedEndMin === endM0) return;
+        justResizedBookingIdRef.current = booking.id;
+        window.setTimeout(() => {
+          if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
+        }, 220);
+        void patchBookingResize(booking, endStr);
+      };
+
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    },
+    [endHour, patchBookingResize, serviceMap],
+  );
 
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
     const mins = startHour * 60 + i * SLOT_MINUTES;
@@ -1927,12 +2391,6 @@ export function PractitionerCalendarView({
     return Array.from({ length: 42 }, (_, i) => addCalendarDays(from, i));
   }, [monthAnchor]);
 
-  const scheduleBlocksInVisibleColumns = useMemo(() => {
-    if (calendarFilterIds === null) return scheduleBlocks;
-    const allowed = new Set(calendarFilterIds);
-    return scheduleBlocks.filter((b) => !b.calendar_id || allowed.has(b.calendar_id));
-  }, [scheduleBlocks, calendarFilterIds]);
-
   /** Week strip: class sessions use instructor columns; events with a calendar column are on the grid. */
   const stripScheduleBlocksByDate = useMemo(
     () =>
@@ -1945,22 +2403,6 @@ export function PractitionerCalendarView({
         ),
       ),
     [scheduleBlocks],
-  );
-
-  const classBlocksForGrid = useMemo(
-    () =>
-      scheduleBlocksInVisibleColumns.filter(
-        (b) => b.kind === 'class_session' && b.status !== 'Cancelled' && b.calendar_id,
-      ),
-    [scheduleBlocksInVisibleColumns],
-  );
-
-  const eventBlocksForGrid = useMemo(
-    () =>
-      scheduleBlocksInVisibleColumns.filter(
-        (b) => b.kind === 'event_ticket' && b.status !== 'Cancelled' && b.calendar_id,
-      ),
-    [scheduleBlocksInVisibleColumns],
   );
 
   const stripHasBlocks = useMemo(() => {
@@ -1983,31 +2425,65 @@ export function PractitionerCalendarView({
     [bookingsMatchingFilters, scheduleBlocksInVisibleColumns, monthCells],
   );
 
-  const openBookingDetail = useCallback((id: string) => {
+  const openBookingDetail = useCallback((id: string, anchor?: { x: number; y: number }) => {
+    if (justResizedBookingIdRef.current === id) return;
     setClassInstanceSheet(null);
+    setClassInstanceAnchor(null);
     setEventInstanceSheet(null);
     setDetailBookingId(id);
+    setDetailBookingAnchor(anchor ?? null);
   }, []);
 
-  const openClassInstanceDetail = useCallback((b: ScheduleBlockDTO) => {
+  const openClassInstanceDetail = useCallback((b: ScheduleBlockDTO, anchor?: { x: number; y: number }) => {
     if (!b.class_instance_id) return;
     setDetailBookingId(null);
+    setDetailBookingAnchor(null);
     setEventInstanceSheet(null);
     setClassInstanceSheet({ instanceId: b.class_instance_id, block: b });
+    setClassInstanceAnchor(anchor ?? null);
   }, []);
 
   const openEventInstanceDetail = useCallback((b: ScheduleBlockDTO) => {
     if (!b.experience_event_id) return;
     setDetailBookingId(null);
+    setDetailBookingAnchor(null);
     setClassInstanceSheet(null);
+    setClassInstanceAnchor(null);
     setEventInstanceSheet({ eventId: b.experience_event_id, block: b });
   }, []);
 
-  const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
+  const calendarBookingDetailSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
     if (!detailBookingId) return null;
     const b = bookings.find((x) => x.id === detailBookingId);
-    return b ? bookingToPrefetch(b) : null;
-  }, [detailBookingId, bookings]);
+    if (!b) return null;
+    const startHm = b.booking_time.slice(0, 5);
+    let durationMins = SLOT_MINUTES;
+    if (b.booking_end_time) {
+      durationMins = Math.max(
+        SLOT_MINUTES,
+        timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time),
+      );
+    } else {
+      const sid = serviceIdForBooking(b);
+      if (sid) {
+        const svc = serviceMap.get(sid);
+        if (svc) durationMins = svc.duration_minutes;
+      } else {
+        durationMins = 30;
+      }
+    }
+    const endHm = minutesToTime(timeToMinutes(startHm) + durationMins);
+    return {
+      bookingDate: b.booking_date,
+      guestName: b.guest_name,
+      partySize: b.party_size,
+      status: b.status,
+      startTime: startHm,
+      endTime: endHm,
+      specialRequests: b.special_requests,
+      depositStatus: b.deposit_status,
+    };
+  }, [detailBookingId, bookings, serviceMap]);
 
   return (
     <div className="flex min-w-[320px] flex-col">
@@ -2131,11 +2607,11 @@ export function PractitionerCalendarView({
                                 <button
                                   key={b.id}
                                   type="button"
-                                  onClick={() => openBookingDetail(b.id)}
-                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                   style={bookingBlockCardStyle(p)}
                                 >
-                                  <div className="flex min-w-0 items-start justify-between gap-2">
+                                  <div className="flex min-w-0 flex-col gap-1">
                                     <div className="min-w-0">
                                       <div className="truncate font-bold">{b.guest_name}</div>
                                       <div className="mt-0.5 text-[10px] font-medium text-slate-600">
@@ -2159,8 +2635,8 @@ export function PractitionerCalendarView({
                                 <button
                                   key={cb.id}
                                   type="button"
-                                  onClick={() => openClassInstanceDetail(cb)}
-                                  className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-md"
+                                  onClick={(e) => openClassInstanceDetail(cb, { x: e.clientX, y: e.clientY })}
+                                  className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-md"
                                   style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 >
                                   <div className="font-semibold text-slate-900">{cb.title}</div>
@@ -2179,7 +2655,7 @@ export function PractitionerCalendarView({
                               const shell = eb.experience_event_id ? emptyOccurrence : !eb.booking_id;
                               const inner = (
                                 <div
-                                  className={`rounded-lg border px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-md ${
+                                  className={`rounded-lg border px-2 py-1 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-md ${
                                     shell ? 'border-dashed border-amber-200 bg-amber-50/80' : 'border-slate-200 bg-gradient-to-br from-white to-slate-50'
                                   }`}
                                   style={{ borderLeftWidth: 3, borderLeftColor: accent }}
@@ -2210,7 +2686,7 @@ export function PractitionerCalendarView({
                                   <button
                                     key={eb.id}
                                     type="button"
-                                    onClick={() => openBookingDetail(eb.booking_id!)}
+                                    onClick={(e) => openBookingDetail(eb.booking_id!, { x: e.clientX, y: e.clientY })}
                                     className="block w-full text-left"
                                   >
                                     {inner}
@@ -2245,10 +2721,16 @@ export function PractitionerCalendarView({
         </div>
       ) : (
         <div ref={timelineRootRef} className="flex min-w-0 w-full flex-col">
-          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            onDragCancel={handleDragCancel}
+            onDragEnd={handleDragEnd}
+          >
             <div
               ref={scrollRef}
-              className={`min-w-0 w-full touch-auto overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch] ${
+              className={`min-w-0 w-full touch-manipulation overflow-x-auto overscroll-x-contain rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] motion-safe:scroll-smooth ${
                 mousePanning ? 'cursor-grabbing' : 'cursor-grab'
               }`}
               onMouseDown={handleCalendarMouseDown}
@@ -2371,6 +2853,8 @@ export function PractitionerCalendarView({
                           pracClassBlocks,
                           pracEventBlocks,
                           resourceParentById,
+                          dragExcludeBookingId,
+                          { ignoreBookings: dragBooking != null },
                         );
                         const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
                         return (
@@ -2394,6 +2878,23 @@ export function PractitionerCalendarView({
                           />
                         );
                       })}
+
+                      {calendarDragTarget && calendarDragTarget.pracId === prac.id ? (
+                        <div
+                          className={`pointer-events-none absolute left-0 right-0 z-[8] rounded-lg border-x-2 border-b-2 border-t-2 ${
+                            calendarDragTarget.invalid
+                              ? 'border-amber-500 bg-amber-200/35 ring-1 ring-inset ring-amber-400/50'
+                              : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
+                          }`}
+                          style={{
+                            top: ((calendarDragTarget.startMin - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT,
+                            height:
+                              ((calendarDragTarget.endMin - calendarDragTarget.startMin) / SLOT_MINUTES) *
+                              SLOT_HEIGHT,
+                          }}
+                          aria-hidden
+                        />
+                      ) : null}
 
                       {resourceAvailabilityByPractitioner.get(prac.id)?.map((m, i) => (
                         <div
@@ -2448,7 +2949,7 @@ export function PractitionerCalendarView({
                           timeToMinutes(cb.end_time) - timeToMinutes(cb.start_time),
                           SLOT_MINUTES,
                         );
-                        const height = Math.max(slotHeightFromDuration(durMins), SLOT_HEIGHT * 0.75);
+                        const height = slotHeightFromDuration(durMins);
                         const accent = cb.accent_colour ?? '#6366f1';
                         const uptake =
                           cb.class_booked_spots != null && cb.class_capacity != null
@@ -2464,7 +2965,7 @@ export function PractitionerCalendarView({
                           >
                             <button
                               type="button"
-                              onClick={() => openClassInstanceDetail(cb)}
+                              onClick={(e) => openClassInstanceDetail(cb, { x: e.clientX, y: e.clientY })}
                               className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md"
                               style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                               title={cb.title}
@@ -2487,7 +2988,7 @@ export function PractitionerCalendarView({
                           timeToMinutes(eb.end_time) - timeToMinutes(eb.start_time),
                           SLOT_MINUTES,
                         );
-                        const height = Math.max(slotHeightFromDuration(durMins), SLOT_HEIGHT * 0.75);
+                        const height = slotHeightFromDuration(durMins);
                         const accent = eb.accent_colour ?? '#F59E0B';
                         const uptake = formatEventUptakeLine(eb);
                         const emptyOccurrence =
@@ -2526,7 +3027,7 @@ export function PractitionerCalendarView({
                             ) : eb.booking_id ? (
                               <button
                                 type="button"
-                                onClick={() => openBookingDetail(eb.booking_id!)}
+                                onClick={(e) => openBookingDetail(eb.booking_id!, { x: e.clientX, y: e.clientY })}
                                 className={cardClass}
                                 style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 title={eb.title}
@@ -2547,7 +3048,17 @@ export function PractitionerCalendarView({
                         );
                       })}
 
-                      {clusterMultiServiceBookings(pracBookings).map((cluster) => {
+                      {(() => {
+                        const bookingClusters = clusterMultiServiceBookings(pracBookings);
+                        const durationForLayout = (booking: Booking) => {
+                          const baseDuration = getBookingDuration(booking);
+                          if (resizeVisual?.bookingId !== booking.id) return baseDuration;
+                          const resizeDeltaMins = (resizeVisual.deltaYPx / SLOT_HEIGHT) * SLOT_MINUTES;
+                          return Math.max(SLOT_MINUTES, baseDuration + resizeDeltaMins);
+                        };
+                        const clusterLayouts = computeBookingClusterLayouts(bookingClusters, durationForLayout);
+                        return bookingClusters.map((cluster) => {
+                          const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
                         if (cluster.kind === 'single') {
                           const b = cluster.booking;
                           const duration = getBookingDuration(b);
@@ -2562,11 +3073,30 @@ export function PractitionerCalendarView({
                           const qBusy = quickActionId === b.id;
                           const arrived = Boolean(b.client_arrived_at);
                           const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
+                          const resizeExtra =
+                            resizeVisual?.bookingId === b.id ? resizeVisual.deltaYPx : 0;
+                          const displayEndHm =
+                            resizePreviewEnd?.bookingId === b.id
+                              ? resizePreviewEnd.endHm
+                              : minutesToTime(timeToMinutes(b.booking_time) + duration);
+                          const blockH = height + resizeExtra;
+                          const isOverlapLane = layout.laneCount > 1;
+                          const showSubtitle = isOverlapLane || blockH >= 44;
+                          const showPillsRow = !isOverlapLane && blockH >= 48;
                           return (
-                            <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
+                            <DraggableBookingShell
+                              key={b.id}
+                              booking={b}
+                              top={top}
+                              height={height}
+                              heightExtraPx={resizeExtra}
+                              laneIndex={layout.laneIndex}
+                              laneCount={layout.laneCount}
+                              canDrag={canDrag}
+                            >
                               {(handle) => (
                                 <div
-                                  className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                  className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
                                   style={bookingBlockCardStyle(palette)}
@@ -2574,7 +3104,7 @@ export function PractitionerCalendarView({
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       type="button"
-                                      className="w-6 shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-[10px] text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing"
+                                      className={`${isOverlapLane ? 'w-3 text-[0]' : 'w-6 text-[10px]'} shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing`}
                                       aria-label="Drag to reschedule"
                                       {...handle.listeners}
                                       {...handle.attributes}
@@ -2582,57 +3112,87 @@ export function PractitionerCalendarView({
                                       ⋮⋮
                                     </button>
                                   ) : null}
-                                  <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch">
-                                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                  <div
+                                    className={`flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
+                                      isOverlapLane ? 'flex-col' : 'flex-row'
+                                    }`}
+                                  >
+                                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                       <button
                                         type="button"
-                                        onClick={() => openBookingDetail(b.id)}
-                                        className="flex min-h-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                        onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                        className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                                          blockH < 56 ? 'py-1.5' : 'py-2'
+                                        }`}
                                         aria-label={`Open booking details for ${b.guest_name}`}
                                       >
-                                        <div className="flex min-w-0 items-start justify-between gap-2">
-                                          <div className="min-w-0">
-                                            <span className="block truncate text-[13px] font-extrabold tracking-tight">{b.guest_name}</span>
-                                            {height > 42 ? (
-                                              <BookingMetaLine
-                                                resourceName={resName}
-                                                serviceName={svc?.name}
-                                                start={b.booking_time.slice(0, 5)}
-                                                end={minutesToTime(timeToMinutes(b.booking_time) + duration)}
-                                                showService={height > 60}
-                                              />
-                                            ) : null}
+                                        <div className="flex min-w-0 shrink-0 flex-col gap-0.5">
+                                          <div className="flex min-w-0 items-center justify-between gap-2">
+                                            <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
+                                              {b.guest_name}
+                                            </span>
+                                            <div className="flex shrink-0 items-center gap-1">
+                                              {arrived &&
+                                              b.status !== 'Seated' &&
+                                              ['Pending', 'Booked', 'Confirmed'].includes(b.status) ? (
+                                                <span
+                                                  className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
+                                                  aria-hidden
+                                                  title="Waiting"
+                                                />
+                                              ) : null}
+                                            </div>
                                           </div>
-                                          <div className="flex shrink-0 flex-col items-end gap-1">
-                                            <CalendarBookingStatusBadge b={b} />
-                                          {arrived &&
-                                            b.status !== 'Seated' &&
-                                            ['Pending', 'Booked', 'Confirmed'].includes(b.status) && (
-                                              <span
-                                                className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                aria-hidden
-                                                title="Waiting"
-                                              />
-                                            )}
-                                          </div>
+                                          <BookingBlockInfoStack
+                                            resourceName={showSubtitle ? resName : null}
+                                            serviceName={showSubtitle ? svc?.name : null}
+                                            start={b.booking_time.slice(0, 5)}
+                                            end={displayEndHm}
+                                            statusBadge={<CalendarBookingStatusBadge b={b} />}
+                                            showService={isOverlapLane || blockH >= 70}
+                                          />
                                         </div>
+                                        {showPillsRow ? (
+                                          <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
+                                            <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
+                                              <BookingBlockPills b={b} />
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                        <div className="min-h-0 min-w-0 flex-1" aria-hidden />
+                                        {canDrag ? (
+                                          <div className="h-2 w-full shrink-0" aria-hidden />
+                                        ) : null}
                                       </button>
-                                      <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-2.5 pb-1.5 pt-0.5">
-                                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                                          <BookingBlockPills b={b} />
-                                        </div>
-                                      </div>
                                     </div>
                                     <CalendarBookingRightColumn
                                       b={b}
                                       busy={qBusy}
-                                      blockHeightPx={height}
+                                      blockHeightPx={height + resizeExtra}
                                       graceMinutes={noShowGraceMinutes}
                                       onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
                                       onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                       onStaffAttendance={patchStaffAttendance}
+                                      narrow={isOverlapLane}
                                     />
                                   </div>
+                                  {canDrag ? (
+                                    <>
+                                      {resizePreviewEnd?.bookingId === b.id ? (
+                                        <span className="pointer-events-none absolute bottom-8 left-1/2 z-20 max-w-[calc(100%-0.5rem)] -translate-x-1/2 truncate rounded-md bg-slate-900 px-2 py-0.5 text-center text-[10px] font-bold tabular-nums text-white shadow-md">
+                                          Until {resizePreviewEnd.endHm}
+                                        </span>
+                                      ) : null}
+                                      <span
+                                        role="separator"
+                                        aria-orientation="horizontal"
+                                        aria-label="Drag to change duration"
+                                        data-no-calendar-pan="true"
+                                        className="absolute bottom-0 left-0 right-0 z-30 h-2 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        onPointerDown={beginAppointmentResize(b)}
+                                      />
+                                    </>
+                                  ) : null}
                                 </div>
                               )}
                             </DraggableBookingShell>
@@ -2652,6 +3212,7 @@ export function PractitionerCalendarView({
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const arrived = Boolean(first.client_arrived_at);
+                        const isOverlapLane = layout.laneCount > 1;
                         const serviceTitle = items
                           .map((x) => {
                             const sid = serviceIdForBooking(x);
@@ -2660,67 +3221,88 @@ export function PractitionerCalendarView({
                           .filter(Boolean)
                           .join(' → ');
                         return (
-                          <DraggableBookingShell key={first.id} booking={first} top={top} height={height} canDrag={false}>
+                          <DraggableBookingShell
+                            key={first.id}
+                            booking={first}
+                            top={top}
+                            height={height}
+                            laneIndex={layout.laneIndex}
+                            laneCount={layout.laneCount}
+                            canDrag={false}
+                          >
                             {() => (
                               <div
-                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
                                 style={bookingBlockCardStyle(palette)}
                                 title={serviceTitle || undefined}
                               >
-                                <div className="flex min-h-0 min-w-0 flex-1 flex-row items-stretch">
+                                <div
+                                  className={`flex min-h-0 min-w-0 flex-1 items-stretch ${
+                                    isOverlapLane ? 'flex-col overflow-hidden' : 'flex-row'
+                                  }`}
+                                >
                                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                                     {items.map((b, segIdx) => {
                                       const dur = getBookingDuration(b);
                                       const sid = serviceIdForBooking(b);
                                       const svc = sid ? serviceMap.get(sid) : null;
+                                      const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
+                                      const showSegMeta = isOverlapLane || segmentApproxPx >= 40;
+                                      const showSegPills = segmentApproxPx >= 38;
+                                      const showSegService = segmentApproxPx >= 52;
                                       return (
                                         <div
                                           key={b.id}
-                                          className="flex min-h-0 flex-col"
+                                          className="flex min-h-0 flex-col overflow-hidden"
                                           style={{ flex: dur, backgroundColor: palette.bg }}
                                         >
                                           <button
                                             type="button"
-                                            onClick={() => openBookingDetail(b.id)}
-                                            className="flex min-h-0 min-w-0 flex-1 flex-col px-2.5 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                            onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                            className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
                                             aria-label={`Open booking details for ${b.guest_name}`}
                                           >
-                                            <div className="flex min-w-0 items-start justify-between gap-2">
-                                              <div className="min-w-0">
-                                              <span className="block truncate text-[13px] font-extrabold tracking-tight">
-                                                {segIdx === 0 ? b.guest_name : '\u00a0'}
-                                              </span>
-                                              <BookingMetaLine
-                                                serviceName={svc?.name}
-                                                start={b.booking_time.slice(0, 5)}
-                                                end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
-                                                showService
-                                              />
+                                            <div className="flex min-w-0 shrink-0 flex-col gap-0.5 overflow-hidden">
+                                              <div className="flex min-w-0 items-center justify-between gap-2">
+                                                <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
+                                                  {segIdx === 0 ? b.guest_name : '\u00a0'}
+                                                </span>
+                                                {segIdx === 0 ? (
+                                                  <div className="flex shrink-0 items-center gap-1">
+                                                    {arrived &&
+                                                    first.status !== 'Seated' &&
+                                                    ['Pending', 'Booked', 'Confirmed'].includes(first.status) ? (
+                                                      <span
+                                                        className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
+                                                        aria-hidden
+                                                        title="Waiting"
+                                                      />
+                                                    ) : null}
+                                                  </div>
+                                                ) : null}
                                               </div>
-                                              {segIdx === 0 ? (
-                                                <div className="flex shrink-0 flex-col items-end gap-1">
-                                                  <CalendarBookingStatusBadge b={first} />
-                                              {segIdx === 0 &&
-                                                arrived &&
-                                                first.status !== 'Seated' &&
-                                                ['Pending', 'Booked', 'Confirmed'].includes(first.status) && (
-                                                  <span
-                                                    className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                    aria-hidden
-                                                    title="Waiting"
-                                                  />
-                                                )}
-                                                </div>
+                                              {showSegMeta ? (
+                                                <BookingBlockInfoStack
+                                                  resourceName={null}
+                                                  serviceName={svc?.name}
+                                                  start={b.booking_time.slice(0, 5)}
+                                                  end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
+                                                  statusBadge={segIdx === 0 ? <CalendarBookingStatusBadge b={first} /> : undefined}
+                                                  showService={isOverlapLane || showSegService}
+                                                />
                                               ) : null}
                                             </div>
+                                            {!isOverlapLane && showSegPills ? (
+                                              <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1">
+                                                <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
+                                                  <BookingBlockPills b={b} />
+                                                </div>
+                                              </div>
+                                            ) : null}
+                                            <div className="min-h-0 min-w-0 flex-1" aria-hidden />
                                           </button>
-                                          <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-2.5 pb-1 pt-0.5">
-                                            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                                              <BookingBlockPills b={b} />
-                                            </div>
-                                          </div>
                                         </div>
                                       );
                                     })}
@@ -2733,13 +3315,15 @@ export function PractitionerCalendarView({
                                     onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
                                     onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                     onStaffAttendance={patchStaffAttendance}
+                                    narrow={isOverlapLane}
                                   />
                                 </div>
                               </div>
                             )}
                           </DraggableBookingShell>
                         );
-                      })}
+                        });
+                      })()}
                     </div>
                   </div>
                 );
@@ -2770,7 +3354,7 @@ export function PractitionerCalendarView({
           </div>
           <DragOverlay dropAnimation={null}>
             {dragBooking ? (
-              <DragBookingPreview booking={dragBooking} />
+              <DragBookingPreview booking={dragBooking} movePreview={calendarDragPreview} />
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -2945,8 +3529,13 @@ export function PractitionerCalendarView({
 
       <ClassInstanceDetailSheet
         selection={classInstanceSheet}
-        onClose={() => setClassInstanceSheet(null)}
+        onClose={() => {
+          setClassInstanceSheet(null);
+          setClassInstanceAnchor(null);
+        }}
         currency={currency}
+        presentation="popover"
+        anchor={classInstanceAnchor}
       />
 
       <EventInstanceDetailSheet
@@ -2955,23 +3544,22 @@ export function PractitionerCalendarView({
         currency={currency}
       />
 
-      <AppointmentDetailSheet
-        open={detailBookingId !== null}
-        bookingId={detailBookingId}
-        onClose={() => setDetailBookingId(null)}
-        onUpdated={() => void fetchData({ silent: true })}
-        currency={currency}
-        practitioners={activePractitioners}
-        requirePractitionerBooking={false}
-        prefetchedBooking={detailPrefetch}
-        services={services.map((s) => ({
-          id: s.id,
-          name: s.name,
-          duration_minutes: s.duration_minutes,
-          colour: s.colour ?? '#6366f1',
-          price_pence: s.price_pence ?? null,
-        }))}
-      />
+      {detailBookingId ? (
+        <BookingDetailPanel
+          bookingId={detailBookingId}
+          venueId={venueId}
+          venueCurrency={currency}
+          initialSnapshot={calendarBookingDetailSnapshot}
+          isAppointment
+          presentation="popover"
+          anchor={detailBookingAnchor}
+          onClose={() => {
+            setDetailBookingId(null);
+            setDetailBookingAnchor(null);
+          }}
+          onUpdated={() => void fetchData({ silent: true })}
+        />
+      ) : null}
 
       {staffBookingModal ? (
         <CalendarStaffBookingModal

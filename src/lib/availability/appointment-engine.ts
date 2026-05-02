@@ -242,9 +242,16 @@ function phantomBusyEnd(p: PhantomBooking): number {
   return pStart + p.duration_minutes + p.buffer_minutes + pProc;
 }
 
-function countOverlappingBookings(bookings: AppointmentBooking[], t: number, slotEnd: number): number {
+function countOverlappingBookings(
+  bookings: AppointmentBooking[],
+  t: number,
+  slotEnd: number,
+  excludeBookingId?: string,
+): number {
+  const excludeLc = excludeBookingId?.toLowerCase();
   let n = 0;
   for (const b of bookings) {
+    if (excludeLc && b.id.toLowerCase() === excludeLc) continue;
     const bStart = timeToMinutes(b.booking_time);
     const bEnd = appointmentBookingBusyEnd(b);
     if (overlaps(t, slotEnd, bStart, bEnd)) n++;
@@ -480,7 +487,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 
           // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
           const overlapping =
-            countOverlappingBookings(practitionerBookings, t, slotEnd) +
+            countOverlappingBookings(practitionerBookings, t, slotEnd, undefined) +
             countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
           if (overlapping >= parallelCap) continue;
 
@@ -614,10 +621,137 @@ export function validateExactAppointmentStart(
   const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
   const parallelCap = parallelCapacityFor(practitioner);
   const overlapping =
-    countOverlappingBookings(practitionerBookings, t, slotEnd) +
+    countOverlappingBookings(practitionerBookings, t, slotEnd, undefined) +
     countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
   if (overlapping >= parallelCap) {
     return { ok: false, reason: 'Conflicts with another booking' };
+  }
+
+  return { ok: true };
+}
+
+const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
+
+/**
+ * Staff reschedule / calendar resize: validate [start, endCore) plus service buffer + processing
+ * fits working hours, breaks, calendar blocks, and parallel capacity vs other bookings.
+ * `endCoreHHmm` is the wall-clock end of the bookable segment (same semantics as `booking_end_time` on the row).
+ */
+export function validateAppointmentCustomInterval(
+  input: AppointmentEngineInput,
+  practitionerId: string,
+  serviceId: string,
+  startTimeHHmm: string,
+  endCoreHHmm: string,
+  excludeBookingId?: string,
+  options?: { allowBookingOverlap?: boolean },
+): { ok: boolean; reason?: string } {
+  const {
+    date,
+    practitioners,
+    services,
+    practitionerServices,
+    existingBookings,
+    phantomBookings = [],
+    practitionerBlockedRanges = [],
+    skipPastSlotFilter = false,
+    venueTimezone,
+    minNoticeHours = 0,
+    venueOpeningHours,
+    venueOpeningExceptions,
+  } = input;
+
+  let todayStr: string;
+  let currentMinute: number;
+  if (venueTimezone) {
+    const local = getVenueLocalDateAndMinutes(venueTimezone, new Date());
+    todayStr = local.dateYmd;
+    currentMinute = local.minutesSinceMidnight;
+  } else {
+    const now = new Date();
+    todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    currentMinute = now.getHours() * 60 + now.getMinutes();
+  }
+  const isToday = date === todayStr;
+  const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
+
+  const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
+  if (!practitioner) {
+    return { ok: false, reason: 'Staff not available' };
+  }
+
+  const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
+  const svc = offeredServices.find((s) => s.id === serviceId);
+  if (!svc) {
+    return { ok: false, reason: 'Service not available with this staff member' };
+  }
+
+  const processing = svc.processing_time_minutes ?? 0;
+  const buffer = svc.buffer_minutes ?? 0;
+  const t = timeToMinutes(startTimeHHmm.slice(0, 5));
+  const endCore = timeToMinutes(endCoreHHmm.slice(0, 5));
+  const coreDuration = endCore - t;
+  if (!(coreDuration >= 15)) {
+    return { ok: false, reason: 'End time must be at least 15 minutes after start' };
+  }
+  if (coreDuration > MAX_APPOINTMENT_CORE_DURATION_MINUTES) {
+    return { ok: false, reason: 'Appointment duration is too long' };
+  }
+
+  const busyEnd = t + coreDuration + buffer + processing;
+
+  const workingRanges = getWorkingRanges(practitioner, date);
+  if (workingRanges.length === 0) {
+    return { ok: false, reason: 'Staff not working this day' };
+  }
+
+  const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
+    workingRanges,
+    venueOpeningHours,
+    date,
+    venueOpeningExceptions,
+  );
+  if (effectiveWorkingRanges.length === 0) {
+    return { ok: false, reason: 'Outside opening hours' };
+  }
+
+  const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
+  if (afterServiceCustom.length === 0) {
+    return { ok: false, reason: 'Outside service availability hours' };
+  }
+
+  const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
+  if (!fitsInRange) {
+    return { ok: false, reason: 'Outside working hours' };
+  }
+
+  if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {
+    return { ok: false, reason: 'Past minimum notice window' };
+  }
+
+  const breakRanges = getBreakRanges(practitioner, date);
+  if (breakRanges.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
+    return { ok: false, reason: 'Conflicts with a break' };
+  }
+
+  const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
+  if (dayBlocks.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
+    return { ok: false, reason: 'Blocked time' };
+  }
+
+  if (!options?.allowBookingOverlap) {
+    const practitionerBookings = existingBookings.filter(
+      (b) => b.practitioner_id === practitioner.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
+    );
+
+    const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
+    const parallelCap = parallelCapacityFor(practitioner);
+    const overlapping =
+      countOverlappingBookings(practitionerBookings, t, busyEnd, excludeBookingId) +
+      countOverlappingPhantoms(practitionerPhantoms, t, busyEnd);
+    if (overlapping >= parallelCap) {
+      return { ok: false, reason: 'Conflicts with another booking' };
+    }
   }
 
   return { ok: true };
@@ -659,7 +793,7 @@ export async function fetchAppointmentInput(params: {
 
   let bookingsQuery = supabase
     .from('bookings')
-    .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
+    .select('id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, status')
     .eq('venue_id', venueId)
     .eq('booking_date', date)
     .in('status', CAPACITY_CONSUMING_STATUSES);
@@ -755,6 +889,7 @@ export async function fetchAppointmentInput(params: {
       calendar_id?: string | null;
       appointment_service_id: string | null;
       service_item_id: string | null;
+      booking_end_time?: string | null;
     };
     const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
     const svc = sid ? serviceMapForBookings.get(sid) : null;
@@ -763,11 +898,19 @@ export async function fetchAppointmentInput(params: {
       ? practitionerServices.find((pRow) => pRow.practitioner_id === practId && pRow.service_id === sid)
       : undefined;
     const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
+    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
+    let coreDuration = merged?.duration_minutes ?? 30;
+    const rawBet = row.booking_end_time;
+    if (rawBet != null && String(rawBet).trim() !== '') {
+      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
+      const d = endMin - startMin;
+      if (d >= 15) coreDuration = d;
+    }
     return {
       id: b.id,
       practitioner_id: practId!,
       booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: merged?.duration_minutes ?? 30,
+      duration_minutes: coreDuration,
       buffer_minutes: merged?.buffer_minutes ?? 0,
       processing_time_minutes: merged?.processing_time_minutes ?? 0,
       status: b.status,
@@ -981,7 +1124,7 @@ export async function fetchCalendarAppointmentInput(params: {
   const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes, venueBlocksRes] = await Promise.all([
     supabase
       .from('bookings')
-      .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
+      .select('id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, status')
       .eq('venue_id', venueId)
       .eq('booking_date', date)
       .or(`practitioner_id.eq.${calendarId},calendar_id.eq.${calendarId}`)
@@ -1024,6 +1167,7 @@ export async function fetchCalendarAppointmentInput(params: {
       calendar_id?: string | null;
       appointment_service_id: string | null;
       service_item_id: string | null;
+      booking_end_time?: string | null;
     };
     const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
     const svc = sid ? serviceMapForBookings.get(sid) : null;
@@ -1032,11 +1176,19 @@ export async function fetchCalendarAppointmentInput(params: {
       ? practitionerServices.find((pRow) => pRow.practitioner_id === calendarId && pRow.service_id === sid)
       : undefined;
     const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
+    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
+    let coreDuration = merged?.duration_minutes ?? 30;
+    const rawBet = row.booking_end_time;
+    if (rawBet != null && String(rawBet).trim() !== '') {
+      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
+      const d = endMin - startMin;
+      if (d >= 15) coreDuration = d;
+    }
     return {
       id: b.id,
       practitioner_id: practKey,
       booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: merged?.duration_minutes ?? 30,
+      duration_minutes: coreDuration,
       buffer_minutes: merged?.buffer_minutes ?? 0,
       processing_time_minutes: merged?.processing_time_minutes ?? 0,
       status: b.status,

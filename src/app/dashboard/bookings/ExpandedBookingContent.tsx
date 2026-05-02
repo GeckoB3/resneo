@@ -16,9 +16,7 @@ import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import {
-  bookingModelShortLabel,
   inferBookingRowModel,
-  isTableReservationBooking,
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
@@ -42,8 +40,10 @@ interface BookingRow {
   guest_email: string | null;
   guest_phone: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
+  service_id?: string | null;
   group_booking_id?: string | null;
   person_label?: string | null;
+  area_id?: string | null;
   area_name?: string | null;
   experience_event_id?: string | null;
   class_instance_id?: string | null;
@@ -51,6 +51,7 @@ interface BookingRow {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  inferred_booking_model?: BookingModel;
 }
 
 interface BookingDetailLite {
@@ -112,7 +113,6 @@ export function ExpandedBookingContent({
   onStatusAction,
   onDetailUpdated,
   onRequestChangeTable,
-  isAppointment = false,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -126,7 +126,6 @@ export function ExpandedBookingContent({
   onStatusAction: (status: BookingStatus) => void;
   onDetailUpdated: () => void;
   onRequestChangeTable?: () => void;
-  isAppointment?: boolean;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('both');
@@ -162,8 +161,9 @@ export function ExpandedBookingContent({
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
-  const notesVariant: BookingNotesVariant =
-    inferBookingRowModel(booking) === 'table_reservation' ? 'table' : 'cde';
+  const inferredBookingModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
+  const tableStyle = inferredBookingModel === 'table_reservation';
+  const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
 
   if (detailLoading) {
     return (
@@ -228,8 +228,6 @@ export function ExpandedBookingContent({
   const canCancel = canTransitionBookingStatus(booking.status, 'Cancelled');
   const canNoShow = canTransitionBookingStatus(booking.status, 'No-Show');
   const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
-  const tableStyle = isTableReservationBooking(booking);
-
   const forwardPrimaryLabel = (target: BookingStatus, defaultLabel: string) => {
     if (target === 'Seated' && !tableStyle) return 'Start';
     return defaultLabel;
@@ -287,13 +285,18 @@ export function ExpandedBookingContent({
                   <span className="font-medium text-slate-700">{formatDateNice(booking.booking_date)}</span>
                   <span className="text-slate-300">·</span>
                   <span className="font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
-                  {!isAppointment ? (
+                  {tableStyle ? (
                     <>
                       <span className="text-slate-300">·</span>
                       <span>{booking.party_size} cover{booking.party_size === 1 ? '' : 's'}</span>
                     </>
+                  ) : booking.party_size > 1 ? (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span>{booking.party_size} people</span>
+                    </>
                   ) : null}
-                  {booking.area_name ? (
+                  {tableStyle && booking.area_name ? (
                     <>
                       <span className="hidden text-slate-300 sm:inline">·</span>
                       <span className="hidden sm:inline">{booking.area_name}</span>
@@ -322,17 +325,24 @@ export function ExpandedBookingContent({
             </div>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
-              <p className={`truncate text-xs font-bold ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
-                {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
-              </p>
-              {detail?.combination_staff_notes ? (
-                <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-emerald-800">
-                  {detail.combination_staff_notes}
+            {tableStyle ? (
+              <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
+                <p className={`truncate text-xs font-bold ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
+                  {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
                 </p>
-              ) : null}
-            </div>
+                {detail?.combination_staff_notes ? (
+                  <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-emerald-800">
+                    {detail.combination_staff_notes}
+                  </p>
+                ) : null}
+              </div>
+            ) : booking.party_size > 1 ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Party</p>
+                <p className="truncate text-xs font-bold text-slate-700">{booking.party_size} people</p>
+              </div>
+            ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
               <p className={`truncate text-xs font-bold ${booking.deposit_status === 'Paid' ? 'text-emerald-700' : booking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
@@ -373,6 +383,86 @@ export function ExpandedBookingContent({
           </div>
         </SectionCard.Body>
       </SectionCard>
+
+      {/* Actions bar */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
+        <div className="px-2 py-1.5 sm:px-3">
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+            {forwardActions.map((action) => (
+              <button
+                key={action.target}
+                type="button"
+                onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md bg-brand-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 sm:text-[11px]"
+              >
+                {(action.target === 'Confirmed' || action.target === 'Booked') && (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                )}
+                {action.target === 'Seated' && tableStyle && (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
+                )}
+                {action.target === 'Seated' && !tableStyle && (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
+                )}
+                {forwardPrimaryLabel(action.target, action.label)}
+              </button>
+            ))}
+
+            {onRequestChangeTable && (
+              <button
+                type="button"
+                onClick={onRequestChangeTable}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:text-[11px]"
+              >
+                Change table
+              </button>
+            )}
+
+            {revertAction && (
+              <button
+                type="button"
+                onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 sm:text-[11px]"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
+                {revertButtonLabel()}
+              </button>
+            )}
+
+            <div className="min-w-1.5 flex-1" />
+
+            <button
+              type="button"
+              onClick={() => { setShowModify(!showModify); if (!showModify) setShowMessageBox(false); }}
+              className={`inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors sm:text-[11px] ${showModify ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
+              Modify
+            </button>
+
+            <div className="mx-0.5 h-3.5 w-px bg-slate-200" />
+
+            {canCancel && (
+              <button
+                type="button"
+                onClick={() => handleStatusClick('Cancelled', 'Cancel Booking')}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-red-600 transition-colors hover:border-red-100 hover:bg-red-50 sm:text-[11px]"
+              >
+                Cancel
+              </button>
+            )}
+            {canNoShow && (
+              <button
+                type="button"
+                onClick={() => handleStatusClick('No-Show', 'Mark No-Show')}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 sm:text-[11px]"
+              >
+                No-Show
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       {detail?.guest?.id ? (
         <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
@@ -596,8 +686,7 @@ export function ExpandedBookingContent({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
               </div>
               <div>
-                <Pill variant="success" size="sm">{bookingModelShortLabel(detail.cde_context.inferred_model)}</Pill>
-                <p className="mt-1.5 text-sm font-semibold text-slate-900">{detail.cde_context.title}</p>
+                <p className="text-sm font-semibold text-slate-900">{detail.cde_context.title}</p>
                 {detail.cde_context.subtitle && (
                   <p className="mt-0.5 text-xs text-slate-600">{detail.cde_context.subtitle}</p>
                 )}
@@ -633,86 +722,6 @@ export function ExpandedBookingContent({
           </SectionCard.Body>
         </SectionCard>
       )}
-
-      {/* Actions bar */}
-      <SectionCard className="rounded-xl">
-        <SectionCard.Body className="p-2">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            {forwardActions.map((action) => (
-              <button
-                key={action.target}
-                type="button"
-                onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
-                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 sm:text-xs"
-              >
-                {(action.target === 'Confirmed' || action.target === 'Booked') && (
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                )}
-                {action.target === 'Seated' && tableStyle && (
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
-                )}
-                {action.target === 'Seated' && !tableStyle && (
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
-                )}
-                {forwardPrimaryLabel(action.target, action.label)}
-              </button>
-            ))}
-
-            {onRequestChangeTable && (
-              <button
-                type="button"
-                onClick={onRequestChangeTable}
-                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:text-xs"
-              >
-                Change table
-              </button>
-            )}
-
-            {revertAction && (
-              <button
-                type="button"
-                onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
-                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 sm:text-xs"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
-                {revertButtonLabel()}
-              </button>
-            )}
-
-            <div className="min-w-2 flex-1" />
-
-            <button
-              type="button"
-              onClick={() => { setShowModify(!showModify); if (!showModify) setShowMessageBox(false); }}
-              className={`inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors sm:text-xs ${showModify ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
-              Modify
-            </button>
-
-            <div className="mx-0.5 h-4 w-px bg-slate-200" />
-
-            {canCancel && (
-              <button
-                type="button"
-                onClick={() => handleStatusClick('Cancelled', 'Cancel Booking')}
-                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-1 text-[11px] font-semibold text-red-600 transition-colors hover:border-red-100 hover:bg-red-50 sm:text-xs"
-              >
-                Cancel
-              </button>
-            )}
-            {canNoShow && (
-              <button
-                type="button"
-                onClick={() => handleStatusClick('No-Show', 'Mark No-Show')}
-                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 sm:text-xs"
-              >
-                No-Show
-              </button>
-            )}
-          </div>
-        </SectionCard.Body>
-      </SectionCard>
 
       {/* Modify booking (collapsible) */}
       {showModify && (
@@ -790,7 +799,7 @@ export function ExpandedBookingContent({
             <p className="text-sm font-bold text-red-800">{confirmAction.label}</p>
             <p className="mt-1 text-xs text-red-700">
               Confirm {confirmAction.label.toLowerCase()} for {guestName}
-              {' '}({booking.party_size} cover{booking.party_size !== 1 ? 's' : ''}) at {booking.booking_time.slice(0, 5)}?
+              {' '}({booking.party_size} {tableStyle ? `cover${booking.party_size !== 1 ? 's' : ''}` : `person${booking.party_size !== 1 ? 's' : ''}`}) at {booking.booking_time.slice(0, 5)}?
             </p>
             <div className="mt-3 flex gap-2">
               <button

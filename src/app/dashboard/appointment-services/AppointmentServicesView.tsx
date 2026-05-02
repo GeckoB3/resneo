@@ -15,6 +15,7 @@ import type {
   PractitionerService,
   ServiceCustomScheduleStored,
   ServiceCustomScheduleV2,
+  ServiceVariant,
   WorkingHours,
 } from '@/types/booking-models';
 import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
@@ -61,7 +62,32 @@ interface Service {
   staff_may_customize_colour?: boolean;
   custom_availability_enabled?: boolean;
   custom_working_hours?: ServiceCustomScheduleStored | null;
+  /** Optional sub-options the customer must pick from before completing a booking. */
+  variants?: ServiceVariant[];
 }
+
+/** One editable row in the variants section of the service modal. Pence values come back as strings while editing. */
+interface VariantFormRow {
+  /** Existing row id (preserved when editing); empty for newly-added rows. */
+  id?: string;
+  name: string;
+  description: string;
+  duration_minutes: number;
+  buffer_minutes: number;
+  price: string;
+  deposit: string;
+  is_active: boolean;
+}
+
+const DEFAULT_VARIANT_ROW: VariantFormRow = {
+  name: '',
+  description: '',
+  duration_minutes: 30,
+  buffer_minutes: 0,
+  price: '',
+  deposit: '',
+  is_active: true,
+};
 
 interface Practitioner {
   id: string;
@@ -110,6 +136,8 @@ interface ServiceFormData {
   allow_same_day_booking: boolean;
   custom_availability_enabled: boolean;
   custom_working_hours: ServiceCustomScheduleV2;
+  /** Optional sub-options. When non-empty, customers must pick one before booking. */
+  variants: VariantFormRow[];
 }
 
 const COLOUR_OPTIONS = [
@@ -145,6 +173,7 @@ const DEFAULT_FORM: ServiceFormData = {
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   custom_availability_enabled: false,
   custom_working_hours: { version: 2, rules: [] },
+  variants: [],
 };
 
 function formatDuration(mins: number): string {
@@ -376,7 +405,7 @@ export function AppointmentServicesView({
   }
 
   function openCreate() {
-    setForm({ ...DEFAULT_FORM, staffMay: { ...DEFAULT_STAFF_MAY } });
+    setForm({ ...DEFAULT_FORM, staffMay: { ...DEFAULT_STAFF_MAY }, variants: [] });
     setEditingId(null);
     setError(null);
     setShowAddCalendarModal(false);
@@ -422,6 +451,16 @@ export function AppointmentServicesView({
         svc.custom_availability_enabled && svc.custom_working_hours && typeof svc.custom_working_hours === 'object'
           ? toServiceCustomScheduleV2(svc.custom_working_hours)
           : { version: 2, rules: [] },
+      variants: (svc.variants ?? []).map((v) => ({
+        id: v.id,
+        name: v.name,
+        description: v.description ?? '',
+        duration_minutes: v.duration_minutes,
+        buffer_minutes: v.buffer_minutes,
+        price: penceToPounds(v.price_pence),
+        deposit: penceToPounds(v.deposit_pence),
+        is_active: v.is_active,
+      })),
     });
     setEditingId(svc.id);
     setError(null);
@@ -514,6 +553,28 @@ export function AppointmentServicesView({
       return;
     }
 
+    if (isAdmin && form.variants.length > 0) {
+      for (let i = 0; i < form.variants.length; i++) {
+        const v = form.variants[i]!;
+        if (!v.name.trim()) {
+          setError(`Variant ${i + 1}: name is required`);
+          return;
+        }
+        if (v.duration_minutes < 5 || v.duration_minutes > 480) {
+          setError(`Variant "${v.name.trim()}" duration must be between 5 and 480 minutes`);
+          return;
+        }
+        if (v.price.trim() && poundsToPence(v.price) == null) {
+          setError(`Variant "${v.name.trim()}" has an invalid price`);
+          return;
+        }
+        if (v.deposit.trim() && poundsToPence(v.deposit) == null) {
+          setError(`Variant "${v.name.trim()}" has an invalid deposit`);
+          return;
+        }
+      }
+    }
+
     if (!isAdmin && !editingId && form.practitioner_ids.length === 0) {
       setError('Select at least one calendar column to offer this service on.');
       return;
@@ -553,6 +614,17 @@ export function AppointmentServicesView({
         payload.custom_working_hours = form.custom_availability_enabled
           ? form.custom_working_hours
           : null;
+        payload.variants = form.variants.map((v, idx) => ({
+          ...(v.id ? { id: v.id } : {}),
+          name: v.name.trim(),
+          description: v.description.trim() || null,
+          duration_minutes: v.duration_minutes,
+          buffer_minutes: v.buffer_minutes,
+          price_pence: poundsToPence(v.price),
+          deposit_pence: poundsToPence(v.deposit),
+          sort_order: idx,
+          is_active: v.is_active,
+        }));
       }
 
       const res = await fetch('/api/venue/appointment-services', {
@@ -710,6 +782,12 @@ export function AppointmentServicesView({
                       <Pill variant="neutral" size="sm">
                         {formatDuration(display.duration_minutes)}
                       </Pill>
+                      {(svc.variants?.filter((v) => v.is_active).length ?? 0) > 0 ? (
+                        <Pill variant="brand" size="sm">
+                          {svc.variants!.filter((v) => v.is_active).length} variant
+                          {svc.variants!.filter((v) => v.is_active).length === 1 ? '' : 's'}
+                        </Pill>
+                      ) : null}
                       {!svc.is_active ? (
                         <Pill variant="warning" size="sm">
                           Inactive
@@ -1123,6 +1201,198 @@ export function AppointmentServicesView({
                 </button>
                 <span className="text-sm text-slate-700">Active (visible to clients)</span>
               </div>
+
+              {/* Variants — optional sub-options that override duration / price */}
+              {isAdmin && (
+                <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">
+                        Variants{' '}
+                        <span className="text-xs font-normal text-slate-500">(optional)</span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Add variants when this service has options that change duration or price (e.g. Full
+                        Head vs Roots, or 30 / 60 / 90 minute massage). When variants are listed, customers
+                        must pick one before booking and the variant&apos;s duration and price are used.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          variants: [...f.variants, { ...DEFAULT_VARIANT_ROW, duration_minutes: f.duration_minutes }],
+                        }))
+                      }
+                      className="shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                    >
+                      Add variant
+                    </button>
+                  </div>
+
+                  {form.variants.length === 0 ? (
+                    <p className="text-xs italic text-slate-500">
+                      No variants. Customers will book with the base duration and price above.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {form.variants.map((variant, idx) => (
+                        <div
+                          key={variant.id ?? `new-${idx}`}
+                          className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2"
+                        >
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="text"
+                              value={variant.name}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, name: e.target.value } : row,
+                                  ),
+                                }))
+                              }
+                              placeholder="Variant name (e.g. Full Head Long Hair)"
+                              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.filter((_, i) => i !== idx),
+                                }))
+                              }
+                              className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-red-700"
+                              aria-label={`Remove variant ${variant.name || idx + 1}`}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div>
+                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                                Duration (mins)
+                              </label>
+                              <NumericInput
+                                min={5}
+                                max={480}
+                                value={variant.duration_minutes}
+                                onChange={(v) =>
+                                  setForm((f) => ({
+                                    ...f,
+                                    variants: f.variants.map((row, i) =>
+                                      i === idx ? { ...row, duration_minutes: v } : row,
+                                    ),
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                                Buffer (mins)
+                              </label>
+                              <NumericInput
+                                min={0}
+                                max={120}
+                                value={variant.buffer_minutes}
+                                onChange={(v) =>
+                                  setForm((f) => ({
+                                    ...f,
+                                    variants: f.variants.map((row, i) =>
+                                      i === idx ? { ...row, buffer_minutes: v } : row,
+                                    ),
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                                Price ({sym})
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={variant.price}
+                                onChange={(e) =>
+                                  setForm((f) => ({
+                                    ...f,
+                                    variants: f.variants.map((row, i) =>
+                                      i === idx ? { ...row, price: e.target.value } : row,
+                                    ),
+                                  }))
+                                }
+                                placeholder="0.00"
+                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                                Deposit ({sym})
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={variant.deposit}
+                                onChange={(e) =>
+                                  setForm((f) => ({
+                                    ...f,
+                                    variants: f.variants.map((row, i) =>
+                                      i === idx ? { ...row, deposit: e.target.value } : row,
+                                    ),
+                                  }))
+                                }
+                                placeholder={form.payment_requirement === 'deposit' ? form.deposit || '0.00' : '—'}
+                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={variant.description}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, description: e.target.value } : row,
+                                  ),
+                                }))
+                              }
+                              placeholder="Optional description"
+                              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600"
+                            />
+                          </div>
+                          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={variant.is_active}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, is_active: e.target.checked } : row,
+                                  ),
+                                }))
+                              }
+                              className="h-3.5 w-3.5 rounded border-slate-300"
+                            />
+                            Active (offered to customers)
+                          </label>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-slate-500">
+                        Deposit is optional — leave blank to fall back to the parent service deposit when
+                        deposit payment is enabled.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Per-calendar overrides (Model B) — admin sets which fields staff may customise */}
               {isAdmin && (

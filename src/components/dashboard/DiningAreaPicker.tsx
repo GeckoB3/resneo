@@ -78,6 +78,7 @@ export function DiningAreaPicker({
         align="start"
         maxWidthPx={280}
         id={panelId}
+        onDismiss={() => setOpen(false)}
         aria-label="Choose dining area"
         className="animate-fade-in z-50 w-[min(calc(100vw-1rem),17.5rem)] rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
       >

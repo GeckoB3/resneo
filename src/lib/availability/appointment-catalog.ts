@@ -10,6 +10,7 @@ import type {
   ClassPaymentRequirement,
   Practitioner,
   PractitionerService,
+  ServiceVariant,
 } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
@@ -17,6 +18,18 @@ import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window'
 import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
+import { loadVariantsForServices } from '@/lib/venue/service-variants';
+
+export interface AppointmentCatalogVariant {
+  id: string;
+  name: string;
+  description: string | null;
+  duration_minutes: number;
+  buffer_minutes: number;
+  price_pence: number | null;
+  deposit_pence: number | null;
+  sort_order: number;
+}
 
 export interface AppointmentCatalogPractitioner {
   id: string;
@@ -31,7 +44,22 @@ export interface AppointmentCatalogPractitioner {
     payment_requirement?: ClassPaymentRequirement;
     /** Hours before start for deposit refund; from service row. */
     cancellation_notice_hours: number;
+    /** Active sub-options. When non-empty the booking flow must collect a variant choice. */
+    variants?: AppointmentCatalogVariant[];
   }>;
+}
+
+function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
+  return {
+    id: v.id,
+    name: v.name,
+    description: v.description,
+    duration_minutes: v.duration_minutes,
+    buffer_minutes: v.buffer_minutes,
+    price_pence: v.price_pence,
+    deposit_pence: v.deposit_pence,
+    sort_order: v.sort_order,
+  };
 }
 
 function serviceItemRowToAppointmentService(row: Record<string, unknown>): AppointmentService {
@@ -118,6 +146,13 @@ async function fetchUnifiedAppointmentCatalog(
     };
   });
 
+  const variantMap = await loadVariantsForServices({
+    admin: supabase,
+    venueId,
+    schema: 'service_item',
+    parentIds: services.map((s) => s.id),
+  });
+
   const practitioners: Practitioner[] = calendars.map((row) => unifiedCalendarRowToPractitioner(row));
   const result: AppointmentCatalogPractitioner[] = [];
 
@@ -138,6 +173,7 @@ async function fetchUnifiedAppointmentCatalog(
         deposit_pence: svc.deposit_pence,
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
+        variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
       })),
     });
   }
@@ -191,6 +227,13 @@ export async function fetchAppointmentCatalog(
     );
   }
 
+  const variantMap = await loadVariantsForServices({
+    admin: supabase,
+    venueId,
+    schema: 'appointment_service',
+    parentIds: services.map((s) => s.id),
+  });
+
   const result: AppointmentCatalogPractitioner[] = [];
 
   for (const practitioner of practitioners) {
@@ -210,6 +253,7 @@ export async function fetchAppointmentCatalog(
         deposit_pence: svc.deposit_pence,
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
+        variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
       })),
     });
   }

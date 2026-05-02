@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-/** Bookmarks and old links: guest management lives under Reports → Clients. */
+/** Bookmarks and old links: guest management lives under Contacts. */
 export default function GuestsPage() {
-  redirect('/dashboard/reports?tab=clients');
+  redirect('/dashboard/contacts');
 }

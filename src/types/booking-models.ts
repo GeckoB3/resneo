@@ -159,6 +159,12 @@ export interface AppointmentService {
    * or `{ version: 2, rules }` with weekly / specific dates / date-range patterns — union of rules).
    */
   custom_working_hours?: ServiceCustomScheduleStored | null;
+  /**
+   * Optional bookable sub-options. When non-empty (and any active), the booking flow must collect
+   * a variant choice before computing slots. Variant values override the parent for duration,
+   * buffer, price and (optionally) deposit; parent payment_requirement is preserved.
+   */
+  variants?: ServiceVariant[];
 }
 
 export interface PractitionerService {
@@ -172,6 +178,31 @@ export interface PractitionerService {
   custom_buffer_minutes?: number | null;
   custom_deposit_pence?: number | null;
   custom_colour?: string | null;
+}
+
+/**
+ * Optional sub-option for an appointment-style service (hair colour: full head vs roots, etc.).
+ * When a parent service has 1+ active variants, the guest must pick one before booking.
+ * Variant duration / buffer / price / deposit override the parent's bookable values.
+ * Parent service still owns payment_requirement and staff/calendar assignments.
+ */
+export interface ServiceVariant {
+  id: string;
+  venue_id: string;
+  /** Set when the venue stores services in `service_items` (unified scheduling). */
+  service_item_id: string | null;
+  /** Set when the venue stores services in legacy `appointment_services`. */
+  appointment_service_id: string | null;
+  name: string;
+  description: string | null;
+  duration_minutes: number;
+  buffer_minutes: number;
+  price_pence: number | null;
+  /** When null and the parent uses deposit payment, fall back to the parent's deposit. */
+  deposit_pence: number | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
 }
 
 // Model C: Event / experience ticket

@@ -8,8 +8,9 @@ import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availabi
 import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
-  computeAppointmentAvailability,
+  validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { autoAssignTable } from '@/lib/table-availability';
@@ -84,6 +85,22 @@ export async function GET(
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       area_name = (ar as { name?: string } | null)?.name ?? null;
+    }
+
+    let service_variant_name: string | null = null;
+    let service_variant_price_pence: number | null = null;
+    const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
+    if (bookingVariantId) {
+      const { data: sv } = await staff.db
+        .from('service_variants')
+        .select('name, price_pence')
+        .eq('id', bookingVariantId)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (sv) {
+        service_variant_name = (sv as { name?: string }).name ?? null;
+        service_variant_price_pence = (sv as { price_pence?: number | null }).price_pence ?? null;
+      }
     }
 
     const { data: guest } = await staff.db
@@ -167,6 +184,8 @@ export async function GET(
       combination_staff_notes,
       cde_context,
       inferred_booking_model: inferred_booking_model as BookingModel,
+      service_variant_name,
+      service_variant_price_pence,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -715,7 +734,12 @@ export async function PATCH(
       return NextResponse.json(updated.data);
     }
 
-    if (body.booking_date !== undefined || body.booking_time !== undefined || body.party_size !== undefined) {
+    if (
+      body.booking_date !== undefined ||
+      body.booking_time !== undefined ||
+      body.party_size !== undefined ||
+      body.booking_end_time !== undefined
+    ) {
       const inferredForModify = inferBookingRowModel({
         experience_event_id: booking.experience_event_id as string | null | undefined,
         class_instance_id: booking.class_instance_id as string | null | undefined,
@@ -751,7 +775,18 @@ export async function PATCH(
 
       const timeStr = newTime.slice(0, 5);
       const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
+      const allowManualCalendarOverlap =
+        isAppointment &&
+        (body.allow_manual_overlap === true || body.allow_booking_overlap === true) &&
+        (body.booking_date !== undefined || body.booking_time !== undefined || body.booking_end_time !== undefined || body.practitioner_id !== undefined);
       const idLc = id.toLowerCase();
+      const beforeEndHm =
+        typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
+          ? String((booking as { booking_end_time?: string | null }).booking_end_time).slice(0, 5)
+          : null;
+
+      /** Default catalogue duration; used for appointment interval validation and end-time projection. */
+      let appointmentSvcDurationMinutes = 30;
 
       let tableRescheduleServiceId: string | null = null;
       let tableRescheduleAreaId: string | null = null;
@@ -765,12 +800,37 @@ export async function PATCH(
           (booking.calendar_id as string | null);
         const svcId =
           (booking.appointment_service_id as string | null) ?? (booking.service_item_id as string | null);
+        if (!practId || !svcId) {
+          return NextResponse.json(
+            { error: 'Cannot validate appointment: missing practitioner or service on booking' },
+            { status: 400 },
+          );
+        }
+
+        const appointmentSvcIdForDuration = booking.appointment_service_id as string | null | undefined;
+        const serviceItemIdForDuration = booking.service_item_id as string | null | undefined;
+        if (appointmentSvcIdForDuration) {
+          const { data: svcRow } = await admin
+            .from('appointment_services')
+            .select('duration_minutes')
+            .eq('id', appointmentSvcIdForDuration)
+            .single();
+          appointmentSvcDurationMinutes = svcRow?.duration_minutes ?? 30;
+        } else if (serviceItemIdForDuration) {
+          const { data: siRow } = await admin
+            .from('service_items')
+            .select('duration_minutes')
+            .eq('id', serviceItemIdForDuration)
+            .single();
+          appointmentSvcDurationMinutes = (siRow as { duration_minutes?: number } | null)?.duration_minutes ?? 30;
+        }
+
         const apptInput = await fetchAppointmentInput({
           supabase: admin,
           venueId: staff.venue_id,
           date: newDate,
-          practitionerId: practId ?? undefined,
-          serviceId: svcId ?? undefined,
+          practitionerId: practId,
+          serviceId: svcId,
         });
         apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== idLc);
         apptInput.skipPastSlotFilter = true;
@@ -780,14 +840,28 @@ export async function PATCH(
           .eq('id', staff.venue_id)
           .single();
         attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
-        const apptResult = computeAppointmentAvailability(apptInput);
-        const practSlots = apptResult.practitioners.find((p) => p.id === practId);
-        const matchSlot = practSlots?.slots.find(
-          (s) => s.start_time === timeStr && (!svcId || s.service_id === svcId),
+
+        const startMin = timeToMinutes(timeStr);
+        let endCoreHHmm: string;
+        if (typeof body.booking_end_time === 'string' && body.booking_end_time.trim() !== '') {
+          const raw = body.booking_end_time.trim();
+          endCoreHHmm = raw.length >= 5 ? raw.slice(0, 5) : minutesToTime(startMin + appointmentSvcDurationMinutes);
+        } else {
+          endCoreHHmm = minutesToTime(startMin + appointmentSvcDurationMinutes);
+        }
+
+        const intervalCheck = validateAppointmentCustomInterval(
+          apptInput,
+          practId,
+          svcId,
+          timeStr,
+          endCoreHHmm,
+          id,
+          { allowBookingOverlap: allowManualCalendarOverlap },
         );
-        if (!matchSlot) {
+        if (!intervalCheck.ok) {
           return NextResponse.json(
-            { error: 'Selected date/time is not available for this practitioner' },
+            { error: intervalCheck.reason ?? 'Selected time is not available for this practitioner' },
             { status: 409 },
           );
         }
@@ -879,26 +953,16 @@ export async function PATCH(
       const appointmentSvcId = booking.appointment_service_id as string | null | undefined;
       const serviceItemId = booking.service_item_id as string | null | undefined;
       if (isAppointment && (appointmentSvcId || serviceItemId)) {
-        let svcDuration = 30;
-        if (appointmentSvcId) {
-          const { data: svcRow } = await admin
-            .from('appointment_services')
-            .select('duration_minutes')
-            .eq('id', appointmentSvcId)
-            .single();
-          svcDuration = svcRow?.duration_minutes ?? 30;
-        } else if (serviceItemId) {
-          const { data: siRow } = await admin
-            .from('service_items')
-            .select('duration_minutes')
-            .eq('id', serviceItemId)
-            .single();
-          svcDuration = (siRow as { duration_minutes?: number } | null)?.duration_minutes ?? 30;
-        }
         const [ry, rmo, rd] = newDate.split('-').map(Number);
         const [rhh, rmm] = timeStr.split(':').map(Number);
         const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));
-        rEnd.setMinutes(rEnd.getMinutes() + svcDuration);
+        const startMin = timeToMinutes(timeStr);
+        let durationMinutes = appointmentSvcDurationMinutes;
+        if (typeof body.booking_end_time === 'string' && body.booking_end_time.trim() !== '') {
+          const endHm = body.booking_end_time.trim().slice(0, 5);
+          durationMinutes = Math.max(15, timeToMinutes(endHm) - startMin);
+        }
+        rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
         bookingUpdate.estimated_end_time = rEnd.toISOString();
         bookingUpdate.booking_end_time = `${String(rEnd.getUTCHours()).padStart(2, '0')}:${String(rEnd.getUTCMinutes()).padStart(2, '0')}:00`;
       }
@@ -970,17 +1034,29 @@ export async function PATCH(
         );
       }
 
+      const afterEndHm =
+        typeof bookingUpdate.booking_end_time === 'string'
+          ? String(bookingUpdate.booking_end_time).slice(0, 5)
+          : beforeEndHm;
+
       await admin.from('events').insert({
         venue_id: staff.venue_id,
         booking_id: id,
         event_type: 'booking_modified',
-        payload: { before, after: { booking_date: newDate, booking_time: timeStr, party_size: newPartySize } },
+        payload: {
+          before,
+          after: {
+            booking_date: newDate,
+            booking_time: timeStr,
+            party_size: newPartySize,
+            ...(afterEndHm ? { booking_end_time: afterEndHm } : {}),
+          },
+        },
       });
 
       const dateChanged = newDate !== booking.booking_date;
       const timeChanged = timeStr !== before.booking_time;
       const partySizeChanged = newPartySize !== booking.party_size;
-
       let tableAssignmentUnassigned = false;
       if (dateChanged || timeChanged || partySizeChanged) {
         const { data: venueForTables } = await admin
@@ -1086,7 +1162,10 @@ export async function PATCH(
       });
     }
 
-    return NextResponse.json({ error: 'Provide status or booking_date/booking_time/party_size' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Provide status or booking_date/booking_time/party_size/booking_end_time' },
+      { status: 400 },
+    );
   } catch (err) {
     console.error('PATCH /api/venue/bookings/[id] failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -308,6 +308,7 @@ export function OperationsWorkspaceToolbar({
                   align="start"
                   maxWidthPx={360}
                   id={infoPanelId}
+                  onDismiss={close}
                   aria-label="View summary information"
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
@@ -373,6 +374,7 @@ export function OperationsWorkspaceToolbar({
                 align="start"
                 maxWidthPx={352}
                 id={datePanelId}
+                onDismiss={close}
                 aria-label="Date and calendar"
                 className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
               >
@@ -436,6 +438,7 @@ export function OperationsWorkspaceToolbar({
                   align="start"
                   maxWidthPx={320}
                   id={timelinePanelId}
+                  onDismiss={close}
                   aria-label="Timeline controls"
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
@@ -466,6 +469,7 @@ export function OperationsWorkspaceToolbar({
                   align="start"
                   maxWidthPx={384}
                   id={controlsPanelId}
+                  onDismiss={close}
                   aria-label={controlsLabel}
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
@@ -509,6 +513,7 @@ export function OperationsWorkspaceToolbar({
                   align="end"
                   maxWidthPx={352}
                   id={`${baseId}-search-panel`}
+                  onDismiss={close}
                   aria-label="Search bookings"
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >

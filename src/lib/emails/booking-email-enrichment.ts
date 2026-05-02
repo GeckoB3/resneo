@@ -22,10 +22,27 @@ type BookingAnchorRow = {
   appointment_service_id: string | null;
   calendar_id: string | null;
   service_item_id: string | null;
+  service_variant_id: string | null;
   group_booking_id: string | null;
   guest_id: string | null;
   person_label: string | null;
 };
+
+/**
+ * Combine parent service name with the chosen variant for confirmation/reminder emails.
+ * Variant duration / price overrides win when present so guests see the actual numbers
+ * for what they booked.
+ */
+function applyVariantOverrides(
+  baseName: string | null,
+  basePrice: number | null,
+  variant: { name?: string | null; price_pence?: number | null } | null | undefined,
+): { name: string | null; price: number | null } {
+  if (!variant) return { name: baseName, price: basePrice };
+  const name = baseName && variant.name ? `${baseName} - ${variant.name}` : baseName ?? variant.name ?? null;
+  const price = variant.price_pence ?? basePrice;
+  return { name, price };
+}
 
 async function resolveAppointmentLabels(
   supabase: SupabaseClient,
@@ -40,32 +57,43 @@ async function resolveAppointmentLabels(
   const legacySvc = row.appointment_service_id;
   const cal = row.calendar_id;
   const item = row.service_item_id;
+  const variantId = row.service_variant_id;
+
+  const variantPromise = variantId
+    ? supabase
+        .from('service_variants')
+        .select('name, price_pence')
+        .eq('id', variantId)
+        .maybeSingle()
+    : Promise.resolve({ data: null });
 
   if (legacyPr && legacySvc) {
-    const [{ data: pr }, { data: svc }] = await Promise.all([
+    const [{ data: pr }, { data: svc }, { data: variant }] = await Promise.all([
       supabase.from('practitioners').select('name').eq('id', legacyPr).maybeSingle(),
       supabase.from('appointment_services').select('name, price_pence').eq('id', legacySvc).maybeSingle(),
+      variantPromise,
     ]);
-    const pp = svc?.price_pence ?? null;
+    const merged = applyVariantOverrides(svc?.name ?? null, svc?.price_pence ?? null, variant);
     return {
       practitionerName: pr?.name ?? null,
-      serviceName: svc?.name ?? null,
-      appointmentPriceDisplay: priceDisplayFromPence(pp),
-      servicePricePence: pp,
+      serviceName: merged.name,
+      appointmentPriceDisplay: priceDisplayFromPence(merged.price),
+      servicePricePence: merged.price,
     };
   }
 
   if (cal && item) {
-    const [{ data: uc }, { data: si }] = await Promise.all([
+    const [{ data: uc }, { data: si }, { data: variant }] = await Promise.all([
       supabase.from('unified_calendars').select('name').eq('id', cal).maybeSingle(),
       supabase.from('service_items').select('name, price_pence').eq('id', item).maybeSingle(),
+      variantPromise,
     ]);
-    const pp = si?.price_pence ?? null;
+    const merged = applyVariantOverrides(si?.name ?? null, si?.price_pence ?? null, variant);
     return {
       practitionerName: uc?.name ?? null,
-      serviceName: si?.name ?? null,
-      appointmentPriceDisplay: priceDisplayFromPence(pp),
-      servicePricePence: pp,
+      serviceName: merged.name,
+      appointmentPriceDisplay: priceDisplayFromPence(merged.price),
+      servicePricePence: merged.price,
     };
   }
 
@@ -94,7 +122,7 @@ export async function enrichBookingEmailForAppointment(
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'practitioner_id, appointment_service_id, calendar_id, service_item_id, group_booking_id, guest_id, person_label',
+      'practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -118,7 +146,7 @@ export async function enrichBookingEmailForAppointment(
     const { data: siblings } = await supabase
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, person_label',
+        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, person_label',
       )
       .eq('group_booking_id', anchor.group_booking_id)
       .eq('guest_id', anchor.guest_id)
@@ -130,12 +158,14 @@ export async function enrichBookingEmailForAppointment(
       const svcIds = [...new Set(siblings.map((s) => s.appointment_service_id).filter(Boolean))] as string[];
       const calIds = [...new Set(siblings.map((s) => s.calendar_id).filter(Boolean))] as string[];
       const itemIds = [...new Set(siblings.map((s) => s.service_item_id).filter(Boolean))] as string[];
+      const variantIds = [...new Set(siblings.map((s) => s.service_variant_id).filter(Boolean))] as string[];
 
-      const [{ data: pracs }, { data: svcs }, { data: cals }, { data: items }] = await Promise.all([
+      const [{ data: pracs }, { data: svcs }, { data: cals }, { data: items }, { data: variants }] = await Promise.all([
         prIds.length ? supabase.from('practitioners').select('id, name').in('id', prIds) : { data: [] },
         svcIds.length ? supabase.from('appointment_services').select('id, name, price_pence').in('id', svcIds) : { data: [] },
         calIds.length ? supabase.from('unified_calendars').select('id, name').in('id', calIds) : { data: [] },
         itemIds.length ? supabase.from('service_items').select('id, name, price_pence').in('id', itemIds) : { data: [] },
+        variantIds.length ? supabase.from('service_variants').select('id, name, price_pence').in('id', variantIds) : { data: [] },
       ]);
 
       const prMap = new Map((pracs ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
@@ -152,6 +182,12 @@ export async function enrichBookingEmailForAppointment(
           { name: s.name, price_pence: s.price_pence },
         ]),
       );
+      const variantMap = new Map(
+        (variants ?? []).map((v: { id: string; name: string; price_pence: number | null }) => [
+          v.id,
+          { name: v.name, price_pence: v.price_pence },
+        ]),
+      );
 
       let sumPence = 0;
       let anyPrice = false;
@@ -162,6 +198,8 @@ export async function enrichBookingEmailForAppointment(
         const sid = s.appointment_service_id as string | null;
         const cid = s.calendar_id as string | null;
         const iid = s.service_item_id as string | null;
+        const vid = s.service_variant_id as string | null;
+        const variant = vid ? variantMap.get(vid) ?? null : null;
 
         let practitionerNameLine = 'Staff';
         let serviceNameLine = 'Treatment';
@@ -170,21 +208,21 @@ export async function enrichBookingEmailForAppointment(
         if (pid && sid) {
           practitionerNameLine = prMap.get(pid) ?? 'Staff';
           const sv = svMap.get(sid);
-          serviceNameLine = sv?.name ?? 'Treatment';
-          const pp = sv?.price_pence ?? null;
-          priceDisplay = priceDisplayFromPence(pp);
-          if (pp != null) {
-            sumPence += pp;
+          const merged = applyVariantOverrides(sv?.name ?? null, sv?.price_pence ?? null, variant);
+          serviceNameLine = merged.name ?? 'Treatment';
+          priceDisplay = priceDisplayFromPence(merged.price);
+          if (merged.price != null) {
+            sumPence += merged.price;
             anyPrice = true;
           }
         } else if (cid && iid) {
           practitionerNameLine = calMap.get(cid) ?? 'Staff';
           const it = itemMap.get(iid);
-          serviceNameLine = it?.name ?? 'Treatment';
-          const pp = it?.price_pence ?? null;
-          priceDisplay = priceDisplayFromPence(pp);
-          if (pp != null) {
-            sumPence += pp;
+          const merged = applyVariantOverrides(it?.name ?? null, it?.price_pence ?? null, variant);
+          serviceNameLine = merged.name ?? 'Treatment';
+          priceDisplay = priceDisplayFromPence(merged.price);
+          if (merged.price != null) {
+            sumPence += merged.price;
             anyPrice = true;
           }
         }

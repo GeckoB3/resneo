@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import type { GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
@@ -16,56 +17,6 @@ export interface ClientSummary {
   new_clients_in_period: number;
   returning_clients_in_period: number;
   anonymous_visits_in_period: number;
-}
-
-interface GuestListRow {
-  id: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  tags: string[];
-  visit_count: number;
-  no_show_count: number;
-  last_visit_date: string | null;
-  created_at: string;
-  identifiability_tier?: string;
-  total_bookings: number;
-}
-
-interface GuestDetailResponse {
-  guest: {
-    id: string;
-    name: string | null;
-    email: string | null;
-    phone: string | null;
-    tags: string[];
-    visit_count: number;
-    no_show_count: number;
-    last_visit_date: string | null;
-    created_at: string;
-    updated_at: string;
-  };
-  stats: {
-    total_bookings: number;
-    cancellations: number;
-    no_shows: number;
-    total_deposit_pence_paid: number;
-    first_visit_date: string | null;
-    last_visit_date: string | null;
-  };
-  booking_history: Array<{
-    id: string;
-    booking_date: string;
-    booking_time: string;
-    party_size: number | null;
-    status: string;
-    deposit_status: string | null;
-    booking_model: BookingModel;
-    kind_label: string;
-    detail_label: string;
-    practitioner_name: string | null;
-    service_name: string | null;
-  }>;
 }
 
 const SORT_OPTIONS: Array<{ value: string; label: string }> = [
@@ -330,6 +281,13 @@ export function ClientsSection({
         }
       />
       <SectionCard.Body className="space-y-6">
+      <p className="text-sm text-slate-600">
+        Looking for filters, CSV export of the current view, and communications history?{' '}
+        <Link href="/dashboard/contacts" className="font-semibold text-brand-700 hover:text-brand-900">
+          Open Contacts
+        </Link>
+        .
+      </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label={`Known ${clientLower}s (all-time)`}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 const PILL_PALETTE = [
   'bg-sky-100 text-sky-800 border-sky-200',
@@ -44,13 +45,11 @@ export function GuestTagEditor({ tags, venueId: _venueId, onTagsChange, disabled
     void loadVenueTags();
   }, [loadVenueTags]);
 
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
-  }, []);
+  useDismissibleLayer({
+    open,
+    refs: [wrapRef],
+    onDismiss: () => setOpen(false),
+  });
 
   const trimmedInput = input.trim().toLowerCase();
   const suggestions = useMemo(() => {

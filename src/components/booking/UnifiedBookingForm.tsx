@@ -8,6 +8,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function toDateStr(d: Date): string {
@@ -239,17 +240,11 @@ export function UnifiedBookingForm({
     return () => clearTimeout(timer);
   }, []);
 
-  // Close dropdown panels on outside click
-  useEffect(() => {
-    if (!openPanel) return;
-    function handler(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setOpenPanel(null);
-      }
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [openPanel]);
+  useDismissibleLayer({
+    open: openPanel !== null,
+    refs: [panelRef],
+    onDismiss: () => setOpenPanel(null),
+  });
 
   // Fetch available time slots when date or party size changes (debounced)
   useEffect(() => {

@@ -103,6 +103,9 @@ export interface BookingDetailRecord {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  service_variant_id?: string | null;
+  service_variant_name?: string | null;
+  service_variant_price_pence?: number | null;
   cde_context?: {
     inferred_model: BookingModel;
     title: string;
@@ -657,9 +660,14 @@ export function AppointmentDetailSheet({
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service</dt>
                   <dd className="mt-0.5 text-slate-900">
-                    {detail.appointment_service_id
-                      ? serviceMap.get(detail.appointment_service_id)?.name ?? '-'
-                      : '-'}
+                    {(() => {
+                      const baseName = detail.appointment_service_id
+                        ? serviceMap.get(detail.appointment_service_id)?.name ?? null
+                        : null;
+                      const variantName = detail.service_variant_name ?? null;
+                      if (baseName && variantName) return `${baseName} - ${variantName}`;
+                      return baseName ?? variantName ?? '-';
+                    })()}
                   </dd>
                 </div>
                 <div>
@@ -681,13 +689,22 @@ export function AppointmentDetailSheet({
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Price</dt>
                   <dd className="mt-0.5 text-slate-700">
-                    {detail.appointment_service_id &&
-                    serviceMap.get(detail.appointment_service_id)?.price_pence != null
-                      ? formatBookablePricePence(
+                    {(() => {
+                      const variantPrice = detail.service_variant_price_pence;
+                      if (variantPrice != null) {
+                        return formatBookablePricePence(Number(variantPrice), sym);
+                      }
+                      if (
+                        detail.appointment_service_id &&
+                        serviceMap.get(detail.appointment_service_id)?.price_pence != null
+                      ) {
+                        return formatBookablePricePence(
                           Number(serviceMap.get(detail.appointment_service_id)?.price_pence),
                           sym,
-                        )
-                      : '-'}
+                        );
+                      }
+                      return '-';
+                    })()}
                   </dd>
                 </div>
                 {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (

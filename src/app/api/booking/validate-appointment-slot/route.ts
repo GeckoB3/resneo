@@ -7,6 +7,8 @@ import {
   validateExactAppointmentStart,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -24,6 +26,8 @@ const bodySchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   practitioner_id: z.string().uuid(),
   service_id: z.string().uuid(),
+  /** When the parent service has variants, the chosen variant id (drives duration/price). */
+  variant_id: z.string().uuid().optional(),
   start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   phantoms: z.array(phantomSchema).optional(),
 });
@@ -39,7 +43,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
     }
 
-    const { venue_id, booking_date, practitioner_id, service_id, start_time, phantoms } = parsed.data;
+    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms } = parsed.data;
     const supabase = getSupabaseAdminClient();
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
@@ -88,6 +92,19 @@ export async function POST(request: NextRequest) {
       serviceId: service_id,
     });
     input.phantomBookings = (phantoms ?? []) as PhantomBooking[];
+
+    if (variant_id) {
+      const variant = await loadActiveVariantForService({
+        admin: supabase,
+        venueId: venue_id,
+        serviceId: service_id,
+        variantId: variant_id,
+      });
+      if (!variant) {
+        return NextResponse.json({ ok: false, error: 'Invalid variant_id for this service' });
+      }
+      applyVariantToAppointmentInput({ services: input.services, serviceId: service_id, variant });
+    }
 
     attachVenueClockToAppointmentInput(
       input,

@@ -154,6 +154,7 @@ export function PractitionerCalendarToolbar({
           align="start"
           maxWidthPx={240}
           id={viewModePanelId}
+          onDismiss={() => setViewModePopoverOpen(false)}
           aria-label="Choose calendar view"
           className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
         >

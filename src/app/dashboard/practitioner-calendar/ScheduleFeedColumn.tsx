@@ -34,9 +34,9 @@ interface ScheduleFeedColumnProps {
   blocks: ScheduleBlockDTO[];
   startHour: number;
   endHour: number;
-  onBookingClick: (bookingId: string) => void;
+  onBookingClick: (bookingId: string, anchor: { x: number; y: number }) => void;
   /** When set, class session blocks open this handler (full session roster) instead of a single booking. */
-  onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
+  onClassInstanceClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
   /** When set, experience event aggregate blocks open this handler (roster + event detail). */
   onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
   /** Omit the top label row when the parent renders a unified sticky header (day grid). */
@@ -158,7 +158,7 @@ export function ScheduleFeedColumn({
               {classOpensRoster ? (
                 <button
                   type="button"
-                  onClick={() => onClassInstanceClick(b)}
+                  onClick={(e) => onClassInstanceClick(b, { x: e.clientX, y: e.clientY })}
                   className="h-full w-full text-left"
                 >
                   {body}
@@ -172,7 +172,11 @@ export function ScheduleFeedColumn({
                   {body}
                 </button>
               ) : clickable && b.booking_id ? (
-                <button type="button" onClick={() => onBookingClick(b.booking_id!)} className="h-full w-full text-left">
+                <button
+                  type="button"
+                  onClick={(e) => onBookingClick(b.booking_id!, { x: e.clientX, y: e.clientY })}
+                  className="h-full w-full text-left"
+                >
                   {body}
                 </button>
               ) : b.kind === 'event_ticket' && b.experience_event_id ? (

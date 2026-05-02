@@ -25,6 +25,11 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import {
+  applyVariantToAppointmentInput,
+  resolveBookableServiceWithVariant,
+} from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import {
@@ -73,6 +78,8 @@ const createBookingSchema = z.object({
   // Model B: appointment fields
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
+  /** Optional sub-option for the appointment service (variant duration / price overrides). */
+  service_variant_id: z.string().uuid().optional(),
   // Model C: event ticket fields
   experience_event_id: z.string().uuid().optional(),
   ticket_lines: z.array(z.object({
@@ -539,7 +546,7 @@ async function handleNonTableBooking(
   const {
     venue_id, booking_date, booking_time, party_size, name, email,
     dietary_notes, occasion, source,
-    practitioner_id, appointment_service_id,
+    practitioner_id, appointment_service_id, service_variant_id,
     experience_event_id, ticket_lines,
     class_instance_id,
     pay_with_class_credits,
@@ -733,6 +740,28 @@ async function handleNonTableBooking(
       return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
     }
     const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
+
+    let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
+    if (service_variant_id) {
+      chosenVariant = await loadActiveVariantForService({
+        admin: supabase,
+        venueId: venue_id,
+        serviceId: appointment_service_id,
+        variantId: service_variant_id,
+      });
+      if (!chosenVariant) {
+        return NextResponse.json(
+          { error: 'Invalid service_variant_id for this service' },
+          { status: 400 },
+        );
+      }
+      applyVariantToAppointmentInput({
+        services: input.services,
+        serviceId: appointment_service_id,
+        variant: chosenVariant,
+      });
+    }
+
     attachVenueClockToAppointmentInput(
       input,
       venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
@@ -748,7 +777,8 @@ async function handleNonTableBooking(
     const ps = input.practitionerServices.find(
       (row) => row.practitioner_id === practitioner_id && row.service_id === appointment_service_id,
     );
-    const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+    const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+    const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
     const practRow = input.practitioners.find((p) => p.id === practitioner_id);
     appointmentEmailExtras = {
       email_variant: 'appointment',
@@ -1023,6 +1053,7 @@ async function handleNonTableBooking(
     // Model-specific anchors
     practitioner_id: practitioner_id ?? null,
     appointment_service_id: appointment_service_id ?? null,
+    service_variant_id: service_variant_id ?? null,
     experience_event_id: experience_event_id ?? null,
     class_instance_id: class_instance_id ?? null,
     resource_id: resource_id ?? null,

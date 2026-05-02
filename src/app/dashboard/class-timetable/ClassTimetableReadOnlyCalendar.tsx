@@ -19,6 +19,8 @@ export interface ReadOnlyCalendarInstance {
 interface ClassTimetableReadOnlyCalendarProps {
   classTypes: ReadOnlyCalendarClassType[];
   instances: ReadOnlyCalendarInstance[];
+  filterClassTypeId: string;
+  onFilterClassTypeIdChange: (classTypeId: string) => void;
   isAdmin?: boolean;
   /** When set, session chips may be clickable to edit. */
   onEditInstance?: (inst: ReadOnlyCalendarInstance) => void;
@@ -33,6 +35,8 @@ interface ClassTimetableReadOnlyCalendarProps {
 export function ClassTimetableReadOnlyCalendar({
   classTypes,
   instances,
+  filterClassTypeId,
+  onFilterClassTypeIdChange,
   isAdmin = false,
   onEditInstance,
   canEditInstance,
@@ -98,15 +102,34 @@ export function ClassTimetableReadOnlyCalendar({
               Primary view of dated sessions. Open Schedule classes to add or adjust times.
             </p>
           </div>
-          {onOpenSchedule ? (
-            <button
-              type="button"
-              onClick={onOpenSchedule}
-              className="inline-flex w-full shrink-0 items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 sm:w-auto"
-            >
-              Schedule classes
-            </button>
-          ) : null}
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end">
+            <label className="block min-w-0 sm:min-w-48">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Filter class
+              </span>
+              <select
+                value={filterClassTypeId}
+                onChange={(e) => onFilterClassTypeIdChange(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm outline-none transition-colors focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="all">All classes</option>
+                {classTypes.map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {ct.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {onOpenSchedule ? (
+              <button
+                type="button"
+                onClick={onOpenSchedule}
+                className="inline-flex w-full shrink-0 items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 sm:w-auto"
+              >
+                Schedule classes
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -251,7 +274,10 @@ export function ClassTimetableReadOnlyCalendar({
         </div>
         {instancesInMonth.length === 0 ? (
           <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-3 text-center text-xs text-slate-500">
-            No sessions in this month. Open Schedule classes to add dates, or move to another month.
+            {filterClassTypeId === 'all'
+              ? 'No sessions in this month.'
+              : 'No sessions for this class in this month.'}{' '}
+            Open Schedule classes to add dates, or move to another month.
           </p>
         ) : null}
       </div>

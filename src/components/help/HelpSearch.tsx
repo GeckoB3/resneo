@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { searchHelpArticles } from '@/lib/help/search-index';
+import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 export function HelpSearch({ className = '' }: { className?: string }) {
   const [query, setQuery] = useState('');
@@ -13,15 +14,12 @@ export function HelpSearch({ className = '' }: { className?: string }) {
 
   const results = useMemo(() => searchHelpArticles(query, 8), [query]);
 
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
-
   const showPanel = open && query.trim().length >= 2;
+  useDismissibleLayer({
+    open: showPanel,
+    refs: [rootRef],
+    onDismiss: () => setOpen(false),
+  });
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>

@@ -2,13 +2,14 @@ import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import HomeFaq from "@/components/home/HomeFaq";
 import { PricingSection } from "@/components/home/PricingSection";
+import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 
 /** Feature blurbs aligned with ReserveNI Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
 const features = [
   {
     title: "Deposit Collection",
-    description:
-      "Per-head deposits via Stripe Connect so funds settle to your connected account. Reserve NI never holds customer money.",
+    description: `Per-head deposits via Stripe Connect. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
     icon: CreditCardIcon,
   },
   {
@@ -30,12 +31,12 @@ const features = [
   },
   {
     title: "Any Bookable Business",
-    description: "Restaurants, barbers, beauty salons, yoga studios, tennis courts, escape rooms. If it's bookable, Reserve NI handles it.",
+    description: "Restaurants, barbers, beauty salons, yoga studios, tennis courts, escape rooms. If it's bookable, ReserveNI handles it.",
     icon: GridIcon,
   },
   {
     title: "Built for Northern Ireland",
-    description: "Local support, GBP pricing, and tailored to the NI business community. No commissions, no hidden fees.",
+    description: `Local support, GBP pricing, and tailored to the NI business community. No commissions, no hidden fees. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
     icon: MapPinIcon,
   },
 ];
@@ -64,7 +65,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex-shrink-0">
-            <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
+            <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
           </Link>
           <div className="flex items-center gap-4">
             <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
@@ -80,7 +81,7 @@ export default function Home() {
         <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(13,148,136,0.08) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(5,150,105,0.06) 0%, transparent 50%)' }} />
         <div className="relative mx-auto max-w-4xl px-6 py-24 text-center sm:py-32 lg:py-40">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Reserve&nbsp;NI
+            ReserveNI
           </h1>
           <p className="mt-4 text-lg font-medium text-brand-700 sm:text-xl">
             Booking management for every business in Northern Ireland
@@ -114,7 +115,8 @@ export default function Home() {
             Everything you need to manage bookings
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-slate-500">
-            Purpose-built for Northern Ireland. No enterprise bloat, no commission on bookings.
+            Purpose-built for Northern Ireland. No enterprise bloat, no commission on bookings.{' '}
+            {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}
           </p>
           <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
@@ -162,6 +164,13 @@ export default function Home() {
           </p>
           <div className="mt-10">
             <ContactForm />
+            <p className="mx-auto mt-4 max-w-lg text-center text-xs leading-relaxed text-slate-500">
+              We&rsquo;ll use the details you provide to respond to your enquiry. See our{' '}
+              <Link href="/privacy" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Privacy Policy
+              </Link>{' '}
+              for more information.
+            </p>
           </div>
         </div>
       </section>
@@ -169,7 +178,9 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-          <p>&copy; 2026 Reserve&nbsp;NI</p>
+          <p className="max-w-xl text-center leading-snug sm:text-left">
+            &copy; 2026 ReserveNI · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/signup" className="transition-colors hover:text-slate-900">
               Sign up
@@ -181,10 +192,10 @@ export default function Home() {
               Contact
             </a>
             <Link href="/terms" className="transition-colors hover:text-slate-900">
-              Terms of Service
+              Website Terms of Use
             </Link>
             <Link href="/privacy" className="transition-colors hover:text-slate-900">
-              Privacy policy
+              Privacy Policy
             </Link>
           </div>
         </div>

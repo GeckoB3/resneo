@@ -292,7 +292,7 @@ function PayContent() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
         <div className="w-full max-w-sm text-center">
-          <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="mx-auto mb-8 h-8 w-auto" />
+          <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="mx-auto mb-8 h-8 w-auto" />
           <div className="rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
             <p className="text-sm text-red-600">{errorMsg}</p>
           </div>
@@ -306,7 +306,7 @@ function PayContent() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
         <div className="w-full max-w-md text-center">
-          <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="mx-auto mb-8 h-8 w-auto" />
+          <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="mx-auto mb-8 h-8 w-auto" />
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm space-y-5">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
               <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -344,7 +344,7 @@ function PayContent() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-md space-y-5">
-        <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="h-8 w-auto" />
+        <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="h-8 w-auto" />
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
           <div>
             <h1 className="text-lg font-semibold text-slate-900">Pay your deposit</h1>
@@ -373,7 +373,7 @@ function PayContent() {
           </Elements>
         </div>
         <p className="text-center text-xs text-slate-400">
-          Powered by <a href="https://www.reserveni.com" className="hover:text-brand-600">Reserve NI</a>
+          Powered by <a href="https://www.reserveni.com" className="hover:text-brand-600">ReserveNI</a>
         </p>
       </div>
     </div>

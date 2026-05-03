@@ -29,8 +29,9 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
+import { bookingStatusVisualForKey, BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
+import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
 import { computePointAnchoredMenuStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import {
@@ -42,32 +43,8 @@ import {
   type ManualCombination,
 } from '@/lib/table-management/combination-engine';
 
-const STATUS_COLORS: Record<string, string> = {
-  Pending: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
-  Booked: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
-  Confirmed: 'bg-[#ECFDF5] border-[#A7F3D0] border-l-[#059669] text-[#065F46]',
-  Seated: 'bg-[#F5F3FF] border-[#DDD6FE] border-l-[#8B5CF6] text-[#5B21B6]',
-  Arrived: 'bg-[#FFFBEB] border-[#FDE68A] border-l-[#F59E0B] text-[#92400E]',
-  Completed: 'bg-slate-100 border-slate-200/90 border-l-emerald-500 text-slate-700 ring-1 ring-inset ring-slate-200/60',
-  'No-Show': 'bg-[#FEF2F2] border-[#FECACA] border-l-[#EF4444] text-[#991B1B]',
-  Cancelled: 'bg-[#F3F4F6] border-[#E5E7EB] border-l-[#6B7280] text-[#6B7280]',
-  'Deposit Pending': 'bg-orange-100 border-orange-300 text-orange-800',
-};
-
 /** Touch/pen: if pointer moved more than this on X or Y before contextmenu, skip menu (drag intent). */
 const CONTEXT_MENU_MAX_POINTER_MOVE_PX = 10;
-
-const STATUS_DOTS: Record<string, string> = {
-  Pending: 'bg-[#3B82F6]',
-  Booked: 'bg-[#3B82F6]',
-  Confirmed: 'bg-[#059669]',
-  Seated: 'bg-[#8B5CF6]',
-  Arrived: 'bg-[#F59E0B]',
-  Completed: 'bg-emerald-500',
-  'No-Show': 'bg-[#EF4444]',
-  Cancelled: 'bg-[#6B7280]',
-  'Deposit Pending': 'bg-orange-500',
-};
 
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -194,13 +171,6 @@ interface MoveSuggestion {
   targetTableName: string;
   dotClassName: string;
   buttonClassName: string;
-}
-
-function statusColorKeyForBooking(block: BookingBlock): string {
-  if (isAttendanceConfirmed(block) && (block.status === 'Booked' || block.status === 'Confirmed')) {
-    return 'Confirmed';
-  }
-  return block.status;
 }
 
 interface Props {
@@ -1617,7 +1587,7 @@ export function TimelineGrid({
               )}
               <div
                 className={`flex flex-col gap-0.5 rounded-lg border border-l-[3px] px-2.5 py-1.5 text-xs font-medium shadow-lg ${
-                  STATUS_COLORS[statusColorKeyForBooking(activeDrag)] ?? 'bg-slate-100 border-slate-300 text-slate-800'
+                  bookingStatusVisualForKey(activeDrag.status).timeline
                 }`}
               >
                 <div className="flex items-center gap-1.5">
@@ -1665,7 +1635,7 @@ export function TimelineGrid({
                   className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-40 ${revert ? 'font-semibold text-amber-800' : 'text-slate-700'}`}
                   disabled={contextMenu.booking.status === status}
                 >
-                  <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOTS[status] ?? 'bg-slate-400'}`} />
+                  <span className={`inline-block h-2 w-2 rounded-full ${bookingStatusVisualForKey(status).dot}`} />
                   {revertLabel ?? status}
                 </button>
                 );
@@ -1975,7 +1945,7 @@ function DraggableBlock({
   const [resizePreviewEnd, setResizePreviewEnd] = useState<string | null>(null);
 
   const isConfirmed = isAttendanceConfirmed(block);
-  const colorClass = STATUS_COLORS[statusColorKeyForBooking(block)] ?? 'bg-slate-100 border-slate-300 text-slate-800';
+  const colorClass = bookingStatusVisualForKey(block.status).timeline;
   const left = block.leftPx + 2;
   const resizeDelta = resizeVisual?.bookingId === block.id ? resizeVisual.deltaPx : 0;
   const width = Math.max(16, block.widthPx - 4 + resizeDelta);
@@ -2238,7 +2208,7 @@ function DraggableBlock({
                 e.stopPropagation();
                 onQuickStatusChange('Confirmed');
               }}
-              className="min-h-7 rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white shadow-sm ring-1 ring-emerald-700/10 transition-colors touch-manipulation hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 sm:min-h-0 sm:px-1.5 sm:py-0.5"
+              className={`min-h-7 rounded-md px-2 py-1 text-[10px] font-bold shadow-sm ring-1 ring-violet-700/10 transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-violet-400/50 sm:min-h-0 sm:px-1.5 sm:py-0.5 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
               aria-label={`Confirm booking for ${block.guest_name}`}
             >
               Confirm

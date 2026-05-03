@@ -6,6 +6,8 @@ import {
   APPOINTMENTS_LIGHT_PRICE,
   SMS_LIGHT_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 
 export default function AppointmentsLightIntroPage() {
   const router = useRouter();
@@ -46,6 +48,11 @@ export default function AppointmentsLightIntroPage() {
           through setup. You can change models later in Settings.
         </p>
       </div>
+
+      <p className="mt-6 text-center text-xs text-slate-500">
+        No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+        {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+      </p>
 
       <div className="mt-8 flex justify-center">
         <button

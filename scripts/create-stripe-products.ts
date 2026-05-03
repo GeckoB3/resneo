@@ -26,7 +26,7 @@ async function main() {
   console.log('Creating Stripe Products and Prices for ReserveNI...\n');
 
   const appointmentsProProduct = await stripe.products.create({
-    name: 'Reserve NI Appointments Pro',
+    name: 'ReserveNI Appointments Pro',
     description: 'Appointments Pro — unlimited calendars and users, 800 SMS/month included, £79/month.',
   });
 
@@ -41,7 +41,7 @@ async function main() {
   console.log(`Appointments Pro Price:   ${appointmentsProPrice.id}`);
 
   const appointmentsPlusProduct = await stripe.products.create({
-    name: 'Reserve NI Appointments Plus',
+    name: 'ReserveNI Appointments Plus',
     description: 'Appointments Plus — up to 5 calendars and 5 users, 300 SMS/month included, £35/month.',
   });
 
@@ -56,7 +56,7 @@ async function main() {
   console.log(`Appointments Plus Price:   ${appointmentsPlusPrice.id}`);
 
   const restaurantProduct = await stripe.products.create({
-    name: 'Reserve NI Restaurant',
+    name: 'ReserveNI Restaurant',
     description: 'Restaurant plan - unlimited calendars, table management, 800 SMS/month included. £79/month.',
   });
 
@@ -71,7 +71,7 @@ async function main() {
   console.log(`Restaurant Price:    ${restaurantPrice.id}`);
 
   const lightProduct = await stripe.products.create({
-    name: 'Reserve NI Appointments Light',
+    name: 'ReserveNI Appointments Light',
     description: 'Appointments Light — £10/month, one calendar, one login, PAYG SMS at 8p.',
   });
 
@@ -86,7 +86,7 @@ async function main() {
   console.log(`Appointments Light Price:   ${lightPrice.id}`);
 
   const smsProduct = await stripe.products.create({
-    name: 'Reserve NI SMS (metered)',
+    name: 'ReserveNI SMS (metered)',
     description: 'Metered SMS overage for Plus/Pro/Restaurant (6p) or Light (8p) — attach separate prices.',
   });
 

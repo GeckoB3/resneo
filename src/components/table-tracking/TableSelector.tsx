@@ -7,6 +7,7 @@ export interface TableForSelector {
   name: string;
   max_covers: number;
   sort_order: number;
+  area_id?: string | null;
 }
 
 export interface TableOccupant {

@@ -60,7 +60,7 @@ export default async function OnboardingLayout({ children }: { children: React.R
           <div aria-hidden className="min-w-0" />
           <div className="flex justify-center">
             <Link href="/" className="flex-shrink-0">
-              <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
+              <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
             </Link>
           </div>
           <div className="flex min-w-0 justify-end">

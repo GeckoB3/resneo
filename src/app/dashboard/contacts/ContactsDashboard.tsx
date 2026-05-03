@@ -1,22 +1,275 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { VenueTerminology } from '@/types/booking-models';
 import type { CustomClientFieldDefinition, GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import { CONTACTS_LIFECYCLE_OPTIONS, CONTACTS_SORT_OPTIONS } from '@/lib/guests/contacts-constants';
 import { formatRelativeVisitDate } from '@/lib/guests/contact-formatting';
-import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
+import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
+import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { useToast } from '@/components/ui/Toast';
 
 export type { GuestListRow } from '@/types/contacts';
+
+const CONTACT_SHOW_OPTIONS: Array<{ value: 'identified' | 'all' | 'anonymous'; label: string }> = [
+  { value: 'identified', label: 'With contact (CRM)' },
+  { value: 'all', label: 'All except walk-ins' },
+  { value: 'anonymous', label: 'Walk-ins only' },
+];
+
+const CONTACTS_TOOLBAR_SUMMARY_STUB: ViewToolbarSummary = {
+  total_covers_booked: 0,
+  total_covers_capacity: 0,
+  tables_in_use: 0,
+  tables_total: 0,
+  unassigned_count: 0,
+  combos_in_use: 0,
+};
+
+function isoDateToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+}
+
+function formatNextAppt(date: string | null | undefined, time: string | null | undefined): string | null {
+  if (!date) return null;
+  try {
+    const d = new Date(`${date}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return null;
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    let dayStr: string;
+    if (d.toDateString() === today.toDateString()) {
+      dayStr = 'Today';
+    } else if (d.toDateString() === tomorrow.toDateString()) {
+      dayStr = 'Tomorrow';
+    } else {
+      dayStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+    const timeStr = time ? time.slice(0, 5) : null;
+    return timeStr ? `${dayStr} ${timeStr}` : dayStr;
+  } catch {
+    return null;
+  }
+}
+
+function ContactRow({
+  row: g,
+  displayNameStr,
+  isAnonRow,
+  active,
+  selected,
+  visitsLabel,
+  onOpen,
+  onToggleSelected,
+}: {
+  row: GuestListRow;
+  displayNameStr: string;
+  isAnonRow: boolean;
+  active: boolean;
+  selected: boolean;
+  visitsLabel: string;
+  onOpen: () => void;
+  onToggleSelected: () => void;
+}) {
+  const email = g.email?.trim() || null;
+  const phone = g.phone?.trim() || null;
+  const nextAppt = formatNextAppt(g.next_booking_date, g.next_booking_time);
+  const tags = g.tags ?? [];
+  const MAX_TAGS = 3;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={active}
+      onClick={() => onOpen()}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      className={`cursor-pointer rounded-xl border px-2 py-1.5 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 sm:px-3 sm:py-2 ${
+        active
+          ? 'border-brand-200 bg-brand-50/50 shadow-md ring-brand-900/10'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60 hover:shadow-md'
+      }`}
+    >
+      <div className="flex min-h-[2.25rem] min-w-0 items-center gap-1.5 sm:min-h-[2.5rem] sm:gap-2">
+        {/* Checkbox */}
+        <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelected()}
+            aria-label={`Select ${displayNameStr}`}
+            className="h-4 w-4 rounded border-slate-300 text-brand-600"
+          />
+        </div>
+
+        {/* Main info row — wraps naturally */}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[12px] sm:text-[13px]">
+            {/* Name — always visible, anchors the row */}
+            <span className={`shrink-0 max-w-[10rem] truncate font-semibold text-slate-900 sm:max-w-[13rem] lg:max-w-[10rem] xl:max-w-[13rem] ${isAnonRow ? 'italic text-slate-500' : ''}`}>
+              {displayNameStr}
+            </span>
+
+            {/* Phone — always show if available */}
+            {phone ? (
+              <>
+                <span className="shrink-0 text-slate-300" aria-hidden>·</span>
+                <span className="shrink-0 tabular-nums text-slate-600">{phone}</span>
+              </>
+            ) : null}
+
+            {/* Email — hidden on xs, visible sm+ */}
+            {email ? (
+              <>
+                <span className="hidden shrink-0 text-slate-300 sm:inline" aria-hidden>·</span>
+                <span className="hidden min-w-0 max-w-[12rem] truncate text-slate-500 sm:inline lg:max-w-[9rem] xl:max-w-[12rem]">{email}</span>
+              </>
+            ) : null}
+
+            {/* Separator */}
+            <span className="shrink-0 text-slate-300" aria-hidden>·</span>
+
+            {/* Visits */}
+            <span className="shrink-0 tabular-nums text-slate-600" title={visitsLabel}>
+              {g.visit_count}v
+              {g.no_show_count > 0 ? <span className="ml-0.5 font-medium text-red-500">{` · ${g.no_show_count} NS`}</span> : null}
+            </span>
+
+            {/* Last visit — hidden on xs */}
+            {g.last_visit_date ? (
+              <>
+                <span className="hidden shrink-0 text-slate-300 sm:inline" aria-hidden>·</span>
+                <span className="hidden shrink-0 text-slate-500 sm:inline">{formatRelativeVisitDate(g.last_visit_date)}</span>
+              </>
+            ) : null}
+
+            {/* Next appointment pill — always show if exists */}
+            {nextAppt ? (
+              <Pill variant="info" size="sm" className="shrink-0">
+                {nextAppt}
+              </Pill>
+            ) : null}
+
+            {/* Tags — show up to MAX_TAGS, collapse rest */}
+            {tags.slice(0, MAX_TAGS).map((t) => (
+              <Pill key={t} variant="neutral" size="sm" className="hidden shrink-0 max-w-[7rem] truncate sm:inline-flex">
+                {t}
+              </Pill>
+            ))}
+            {/* On mobile show just first tag if no appt */}
+            {!nextAppt && tags.length > 0 ? (
+              <Pill variant="neutral" size="sm" className="shrink-0 max-w-[7rem] truncate sm:hidden">
+                {tags[0]}
+              </Pill>
+            ) : null}
+            {tags.length > MAX_TAGS ? (
+              <span className="hidden shrink-0 text-[11px] tabular-nums text-slate-400 sm:inline">+{tags.length - MAX_TAGS}</span>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Chevron */}
+        <svg
+          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${active ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function ContactsToolbarOptionPopover({
+  toolbarPanelAnchorRef,
+  triggerRef,
+  triggerText,
+  panelHeading,
+  open,
+  onDismiss,
+  onTriggerClick,
+  isDirty,
+  panelId,
+  triggerAriaLabel,
+  children,
+}: {
+  toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  triggerText: string;
+  panelHeading: string;
+  open: boolean;
+  onDismiss: () => void;
+  onTriggerClick: () => void;
+  isDirty: boolean;
+  panelId: string;
+  triggerAriaLabel: string;
+  children: ReactNode;
+}) {
+  const emphasize = open || isDirty;
+  return (
+    <div className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={onTriggerClick}
+        className={`inline-flex min-h-8 shrink-0 items-center gap-0.5 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 sm:text-xs ${
+          emphasize
+            ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+            : 'border-slate-200 bg-white text-slate-700'
+        }`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={panelId}
+        aria-label={triggerAriaLabel}
+      >
+        <span className="max-w-[min(42vw,7.5rem)] truncate sm:max-w-[9.5rem]" title={triggerText}>
+          {triggerText}
+        </span>
+        <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+      <ClampedFixedDropdown
+        open={open}
+        triggerRef={triggerRef}
+        verticalAnchorRef={toolbarPanelAnchorRef}
+        horizontalCenter
+        gapPx={4}
+        align="start"
+        maxWidthPx={320}
+        id={panelId}
+        onDismiss={onDismiss}
+        aria-label={panelHeading}
+        className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+      >
+        <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{panelHeading}</p>
+        <div className="space-y-0.5">{children}</div>
+      </ClampedFixedDropdown>
+    </div>
+  );
+}
 
 export function ContactsDashboard({
   venueId,
@@ -31,6 +284,9 @@ export function ContactsDashboard({
   appointmentDashboardExperience: boolean;
   isAdmin: boolean;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { addToast } = useToast();
   const isAppointment = appointmentDashboardExperience;
   const clientWord = terminology.client;
   const clientLower = clientWord.toLowerCase();
@@ -64,7 +320,14 @@ export function ContactsDashboard({
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
+  const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'show' | 'status' | 'sort'>('none');
+  const showFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const statusFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const contactsToolbarPanelsId = useId();
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -162,6 +425,65 @@ export function ContactsDashboard({
     }
   }, [selectedIds, loadList]);
 
+  const runBulkContactMessage = useCallback(
+    async (message: string, channel: GuestMessageChannel) => {
+      if (selectedIds.length === 0) return;
+      setBulkContactMessageSending(true);
+      setError(null);
+      try {
+        const outcomes = await Promise.all(
+          selectedIds.map(async (guestId) => {
+            try {
+              const res = await fetch(`/api/venue/guests/${guestId}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, channel }),
+              });
+              const payload = (await res.json().catch(() => ({}))) as {
+                success?: boolean;
+                error?: string;
+                errors?: string[];
+              };
+              const sent = Boolean(res.ok && payload.success);
+              const issues =
+                payload.errors && payload.errors.length > 0
+                  ? payload.errors.join('; ')
+                  : payload.error ?? null;
+              return { sent, issues, guestId };
+            } catch {
+              return { sent: false, issues: 'Request failed', guestId };
+            }
+          }),
+        );
+        const okCount = outcomes.filter((o) => o.sent).length;
+        const failureSummaries = outcomes
+          .filter((o) => !o.sent && o.issues)
+          .slice(0, 5)
+          .map((o) => {
+            const name = guests.find((g) => g.id === o.guestId)?.name?.trim();
+            return `${name || clientWord}: ${o.issues}`;
+          });
+        if (okCount === selectedIds.length) {
+          addToast(`Message sent to ${okCount} ${clientLower}${okCount === 1 ? '' : 's'}`, 'success');
+        } else if (okCount > 0) {
+          const preview = failureSummaries.slice(0, 2).join(' · ');
+          setError(`Sent to ${okCount}/${selectedIds.length}. ${preview}`);
+          addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
+        } else {
+          const first = failureSummaries[0] ?? 'No messages were sent.';
+          setError(first);
+          addToast(first, 'error');
+        }
+        setSelectedIds([]);
+        setBulkContactMessageOpen(false);
+        await loadList();
+      } finally {
+        setBulkContactMessageSending(false);
+      }
+    },
+    [addToast, clientLower, clientWord, guests, loadList, selectedIds],
+  );
+
   const loadDetail = useCallback(async (guestId: string) => {
     setDetailLoading(true);
     setDetail(null);
@@ -195,6 +517,13 @@ export function ContactsDashboard({
     setSelectedId(id);
     setPanelOpen(true);
   }, []);
+
+  useEffect(() => {
+    const guestIdFromQuery = searchParams.get('guest')?.trim();
+    if (!guestIdFromQuery) return;
+    openContact(guestIdFromQuery);
+    router.replace('/dashboard/contacts', { scroll: false });
+  }, [openContact, router, searchParams]);
 
   const closePanel = useCallback(() => {
     setPanelOpen(false);
@@ -367,115 +696,257 @@ export function ContactsDashboard({
       ? `No ${clientLower}s yet. They’ll appear here automatically as ${bookingWord.toLowerCase()}s come in.`
       : 'No clients match your search. Try another filter or search.';
 
-  return (
-    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <div className="min-w-0 flex-1">
-      <PageHeader
-        eyebrow="CRM"
-        title="Contacts"
-        subtitle={`Search, filter, and manage everyone who has booked with you. ${clientWord} labels follow your venue terminology.`}
-        actions={
-          <button
-            type="button"
-            disabled={exporting || loading}
-            onClick={() => void exportFilteredCsv()}
-            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-          >
-            {exporting ? 'Exporting…' : 'Export CSV'}
-          </button>
-        }
-      />
+  const toolbarDatePlaceholder = isoDateToday();
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <StatTile label={`Known ${clientLower}s (this list)`} value={String(totalCount)} color="slate" />
-        <StatTile
-          label="Filters"
-          value={lifecycle === 'all' ? 'All statuses' : CONTACTS_LIFECYCLE_OPTIONS.find((o) => o.value === lifecycle)?.label ?? ''}
-          color="brand"
-        />
-        <StatTile label="Page" value={`${page + 1} / ${totalPages}`} color="emerald" />
+  const contactsSummaryContent = useMemo(
+    () => (
+      <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Directory overview">
+        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+          <span className="font-normal text-slate-500">Directory</span>
+          <span className="tabular-nums">{totalCount}</span>
+        </span>
+        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+          <span className="font-normal text-slate-500">Page</span>
+          <span className="tabular-nums">{page + 1}</span>
+          <span className="text-slate-400">/</span>
+          <span className="tabular-nums">{totalPages}</span>
+        </span>
+        {lifecycle !== 'all' ? (
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+            <span className="font-normal text-slate-500">Status</span>
+            <span>{CONTACTS_LIFECYCLE_OPTIONS.find((o) => o.value === lifecycle)?.label ?? lifecycle}</span>
+          </span>
+        ) : null}
+        {filter !== 'identified' ? (
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+            <span className="font-normal text-slate-500">Show</span>
+            <span className="max-w-full min-w-0 break-words">
+              {CONTACT_SHOW_OPTIONS.find((o) => o.value === filter)?.label ?? filter}
+            </span>
+          </span>
+        ) : null}
+        {debouncedSearch ? (
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-brand-100 bg-brand-50/80 px-1.5 py-0.5 font-medium text-brand-900">
+            <span className="font-normal text-brand-700/80">Search</span>
+            <span className="max-w-full min-w-0 break-all sm:break-words" title={debouncedSearch}>
+              {debouncedSearch}
+            </span>
+          </span>
+        ) : null}
+        {tagFilter.length > 0 ? (
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
+            <span className="font-normal text-slate-500">Tags</span>
+            <span>{tagFilter.length}</span>
+          </span>
+        ) : null}
       </div>
+    ),
+    [totalCount, page, totalPages, lifecycle, filter, debouncedSearch, tagFilter.length],
+  );
 
-      <SectionCard elevated className="mt-6">
-        <SectionCard.Header eyebrow="Directory" title={`${clientWord} list`} />
-        <SectionCard.Body className="space-y-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 lg:flex-row lg:flex-wrap lg:items-end">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="contacts-search" className="mb-1 block text-xs font-medium text-slate-500">
-                Search
-              </label>
-              <input
-                id="contacts-search"
-                type="search"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+  const selectRowClass = (selected: boolean) =>
+    selected
+      ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+      : 'text-slate-800 hover:bg-slate-50';
+
+  const contactsToolbarTools = useCallback(
+    (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
+      <>
+        <ContactsToolbarOptionPopover
+          toolbarPanelAnchorRef={toolbarPanelAnchorRef}
+          triggerRef={showFilterTriggerRef}
+          triggerText={CONTACT_SHOW_OPTIONS.find((o) => o.value === filter)?.label ?? 'Show'}
+          panelHeading="Show"
+          open={filterPopoverKind === 'show'}
+          onDismiss={() => setFilterPopoverKind('none')}
+          onTriggerClick={() =>
+            setFilterPopoverKind((k) => (k === 'show' ? 'none' : 'show'))
+          }
+          isDirty={filter !== 'identified'}
+          panelId={`${contactsToolbarPanelsId}-show`}
+          triggerAriaLabel="Show — CRM list scope"
+        >
+          <div role="radiogroup" aria-label="List scope">
+            {CONTACT_SHOW_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={filter === o.value}
+                onClick={() => {
+                  setFilter(o.value);
                   setPage(0);
+                  setFilterPopoverKind('none');
                 }}
-                placeholder="Name, email, or phone"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div className="w-full sm:w-44">
-              <label htmlFor="contacts-filter" className="mb-1 block text-xs font-medium text-slate-500">
-                Show
-              </label>
-              <select
-                id="contacts-filter"
-                value={filter}
-                onChange={(e) => {
-                  setFilter(e.target.value as 'identified' | 'all' | 'anonymous');
-                  setPage(0);
-                }}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(filter === o.value)}`}
               >
-                <option value="identified">With contact (CRM)</option>
-                <option value="all">All except walk-ins</option>
-                <option value="anonymous">Walk-ins only</option>
-              </select>
-            </div>
-            <div className="w-full min-w-[12rem] sm:w-56">
-              <label htmlFor="contacts-lifecycle" className="mb-1 block text-xs font-medium text-slate-500">
-                Status
-              </label>
-              <select
-                id="contacts-lifecycle"
-                value={lifecycle}
-                onChange={(e) => {
-                  setLifecycle(e.target.value);
-                  setPage(0);
-                }}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              >
-                {CONTACTS_LIFECYCLE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="w-full min-w-[12rem] sm:w-64">
-              <label htmlFor="contacts-sort" className="mb-1 block text-xs font-medium text-slate-500">
-                Sort
-              </label>
-              <select
-                id="contacts-sort"
-                value={sort}
-                onChange={(e) => {
-                  setSort(e.target.value);
-                  setPage(0);
-                }}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              >
-                {CONTACTS_SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                {o.label}
+              </button>
+            ))}
           </div>
+        </ContactsToolbarOptionPopover>
+        <ContactsToolbarOptionPopover
+          toolbarPanelAnchorRef={toolbarPanelAnchorRef}
+          triggerRef={statusFilterTriggerRef}
+          triggerText={
+            CONTACTS_LIFECYCLE_OPTIONS.find((o) => o.value === lifecycle)?.label ?? 'Status'
+          }
+          panelHeading="Status"
+          open={filterPopoverKind === 'status'}
+          onDismiss={() => setFilterPopoverKind('none')}
+          onTriggerClick={() =>
+            setFilterPopoverKind((k) => (k === 'status' ? 'none' : 'status'))
+          }
+          isDirty={lifecycle !== 'all'}
+          panelId={`${contactsToolbarPanelsId}-status`}
+          triggerAriaLabel="Status — lifecycle filter"
+        >
+          <div role="radiogroup" aria-label="Contact lifecycle">
+            {CONTACTS_LIFECYCLE_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={lifecycle === o.value}
+                onClick={() => {
+                  setLifecycle(o.value);
+                  setPage(0);
+                  setFilterPopoverKind('none');
+                }}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(lifecycle === o.value)}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </ContactsToolbarOptionPopover>
+        <ContactsToolbarOptionPopover
+          toolbarPanelAnchorRef={toolbarPanelAnchorRef}
+          triggerRef={sortFilterTriggerRef}
+          triggerText={CONTACTS_SORT_OPTIONS.find((o) => o.value === sort)?.label ?? 'Sort'}
+          panelHeading="Sort"
+          open={filterPopoverKind === 'sort'}
+          onDismiss={() => setFilterPopoverKind('none')}
+          onTriggerClick={() =>
+            setFilterPopoverKind((k) => (k === 'sort' ? 'none' : 'sort'))
+          }
+          isDirty={sort !== 'last_visit_desc'}
+          panelId={`${contactsToolbarPanelsId}-sort`}
+          triggerAriaLabel="Sort directory"
+        >
+          <div role="radiogroup" aria-label="Sort list">
+            {CONTACTS_SORT_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={sort === o.value}
+                onClick={() => {
+                  setSort(o.value);
+                  setPage(0);
+                  setFilterPopoverKind('none');
+                }}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(sort === o.value)}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </ContactsToolbarOptionPopover>
+      </>
+    ),
+    [
+      filter,
+      lifecycle,
+      sort,
+      filterPopoverKind,
+      contactsToolbarPanelsId,
+      setFilter,
+      setLifecycle,
+      setSort,
+    ],
+  );
 
+  return (
+    <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="min-w-0 w-full flex-1 space-y-3">
+        <div className="min-w-0 space-y-3 pb-1">
+          <OperationsWorkspaceToolbar
+            title="Contacts"
+            summary={CONTACTS_TOOLBAR_SUMMARY_STUB}
+            summaryContent={contactsSummaryContent}
+            date={toolbarDatePlaceholder}
+            onDateChange={() => {}}
+            datePickerPanel={null}
+            liveState="live"
+            onRefresh={() => void loadList()}
+            onNewBooking={() => {}}
+            onWalkIn={() => {}}
+            compact
+            showDateNavigator={false}
+            showBookingActions={false}
+            showControlsButton={false}
+            controlsPanel={null}
+            searchActive={search.trim().length > 0}
+            searchAriaLabel="Search contacts"
+            searchPanel={(
+              <div className="space-y-2">
+                <label htmlFor="contacts-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Search
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                    <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                    </svg>
+                  </div>
+                  <input
+                    id="contacts-toolbar-search"
+                    type="text"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(0);
+                    }}
+                    placeholder="Name, email, or phone"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
+                  />
+                </div>
+                {search.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setPage(0);
+                    }}
+                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                  >
+                    Clear search
+                  </button>
+                ) : null}
+              </div>
+            )}
+            toolbarTools={contactsToolbarTools}
+            trailingActions={(
+              <button
+                type="button"
+                disabled={exporting || loading}
+                onClick={() => void exportFilteredCsv()}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
+                aria-label="Export CSV"
+              >
+                <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 12 12 16.5m0 0 4.5-4.5M12 16.5V3" />
+                </svg>
+                <span className="hidden sm:inline">{exporting ? 'Export…' : 'Export'}</span>
+              </button>
+            )}
+          />
+        </div>
+
+        <SectionCard elevated className="min-w-0">
+          <SectionCard.Header eyebrow="Directory" title={`${clientWord} list`} />
+          <SectionCard.Body className="min-w-0 space-y-6">
           {venueTags.length > 0 && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by tags</p>
@@ -504,7 +975,7 @@ export function ContactsDashboard({
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={bulkBusy}
+                  disabled={bulkBusy || bulkContactMessageSending}
                   onClick={() => void runBulkAddTag()}
                   className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                 >
@@ -512,7 +983,15 @@ export function ContactsDashboard({
                 </button>
                 <button
                   type="button"
-                  disabled={bulkBusy}
+                  disabled={bulkBusy || bulkContactMessageSending}
+                  onClick={() => setBulkContactMessageOpen(true)}
+                  className="min-h-10 rounded-lg border border-slate-800/15 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Message
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkBusy || bulkContactMessageSending}
                   onClick={() => setSelectedIds([])}
                   className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
                 >
@@ -531,119 +1010,53 @@ export function ContactsDashboard({
           ) : guests.length === 0 ? (
             <EmptyState title={emptyTitle} description={emptyDescription} />
           ) : (
-            <>
-              <HorizontalScrollHint />
-              <div className="touch-pan-x overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-                <table className="w-full min-w-[880px] text-sm">
-                  <thead className="border-b border-slate-100 bg-slate-50/60">
-                    <tr>
-                      <th className="w-10 px-2 py-2 text-left">
-                        <input
-                          type="checkbox"
-                          aria-label="Select all on this page"
-                          checked={guests.length > 0 && guests.every((g) => selectedIds.includes(g.id))}
-                          onChange={() => togglePageSelection()}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">{clientWord}</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">{visitsLabel}</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Last visit</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Deposits</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Tags</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Indicators</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {guests.map((g) => {
-                      const isAnonRow = filter === 'anonymous' || g.identifiability_tier === 'anonymous';
-                      const active = selectedId === g.id && panelOpen;
-                      return (
-                        <tr
-                          key={g.id}
-                          className={`cursor-pointer hover:bg-slate-50/80 ${active ? 'bg-brand-50/40' : ''}`}
-                          onClick={() => openContact(g.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              openContact(g.id);
-                            }
-                          }}
-                          tabIndex={0}
-                          role="button"
-                          aria-expanded={active}
-                        >
-                          <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              aria-label={`Select ${displayName(g)}`}
-                              checked={selectedIds.includes(g.id)}
-                              onChange={() => toggleSelected(g.id)}
-                            />
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className={`font-medium text-slate-900 ${isAnonRow ? 'italic text-slate-500' : ''}`}>
-                              {displayName(g)}
-                            </div>
-                            <div className="mt-0.5 max-w-[240px] truncate text-xs text-slate-500">
-                              {[g.email, g.phone].filter(Boolean).join(' · ') || '—'}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">
-                            <span>{g.visit_count}</span>
-                            {g.no_show_count > 0 && (
-                              <span className="ml-1 text-xs font-medium text-red-600">{g.no_show_count} NS</span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">
-                            {formatRelativeVisitDate(g.last_visit_date)}
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
-                            {currencySymbol}
-                            {((g.paid_deposit_pence ?? 0) / 100).toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex max-w-[200px] flex-wrap gap-1">
-                              {(g.tags ?? []).slice(0, 4).map((t) => (
-                                <Pill key={t} variant="neutral" size="sm" className="max-w-[120px] truncate">
-                                  {t}
-                                </Pill>
-                              ))}
-                              {(g.tags?.length ?? 0) > 4 ? (
-                                <span className="text-xs text-slate-400">+{g.tags!.length - 4}</span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex flex-wrap gap-1">
-                              {(g.upcoming_booking_count ?? 0) > 0 && (
-                                <Pill variant="info" size="sm">
-                                  Upcoming ×{g.upcoming_booking_count}
-                                </Pill>
-                              )}
-                              {(g.cancelled_count ?? 0) > 0 && (
-                                <Pill variant="warning" size="sm">
-                                  Cancelled {g.cancelled_count}
-                                </Pill>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div className="space-y-3">
+              {/* Select-all bar */}
+              <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-1.5">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={guests.length > 0 && guests.every((g) => selectedIds.includes(g.id))}
+                    onChange={() => togglePageSelection()}
+                    aria-label="Select all on this page"
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                  />
+                  Select all
+                </label>
+                <span className="text-[11px] font-medium text-slate-400">{guests.length} {guests.length === 1 ? clientLower : `${clientLower}s`}</span>
               </div>
+
+              <div className="space-y-1.5" role="list" aria-label={`${clientWord} directory`}>
+                {guests.map((g) => {
+                  const isAnonRow = filter === 'anonymous' || g.identifiability_tier === 'anonymous';
+                  const active = selectedId === g.id && panelOpen;
+                  return (
+                    <div key={g.id} role="listitem">
+                      <ContactRow
+                        row={g}
+                        displayNameStr={displayName(g)}
+                        isAnonRow={isAnonRow}
+                        active={active}
+                        selected={selectedIds.includes(g.id)}
+                        visitsLabel={visitsLabel}
+                        onOpen={() => openContact(g.id)}
+                        onToggleSelected={() => toggleSelected(g.id)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  Page {page + 1} of {totalPages} ({totalCount} total)
+                <span className="text-[13px]">
+                  Page {page + 1} of {totalPages} · {totalCount} total
                 </span>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     disabled={page <= 0}
                     onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-50"
+                    className="min-h-9 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
                   >
                     Previous
                   </button>
@@ -651,13 +1064,13 @@ export function ContactsDashboard({
                     type="button"
                     disabled={page >= totalPages - 1}
                     onClick={() => setPage((p) => p + 1)}
-                    className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-50"
+                    className="min-h-9 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
                   >
                     Next
                   </button>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </SectionCard.Body>
       </SectionCard>
@@ -719,6 +1132,21 @@ export function ContactsDashboard({
             onOpenMerge={isAdmin ? () => setMergeOpen(true) : undefined}
           />
         </aside>
+      ) : null}
+
+      {bulkContactMessageOpen && selectedIds.length > 0 ? (
+        <BulkGuestMessageModal
+          onClose={() => {
+            if (!bulkContactMessageSending) setBulkContactMessageOpen(false);
+          }}
+          recipientCount={selectedIds.length}
+          sending={bulkContactMessageSending}
+          onSend={(msg, ch) => {
+            void runBulkContactMessage(msg, ch);
+          }}
+          title={`Message ${selectedIds.length} ${clientWord}${selectedIds.length !== 1 ? 's' : ''}`}
+          description={`The same message goes to each selected ${clientLower}. Contacts without email or SMS on file are skipped when that channel is chosen — same behaviour as bulk messaging from ${bookingWord}s.`}
+        />
       ) : null}
 
       {mergeOpen && selectedId && isAdmin ? (

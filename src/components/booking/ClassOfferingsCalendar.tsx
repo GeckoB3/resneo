@@ -121,7 +121,7 @@ export function ClassOfferingsCalendar({
           </div>
         ))}
       </div>
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      <div className="mt-1 grid grid-cols-7 gap-0.5">
         {cells.map((iso) => {
           const inMonth = iso.slice(0, 7) === monthAnchor.slice(0, 7);
           const hasSession = highlightSet.has(iso);
@@ -134,13 +134,13 @@ export function ClassOfferingsCalendar({
               type="button"
               disabled={!selectable}
               onClick={() => selectable && onSelectDate(iso)}
-              className={`flex h-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+              className={`flex aspect-square items-center justify-center rounded-md text-sm font-medium transition-colors ${
                 !inMonth ? 'text-slate-300' : 'text-slate-800'
               } ${
                 isSelected
                   ? 'bg-brand-600 text-white shadow-sm'
                   : selectable
-                    ? 'bg-emerald-100 text-emerald-950 ring-1 ring-emerald-300 hover:bg-emerald-200'
+                    ? 'bg-emerald-50 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-100'
                     : inMonth
                       ? 'text-slate-400'
                       : ''
@@ -151,7 +151,10 @@ export function ClassOfferingsCalendar({
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-slate-500">{footerMessage}</p>
+      <p className="mt-3 text-xs text-slate-500">
+        <span className="mr-2 inline-block h-2 w-2 rounded-sm bg-emerald-400 align-middle" aria-hidden />
+        {footerMessage}
+      </p>
     </div>
   );
 }

@@ -20,9 +20,10 @@ import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
+import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import type { VenueStaff } from '@/lib/venue-auth';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -62,7 +63,7 @@ function mergeTodayByModelWithActiveModels(
 
 function toLoadBookings(
   rows: Array<{
-    booking_time: string;
+    booking_time?: string | null;
     party_size: number;
     status: string;
     estimated_end_time?: string | null;
@@ -127,6 +128,279 @@ export interface DashboardHomePayload {
     kind_label?: string;
     booking_model?: string;
   }>;
+  /**
+   * Restaurant table-primary venue with secondary enabled models (`enabled_models`): dining metrics (`today`,
+   * `forecast`, `heatmap`) reflect **table** bookings only. See `secondary_booking_activity` for combined non-table totals.
+   */
+  table_focus_secondaries_enabled?: boolean;
+  /** Bookings inferred as non-table reservations (today + 7-day forecast; no dining heatmap). */
+  secondary_booking_activity?: {
+    today: Pick<
+      DashboardHomePayload['today'],
+      | 'covers'
+      | 'bookings'
+      | 'confirmed'
+      | 'pending'
+      | 'seated'
+      | 'revenue'
+      | 'next_booking'
+    >;
+    forecast: DashboardHomePayload['forecast'];
+  };
+}
+
+type DashboardBookingOpsRow = {
+  /** Present on week-scope rows only; omit for same-day aggregates. */
+  booking_date?: string;
+  booking_time?: string | null;
+  party_size: number;
+  status: string;
+  deposit_amount_pence?: number | null;
+  estimated_end_time?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
+} & Record<string, unknown>;
+
+function inferBookingRowModelFromFetchedRow(row: DashboardBookingOpsRow): BookingModel {
+  return inferBookingRowModel({
+    experience_event_id: row.experience_event_id as string | null | undefined,
+    class_instance_id: row.class_instance_id as string | null | undefined,
+    resource_id: row.resource_id as string | null | undefined,
+    event_session_id: row.event_session_id as string | null | undefined,
+    calendar_id: row.calendar_id as string | null | undefined,
+    service_item_id: row.service_item_id as string | null | undefined,
+    practitioner_id: row.practitioner_id as string | null | undefined,
+    appointment_service_id: row.appointment_service_id as string | null | undefined,
+  });
+}
+
+function computeBookingForecastAndTodayOps(input: {
+  todayBookings: DashboardBookingOpsRow[];
+  weekBookingsForOps: DashboardBookingOpsRow[];
+  dateStrs: string[];
+  nowMinutes: number;
+}): {
+  forecast: DashboardHomePayload['forecast'];
+  today: NonNullable<DashboardHomePayload['secondary_booking_activity']>['today'];
+} {
+  const { todayBookings, weekBookingsForOps, dateStrs, nowMinutes } = input;
+  const todayCovers = todayBookings.reduce((sum, b) => sum + b.party_size, 0);
+  const todayBookingCount = todayBookings.length;
+  const todayRevenue =
+    todayBookings.reduce((sum, b) => sum + (b.deposit_amount_pence ?? 0), 0) / 100;
+  const confirmedCount = todayBookings.filter((b) => isAttendanceConfirmed(b)).length;
+  const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
+  const seatedCount = todayBookings.filter((b) => b.status === 'Seated').length;
+
+  let nextBooking: { time: string; party_size: number } | null = null;
+  for (const b of [...todayBookings].sort((a, c) =>
+    String(a.booking_time ?? '').localeCompare(String(c.booking_time ?? '')),
+  )) {
+    const t = String(b.booking_time ?? '');
+    const [h, mPart] = t.split(':').map(Number);
+    if ((h ?? 0) * 60 + (mPart ?? 0) > nowMinutes) {
+      nextBooking = { time: t.slice(0, 5), party_size: b.party_size };
+      break;
+    }
+  }
+
+  const forecast: DashboardHomePayload['forecast'] = [];
+  for (const dateStr of dateStrs) {
+    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
+    forecast.push({
+      date: dateStr,
+      day: weekdayShortForDateStr(dateStr),
+      covers: dayBookings.reduce((sum, b) => sum + b.party_size, 0),
+      bookings: dayBookings.length,
+    });
+  }
+
+  return {
+    forecast,
+    today: {
+      covers: todayCovers ?? 0,
+      bookings: todayBookingCount ?? 0,
+      confirmed: confirmedCount ?? 0,
+      pending: pendingCount ?? 0,
+      seated: seatedCount ?? 0,
+      revenue: todayRevenue ?? 0,
+      next_booking: nextBooking,
+    },
+  };
+}
+
+/** Dining load: forecast rows, heatmap, and aggregated `today` block (covers in house, fills, deposits, etc.). */
+function computeRestaurantTableLoadSlice(input: {
+  todayBookings: DashboardBookingOpsRow[];
+  weekBookingsForOps: DashboardBookingOpsRow[];
+  dateStrs: string[];
+  todayStrVenue: string;
+  nowMinutes: number;
+  openingHours: OpeningHours | null;
+  availabilityConfig: AvailabilityConfig | null;
+  engine: 'legacy' | 'service';
+  engineInputsByDate: Map<string, EngineInput> | null;
+  useServiceAreaScope: boolean;
+  venueId: string;
+  caps: Array<number | null>;
+}): {
+  forecast: DashboardHomePayload['forecast'];
+  heatmap: DashboardHomePayload['heatmap'];
+  today: DashboardHomePayload['today'];
+} {
+  const {
+    todayBookings,
+    weekBookingsForOps,
+    dateStrs,
+    todayStrVenue,
+    nowMinutes,
+    openingHours,
+    availabilityConfig,
+    engine,
+    engineInputsByDate,
+    useServiceAreaScope,
+    venueId,
+    caps,
+  } = input;
+
+  const ops = computeBookingForecastAndTodayOps({
+    todayBookings,
+    weekBookingsForOps,
+    dateStrs,
+    nowMinutes,
+  });
+  const forecast = ops.forecast;
+  const todayCovers = ops.today.covers;
+  const todayBookingCount = ops.today.bookings;
+  const confirmedCount = ops.today.confirmed;
+  const pendingCount = ops.today.pending;
+  const seatedCount = ops.today.seated;
+  const todayRevenue = ops.today.revenue;
+  const nextBooking = ops.today.next_booking;
+
+  const heatmap: DashboardHomePayload['heatmap'] = [];
+
+  for (let i = 0; i < 7; i++) {
+    const dateStr = dateStrs[i]!;
+    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
+    const engineInput = engine === 'service' ? engineInputsByDate?.get(dateStr) ?? null : null;
+    const defaultDur = defaultDurationForDashboardDay(engine, engineInput, availabilityConfig);
+
+    const dayOfWeek = getDayOfWeek(dateStr);
+    const window = resolveOpeningWindowMinutes(openingHours, dayOfWeek);
+    const earliestMin = window?.startMin ?? 11 * 60;
+    const latestMin = window?.endMin ?? 23 * 60;
+
+    const peak = peakOverlappingCovers(toLoadBookings(dayBookings), {
+      earliestMin,
+      latestMin,
+      stepMinutes: 30,
+      defaultDurationMinutes: defaultDur,
+    });
+
+    const cap = caps[i] ?? null;
+    const fillPercent = cap != null && cap > 0 ? Math.min(100, Math.round((peak / cap) * 100)) : null;
+
+    let by_service:
+      | Array<{
+          service_id: string;
+          service_name: string;
+          daily_total_covers: number;
+          peak_in_house_covers: number;
+          concurrent_cap: number | null;
+          fill_percent: number | null;
+        }>
+      | undefined;
+    if (useServiceAreaScope && engineInput && engineInput.services.length > 0) {
+      const capRows = perServiceConcurrentSlotCaps(engineInput, venueId, dateStr);
+      const capMap = new Map(capRows.map((r) => [r.serviceId, r] as const));
+      const sortedServices = [...engineInput.services].sort((a, b) => a.sort_order - b.sort_order);
+      by_service = sortedServices.map((service) => {
+        const capRow = capMap.get(service.id);
+        const svcCap = capRow?.cap ?? null;
+        const effective = resolveServiceForDate(
+          service,
+          engineInput.schedule_exceptions,
+          venueId,
+          dateStr,
+          dayOfWeek,
+        );
+        if (!effective) {
+          return {
+            service_id: service.id,
+            service_name: service.name,
+            daily_total_covers: 0,
+            peak_in_house_covers: 0,
+            concurrent_cap: null,
+            fill_percent: null,
+          };
+        }
+        const winStart = timeToMinutes(effective.start_time);
+        let winEnd = timeToMinutes(effective.end_time);
+        if (winEnd <= winStart) winEnd += 24 * 60;
+        const svcDurations = engineInput.durations.filter((d) => d.service_id === service.id);
+        const svcDur =
+          svcDurations.length > 0 ? Math.min(...svcDurations.map((d) => d.duration_minutes)) : defaultDur;
+        const svcBookings = dayBookings.filter(
+          (b) => String((b as { service_id?: string | null }).service_id ?? '') === service.id,
+        );
+        const svcPeak = peakOverlappingCovers(toLoadBookings(svcBookings), {
+          earliestMin: winStart,
+          latestMin: winEnd,
+          stepMinutes: 30,
+          defaultDurationMinutes: svcDur,
+        });
+        const svcDaily = svcBookings.reduce((sum, b) => sum + b.party_size, 0);
+        const svcFill =
+          svcCap != null && svcCap > 0 ? Math.min(100, Math.round((svcPeak / svcCap) * 100)) : null;
+        return {
+          service_id: service.id,
+          service_name: service.name,
+          daily_total_covers: svcDaily,
+          peak_in_house_covers: svcPeak,
+          concurrent_cap: svcCap,
+          fill_percent: svcFill,
+        };
+      });
+    }
+
+    heatmap.push({
+      date: dateStr,
+      day: forecast[i]!.day,
+      daily_total_covers: forecast[i]!.covers ?? 0,
+      peak_in_house_covers: peak ?? 0,
+      concurrent_cap: cap ?? null,
+      fill_percent: fillPercent ?? null,
+      ...(by_service && by_service.length > 0 ? { by_service } : {}),
+    });
+  }
+
+  const todayHeat = heatmap[0]!;
+  const todayEngineInput = engine === 'service' ? engineInputsByDate?.get(todayStrVenue) ?? null : null;
+  const todayDefaultDur = defaultDurationForDashboardDay(engine, todayEngineInput, availabilityConfig);
+  const todayLoadBookings = toLoadBookings(todayBookings);
+
+  const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
+  const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
+
+  return {
+    forecast,
+    heatmap,
+    today: {
+      covers: todayCovers ?? 0,
+      bookings: todayBookingCount ?? 0,
+      confirmed: confirmedCount ?? 0,
+      pending: pendingCount ?? 0,
+      seated: seatedCount ?? 0,
+      revenue: todayRevenue ?? 0,
+      next_booking: nextBooking,
+      peak_in_house_covers: todayHeat.peak_in_house_covers ?? 0,
+      concurrent_cap: todayHeat.concurrent_cap ?? null,
+      peak_fill_percent: todayHeat.fill_percent ?? null,
+      covers_in_house_now: coversInHouseNow ?? 0,
+      arriving_within_30_min: arrivingWithin30 ?? 0,
+    },
+  };
 }
 
 /**
@@ -182,7 +456,7 @@ export async function buildDashboardHomePayload(
     Boolean(defaultAreaId);
 
   const bookingListCols =
-    'id, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
+    'id, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
 
   const [todayBookingsRes, weekBookingsRes] = await Promise.all([
     admin
@@ -194,7 +468,7 @@ export async function buildDashboardHomePayload(
     admin
       .from('bookings')
       .select(
-        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, service_id, area_id`,
+        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, service_id, area_id`,
       )
       .eq('venue_id', staff.venue_id)
       .gte('booking_date', todayStrVenue)
@@ -224,33 +498,32 @@ export async function buildDashboardHomePayload(
     todayByModel[m] = (todayByModel[m] ?? 0) + 1;
   }
 
-  const todayCovers = todayBookings.reduce((sum, b) => sum + b.party_size, 0);
-  const todayBookingCount = todayBookings.length;
-  const todayRevenue = todayBookings.reduce((sum, b) => sum + (b.deposit_amount_pence ?? 0), 0) / 100;
-  const confirmedCount = todayBookings.filter((b) => b.status === 'Confirmed').length;
-  const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
-  const seatedCount = todayBookings.filter((b) => b.status === 'Seated').length;
+  const venueBookingModel = venueMode.bookingModel;
+  const pricingTier = (venueRow as { pricing_tier?: string | null }).pricing_tier;
+  const enabledModelsNorm = venueMode.enabledModels;
 
-  let nextBooking: { time: string; party_size: number } | null = null;
-  for (const b of [...todayBookings].sort((a, b) => String(a.booking_time).localeCompare(String(b.booking_time)))) {
-    const t = String(b.booking_time);
-    const [h, m] = t.split(':').map(Number);
-    if ((h ?? 0) * 60 + (m ?? 0) > nowMinutes) {
-      nextBooking = { time: t.slice(0, 5), party_size: b.party_size };
-      break;
-    }
-  }
+  const tableFocusSecondariesEnabled =
+    venueBookingModel === 'table_reservation' &&
+    isRestaurantTableProductTier(pricingTier) &&
+    enabledModelsNorm.length > 0;
 
-  const forecast: Array<{ date: string; day: string; covers: number; bookings: number }> = [];
-  for (const dateStr of dateStrs) {
-    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
-    forecast.push({
-      date: dateStr,
-      day: weekdayShortForDateStr(dateStr),
-      covers: dayBookings.reduce((sum, b) => sum + b.party_size, 0),
-      bookings: dayBookings.length,
-    });
-  }
+  const toOpsRow = (b: unknown) => b as DashboardBookingOpsRow;
+
+  const todayForTableMetrics = todayBookings.filter((b) => {
+    if (!tableFocusSecondariesEnabled) return true;
+    return inferBookingRowModelFromFetchedRow(toOpsRow(b)) === 'table_reservation';
+  });
+  const weekForTableMetrics = weekBookingsForOps.filter((b) => {
+    if (!tableFocusSecondariesEnabled) return true;
+    return inferBookingRowModelFromFetchedRow(toOpsRow(b)) === 'table_reservation';
+  });
+
+  const todayNonTable = tableFocusSecondariesEnabled
+    ? todayBookings.filter((b) => inferBookingRowModelFromFetchedRow(toOpsRow(b)) !== 'table_reservation')
+    : [];
+  const weekNonTableFull = tableFocusSecondariesEnabled
+    ? weekBookings.filter((b) => inferBookingRowModelFromFetchedRow(toOpsRow(b)) !== 'table_reservation')
+    : [];
 
   const caps: Array<number | null> = dateStrs.map((dateStr) => {
     if (engine === 'service' && engineInputsByDate) {
@@ -261,123 +534,38 @@ export async function buildDashboardHomePayload(
     return resolveVenueConcurrentCapLegacy(availabilityConfig, dateStr);
   });
 
-  const heatmap: Array<{
-    date: string;
-    day: string;
-    daily_total_covers: number;
-    peak_in_house_covers: number;
-    concurrent_cap: number | null;
-    fill_percent: number | null;
-  }> = [];
-
-  for (let i = 0; i < 7; i++) {
-    const dateStr = dateStrs[i]!;
-    const dayBookings = weekBookingsForOps.filter((b) => b.booking_date === dateStr);
-    const engineInput = engine === 'service' ? engineInputsByDate?.get(dateStr) ?? null : null;
-    const defaultDur = defaultDurationForDashboardDay(engine, engineInput, availabilityConfig);
-
-    const dayOfWeek = getDayOfWeek(dateStr);
-    const window = resolveOpeningWindowMinutes(openingHours as OpeningHours | null, dayOfWeek);
-    const earliestMin = window?.startMin ?? 11 * 60;
-    const latestMin = window?.endMin ?? 23 * 60;
-
-    const peak = peakOverlappingCovers(toLoadBookings(dayBookings), {
-      earliestMin,
-      latestMin,
-      stepMinutes: 30,
-      defaultDurationMinutes: defaultDur,
-    });
-
-    const cap = caps[i] ?? null;
-    const fillPercent = cap != null && cap > 0 ? Math.min(100, Math.round((peak / cap) * 100)) : null;
-
-    let by_service:
-      | Array<{
-          service_id: string;
-          service_name: string;
-          daily_total_covers: number;
-          peak_in_house_covers: number;
-          concurrent_cap: number | null;
-          fill_percent: number | null;
-        }>
-      | undefined;
-    if (useServiceAreaScope && engineInput && engineInput.services.length > 0) {
-      const capRows = perServiceConcurrentSlotCaps(engineInput, staff.venue_id, dateStr);
-      const capMap = new Map(capRows.map((r) => [r.serviceId, r] as const));
-      const sortedServices = [...engineInput.services].sort((a, b) => a.sort_order - b.sort_order);
-      by_service = sortedServices.map((service) => {
-        const capRow = capMap.get(service.id);
-        const svcCap = capRow?.cap ?? null;
-        const effective = resolveServiceForDate(
-          service,
-          engineInput.schedule_exceptions,
-          staff.venue_id,
-          dateStr,
-          dayOfWeek,
-        );
-        if (!effective) {
-          return {
-            service_id: service.id,
-            service_name: service.name,
-            daily_total_covers: 0,
-            peak_in_house_covers: 0,
-            concurrent_cap: null,
-            fill_percent: null,
-          };
-        }
-        const winStart = timeToMinutes(effective.start_time);
-        let winEnd = timeToMinutes(effective.end_time);
-        if (winEnd <= winStart) winEnd += 24 * 60;
-        const svcDurations = engineInput.durations.filter((d) => d.service_id === service.id);
-        const svcDur =
-          svcDurations.length > 0
-            ? Math.min(...svcDurations.map((d) => d.duration_minutes))
-            : defaultDur;
-        const svcBookings = dayBookings.filter(
-          (b) => String((b as { service_id?: string | null }).service_id ?? '') === service.id,
-        );
-        const svcPeak = peakOverlappingCovers(toLoadBookings(svcBookings), {
-          earliestMin: winStart,
-          latestMin: winEnd,
-          stepMinutes: 30,
-          defaultDurationMinutes: svcDur,
-        });
-        const svcDaily = svcBookings.reduce((sum, b) => sum + b.party_size, 0);
-        const svcFill =
-          svcCap != null && svcCap > 0 ? Math.min(100, Math.round((svcPeak / svcCap) * 100)) : null;
-        return {
-          service_id: service.id,
-          service_name: service.name,
-          daily_total_covers: svcDaily,
-          peak_in_house_covers: svcPeak,
-          concurrent_cap: svcCap,
-          fill_percent: svcFill,
-        };
-      });
-    }
-
-    heatmap.push({
-      date: dateStr,
-      day: forecast[i]!.day,
-      daily_total_covers: forecast[i]!.covers ?? 0,
-      peak_in_house_covers: peak ?? 0,
-      concurrent_cap: cap ?? null,
-      fill_percent: fillPercent ?? null,
-      ...(by_service && by_service.length > 0 ? { by_service } : {}),
-    });
-  }
+  const { forecast, heatmap, today } = computeRestaurantTableLoadSlice({
+    todayBookings: todayForTableMetrics,
+    weekBookingsForOps: weekForTableMetrics,
+    dateStrs,
+    todayStrVenue,
+    nowMinutes,
+    openingHours: openingHours as OpeningHours | null,
+    availabilityConfig,
+    engine,
+    engineInputsByDate,
+    useServiceAreaScope,
+    venueId: staff.venue_id,
+    caps,
+  });
 
   const todayHeat = heatmap[0]!;
-  const todayEngineInput = engine === 'service' ? engineInputsByDate?.get(todayStrVenue) ?? null : null;
-  const todayDefaultDur = defaultDurationForDashboardDay(engine, todayEngineInput, availabilityConfig);
-  const todayLoadBookings = toLoadBookings(todayBookings);
 
-  const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
-  const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
+  const secondaryBookingActivity: DashboardHomePayload['secondary_booking_activity'] =
+    tableFocusSecondariesEnabled
+      ? (() => {
+          const s = computeBookingForecastAndTodayOps({
+            todayBookings: todayNonTable,
+            weekBookingsForOps: weekNonTableFull,
+            dateStrs,
+            nowMinutes,
+          });
+          return { today: s.today, forecast: s.forecast };
+        })()
+      : undefined;
 
-  const venueBookingModel = venueMode.bookingModel;
-  const pricingTier = (venueRow as { pricing_tier?: string | null }).pricing_tier;
   const isAppt = isAppointmentDashboardExperience(pricingTier, venueBookingModel, venueMode.enabledModels);
+  const alertsUseAppointmentTone = isAppt && !tableFocusSecondariesEnabled;
   const alerts: Array<{ type: string; message: string }> = [];
 
   if (
@@ -418,12 +606,19 @@ export async function buildDashboardHomePayload(
     const pend = todayBookings.filter((b) => b.status === 'Pending').length;
     alerts.push({
       type: 'info',
-      message: `${pend} pending ${isAppt ? 'appointment' : 'booking'}${pend > 1 ? 's' : ''} awaiting payment.`,
+      message: `${pend} pending ${alertsUseAppointmentTone ? 'appointment' : 'booking'}${pend > 1 ? 's' : ''} awaiting payment.`,
     });
   }
-  const tomorrow = forecast[1];
-  if (tomorrow && tomorrow.bookings === 0) {
-    alerts.push({ type: 'info', message: `No ${isAppt ? 'appointments' : 'bookings'} yet for tomorrow (${tomorrow.day}).` });
+  const tomorrowStr = dateStrs[1];
+  if (tomorrowStr) {
+    const combinedTomorrowBookings = weekBookings.filter((b) => b.booking_date === tomorrowStr).length;
+    const tomorrowDayLabel = forecast[1]?.day ?? weekdayShortForDateStr(tomorrowStr);
+    if (combinedTomorrowBookings === 0) {
+      alerts.push({
+        type: 'info',
+        message: `No bookings yet for tomorrow (${tomorrowDayLabel}).`,
+      });
+    }
   }
 
   const guestIds = [...new Set(todayBookings.slice(0, 10).map((b) => b.guest_id).filter(Boolean))] as string[];
@@ -442,9 +637,7 @@ export async function buildDashboardHomePayload(
     String(a.booking_time).localeCompare(String(b.booking_time)),
   );
 
-  const primaryBm = venueMode.bookingModel;
-  const enabledModelsNorm = venueMode.enabledModels;
-  const todayByModelMerged = mergeTodayByModelWithActiveModels(todayByModel, primaryBm, enabledModelsNorm);
+  const todayByModelMerged = mergeTodayByModelWithActiveModels(todayByModel, venueBookingModel, enabledModelsNorm);
 
   return {
     booking_model: venueMode.bookingModel,
@@ -452,20 +645,9 @@ export async function buildDashboardHomePayload(
     active_booking_models: venueMode.activeBookingModels,
     enabled_models: enabledModelsNorm,
     today_by_booking_model: todayByModelMerged,
-    today: {
-      covers: todayCovers ?? 0,
-      bookings: todayBookingCount ?? 0,
-      confirmed: confirmedCount ?? 0,
-      pending: pendingCount ?? 0,
-      seated: seatedCount ?? 0,
-      revenue: todayRevenue ?? 0,
-      next_booking: nextBooking,
-      peak_in_house_covers: todayHeat.peak_in_house_covers ?? 0,
-      concurrent_cap: todayHeat.concurrent_cap ?? null,
-      peak_fill_percent: todayHeat.fill_percent ?? null,
-      covers_in_house_now: coversInHouseNow ?? 0,
-      arriving_within_30_min: arrivingWithin30 ?? 0,
-    },
+    table_focus_secondaries_enabled: tableFocusSecondariesEnabled || undefined,
+    secondary_booking_activity: secondaryBookingActivity,
+    today,
     forecast,
     heatmap,
     alerts,

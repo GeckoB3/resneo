@@ -291,7 +291,7 @@ export function GET() {
   </footer>
 
   <div class="powered-by">
-    Reservations powered by <a href="https://www.reserveni.com">Reserve NI</a>
+    Reservations powered by <a href="https://www.reserveni.com">ReserveNI</a>
   </div>
 
 </body>

@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  showAttendanceConfirmedPill,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
@@ -149,7 +149,7 @@ export function AppointmentRegistryCard({
                 Deposit pending
               </span>
             )}
-            {showAttendanceConfirmedPill(booking) && (
+            {showAttendanceConfirmedSupplementPill(booking) && (
               <span
                 className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
                 title="Confirmed"

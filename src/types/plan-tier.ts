@@ -1,2 +1,2 @@
-/** Reserve NI subscription tier as stored on `venues.pricing_tier`. */
+/** ReserveNI subscription tier as stored on `venues.pricing_tier`. */
 export type PlanTier = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';

@@ -136,6 +136,12 @@ export interface OperationsWorkspaceToolbarProps {
   /** Optional search popover content shown from a magnifying-glass icon in compact toolbars. */
   searchPanel?: ReactNode;
   searchActive?: boolean;
+  /** Accessible name for the search trigger and dropdown (compact toolbars). */
+  searchAriaLabel?: string;
+  /** When false, hides prev/next/date/Today controls. Defaults to showing the navigator. */
+  showDateNavigator?: boolean;
+  /** When false, hides New booking and Walk-in. Defaults to showing both. */
+  showBookingActions?: boolean;
   /** Override KPI chips while keeping the same compact toolbar shell. */
   summaryContent?: ReactNode;
   /** Extra actions after Walk-in (e.g. Edit layout link). */
@@ -170,6 +176,9 @@ export function OperationsWorkspaceToolbar({
   toolbarTools,
   searchPanel,
   searchActive = false,
+  searchAriaLabel = 'Search bookings',
+  showDateNavigator = true,
+  showBookingActions = true,
   summaryContent,
   trailingActions,
 }: OperationsWorkspaceToolbarProps) {
@@ -336,73 +345,77 @@ export function OperationsWorkspaceToolbar({
                 : '-mx-1 flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:max-w-[min(64rem,68vw)] sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0'
             }
           >
-            <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
-              className={compact
-                ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
-              aria-label="Previous day"
-            >
-              <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-              </svg>
-            </button>
-            <div ref={datePopoverRef} className="relative shrink-0">
-              <button
-                ref={dateTriggerRef}
-                type="button"
-                onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
-                className={compact
-                  ? 'min-h-8 w-[clamp(7.5rem,42vw,9rem)] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-800 shadow-sm hover:bg-slate-50 sm:text-xs'
-                  : 'min-h-10 min-w-[8.75rem] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:min-w-[10rem] sm:px-3 sm:text-sm'}
-                aria-expanded={open === 'date'}
-                aria-controls={datePanelId}
-              >
-                <span className="block truncate">{dateLabel ?? formatDateHeading(date)}</span>
-                {!compact && isToday ? (
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Today</span>
-                ) : null}
-              </button>
-              <ClampedFixedDropdown
-                open={inlineDateOpen}
-                triggerRef={dateTriggerRef}
-                verticalAnchorRef={compact ? panelSurfaceRef : undefined}
-                horizontalCenter={compact}
-                gapPx={4}
-                align="start"
-                maxWidthPx={352}
-                id={datePanelId}
-                onDismiss={close}
-                aria-label="Date and calendar"
-                className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
-              >
-                {datePickerPanel}
-              </ClampedFixedDropdown>
-            </div>
-            <button
-              type="button"
-              onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
-              className={compact
-                ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
-              aria-label="Next day"
-            >
-              <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => onDateChange(todayIso)}
-              className={compact
-                ? 'min-h-8 w-[3.25rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
-                : 'min-h-10 shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-sm'}
-            >
-              Today
-            </button>
+            {showDateNavigator ? (
+              <>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
+                    className={compact
+                      ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
+                      : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                    aria-label="Previous day"
+                  >
+                    <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                    </svg>
+                  </button>
+                  <div ref={datePopoverRef} className="relative shrink-0">
+                    <button
+                      ref={dateTriggerRef}
+                      type="button"
+                      onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
+                      className={compact
+                        ? 'min-h-8 w-[clamp(7.5rem,42vw,9rem)] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-800 shadow-sm hover:bg-slate-50 sm:text-xs'
+                        : 'min-h-10 min-w-[8.75rem] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:min-w-[10rem] sm:px-3 sm:text-sm'}
+                      aria-expanded={open === 'date'}
+                      aria-controls={datePanelId}
+                    >
+                      <span className="block truncate">{dateLabel ?? formatDateHeading(date)}</span>
+                      {!compact && isToday ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Today</span>
+                      ) : null}
+                    </button>
+                    <ClampedFixedDropdown
+                      open={inlineDateOpen}
+                      triggerRef={dateTriggerRef}
+                      verticalAnchorRef={compact ? panelSurfaceRef : undefined}
+                      horizontalCenter={compact}
+                      gapPx={4}
+                      align="start"
+                      maxWidthPx={352}
+                      id={datePanelId}
+                      onDismiss={close}
+                      aria-label="Date and calendar"
+                      className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
+                    >
+                      {datePickerPanel}
+                    </ClampedFixedDropdown>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
+                    className={compact
+                      ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
+                      : 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                    aria-label="Next day"
+                  >
+                    <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDateChange(todayIso)}
+                  className={compact
+                    ? 'min-h-8 w-[3.25rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
+                    : 'min-h-10 shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-sm'}
+                >
+                  Today
+                </button>
+              </>
+            ) : null}
             {toolbarLeadingTools
               ? typeof toolbarLeadingTools === 'function'
                 // This render prop only forwards the ref object to child overlay components;
@@ -496,7 +509,7 @@ export function OperationsWorkspaceToolbar({
                       ? 'border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200'
                       : 'border-slate-200 bg-white'
                   }`}
-                  aria-label="Search bookings"
+                  aria-label={searchAriaLabel}
                   aria-expanded={open === 'search'}
                   aria-controls={`${baseId}-search-panel`}
                 >
@@ -514,7 +527,7 @@ export function OperationsWorkspaceToolbar({
                   maxWidthPx={352}
                   id={`${baseId}-search-panel`}
                   onDismiss={close}
-                  aria-label="Search bookings"
+                  aria-label={searchAriaLabel}
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
                   {searchPanel}
@@ -542,42 +555,44 @@ export function OperationsWorkspaceToolbar({
                 <LiveStateIndicator state={liveState} />
               </span>
             ) : null}
-            <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={onNewBooking}
-              className={
-                compact
-                  ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-brand-600 hover:bg-brand-700`
-                  : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
-              }
-              aria-label="New Booking"
-            >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>New</span>
-            </button>
-            <button
-              type="button"
-              onClick={onWalkIn}
-              className={
-                compact
-                  ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-emerald-600 hover:bg-emerald-700`
-                  : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
-              }
-              aria-label="Walk-in"
-            >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
-                />
-              </svg>
-              <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>Walk-in</span>
-            </button>
-            </div>
+            {showBookingActions ? (
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={onNewBooking}
+                  className={
+                    compact
+                      ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-brand-600 hover:bg-brand-700`
+                      : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
+                  }
+                  aria-label="New Booking"
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>New</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onWalkIn}
+                  className={
+                    compact
+                      ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-emerald-600 hover:bg-emerald-700`
+                      : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
+                  }
+                  aria-label="Walk-in"
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+                    />
+                  </svg>
+                  <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>Walk-in</span>
+                </button>
+              </div>
+            ) : null}
             {trailingActions}
           </div>
           {compact && pinnedRow ? <div className="contents">{pinnedRow}</div> : null}
@@ -600,7 +615,7 @@ export function OperationsWorkspaceToolbar({
             id={open === 'date' ? datePanelId : open === 'timeline' ? timelinePanelId : open === 'search' ? `${baseId}-search-panel` : controlsPanelId}
             role="dialog"
             aria-modal="true"
-            aria-label={open === 'info' ? 'View summary information' : open === 'date' ? 'Date and calendar' : open === 'timeline' ? 'Timeline controls' : open === 'search' ? 'Search bookings' : controlsLabel}
+            aria-label={open === 'info' ? 'View summary information' : open === 'date' ? 'Date and calendar' : open === 'timeline' ? 'Timeline controls' : open === 'search' ? searchAriaLabel : controlsLabel}
             className="relative z-[71] flex max-h-[min(92dvh,920px)] w-full max-w-lg flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:rounded-l-2xl sm:border-y sm:border-l sm:border-r-0 sm:border-slate-200 sm:shadow-xl"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-2 sm:px-4">

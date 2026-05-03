@@ -34,6 +34,7 @@ import {
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import { planCalendarLimit } from '@/lib/plan-limits';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -507,6 +508,9 @@ function PlanSection({
           </>
         )}
       </p>
+      {!isFreeAccess ? (
+        <p className="text-xs text-slate-600 leading-relaxed">{SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}</p>
+      ) : null}
       {planSuccess ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
           <Pill variant="success" size="sm" dot>

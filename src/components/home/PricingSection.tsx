@@ -11,6 +11,8 @@ import {
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -21,7 +23,6 @@ export function PricingSection() {
     <section id="pricing" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Simple, transparent pricing</h2>
-        <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
 
         <div className="mx-auto mt-10 flex justify-center">
           <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
@@ -145,7 +146,7 @@ export function PricingSection() {
         )}
 
         <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-slate-500">
-          No per-booking fees. No commission. Cancel anytime.
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
         </p>
 
         <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">

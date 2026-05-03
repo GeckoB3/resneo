@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import type { EngineInput } from '@/types/availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import {
@@ -26,7 +27,10 @@ import {
   validateNoShowGracePeriod,
   validateTablesBelongToVenue,
 } from '@/lib/table-management/lifecycle';
-import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
+import {
+  resolveDurationAndBufferForTableAssignment,
+  resolveTableAssignmentDurationBuffer,
+} from '@/lib/table-management/booking-table-duration';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -237,17 +241,37 @@ export async function PATCH(
       bodyKeys.length === 1 && bodyKeys[0] === 'staff_attendance_confirmed';
     if (isStaffAttendanceOnlyPatch) {
       const on = Boolean(body.staff_attendance_confirmed);
+      const currentStatus = booking.status as string;
+      const attPayload: Record<string, unknown> = {
+        staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      };
+      // Mirror the full handler: promote Booked → Confirmed on confirm,
+      // and revert Confirmed → Booked on cancel (when guest has not also confirmed).
+      if (on && currentStatus === 'Booked') {
+        attPayload.status = 'Confirmed';
+      } else if (!on && currentStatus === 'Confirmed' && !booking.guest_attendance_confirmed_at) {
+        attPayload.status = 'Booked';
+      }
       const { error: attErr } = await staff.db
         .from('bookings')
-        .update({
-          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(attPayload)
         .eq('id', id)
         .eq('venue_id', staff.venue_id);
       if (attErr) {
         console.error('PATCH staff_attendance_confirmed failed:', attErr);
         return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+      }
+      // Run lifecycle hooks when the status changed.
+      if (attPayload.status && attPayload.status !== currentStatus) {
+        const adminForHooks = getSupabaseAdminClient();
+        await applyBookingLifecycleStatusEffects(adminForHooks, {
+          bookingId: id,
+          guestId: booking.guest_id,
+          previousStatus: currentStatus,
+          nextStatus: attPayload.status as BookingStatus,
+          actorId: staff.id,
+        });
       }
       const { data: updatedAttendance, error: selErr } = await staff.db
         .from('bookings')
@@ -738,7 +762,8 @@ export async function PATCH(
       body.booking_date !== undefined ||
       body.booking_time !== undefined ||
       body.party_size !== undefined ||
-      body.booking_end_time !== undefined
+      body.booking_end_time !== undefined ||
+      body.duration_minutes !== undefined
     ) {
       const inferredForModify = inferBookingRowModel({
         experience_event_id: booking.experience_event_id as string | null | undefined,
@@ -775,6 +800,12 @@ export async function PATCH(
 
       const timeStr = newTime.slice(0, 5);
       const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
+      if (isAppointment && body.duration_minutes !== undefined) {
+        return NextResponse.json(
+          { error: 'Cover time cannot be changed here for appointment bookings' },
+          { status: 400 },
+        );
+      }
       const allowManualCalendarOverlap =
         isAppointment &&
         (body.allow_manual_overlap === true || body.allow_booking_overlap === true) &&
@@ -791,6 +822,9 @@ export async function PATCH(
       let tableRescheduleServiceId: string | null = null;
       let tableRescheduleAreaId: string | null = null;
       let tableAreaChanged = false;
+      let tableModifyEngineInput: EngineInput | null = null;
+      let tableSittingMinutesForAssignment: number | null = null;
+      let tableBufferMinutesForAssignment: number | null = null;
 
       // --- Validate slot availability ---
       if (isAppointment) {
@@ -919,6 +953,7 @@ export async function PATCH(
         tableRescheduleServiceId = slot.service_id;
         tableRescheduleAreaId = targetAreaId;
         tableAreaChanged = areaChanged;
+        tableModifyEngineInput = engineInput;
       }
 
       const before = {
@@ -965,6 +1000,35 @@ export async function PATCH(
         rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
         bookingUpdate.estimated_end_time = rEnd.toISOString();
         bookingUpdate.booking_end_time = `${String(rEnd.getUTCHours()).padStart(2, '0')}:${String(rEnd.getUTCMinutes()).padStart(2, '0')}:00`;
+      }
+
+      if (!isAppointment && tableRescheduleServiceId && tableModifyEngineInput) {
+        const { durationMinutes: engineDurationMinutes, bufferMinutes } =
+          await resolveDurationAndBufferForTableAssignment(
+            admin,
+            tableModifyEngineInput,
+            newDate,
+            newPartySize,
+            tableRescheduleServiceId,
+          );
+        let sittingMinutes = engineDurationMinutes;
+        if (body.duration_minutes !== undefined && body.duration_minutes !== null) {
+          const raw = Number(body.duration_minutes);
+          if (!Number.isInteger(raw) || raw < 15 || raw > 300) {
+            return NextResponse.json(
+              { error: 'duration_minutes must be an integer between 15 and 300' },
+              { status: 400 },
+            );
+          }
+          sittingMinutes = raw;
+        }
+        tableSittingMinutesForAssignment = sittingMinutes;
+        tableBufferMinutesForAssignment = bufferMinutes;
+        const [ey, emo, ed] = newDate.split('-').map(Number);
+        const [ehh, emm] = timeStr.split(':').map(Number);
+        const tableEnd = new Date(Date.UTC(ey!, emo! - 1, ed!, ehh!, emm!, 0));
+        tableEnd.setMinutes(tableEnd.getMinutes() + sittingMinutes);
+        bookingUpdate.estimated_end_time = tableEnd.toISOString();
       }
 
       if (newPartySize > booking.party_size && booking.deposit_status === 'Paid' && booking.deposit_amount_pence) {
@@ -1070,13 +1134,22 @@ export async function PATCH(
           await clearTableStatusesForBooking(admin, id, staff.id);
 
           const serviceIdForDuration = tableRescheduleServiceId ?? (booking.service_id as string | null);
-          const { durationMinutes, bufferMinutes } = await resolveTableAssignmentDurationBuffer(
-            admin,
-            staff.venue_id,
-            newDate,
-            newPartySize,
-            serviceIdForDuration,
-          );
+          let durationMinutes: number;
+          let bufferMinutes: number;
+          if (tableSittingMinutesForAssignment != null && tableBufferMinutesForAssignment != null) {
+            durationMinutes = tableSittingMinutesForAssignment;
+            bufferMinutes = tableBufferMinutesForAssignment;
+          } else {
+            const resolved = await resolveTableAssignmentDurationBuffer(
+              admin,
+              staff.venue_id,
+              newDate,
+              newPartySize,
+              serviceIdForDuration,
+            );
+            durationMinutes = resolved.durationMinutes;
+            bufferMinutes = resolved.bufferMinutes;
+          }
           const assigned = await autoAssignTable(
             admin,
             staff.venue_id,

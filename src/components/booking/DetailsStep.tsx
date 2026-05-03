@@ -383,9 +383,9 @@ export function DetailsStep({
               <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
               <span className="text-sm text-slate-600">
                 I accept the{' '}
-                <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">booking terms</a>
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">Website Terms of Use</a>
                 {' '}and{' '}
-                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">privacy policy</a>.
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">Privacy Policy</a>.
               </span>
             </label>
             {errors.acceptTerms && <p className="text-xs text-red-600">{errors.acceptTerms.message}</p>}

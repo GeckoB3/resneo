@@ -2,12 +2,12 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { ContactsDashboard } from './ContactsDashboard';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 import { isAppointmentDashboardExperience } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { ToastProvider } from '@/components/ui/Toast';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
   const base = DEFAULT_TERMINOLOGY[model];
@@ -32,11 +32,11 @@ export default async function ContactsPage() {
 
   if (!venueId) {
     return (
-      <PageFrame maxWidthClass="max-w-lg">
+      <div className="mx-auto w-full max-w-lg px-4 py-12 sm:px-6">
         <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <p className="text-slate-600">No venue linked to your account.</p>
         </div>
-      </PageFrame>
+      </div>
     );
   }
 
@@ -66,14 +66,18 @@ export default async function ContactsPage() {
   );
 
   return (
-    <PageFrame maxWidthClass="max-w-[1400px]" className="space-y-6">
-      <ContactsDashboard
-        venueId={venueId}
-        currency={currency}
-        terminology={terminology}
-        appointmentDashboardExperience={appointmentDashboardExperience}
-        isAdmin={staff.role === 'admin'}
-      />
-    </PageFrame>
+    <ToastProvider>
+      <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
+        <div className="mx-auto max-w-[1600px] min-w-0">
+          <ContactsDashboard
+            venueId={venueId}
+            currency={currency}
+            terminology={terminology}
+            appointmentDashboardExperience={appointmentDashboardExperience}
+            isAdmin={staff.role === 'admin'}
+          />
+        </div>
+      </div>
+    </ToastProvider>
   );
 }

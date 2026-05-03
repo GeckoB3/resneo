@@ -21,13 +21,13 @@ export function buildIcsContent(params: {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Reserve NI//Booking//EN',
+    'PRODID:-//ReserveNI//Booking//EN',
     'BEGIN:VEVENT',
     `DTSTART:${formatUtc(start)}`,
     `DTEND:${formatUtc(end)}`,
     `SUMMARY:Reservation at ${escapeIcs(venueName)}`,
     ...(venueAddress ? [`LOCATION:${escapeIcs(venueAddress)}`] : []),
-    `DESCRIPTION:Party of ${partySize}. Booked via Reserve NI.`,
+    `DESCRIPTION:Party of ${partySize}. Booked via ReserveNI.`,
     'END:VEVENT',
     'END:VCALENDAR',
   ];

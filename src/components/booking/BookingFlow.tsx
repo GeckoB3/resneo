@@ -1,10 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AvailabilityResponse, AvailableSlot, BookingRulesPublic, GuestDetails, ServiceGroup, VenuePublic } from './types';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DateStep } from './DateStep';
-import { SlotStep } from './SlotStep';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ConfirmationStep } from './ConfirmationStep';
@@ -20,8 +19,7 @@ export interface BookingFlowProps {
   accentColour?: string;
 }
 
-const steps: Array<'date' | 'slot' | 'details' | 'payment' | 'confirmation'> = ['date', 'slot', 'details', 'payment', 'confirmation'];
-const STEP_LABELS = ['Date', 'Time', 'Details', 'Payment', 'Done'];
+const steps: Array<'date' | 'details' | 'payment' | 'confirmation'> = ['date', 'details', 'payment', 'confirmation'];
 
 export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: BookingFlowProps) {
   const areaList = venue.areas ?? [];
@@ -39,11 +37,16 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [serviceGroups, setServiceGroups] = useState<ServiceGroup[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
-  const [partySize, setPartySize] = useState(venue.booking_rules?.min_party_size ?? 2);
+  const [partySize, setPartySize] = useState(() => {
+    const min = venue.booking_rules?.min_party_size ?? 1;
+    const max = venue.booking_rules?.max_party_size ?? 20;
+    return Math.min(Math.max(2, min), max);
+  });
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
   const [paymentComplete, setPaymentComplete] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [largePartyRedirect, setLargePartyRedirect] = useState(false);
   const [largePartyMessage, setLargePartyMessage] = useState<string | null>(null);
@@ -67,7 +70,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   useEffect(() => {
     if (!embed || !onHeightChange) return;
     onHeightChange(document.documentElement.scrollHeight);
-  }, [embed, onHeightChange, step, selectedDate, slots.length, selectedSlot, guestDetails, createResult, paymentComplete]);
+  }, [embed, onHeightChange, step, selectedDate, slots.length, slotsLoading, initialLoading, selectedSlot, guestDetails, createResult, paymentComplete]);
 
   const goNext = useCallback(() => {
     setError(null);
@@ -111,13 +114,82 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     }
   }, [venue.id, partySize, venue.public_booking_area_mode, guestAreaId]);
 
+  // On mount: find the next date with availability and pre-load it
+  useEffect(() => {
+    const initPartySize = Math.min(Math.max(2, venue.booking_rules?.min_party_size ?? 1), venue.booking_rules?.max_party_size ?? 20);
+    const initAreaId = venue.public_booking_area_mode !== 'manual' || areaList.length <= 1 ? null : areaList[0]!.id;
+
+    async function findFirstAvailableDate() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let dayOffset = 0; dayOffset <= 30; dayOffset++) {
+        const checkDate = new Date(today);
+        checkDate.setDate(checkDate.getDate() + dayOffset);
+        const y = checkDate.getFullYear();
+        const m = String(checkDate.getMonth() + 1).padStart(2, '0');
+        const d = String(checkDate.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${d}`;
+
+        let url = `/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(dateStr)}&party_size=${initPartySize}`;
+        if (venue.public_booking_area_mode === 'manual' && initAreaId) {
+          url += `&area_id=${encodeURIComponent(initAreaId)}`;
+        }
+
+        try {
+          const res = await fetch(url);
+          if (!res.ok) break;
+          const data: AvailabilityResponse = await res.json();
+          const hasSlots =
+            (data.slots ?? []).length > 0 ||
+            (data.services ?? []).some((s) => s.slots.length > 0) ||
+            data.large_party_redirect;
+
+          if (hasSlots) {
+            setSelectedDate(dateStr);
+            setSlots(data.slots ?? []);
+            setServiceGroups(data.services ?? []);
+            if (data.large_party_redirect) {
+              setLargePartyRedirect(true);
+              setLargePartyMessage(data.large_party_message ?? null);
+            }
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      setInitialLoading(false);
+    }
+
+    findFirstAvailableDate();
+  // Only run on mount — venue props are stable server-rendered values
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch slots when party size changes (if a date is already selected)
+  const isInitialPartyMount = useRef(true);
+  useEffect(() => {
+    if (isInitialPartyMount.current) {
+      isInitialPartyMount.current = false;
+      return;
+    }
+    if (selectedDate) {
+      setSelectedSlot(null);
+      fetchSlots(selectedDate).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partySize]);
+
+  // Date selected from calendar — fetch slots inline, stay on step 1
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate(date);
     setSelectedSlot(null);
     fetchSlots(date).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
-    goNext();
-  }, [fetchSlots, goNext]);
+  }, [fetchSlots]);
 
+  // Time slot selected — advance to details
   const handleSlotSelect = useCallback((slot: AvailableSlot) => {
     setSelectedSlot(slot);
     goNext();
@@ -216,9 +288,6 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     ? { '--accent-color': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties
     : undefined;
 
-  const visibleSteps = requiresDeposit ? STEP_LABELS : STEP_LABELS.filter((_, i) => i !== 3);
-  const currentVisibleIndex = requiresDeposit ? stepIndex : (stepIndex >= 3 ? stepIndex - 1 : stepIndex);
-
   const tableRefundNoticeHours = useMemo(() => {
     const fromSlot = selectedSlot?.cancellation_notice_hours;
     if (typeof fromSlot === 'number' && Number.isFinite(fromSlot)) return fromSlot;
@@ -234,41 +303,6 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   return (
     <div className="mx-auto max-w-lg" style={accentStyle}>
-      {/* Progress indicator */}
-      {step !== 'confirmation' && (
-        <div className="mb-8 mt-2">
-          <div className="mx-auto flex w-fit items-center justify-center">
-            {visibleSteps.map((label, i) => {
-              const isActive = i === currentVisibleIndex;
-              const isDone = i < currentVisibleIndex;
-              return (
-                <div key={label} className="flex items-center">
-                  <div className="flex min-w-12 flex-col items-center">
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
-                      isActive ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' :
-                      isDone ? 'bg-brand-100 text-brand-700' :
-                      'bg-slate-100 text-slate-400'
-                    }`}>
-                      {isDone ? (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                        </svg>
-                      ) : (
-                        i + 1
-                      )}
-                    </div>
-                    <span className={`mt-1 text-xs font-medium ${isActive ? 'text-brand-700' : isDone ? 'text-brand-600' : 'text-slate-400'}`}>{label}</span>
-                  </div>
-                  {i < visibleSteps.length - 1 && (
-                    <div className={`mx-2 h-0.5 w-8 rounded sm:w-12 ${isDone ? 'bg-brand-300' : 'bg-slate-100'}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
@@ -281,26 +315,16 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           maxAdvanceBookingDays={maxAdvanceBookingDays}
           onPartySizeChange={setPartySize}
           onDateSelect={handleDateSelect}
-        />
-      )}
-      {step === 'slot' && (
-        <SlotStep
-          date={selectedDate!}
+          selectedDate={selectedDate}
           slots={slots}
           serviceGroups={serviceGroups.length > 0 ? serviceGroups : undefined}
-          loading={slotsLoading}
+          slotsLoading={slotsLoading}
+          initialLoading={initialLoading}
           largePartyRedirect={largePartyRedirect}
           largePartyMessage={largePartyMessage}
+          onSlotSelect={handleSlotSelect}
           venueId={venue.id}
-          partySize={partySize}
           phoneDefaultCountry={phoneDefaultCountry}
-          onSelect={handleSlotSelect}
-          onBack={goBack}
-          onDateChange={(newDate) => {
-            setSelectedDate(newDate);
-            setSelectedSlot(null);
-            fetchSlots(newDate).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
-          }}
           showAreaTabs={showAreaTabs}
           areas={areaList}
           selectedAreaId={guestAreaId}

@@ -89,7 +89,7 @@ export function SignupPlanConflictBanner() {
     <div className="mx-auto mb-6 w-full max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
       <p className="font-semibold">Your account already has a plan</p>
       <p className="mt-1 text-amber-900/90">
-        You are signed in with an account that already has a Reserve NI subscription. Use the dashboard to manage your
+        You are signed in with an account that already has a ReserveNI subscription. Use the dashboard to manage your
         venue.
       </p>
       <Link href="/dashboard" className="mt-2 inline-block font-medium text-brand-700 underline hover:text-brand-800">

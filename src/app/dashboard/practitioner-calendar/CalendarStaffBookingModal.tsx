@@ -50,7 +50,7 @@ export function CalendarStaffBookingModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="calendar-staff-booking-title"
-        className="flex h-[min(90dvh,90vh)] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
+        className="flex h-[min(90dvh,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-6 py-4">

@@ -163,7 +163,7 @@ export default function SignupPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Create your account</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Get started with Reserve NI in minutes.
+          Get started with ReserveNI in minutes.
         </p>
       </div>
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -220,13 +220,21 @@ export default function SignupPage() {
               className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span className="text-xs text-slate-500">
-              I agree to the Reserve NI{' '}
-              <a href="/terms" className="text-brand-600 underline hover:text-brand-700">
-                terms of service
-              </a>{' '}
-              and{' '}
-              <a href="/privacy" className="text-brand-600 underline hover:text-brand-700">
-                privacy policy
+              I agree to the ReserveNI{' '}
+              <a href="/terms/customer" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
+                customer terms
+              </a>
+              {', '}
+              <a href="/terms/data-processing" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
+                data processing terms
+              </a>
+              {', '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
+                Website Terms of Use
+              </a>
+              {' and '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
+                Privacy Policy
               </a>.
             </span>
           </label>

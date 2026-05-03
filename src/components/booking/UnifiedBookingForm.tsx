@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CountryCode } from 'libphonenumber-js';
 import { useToast } from '@/components/ui/Toast';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
@@ -11,16 +11,19 @@ import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenu
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
+/** YYYY-MM-DD in the browser's local calendar (matches guest BookingFlow / DateStep). */
+function localCalendarDateStr(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatDateLabel(dateStr: string): string {
-  const today = toDateStr(new Date());
-  const tomorrow = toDateStr(new Date(Date.now() + 86400000));
+  const today = localCalendarDateStr();
+  const t = new Date();
+  t.setDate(t.getDate() + 1);
+  const tomorrow = localCalendarDateStr(t);
   if (dateStr === today) return 'Today';
   if (dateStr === tomorrow) return 'Tomorrow';
   const d = new Date(dateStr + 'T00:00');
@@ -28,6 +31,10 @@ function formatDateLabel(dateStr: string): string {
 }
 
 const PARTY_GRID = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+/** Matches server / availability engine bounds for sitting duration. */
+const COVER_TIME_MIN = 15;
+const COVER_TIME_MAX = 300;
 
 function ChevronDown({ className }: { className?: string }) {
   return (
@@ -54,6 +61,50 @@ interface Suggestion {
   spare_covers: number;
 }
 
+/** Frozen when opening the modify-booking modal; drives PATCH + table assignment. */
+export interface UnifiedBookingEditSnapshot {
+  booking_date: string;
+  booking_time: string;
+  party_size: number;
+  area_id: string | null;
+  guest_name: string;
+  guest_phone: string | null;
+  guest_email: string | null;
+  dietary_notes: string | null;
+  special_requests: string | null;
+  internal_notes: string | null;
+  occasion: string | null;
+  table_ids: string[];
+  estimated_end_time: string | null;
+  deposit_status: string | null;
+}
+
+function timeToMinutesUbf(value: string): number {
+  const [h, m] = value.slice(0, 5).split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function estimatedEndToHHMMUbf(iso: string | null | undefined): string | null {
+  if (iso == null || typeof iso !== 'string' || !iso.trim()) return null;
+  const d = new Date(iso.trim());
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString().slice(11, 16);
+  }
+  const afterT = iso.includes('T') ? iso.split('T')[1] : null;
+  const hm = (afterT ?? iso).slice(0, 5);
+  if (/^\d{2}:\d{2}$/.test(hm)) return hm;
+  return null;
+}
+
+function suggestDurationFromEditSnapshot(snapshot: UnifiedBookingEditSnapshot): number {
+  const start = snapshot.booking_time.slice(0, 5);
+  const endHm = estimatedEndToHHMMUbf(snapshot.estimated_end_time);
+  if (!endHm) return 90;
+  let d = timeToMinutesUbf(endHm) - timeToMinutesUbf(start);
+  if (d <= 0) d += 24 * 60;
+  return Math.max(15, Math.round(d / 15) * 15);
+}
+
 export interface UnifiedBookingFormProps {
   venueId: string;
   advancedMode: boolean;
@@ -64,6 +115,9 @@ export interface UnifiedBookingFormProps {
   venueCurrency?: string;
   onCreated: (result?: { booking_id: string; payment_url?: string }) => void;
   onClose?: () => void;
+  /** Table booking: edit existing reservation instead of POST /api/venue/bookings. */
+  editBookingId?: string;
+  editSnapshot?: UnifiedBookingEditSnapshot;
 }
 
 export function UnifiedBookingForm({
@@ -75,15 +129,20 @@ export function UnifiedBookingForm({
   venueCurrency: venueCurrencyProp,
   onCreated,
   onClose,
+  editBookingId,
+  editSnapshot,
 }: UnifiedBookingFormProps) {
+  const isEdit = Boolean(editBookingId && editSnapshot);
   const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
   const [venueCurrencyResolved, setVenueCurrencyResolved] = useState<string | null>(venueCurrencyProp ?? null);
-  const [date, setDate] = useState(initialDate ?? new Date().toISOString().slice(0, 10));
-  const [partySize, setPartySize] = useState(2);
+  const [date, setDate] = useState(() => editSnapshot?.booking_date ?? initialDate ?? localCalendarDateStr());
+  const [partySize, setPartySize] = useState(() => editSnapshot?.party_size ?? 2);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [selectedTime, setSelectedTime] = useState(initialTime ?? '');
+  const [selectedTime, setSelectedTime] = useState(
+    () => editSnapshot?.booking_time.slice(0, 5) ?? initialTime ?? '',
+  );
   /** Disambiguates duplicate clock times when combined multi-area availability returns one row per area. */
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
   const [publicBookingAreaMode, setPublicBookingAreaMode] = useState<'auto' | 'manual'>('auto');
@@ -92,27 +151,53 @@ export function UnifiedBookingForm({
   /** Avoid fetching `/api/booking/availability` with the wrong `area_id` before venue + areas are loaded. */
   const [tableBookingPrefsReady, setTableBookingPrefsReady] = useState(false);
   /**
+   * When the parent does not pass `initialDate`, scan forward for the first bookable day so date/time
+   * start at the next availability (same idea as guest BookingFlow). Gate slot fetch until this completes.
+   */
+  const [availabilitySeedReady, setAvailabilitySeedReady] = useState(() => initialDate != null || Boolean(editSnapshot));
+  const [availabilitySeedGeneration, setAvailabilitySeedGeneration] = useState(0);
+  /**
    * Bumps when the form is reset (e.g. "Create Another Booking") so we refetch slots even when
    * `date` / `party_size` / area prefs are unchanged — otherwise the availability effect skips and
    * times stay empty until the user tweaks a selector.
    */
   const [slotFetchNonce, setSlotFetchNonce] = useState(0);
 
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [dietaryNotes, setDietaryNotes] = useState('');
-  const [notes, setNotes] = useState('');
+  const [name, setName] = useState(() => editSnapshot?.guest_name ?? '');
+  const [phone, setPhone] = useState(() => editSnapshot?.guest_phone ?? '');
+  const [email, setEmail] = useState(() => editSnapshot?.guest_email ?? '');
+  const [dietaryNotes, setDietaryNotes] = useState(() => editSnapshot?.dietary_notes ?? '');
+  const [notes, setNotes] = useState(() => editSnapshot?.special_requests ?? '');
+  const [occasion, setOccasion] = useState(() => editSnapshot?.occasion ?? '');
+  const [internalNotes, setInternalNotes] = useState(() => editSnapshot?.internal_notes ?? '');
+
+  const [coverDurationMinutes, setCoverDurationMinutes] = useState(() =>
+    editSnapshot ? suggestDurationFromEditSnapshot(editSnapshot) : 90,
+  );
+  const [coverDurationDirty, setCoverDurationDirty] = useState(false);
+  const prevUbfDurationInputKeyRef = useRef<string | null>(null);
 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [tableAssignMode, setTableAssignMode] = useState<'suggested' | 'floor'>('suggested');
-  const [manualTableIds, setManualTableIds] = useState<string[]>([]);
+  const [tableAssignMode, setTableAssignMode] = useState<'suggested' | 'floor'>(() =>
+    editSnapshot && (editSnapshot.table_ids?.length ?? 0) > 0 ? 'floor' : 'suggested',
+  );
+  const [manualTableIds, setManualTableIds] = useState<string[]>(() => editSnapshot?.table_ids ?? []);
   const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
   const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
-  /** Which dining area layout to show on the floor-plan tab (multi-area venues). */
-  const [floorPlanViewAreaId, setFloorPlanViewAreaId] = useState<string | null>(null);
+  /** Dining area for table suggestions and floor picker (multi-area venues). */
+  const [tableAssignmentAreaId, setTableAssignmentAreaId] = useState<string | null>(null);
+  const assignmentSlotIdentityRef = useRef<string | null>(null);
+  const editBaselineRef = useRef<UnifiedBookingEditSnapshot | null>(null);
+
+  const ubfDurationInputKey = useMemo(() => {
+    const timePart =
+      selectedTime.length >= 5 ? selectedTime.slice(0, 5) : selectedTime;
+    const areaPart =
+      diningAreas.length > 1 && tableAssignmentAreaId ? tableAssignmentAreaId : '';
+    return `${date}|${timePart}|${partySize}|${areaPart}`;
+  }, [date, selectedTime, partySize, diningAreas.length, tableAssignmentAreaId]);
 
   const [requireDeposit, setRequireDeposit] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -123,7 +208,8 @@ export function UnifiedBookingForm({
   const [openPanel, setOpenPanel] = useState<'party' | 'date' | 'time' | null>(null);
   const [gridCenter, setGridCenter] = useState('20:00');
   const [calendarMonth, setCalendarMonth] = useState(() => {
-    const d = new Date((initialDate ?? new Date().toISOString().slice(0, 10)) + 'T00:00');
+    const base = editSnapshot?.booking_date ?? initialDate ?? localCalendarDateStr();
+    const d = new Date(`${base}T00:00`);
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -131,6 +217,9 @@ export function UnifiedBookingForm({
   const nameRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** Party size for the “next available day” scan only (do not re-scan when party changes mid-session). */
+  const partySizeForSeedRef = useRef(partySize);
+  partySizeForSeedRef.current = partySize;
 
   const phoneDefaultCountry: CountryCode = useMemo(
     () => defaultPhoneCountryForVenueCurrency(venueCurrencyResolved ?? undefined),
@@ -141,6 +230,23 @@ export function UnifiedBookingForm({
     () => diningAreas.length > 1 && publicBookingAreaMode === 'manual',
     [diningAreas.length, publicBookingAreaMode],
   );
+
+  useLayoutEffect(() => {
+    if (!isEdit || !editSnapshot) return;
+    editBaselineRef.current = {
+      ...editSnapshot,
+      table_ids: [...editSnapshot.table_ids],
+    };
+  }, [isEdit, editBookingId, editSnapshot]);
+
+  useEffect(() => {
+    if (!isEdit || !editSnapshot?.area_id || !tableBookingPrefsReady) return;
+    if (!diningAreas.some((a) => a.id === editSnapshot.area_id)) return;
+    setTableAssignmentAreaId(editSnapshot.area_id);
+    if (publicBookingAreaMode === 'manual') {
+      setStaffAreaId(editSnapshot.area_id);
+    }
+  }, [isEdit, editSnapshot, tableBookingPrefsReady, diningAreas, publicBookingAreaMode]);
 
   useEffect(() => {
     if (venueCurrencyProp != null) {
@@ -175,8 +281,18 @@ export function UnifiedBookingForm({
       const active = (a.areas ?? []).filter((x) => x.is_active);
       const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
       setDiningAreas(mapped);
-      if (mapped.length > 1 && v.public_booking_area_mode === 'manual') {
-        setStaffAreaId((prev) => prev ?? mapped[0]!.id);
+      if (mapped.length > 1) {
+        setTableAssignmentAreaId((prev) =>
+          prev && mapped.some((x) => x.id === prev) ? prev : mapped[0]!.id,
+        );
+        if (v.public_booking_area_mode === 'manual') {
+          setStaffAreaId((prev) => {
+            if (prev && mapped.some((x) => x.id === prev)) return prev;
+            return mapped[0]!.id;
+          });
+        }
+      } else {
+        setTableAssignmentAreaId(null);
       }
       setTableBookingPrefsReady(true);
     };
@@ -214,31 +330,106 @@ export function UnifiedBookingForm({
   }, [venueBootstrap]);
 
   useEffect(() => {
-    if (diningAreas.length === 0) return;
-    setFloorPlanViewAreaId((prev) => {
-      if (prev && diningAreas.some((a) => a.id === prev)) return prev;
-      return diningAreas[0]!.id;
-    });
-  }, [diningAreas]);
+    if (initialDate != null) return;
+    if (!tableBookingPrefsReady) return;
+    if (diningAreas.length > 1 && publicBookingAreaMode === 'manual' && !staffAreaId) return;
+
+    let cancelled = false;
+    setAvailabilitySeedReady(false);
+
+    void (async () => {
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const maxDays = 60;
+
+        for (let dayOffset = 0; dayOffset <= maxDays; dayOffset++) {
+          const checkDate = new Date(today);
+          checkDate.setDate(checkDate.getDate() + dayOffset);
+          const y = checkDate.getFullYear();
+          const m = String(checkDate.getMonth() + 1).padStart(2, '0');
+          const d = String(checkDate.getDate()).padStart(2, '0');
+          const dateStr = `${y}-${m}-${d}`;
+
+          let url = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(dateStr)}&party_size=${partySizeForSeedRef.current}`;
+          if (publicBookingAreaMode === 'manual' && staffAreaId) {
+            url += `&area_id=${encodeURIComponent(staffAreaId)}`;
+          }
+
+          const res = await fetch(url);
+          if (cancelled) return;
+          if (!res.ok) break;
+
+          const data = (await res.json()) as {
+            slots?: unknown[];
+            services?: Array<{ slots?: unknown[] }>;
+            large_party_redirect?: boolean;
+          };
+          const hasSlots = (data.slots ?? []).length > 0;
+          const hasServiceSlots = (data.services ?? []).some((s) => (s.slots ?? []).length > 0);
+          if (hasSlots || hasServiceSlots || data.large_party_redirect) {
+            if (!cancelled) {
+              setDate(dateStr);
+              setCalendarMonth(new Date(y, parseInt(m, 10) - 1, 1));
+            }
+            break;
+          }
+        }
+      } catch {
+        /* keep default date */
+      } finally {
+        if (!cancelled) setAvailabilitySeedReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    availabilitySeedGeneration,
+    diningAreas.length,
+    initialDate,
+    publicBookingAreaMode,
+    staffAreaId,
+    tableBookingPrefsReady,
+    venueId,
+  ]);
 
   useEffect(() => {
-    if (publicBookingAreaMode === 'manual' && staffAreaId) {
-      setFloorPlanViewAreaId(staffAreaId);
+    if (publicBookingAreaMode === 'manual' && staffAreaId && diningAreas.length > 1) {
+      setTableAssignmentAreaId(staffAreaId);
     }
-  }, [publicBookingAreaMode, staffAreaId]);
+  }, [diningAreas.length, publicBookingAreaMode, staffAreaId]);
 
   useEffect(() => {
+    if (diningAreas.length <= 1) return;
     if (publicBookingAreaMode === 'manual') return;
-    if (!selectedSlotKey || slots.length === 0) return;
-    const sl = slots.find((s) => s.key === selectedSlotKey);
-    if (sl?.area_id) setFloorPlanViewAreaId(sl.area_id);
-  }, [publicBookingAreaMode, selectedSlotKey, slots]);
+    const id = `${selectedSlotKey ?? ''}|${selectedTime}`;
+    if (assignmentSlotIdentityRef.current === id && assignmentSlotIdentityRef.current !== '') return;
+    assignmentSlotIdentityRef.current = id;
+    const sl =
+      slots.find((s) => s.key === selectedSlotKey) ??
+      slots.find((s) => s.start_time.slice(0, 5) === selectedTime.slice(0, 5));
+    setTableAssignmentAreaId(sl?.area_id ?? diningAreas[0]!.id);
+  }, [diningAreas, publicBookingAreaMode, selectedSlotKey, selectedTime, slots]);
 
-  // Focus guest name when form opens
+  const selectTableAssignmentArea = useCallback(
+    (areaId: string) => {
+      setTableAssignmentAreaId(areaId);
+      if (publicBookingAreaMode === 'manual') {
+        setStaffAreaId(areaId);
+        setSelectedSlotKey(null);
+      }
+    },
+    [publicBookingAreaMode],
+  );
+
+  // Focus guest name when form opens (create flow only; modify modal opens mid-workflow)
   useEffect(() => {
+    if (isEdit) return;
     const timer = setTimeout(() => nameRef.current?.focus(), 80);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isEdit]);
 
   useDismissibleLayer({
     open: openPanel !== null,
@@ -250,6 +441,9 @@ export function UnifiedBookingForm({
   useEffect(() => {
     if (!date) {
       setSlots([]);
+      return;
+    }
+    if (!availabilitySeedReady) {
       return;
     }
     if (!tableBookingPrefsReady) {
@@ -315,17 +509,7 @@ export function UnifiedBookingForm({
                 }
               }
               if (!picked) {
-                const defaultCenter = 20 * 60;
-                picked = rawSlots[0]!;
-                let bestDist = Infinity;
-                for (const s of rawSlots) {
-                  const p = s.start_time.slice(0, 5).split(':');
-                  const dist = Math.abs(parseInt(p[0], 10) * 60 + parseInt(p[1], 10) - defaultCenter);
-                  if (dist < bestDist) {
-                    picked = s;
-                    bestDist = dist;
-                  }
-                }
+                picked = rawSlots.reduce((best, s) => (s.start_time < best.start_time ? s : best));
               }
               setSelectedTime(picked.start_time);
               setSelectedSlotKey(picked.key);
@@ -351,6 +535,7 @@ export function UnifiedBookingForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     addToast,
+    availabilitySeedReady,
     date,
     partySize,
     venueId,
@@ -378,30 +563,90 @@ export function UnifiedBookingForm({
     };
   }, [advancedMode]);
 
-  // Fetch table suggestions when in advanced mode and time is selected
+  // Resolve cover time from venue defaults (GET walk-in); table suggestions use the same duration.
   useEffect(() => {
     let cancelled = false;
-    if (!advancedMode || !date || !selectedTime) {
-      setSuggestions([]);
-      setSelectedSuggestionKey(null);
-      setOccupiedTableIds([]);
-      setManualTableIds([]);
+
+    if (!date || !selectedTime || partySize < 1) {
+      if (advancedMode) {
+        setSuggestions([]);
+        setSelectedSuggestionKey(null);
+        setOccupiedTableIds([]);
+        if (!isEdit) setManualTableIds([]);
+      }
       return;
     }
-    setManualTableIds([]);
-    setLoadingSuggestions(true);
-    (async () => {
+    if (!tableBookingPrefsReady) return;
+    if (diningAreas.length > 1 && !tableAssignmentAreaId) {
+      if (advancedMode) {
+        setSuggestions([]);
+        setSelectedSuggestionKey(null);
+        setOccupiedTableIds([]);
+      }
+      return;
+    }
+
+    const prevKey = prevUbfDurationInputKeyRef.current;
+    const inputKeyChanged = prevKey !== null && ubfDurationInputKey !== prevKey;
+    prevUbfDurationInputKeyRef.current = ubfDurationInputKey;
+
+    const effectiveDurationDirty = inputKeyChanged ? false : coverDurationDirty;
+    if (inputKeyChanged && coverDurationDirty) {
+      setCoverDurationDirty(false);
+    }
+
+    if (advancedMode && !isEdit) {
+      setManualTableIds([]);
+    }
+
+    if (advancedMode) {
+      setLoadingSuggestions(true);
+    }
+
+    const timeParam = selectedTime.length >= 5 ? selectedTime.slice(0, 5) : selectedTime;
+    const durationParams = new URLSearchParams({
+      date,
+      time: timeParam,
+      party_size: String(partySize),
+    });
+    if (diningAreas.length > 1 && tableAssignmentAreaId) {
+      durationParams.set('area_id', tableAssignmentAreaId);
+    }
+
+    void (async () => {
       try {
-        const params = new URLSearchParams({
-          date,
-          time: selectedTime.slice(0, 5),
-          party_size: String(partySize),
-          duration_minutes: '90',
-        });
-        if (publicBookingAreaMode === 'manual' && staffAreaId) {
-          params.set('area_id', staffAreaId);
+        let durationForSuggestions = coverDurationMinutes;
+        if (!effectiveDurationDirty) {
+          const durationRes = await fetch(`/api/venue/bookings/walk-in?${durationParams.toString()}`);
+          if (durationRes.ok && !cancelled) {
+            const durationPayload = (await durationRes.json()) as { duration_minutes?: number };
+            const resolved = durationPayload.duration_minutes;
+            if (typeof resolved === 'number') {
+              durationForSuggestions = resolved;
+              setCoverDurationMinutes((m) => (m === resolved ? m : resolved));
+            }
+          }
         }
-        const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
+
+        if (!advancedMode) {
+          return;
+        }
+
+        const suggestionParams = new URLSearchParams({
+          date,
+          time: timeParam,
+          party_size: String(partySize),
+          duration_minutes: String(
+            effectiveDurationDirty ? coverDurationMinutes : durationForSuggestions,
+          ),
+        });
+        if (diningAreas.length > 1 && tableAssignmentAreaId) {
+          suggestionParams.set('area_id', tableAssignmentAreaId);
+        }
+        if (isEdit && editBookingId) {
+          suggestionParams.set('booking_id', editBookingId);
+        }
+        const res = await fetch(`/api/venue/tables/combinations/suggest?${suggestionParams.toString()}`);
         if (cancelled) return;
         if (!res.ok) {
           setSuggestions([]);
@@ -414,9 +659,11 @@ export function UnifiedBookingForm({
         const busy = (payload.occupied_table_ids ?? []) as string[];
         setSuggestions(next);
         setOccupiedTableIds(Array.isArray(busy) ? busy : []);
-        setSelectedSuggestionKey(
-          next.length > 0 ? `${next[0].source}:${next[0].table_ids.join('|')}` : null,
-        );
+        if (!(isEdit && tableAssignMode === 'floor')) {
+          setSelectedSuggestionKey(
+            next.length > 0 ? `${next[0]!.source}:${next[0]!.table_ids.join('|')}` : null,
+          );
+        }
       } catch {
         if (!cancelled) {
           setSuggestions([]);
@@ -424,11 +671,28 @@ export function UnifiedBookingForm({
           setOccupiedTableIds([]);
         }
       } finally {
-        if (!cancelled) setLoadingSuggestions(false);
+        if (advancedMode && !cancelled) setLoadingSuggestions(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [advancedMode, date, selectedTime, partySize, publicBookingAreaMode, staffAreaId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    advancedMode,
+    coverDurationDirty,
+    coverDurationMinutes,
+    date,
+    diningAreas.length,
+    editBookingId,
+    isEdit,
+    partySize,
+    selectedTime,
+    tableAssignMode,
+    tableAssignmentAreaId,
+    tableBookingPrefsReady,
+    ubfDurationInputKey,
+  ]);
 
   const selectedSuggestion = useMemo(
     () => suggestions.find((s) => `${s.source}:${s.table_ids.join('|')}` === selectedSuggestionKey) ?? null,
@@ -444,13 +708,10 @@ export function UnifiedBookingForm({
 
   const tablesForFloorPlanPicker = useMemo(() => {
     if (!prefetchedTables?.length) return null;
-    if (publicBookingAreaMode === 'manual' && staffAreaId) {
-      return prefetchedTables.filter((t) => t.area_id === staffAreaId);
-    }
     if (diningAreas.length <= 1) return prefetchedTables;
-    if (!floorPlanViewAreaId) return prefetchedTables;
-    return prefetchedTables.filter((t) => t.area_id === floorPlanViewAreaId);
-  }, [prefetchedTables, diningAreas.length, floorPlanViewAreaId, publicBookingAreaMode, staffAreaId]);
+    if (!tableAssignmentAreaId) return prefetchedTables;
+    return prefetchedTables.filter((t) => t.area_id === tableAssignmentAreaId);
+  }, [prefetchedTables, diningAreas.length, tableAssignmentAreaId]);
 
   const phoneE164 = normalizeToE164(phone, phoneDefaultCountry);
   const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
@@ -498,7 +759,7 @@ export function UnifiedBookingForm({
   }, [calendarMonth]);
 
   const resetForm = useCallback(() => {
-    setDate(initialDate ?? new Date().toISOString().slice(0, 10));
+    setDate(initialDate ?? localCalendarDateStr());
     setPartySize(2);
     setOpenPanel(null);
     setGridCenter('20:00');
@@ -520,7 +781,19 @@ export function UnifiedBookingForm({
     setRequireDeposit(false);
     setError(null);
     setResult(null);
-  }, [initialDate, initialTime]);
+    setCoverDurationMinutes(90);
+    setCoverDurationDirty(false);
+    setTableAssignmentAreaId((prev) => {
+      if (diningAreas.length <= 1) return null;
+      if (prev && diningAreas.some((a) => a.id === prev)) return prev;
+      return diningAreas[0]!.id;
+    });
+    assignmentSlotIdentityRef.current = null;
+    if (initialDate == null) {
+      setAvailabilitySeedReady(false);
+      setAvailabilitySeedGeneration((g) => g + 1);
+    }
+  }, [initialDate, initialTime, diningAreas]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -532,17 +805,151 @@ export function UnifiedBookingForm({
       return;
     }
 
+    if (isEdit && editBookingId && editBaselineRef.current) {
+      const orig = editBaselineRef.current;
+      const timeHm = selectedTime.slice(0, 5);
+      const origTime = orig.booking_time.slice(0, 5);
+      const areaChanged =
+        diningAreas.length > 1 && (tableAssignmentAreaId ?? null) !== (orig.area_id ?? null);
+      const scheduleChanged =
+        date !== orig.booking_date ||
+        timeHm !== origTime ||
+        partySize !== orig.party_size ||
+        areaChanged;
+
+      setSaving(true);
+      try {
+        if (scheduleChanged) {
+          const body: Record<string, unknown> = {
+            booking_date: date,
+            booking_time: timeHm,
+            party_size: partySize,
+            duration_minutes: Math.min(
+              COVER_TIME_MAX,
+              Math.max(COVER_TIME_MIN, Math.round(Number(coverDurationMinutes)) || COVER_TIME_MIN),
+            ),
+          };
+          if (diningAreas.length > 1 && tableAssignmentAreaId) {
+            body.area_id = tableAssignmentAreaId;
+          }
+          const res = await fetch(`/api/venue/bookings/${editBookingId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            setError(typeof payload.error === 'string' ? payload.error : 'Failed to update booking');
+            return;
+          }
+        } else {
+          const baselineDur = suggestDurationFromEditSnapshot(orig);
+          const clampedDur = Math.min(
+            COVER_TIME_MAX,
+            Math.max(COVER_TIME_MIN, Math.round(Number(coverDurationMinutes)) || COVER_TIME_MIN),
+          );
+          if (clampedDur !== baselineDur) {
+            const res = await fetch(`/api/venue/bookings/${editBookingId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ duration_minutes: clampedDur }),
+            });
+            if (!res.ok) {
+              const payload = await res.json().catch(() => ({}));
+              setError(typeof payload.error === 'string' ? payload.error : 'Failed to update booking');
+              return;
+            }
+          }
+        }
+
+        const detailsPayload: Record<string, unknown> = {};
+        if (name.trim() !== (orig.guest_name ?? '').trim()) {
+          detailsPayload.guest_name = name.trim();
+        }
+        const origPhone = orig.guest_phone ?? '';
+        if (resolvedPhone !== origPhone) {
+          detailsPayload.guest_phone = resolvedPhone;
+        }
+        const origEmail = (orig.guest_email ?? '').trim();
+        if (email.trim() !== origEmail) {
+          detailsPayload.guest_email = email.trim() || null;
+        }
+
+        if (Object.keys(detailsPayload).length > 0) {
+          const res = await fetch(`/api/venue/bookings/${editBookingId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(detailsPayload),
+          });
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            setError(typeof payload.error === 'string' ? payload.error : 'Failed to update guest details');
+            return;
+          }
+        }
+
+        const desired = tableIdsToAssign ?? [];
+        const origIds = [...orig.table_ids].sort();
+        const newIds = [...desired].sort();
+
+        if (scheduleChanged && advancedMode && newIds.length > 0) {
+          const assignRes = await fetch('/api/venue/tables/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ booking_id: editBookingId, table_ids: desired }),
+          });
+          if (!assignRes.ok) {
+            const assignPayload = await assignRes.json().catch(() => ({}));
+            addToast(
+              typeof assignPayload.error === 'string'
+                ? assignPayload.error
+                : 'Booking updated, but table assignment failed',
+              'error',
+            );
+          }
+        } else if (!scheduleChanged && origIds.join('|') !== newIds.join('|')) {
+          const assignBody =
+            newIds.length === 0
+              ? { action: 'unassign', booking_id: editBookingId }
+              : origIds.length > 0
+                ? {
+                    action: 'reassign',
+                    booking_id: editBookingId,
+                    old_table_ids: origIds,
+                    new_table_ids: newIds,
+                  }
+                : { booking_id: editBookingId, table_ids: newIds };
+          const assignRes = await fetch('/api/venue/tables/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(assignBody),
+          });
+          if (!assignRes.ok) {
+            const assignPayload = await assignRes.json().catch(() => ({}));
+            setError(
+              typeof assignPayload.error === 'string'
+                ? assignPayload.error
+                : 'Failed to update table assignment',
+            );
+            return;
+          }
+        }
+
+        addToast('Booking updated', 'success');
+        onCreated({ booking_id: editBookingId });
+      } catch {
+        setError('Failed to update booking');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     setSaving(true);
     try {
-      const slotForArea =
-        selectedSlotKey ? slots.find((s) => s.key === selectedSlotKey) : slots.find((s) => s.start_time === selectedTime);
       let resolvedAreaId: string | undefined;
-      if (diningAreas.length > 1) {
-        if (publicBookingAreaMode === 'manual' && staffAreaId) {
-          resolvedAreaId = staffAreaId;
-        } else {
-          resolvedAreaId = slotForArea?.area_id;
-        }
+      if (diningAreas.length > 1 && tableAssignmentAreaId) {
+        resolvedAreaId = tableAssignmentAreaId;
       }
 
       const createRes = await fetch('/api/venue/bookings', {
@@ -559,6 +966,17 @@ export function UnifiedBookingForm({
           special_requests: notes.trim() || undefined,
           require_deposit: requireDeposit,
           ...(resolvedAreaId ? { area_id: resolvedAreaId } : {}),
+          ...(coverDurationDirty
+            ? {
+                duration_minutes: Math.min(
+                  COVER_TIME_MAX,
+                  Math.max(
+                    COVER_TIME_MIN,
+                    Math.round(Number(coverDurationMinutes)) || COVER_TIME_MIN,
+                  ),
+                ),
+              }
+            : {}),
         }),
       });
 
@@ -750,8 +1168,10 @@ export function UnifiedBookingForm({
 
             {openPanel === 'date' && (() => {
               const { yr, mo, cells } = calendarGrid;
-              const todayStr = toDateStr(new Date());
-              const tomorrowStr = toDateStr(new Date(Date.now() + 86400000));
+              const todayStr = localCalendarDateStr();
+              const tomorrow = new Date();
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              const tomorrowStr = localCalendarDateStr(tomorrow);
               const nowDate = new Date();
               const canGoPrev = new Date(yr, mo - 1, 1) >= new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
 
@@ -896,16 +1316,17 @@ export function UnifiedBookingForm({
 
       {/* ── Dining area tabs (staff, multi-area manual mode) ── */}
       {showStaffAreaTabs && (
-        <div className="flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-2 sm:rounded-xl">
+        <div className="flex min-h-11 flex-nowrap gap-2 overflow-x-auto rounded-lg border border-slate-100 bg-slate-50/80 p-2 sm:rounded-xl sm:min-h-12">
           {diningAreas.map((a) => (
             <button
               key={a.id}
               type="button"
               onClick={() => {
                 setStaffAreaId(a.id);
+                setTableAssignmentAreaId(a.id);
                 setSelectedSlotKey(null);
               }}
-              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+              className={`inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
                 staffAreaId === a.id
                   ? 'border-brand-500 bg-brand-50 text-brand-900'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
@@ -970,6 +1391,32 @@ export function UnifiedBookingForm({
         )}
       </div>
 
+      <div>
+        <label htmlFor="ubf-cover-duration" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
+          Cover time
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            id="ubf-cover-duration"
+            type="number"
+            min={COVER_TIME_MIN}
+            max={COVER_TIME_MAX}
+            step={5}
+            value={coverDurationMinutes}
+            onChange={(e) => {
+              const raw = parseInt(e.target.value, 10);
+              if (Number.isNaN(raw)) return;
+              setCoverDurationDirty(true);
+              setCoverDurationMinutes(
+                Math.min(COVER_TIME_MAX, Math.max(COVER_TIME_MIN, raw)),
+              );
+            }}
+            className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-base tabular-nums transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:py-2.5 sm:text-sm"
+          />
+          <span className="text-xs text-slate-600 sm:text-sm">minutes at the table</span>
+        </div>
+      </div>
+
       {/* Divider */}
       <div className="border-t border-slate-100" />
 
@@ -1026,33 +1473,37 @@ export function UnifiedBookingForm({
           />
         </div>
 
-        <div>
-          <label htmlFor="ubf-dietary" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Dietary notes <span className="text-slate-400">(optional)</span>
-          </label>
-          <textarea
-            id="ubf-dietary"
-            value={dietaryNotes}
-            onChange={(e) => setDietaryNotes(e.target.value)}
-            rows={2}
-            placeholder="Allergies, intolerances, dietary requirements..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-          />
-        </div>
+        {!isEdit && (
+          <>
+            <div>
+              <label htmlFor="ubf-dietary" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
+                Dietary notes <span className="text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                id="ubf-dietary"
+                value={dietaryNotes}
+                onChange={(e) => setDietaryNotes(e.target.value)}
+                rows={2}
+                placeholder="Allergies, intolerances, dietary requirements..."
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+              />
+            </div>
 
-        <div>
-          <label htmlFor="ubf-notes" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Notes <span className="text-slate-400">(optional)</span>
-          </label>
-          <textarea
-            id="ubf-notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="Internal notes for staff..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
-          />
-        </div>
+            <div>
+              <label htmlFor="ubf-notes" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
+                Notes <span className="text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                id="ubf-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                placeholder="Internal notes for staff..."
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Table suggestions (advanced mode only) */}
@@ -1061,6 +1512,33 @@ export function UnifiedBookingForm({
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:mb-2.5 sm:text-xs">
             Table Assignment
           </p>
+
+          {diningAreas.length > 1 && (
+            <div className="mb-2 min-h-[4.25rem] rounded-lg border border-slate-100 bg-white/80 p-2 sm:mb-2.5">
+              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">Area</p>
+              <div className="flex flex-nowrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1">
+                {diningAreas.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => selectTableAssignmentArea(a.id)}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+                      tableAssignmentAreaId === a.id
+                        ? 'border-brand-500 bg-brand-50 text-brand-900'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: a.colour || '#6366F1' }}
+                      aria-hidden
+                    />
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mb-2 inline-flex w-full rounded-lg border border-slate-200 bg-white p-0.5 sm:mb-2.5 sm:w-auto">
             <button
@@ -1096,16 +1574,18 @@ export function UnifiedBookingForm({
           </div>
 
           {tableAssignMode === 'suggested' && (
-            <>
+            <div className="min-h-[280px]">
               {loadingSuggestions ? (
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-xs text-slate-400">
                   <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-                  Loading suggestions...
+                  Loading suggestions…
                 </div>
               ) : suggestions.length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  No table suggestions available for this time and party size. Try floor plan to pick manually.
-                </p>
+                <div className="flex min-h-[280px] flex-col justify-center">
+                  <p className="text-xs text-slate-500">
+                    No table suggestions available for this time and party size. Try floor plan to pick manually.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-1">
                   {suggestions.slice(0, 5).map((suggestion) => {
@@ -1142,57 +1622,32 @@ export function UnifiedBookingForm({
                   })}
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {tableAssignMode === 'floor' && (
-            <>
-              {diningAreas.length > 1 && publicBookingAreaMode === 'auto' && (
-                <div
-                  className="mb-2 flex flex-wrap gap-1.5"
-                  role="tablist"
-                  aria-label="Floor plan dining area"
-                >
-                  {diningAreas.map((a) => {
-                    const active = floorPlanViewAreaId === a.id;
-                    return (
-                      <button
-                        key={a.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        onClick={() => setFloorPlanViewAreaId(a.id)}
-                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                          active
-                            ? 'border-slate-800 bg-slate-900 text-white'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ background: a.colour || '#94a3b8' }}
-                          aria-hidden
-                        />
-                        {a.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+            <div className="min-h-[280px]">
               <MiniFloorPlanPicker
                 tables={tablesForFloorPlanPicker}
                 selectedIds={manualTableIds}
                 onChange={setManualTableIds}
                 occupiedTableIds={occupiedTableIds}
                 partySize={partySize}
-                minHeight={220}
+                minHeight={248}
               />
-            </>
+            </div>
           )}
         </div>
       )}
 
+      {isEdit && editSnapshot?.deposit_status === 'Paid' && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm">
+          Changing party size won&apos;t adjust the deposit already paid.
+        </p>
+      )}
+
       {/* Deposit toggle */}
+      {!isEdit && (
       <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:rounded-xl sm:px-4 sm:py-3">
         <div className="min-w-0 pr-1">
           <p className="text-xs font-medium text-slate-700 sm:text-sm">Require deposit</p>
@@ -1215,6 +1670,7 @@ export function UnifiedBookingForm({
           />
         </button>
       </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -1234,7 +1690,7 @@ export function UnifiedBookingForm({
           disabled={!canSubmit}
           className="min-h-[44px] w-full touch-manipulation rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:flex-1 sm:rounded-xl sm:py-3"
         >
-          {saving ? 'Creating...' : 'Create Booking'}
+          {saving ? (isEdit ? 'Saving…' : 'Creating...') : isEdit ? 'Save changes' : 'Create Booking'}
         </button>
         {onClose && (
           <button
@@ -1259,7 +1715,7 @@ export function UnifiedBookingForm({
           role="dialog"
           aria-modal="true"
           aria-label="Create booking"
-          className={`max-h-[min(100dvh,100vh)] w-full max-w-[min(100vw,42rem)] overflow-y-auto rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:my-8 sm:rounded-2xl sm:p-6 sm:pb-6 ${advancedMode ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}
+          className={`max-h-[min(100dvh,100vh)] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:my-8 sm:rounded-2xl sm:p-6 sm:pb-6 ${advancedMode ? 'sm:max-w-2xl' : ''}`}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="mb-3 flex items-center justify-between gap-2 sm:mb-5">
@@ -1282,7 +1738,9 @@ export function UnifiedBookingForm({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-6">
+    <div
+      className={`mx-auto w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-6 ${advancedMode ? 'max-w-2xl' : 'max-w-lg'}`}
+    >
       {formContent}
     </div>
   );

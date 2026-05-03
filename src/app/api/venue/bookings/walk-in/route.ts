@@ -28,6 +28,8 @@ const walkInSchema = z.object({
   email: z.union([z.literal(''), z.string().email()]).optional(),
   /** Override venue-derived cover time for table walk-ins (minutes at the table). */
   duration_minutes: z.number().int().min(15).max(300).optional(),
+  /** When no `table_ids` are sent, scopes service inference, suggestions, and temporary tables to this dining area. */
+  area_id: z.string().uuid().optional(),
 });
 
 function isUuid(value: string | null): value is string {
@@ -422,7 +424,23 @@ export async function POST(request: NextRequest) {
     }
 
     const resolvedTableIds = rawTableIds ?? (table_id ? [table_id] : []);
-    const areaId = await inferTableWalkInAreaId(admin, staff.venue_id, resolvedTableIds);
+    let areaId = await inferTableWalkInAreaId(admin, staff.venue_id, resolvedTableIds);
+    if (
+      resolvedTableIds.length === 0 &&
+      parsed.data.area_id &&
+      isUuid(parsed.data.area_id)
+    ) {
+      const { data: areaRow } = await admin
+        .from('areas')
+        .select('id')
+        .eq('id', parsed.data.area_id)
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (areaRow?.id) {
+        areaId = areaRow.id as string;
+      }
+    }
     if (!areaId) {
       return NextResponse.json({ error: 'Availability setup is required before creating walk-ins' }, { status: 503 });
     }

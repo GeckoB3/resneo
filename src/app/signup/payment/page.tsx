@@ -14,6 +14,8 @@ import {
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
@@ -30,6 +32,7 @@ export default function PaymentPage() {
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   /** Until checked, we do not know if the browser has a Supabase session (required for checkout). */
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState(false);
@@ -264,7 +267,7 @@ export default function PaymentPage() {
           ) : (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">
-                Reserve NI {planLabel}: &pound;{totalPrice}/month
+                ReserveNI {planLabel}: &pound;{totalPrice}/month
               </p>
               <p className="mt-1 leading-relaxed">
                 {isRestaurant
@@ -311,18 +314,73 @@ export default function PaymentPage() {
           </div>
         )}
 
+        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <input
+            type="checkbox"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span className="text-xs leading-relaxed text-slate-600">
+            By signing up, I confirm I have authority to act for this business and agree to the ReserveNI{' '}
+            <a
+              href="/terms/customer"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              customer terms
+            </a>
+            {', '}
+            <a
+              href="/terms/data-processing"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              data processing terms
+            </a>
+            {', '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Website Terms of Use
+            </a>
+            {' and '}
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Privacy Policy
+            </a>
+            .
+          </span>
+        </label>
+
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={loading || !hasSession || planFamilyBlocked}
-          className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
+          disabled={loading || !hasSession || planFamilyBlocked || !termsAccepted}
+          className="mt-4 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
           {loading
             ? 'Processing...'
             : isFounding ? 'Complete setup' : 'Proceed to payment'}
         </button>
 
-        <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
+        <p className="mt-3 text-center text-xs text-slate-500">
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+        </p>
         {!isFounding && (
           <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.

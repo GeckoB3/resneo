@@ -8,6 +8,7 @@ import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessag
 import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -1632,22 +1633,10 @@ export function ResourceTimelineView({
                     {(isAdmin ||
                       (selected.display_on_calendar_id !== null &&
                         linkedPractitionerIds.includes(selected.display_on_calendar_id))) ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => openEdit(selected)}
-                          className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDelete(selected.id)}
-                          className="min-h-10 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-100"
-                        >
-                          Delete
-                        </button>
-                      </>
+                      <DashboardEntityRowActions
+                        onEdit={() => openEdit(selected)}
+                        onDelete={() => void handleDelete(selected.id)}
+                      />
                     ) : null}
                   </div>
                 }

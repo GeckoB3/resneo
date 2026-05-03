@@ -169,15 +169,15 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
       <footer className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/90 backdrop-blur py-3 text-center text-xs text-slate-400">
         <span>
           <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Privacy
+            Privacy Policy
           </a>
           {' · '}
           <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Terms
+            Website Terms of Use
           </a>
           {' · '}
           <a href="https://www.reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Powered by Reserve NI
+            Powered by ReserveNI
           </a>
         </span>
       </footer>

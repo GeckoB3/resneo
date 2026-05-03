@@ -1,10 +1,10 @@
 /**
- * Staff-initiated guest message delivery channel for POST /api/venue/bookings/[id]/message.
+ * Staff-initiated guest message channel for bookings and contacts endpoints.
  */
 export type GuestMessageChannel = 'email' | 'sms' | 'both';
 
 export const GUEST_MESSAGE_CHANNEL_OPTIONS: Array<{ value: GuestMessageChannel; label: string }> = [
-  { value: 'both', label: 'Email & SMS (use what is on file)' },
+  { value: 'both', label: 'Email & SMS (if available)' },
   { value: 'email', label: 'Email only' },
   { value: 'sms', label: 'SMS only' },
 ];

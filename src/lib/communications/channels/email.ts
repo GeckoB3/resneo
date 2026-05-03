@@ -61,7 +61,7 @@ function textToHtml(text: string): string {
 
     // Logo
     '<tr><td style="padding:0 0 20px 0;border-bottom:3px solid #4E6B78">',
-    `<img src="${base}/Logo.png" alt="Reserve NI" width="120" style="height:auto;display:block" />`,
+    `<img src="${base}/Logo.png" alt="ReserveNI" width="120" style="height:auto;display:block" />`,
     '</td></tr>',
 
     // Body
@@ -71,9 +71,9 @@ function textToHtml(text: string): string {
 
     // Footer
     '<tr><td style="padding:20px 0 0 0;border-top:1px solid #e2e8f0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:12px;color:#94a3b8">',
-    `<a href="${base}/privacy" target="_blank" style="color:#94a3b8;text-decoration:underline">Privacy</a>`,
+    `<a href="${base}/privacy" target="_blank" style="color:#94a3b8;text-decoration:underline">Privacy Policy</a>`,
     ' &middot; ',
-    `<a href="${base}/terms" target="_blank" style="color:#94a3b8;text-decoration:underline">Terms</a>`,
+    `<a href="${base}/terms" target="_blank" style="color:#94a3b8;text-decoration:underline">Website Terms of Use</a>`,
     '</td></tr>',
 
     '</table>',
@@ -96,7 +96,7 @@ export class EmailChannel implements MessageChannel {
       await sgMail.send({
         to: email,
         from: fromEmail,
-        subject: template.subject ?? 'Reserve NI',
+        subject: template.subject ?? 'ReserveNI',
         text: template.body,
         html: template.html ?? textToHtml(template.body),
       });

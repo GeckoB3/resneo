@@ -20,7 +20,7 @@ import {
 } from '@/lib/booking/infer-booking-row-model';
 import {
   attendanceConfirmationSources,
-  showAttendanceConfirmedPill,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
@@ -580,7 +580,7 @@ export function AppointmentDetailSheet({
                     </span>
                   )}
                   {isApptStyle &&
-                    showAttendanceConfirmedPill(detail) &&
+                    showAttendanceConfirmedSupplementPill(detail) &&
                     ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <span
                       className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80"

@@ -3,12 +3,12 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy - Reserve NI',
+  title: 'Privacy Policy - ReserveNI',
   description:
-    'How Reserve NI collects, uses, and protects personal data in line with UK data protection law.',
+    'How JAR 26 LTD trading as ReserveNI collects, uses, and protects personal data when you use our website, platform and booking features.',
 };
 
-const LAST_UPDATED = '26 April 2026';
+const LAST_UPDATED = '01 May 2026';
 
 export default function PrivacyPage() {
   return (
@@ -16,7 +16,7 @@ export default function PrivacyPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
           <Link href="/">
-            <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="h-8 w-auto" />
+            <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -27,261 +27,481 @@ export default function PrivacyPage() {
           <p className="mb-8 text-sm text-slate-500">Last updated: {LAST_UPDATED}</p>
 
           <div className="prose prose-slate max-w-none space-y-8 text-sm leading-relaxed text-slate-700">
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">1. Purpose and scope</h2>
-              <p>
-                This Privacy Policy explains how Reserve NI (&ldquo;we&rdquo;, &ldquo;us&rdquo;) processes
-                personal data when you use reserveni.com and our booking and guest management platform for
-                independent venues in Northern Ireland, including guest-facing booking, communications, payments
-                facilitated through Stripe, and the staff dashboard.
-              </p>
-              <p className="mt-3">
-                We process personal data in accordance with the UK General Data Protection Regulation (UK GDPR) as
-                it forms part of the law of the United Kingdom by virtue of the European Union (Withdrawal) Act
-                2018, the Data Protection Act 2018, the Privacy and Electronic Communications Regulations 2003
-                (PECR) where they apply, and related UK law.
-              </p>
-            </section>
+            <p>
+              This Privacy Policy explains how JAR 26 LTD trading as ReserveNI collects, uses and protects personal
+              data when you use our website, contact us, enquire about our services, sign up for ReserveNI, or interact
+              with booking pages or platform features operated using ReserveNI.
+            </p>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">2. Who is responsible for your data</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">1. Who we are</h2>
               <p>
-                <strong>Reserve NI as controller.</strong> We are the data controller for personal data we process
-                to operate our service, authenticate venue users, take subscription payments, provide support,
-                comply with law, and secure our systems.
+                ReserveNI is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
+                NI740269.
+              </p>
+              <p className="mt-3">We trade as ReserveNI.</p>
+              <p className="mt-3">
+                Our registered office is 100a Main Street, Bangor, Northern Ireland, BT20 4AG.
               </p>
               <p className="mt-3">
-                <strong>Venues as controllers.</strong> Each venue that uses Reserve NI decides why and how guest
-                data is used for its own bookings and marketing (where permitted). In those situations the venue is
-                typically an independent data controller and we process that data as a{' '}
-                <strong>processor</strong> on the venue&apos;s documented instructions, under our agreement with
-                them, unless we are also required to process the same data as controller for our own legal or
-                security purposes (for example fraud prevention).
+                Our trading address is 5 Church Road, Holywood, Northern Ireland, BT18 9BU.
               </p>
               <p className="mt-3">
-                If you make a booking, you may exercise privacy rights with the venue directly. You can also
-                contact us and we will forward or assist where appropriate.
+                You can contact us by email:{' '}
+                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
+                  hello@reserveni.com
+                </a>
+                .
               </p>
-            </section>
-
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">3. Contact details</h2>
-              <p>
-                Email:{' '}
+              <p className="mt-3">Our ICO registration number is [to be added once issued].</p>
+              <p className="mt-3">
+                For privacy or data protection requests, please email{' '}
                 <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
                   hello@reserveni.com
                 </a>{' '}
-                (please include &ldquo;Privacy&rdquo; in the subject line).
+                and clearly mark your message as a privacy request. If we publish a dedicated privacy email address, you
+                may also use that address.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">2. Scope of this policy</h2>
+              <p>This policy applies to personal data we process in connection with:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>visits to our public website;</li>
+                <li>enquiries, contact forms and demo requests;</li>
+                <li>sales, onboarding and customer communications;</li>
+                <li>ReserveNI business customer accounts;</li>
+                <li>support requests;</li>
+                <li>platform administration, security and billing;</li>
+                <li>
+                  guest or client bookings made through ReserveNI-powered booking pages, where applicable.
+                </li>
+              </ul>
+              <p className="mt-3">
+                Business customers who use the ReserveNI platform may receive additional contractual data-protection
+                terms during onboarding, including a data processing addendum. Those terms govern our processing of
+                venue-controlled guest/client data in more detail.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">
+                3. When we are controller and when we are processor
+              </h2>
+              <p>
+                For personal data collected through our website, sales enquiries, customer accounts, billing, support,
+                security, legal compliance, business administration and our own marketing, JAR 26 LTD trading as
+                ReserveNI is usually the controller.
               </p>
               <p className="mt-3">
-                If we need to verify your identity before fulfilling a rights request, we will tell you. Venue staff
-                may use{' '}
-                <a href="mailto:support@reserveni.com" className="text-brand-600 hover:underline">
-                  support@reserveni.com
-                </a>{' '}
-                for account-related support; privacy rights about your own staff account can still be sent to
-                hello@reserveni.com.
+                For personal data about guests, clients or end users that venues or business customers enter into or
+                collect through the ReserveNI platform, the venue or business customer is usually the controller and
+                ReserveNI acts as processor on that venue&apos;s behalf.
+              </p>
+              <p className="mt-3">
+                Venue customers are responsible for ensuring they have an appropriate lawful basis, privacy notice and
+                any required consents for the personal data they collect and use through ReserveNI.
+              </p>
+              <p className="mt-3">
+                If you are a guest or client of a venue and your request relates to a booking, service, cancellation,
+                refund, marketing message or client record controlled by that venue, you may need to contact the venue
+                directly. We may assist the venue in responding where required by data-protection law or our customer
+                terms.
               </p>
             </section>
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">4. Personal data we collect</h2>
-              <p>
-                <strong>Guests.</strong>                 When you book or interact with a venue that uses Reserve NI, we may process name, email address,
-                phone number, booking details (time, party size, occasion, dietary or
-                accessibility notes you choose to provide), communications we send on the venue&apos;s behalf, and
-                records of confirmations, cancellations, deposits, and no-shows as configured by the venue.
-                Payment card data is collected by Stripe; we do not store full card numbers on our systems.
+              <p>Depending on how you use ReserveNI, we may collect and process the following types of personal data:</p>
+
+              <p className="mt-4 font-semibold text-slate-900">Website visitors and enquirers</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>name;</li>
+                <li>business name;</li>
+                <li>job title or role;</li>
+                <li>email address;</li>
+                <li>phone number;</li>
+                <li>enquiry details;</li>
+                <li>marketing preferences;</li>
+                <li>website usage information;</li>
+                <li>IP address, browser information, device information and technical logs.</li>
+              </ul>
+
+              <p className="mt-4 font-semibold text-slate-900">Business customers and platform users</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>account holder name;</li>
+                <li>business name and trading details;</li>
+                <li>business address;</li>
+                <li>email address;</li>
+                <li>phone number;</li>
+                <li>staff user names and roles;</li>
+                <li>login and authentication information;</li>
+                <li>subscription plan and billing information;</li>
+                <li>payment-provider references;</li>
+                <li>platform settings;</li>
+                <li>booking-page configuration;</li>
+                <li>support messages;</li>
+                <li>audit logs, security logs and usage records.</li>
+              </ul>
+
+              <p className="mt-4 font-semibold text-slate-900">Guests or clients using ReserveNI-powered booking pages</p>
+              <p className="mt-2">Depending on the venue&apos;s configuration, booking pages may collect:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>name;</li>
+                <li>email address;</li>
+                <li>phone number;</li>
+                <li>booking date and time;</li>
+                <li>service selected;</li>
+                <li>venue selected;</li>
+                <li>staff or resource selected;</li>
+                <li>booking notes or special requests;</li>
+                <li>cancellation or rescheduling information;</li>
+                <li>deposit/payment references;</li>
+                <li>reminder and communication records.</li>
+              </ul>
+
+              <p className="mt-4 font-semibold text-slate-900">Sensitive or special-category data</p>
+              <p className="mt-2">
+                Some venues may ask for information such as accessibility needs, dietary requirements, health-related
+                information, injury information, disability-related information or other sensitive details where
+                relevant to a booking or service.
               </p>
               <p className="mt-3">
-                <strong>Venue users and account holders.</strong> We process account identifiers (such as email),
-                profile and business details you supply, Stripe or billing references, usage and audit logs needed
-                for security, and correspondence with support.
+                Venues should not collect health, disability, accessibility, dietary or other sensitive information
+                through ReserveNI unless it is necessary for the booking or service and they have a lawful basis for
+                doing so. Where a venue collects this information, the venue is responsible for explaining this to the
+                individual and complying with applicable data-protection law.
               </p>
               <p className="mt-3">
-                <strong>Website and enquiries.</strong> If you contact us via forms or email, we process what you
-                send us and technical metadata needed to deliver the message.
+                ReserveNI does not require venues to collect special-category data unless a specific platform feature or
+                venue configuration makes that necessary.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">Support access to venue accounts</h2>
-              <p>
-                ReserveNI support staff may access your account to help resolve issues you&apos;ve reported. Access is
-                logged, time-limited, and only used for support purposes. You will be notified by email when this
-                happens, and you can review all support activity in your settings (Settings → Support access).
-              </p>
-              <p className="mt-3">
-                We do not store full payment card numbers on our systems; card data is handled by Stripe. Support
-                sessions use the selected venue user&apos;s normal permissions, are time-limited, and any changes made
-                during the session are recorded in the same audit log.
-              </p>
-            </section>
-
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">5. Purposes and lawful bases (UK GDPR Article 6)</h2>
-              <p>We process personal data on the following bases, as applicable:</p>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">5. How we collect personal data</h2>
+              <p>We may collect personal data:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
-                  <strong>Contract</strong> (Article 6(1)(b)): to provide the Service, manage subscriptions, and
-                  facilitate bookings and payments you have asked for.
+                  directly from you when you use the website, submit a form, contact us, sign up or use the platform;
+                </li>
+                <li>from business customers who configure the platform or upload/import information;</li>
+                <li>from guests or clients who make bookings through ReserveNI-powered booking pages;</li>
+                <li>from payment providers, where payments or deposits are processed;</li>
+                <li>automatically through website, platform, security and server logs;</li>
+                <li>from third-party service providers used to operate, secure, support and improve ReserveNI.</li>
+              </ul>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">6. How we use personal data</h2>
+              <p>We use personal data for the following purposes:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>to operate and secure our website;</li>
+                <li>to respond to enquiries and demo requests;</li>
+                <li>to provide information about ReserveNI;</li>
+                <li>to create and manage business customer accounts;</li>
+                <li>to provide, maintain and improve the ReserveNI platform;</li>
+                <li>to support booking pages and booking workflows configured by venues;</li>
+                <li>to send transactional emails, confirmations, reminders, notices and service messages;</li>
+                <li>to process subscriptions, billing records and payment-provider references;</li>
+                <li>to provide customer support;</li>
+                <li>to monitor usage, diagnose issues and improve performance;</li>
+                <li>to prevent fraud, misuse, spam, unauthorised access and security incidents;</li>
+                <li>to comply with legal, tax, accounting and regulatory obligations;</li>
+                <li>to establish, exercise or defend legal claims;</li>
+                <li>to send marketing communications where permitted by law.</li>
+              </ul>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">7. Lawful bases</h2>
+              <p>Where ReserveNI acts as controller, we rely on one or more of the following lawful bases:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>
+                  <strong>Contract:</strong> where processing is necessary to provide website functions, respond to
+                  service requests, manage customer accounts, provide the platform or administer subscriptions.
                 </li>
                 <li>
-                  <strong>Legitimate interests</strong> (Article 6(1)(f)): to secure the platform, troubleshoot,
-                  improve the Service in ways you would expect, and protect our business and users, balanced against
-                  your rights.
+                  <strong>Legitimate interests:</strong> where processing is necessary for running and improving our
+                  business, responding to enquiries, securing the website and platform, preventing misuse, supporting
+                  customers, keeping records and communicating with business contacts, provided those interests are not
+                  overridden by individual rights.
                 </li>
                 <li>
-                  <strong>Legal obligation</strong> (Article 6(1)(c)): to comply with tax, accounting, or lawful
-                  requests from authorities.
+                  <strong>Consent:</strong> where consent is required, for example for certain marketing communications
+                  or non-essential cookies/analytics.
                 </li>
                 <li>
-                  <strong>Consent</strong> (Article 6(1)(a)): where the law requires consent (for example certain
-                  marketing cookies or optional marketing messages), which you may withdraw at any time.
+                  <strong>Legal obligation:</strong> where processing is necessary for tax, accounting, company,
+                  regulatory, data-protection or other legal obligations.
+                </li>
+                <li>
+                  <strong>Legal claims:</strong> where processing is necessary to establish, exercise or defend legal
+                  claims.
                 </li>
               </ul>
               <p className="mt-3">
-                Venues must identify their own lawful bases when they act as controllers for guest data (often
-                contract and legitimate interests for service messages; consent or soft opt-in under PECR for some
-                marketing, depending on context).
+                Where ReserveNI acts as processor for venue-controlled guest/client data, we process that data on the
+                instructions of the relevant venue customer, subject to our customer terms and data processing terms.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">6. Special category and criminal offence data</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">8. Guest bookings and venue-controlled data</h2>
               <p>
-                If you give us or a venue health-related or other special category data (for example dietary
-                information that reveals health), we expect venues to collect it only where necessary and lawful. We
-                process it strictly to provide the Service and on appropriate legal grounds (which may include
-                explicit consent or substantial public interest conditions as set out in UK law).
+                Where you make a booking with a venue through a ReserveNI-powered booking page, the venue is usually
+                responsible for deciding why and how your booking data is used.
+              </p>
+              <p className="mt-3">
+                ReserveNI provides the software and technical infrastructure that allows the venue to manage bookings,
+                reminders, customer records, deposits and related communications.
+              </p>
+              <p className="mt-3">
+                The venue is responsible for its own services, booking rules, cancellation policies, refunds, customer
+                communications, marketing permissions and privacy information.
+              </p>
+              <p className="mt-3">
+                If your request relates to a booking, refund, cancellation, no-show, venue service, venue marketing
+                message or venue-held client record, you should usually contact the venue first.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">7. Recipients and processors</h2>
-              <p>We share personal data only as needed to run the Service:</p>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">9. Payments and deposits</h2>
+              <p>
+                Where payments, deposits or subscription payments are made in connection with ReserveNI, they are
+                processed by third-party payment providers such as Stripe.
+              </p>
+              <p className="mt-3">
+                ReserveNI does not hold booking money. Booking deposits and venue payments are
+                processed and managed through the venue and/or the relevant payment provider.
+              </p>
+              <p className="mt-3">
+                We may receive payment-related information such as payment status, payment references, customer
+                identifiers, subscription references, connected-account identifiers, transaction metadata, invoices,
+                billing status and fraud/security signals. We do not receive full card numbers from payment providers.
+              </p>
+              <p className="mt-3">
+                Payment providers process personal data in accordance with their own terms and privacy policies.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">10. Emails, SMS and service messages</h2>
+              <p>
+                ReserveNI and venues using ReserveNI may send transactional or service messages, such as booking
+                confirmations, reminders, cancellation notices, deposit requests, account emails, security messages and
+                support communications.
+              </p>
+              <p className="mt-3">
+                These messages are generally necessary to provide the website, platform, booking or customer service
+                requested.
+              </p>
+              <p className="mt-3">
+                Marketing emails, promotional SMS messages, newsletters, offers, rebooking campaigns or similar
+                marketing communications will only be sent where permitted by law. You can opt out of ReserveNI
+                marketing communications at any time by using the unsubscribe option where provided or by contacting
+                us.
+              </p>
+              <p className="mt-3">
+                Venues are responsible for ensuring they have the correct permissions to send their own marketing
+                communications through or in connection with ReserveNI.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">11. Cookies and similar technologies</h2>
+              <p>
+                We use cookies and similar technologies where necessary to operate, secure and improve our website and
+                platform.
+              </p>
+              <p className="mt-3">
+                If we use only strictly necessary cookies, we will not use those cookies for advertising or
+                non-essential tracking.
+              </p>
+              <p className="mt-3">
+                If we introduce analytics, advertising, tracking pixels, heatmaps or other non-essential cookies or
+                similar technologies, we will update this policy and, where required, ask for consent before those
+                technologies are used.
+              </p>
+              <p className="mt-3">
+                You can usually control cookies through your browser settings. Blocking some cookies may affect how the
+                website or platform works.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">12. Who we share personal data with</h2>
+              <p>
+                We may share personal data with trusted third-party providers who help us operate, secure and support
+                ReserveNI. These may include:
+              </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>
-                  <strong>The venue you book with</strong>, for operational and customer service purposes.
-                </li>
-                <li>
-                  <strong>Stripe</strong> (United States and other locations where Stripe operates): payment
-                  services and fraud prevention. Stripe acts as a controller for some processing; see{' '}
-                  <a
-                    href="https://stripe.com/gb/privacy"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-brand-600 hover:underline"
-                  >
-                    stripe.com/gb/privacy
-                  </a>
-                  . International transfers rely on appropriate safeguards such as the UK International Data
-                  Transfer Agreement or addendum, or adequacy regulations, as applicable.
-                </li>
-                <li>
-                  <strong>Supabase</strong> and infrastructure partners: hosting and database services. We
-                  configure services to use regions appropriate for our deployment (commonly EU or UK where
-                  available).
-                </li>
-                <li>
-                  <strong>SendGrid</strong> and <strong>Twilio</strong> (or equivalent providers): to send email and
-                  SMS as configured by you or the venue. Their use is governed by our agreements and their privacy
-                  notices.
-                </li>
+                <li>hosting and infrastructure providers;</li>
+                <li>database and authentication providers;</li>
+                <li>payment providers such as Stripe;</li>
+                <li>email and SMS providers;</li>
+                <li>customer support and CRM tools;</li>
+                <li>analytics providers, where enabled;</li>
+                <li>professional advisers, such as accountants, lawyers and insurers;</li>
+                <li>regulators, public authorities, courts or law enforcement where required by law.</li>
               </ul>
-              <p className="mt-3">We do not sell your personal data.</p>
+              <p className="mt-3">
+                Examples of providers we may use include Stripe for payments, Supabase for database/authentication,
+                Vercel for hosting, and email/SMS providers for transactional communications. This list should be kept
+                accurate and updated to reflect the providers actually used.
+              </p>
+              <p className="mt-3">We do not sell personal data to advertisers.</p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">8. International transfers</h2>
-              <p>
-                Some providers may process data outside the UK and European Economic Area. Where we transfer personal
-                data to countries not subject to a UK adequacy decision, we use appropriate safeguards recognised
-                under UK law (such as the UK International Data Transfer Agreement / Addendum to the EU Standard
-                Contractual Clauses, or provider-specific transfer mechanisms).
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">13. International transfers</h2>
+              <p>Some of our service providers may process personal data outside the United Kingdom.</p>
+              <p className="mt-3">
+                Where personal data is transferred internationally, we will take steps designed to ensure appropriate
+                safeguards are in place, such as adequacy regulations, standard contractual clauses, the UK
+                International Data Transfer Agreement/Addendum or other lawful transfer mechanisms where required.
+              </p>
+              <p className="mt-3">
+                Venue-controlled guest/client data may also be subject to the venue&apos;s own privacy information and
+                data-processing arrangements.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">9. Retention</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">14. How long we keep personal data</h2>
               <p>
-                We keep personal data only as long as necessary for the purposes above, including legal, accounting,
-                and dispute resolution needs. Booking and guest records may be retained for the period venues need
-                to operate and as configured in the product, within limits we apply for the platform. When data is no
-                longer needed, we delete or anonymise it in line with our internal schedules, subject to statutory
-                retention duties.
+                We keep personal data only for as long as needed for the purposes described in this policy, including to
+                provide services, comply with legal obligations, resolve disputes, maintain security and enforce
+                agreements.
               </p>
-            </section>
-
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">10. Security</h2>
-              <p>
-                We implement appropriate technical and organisational measures to protect personal data against
-                unauthorised access, alteration, loss, or destruction, including access controls and encryption in
-                transit where standard for the Service. No online service is perfectly secure; we encourage strong
-                passwords and prompt reporting of suspected misuse.
-              </p>
-            </section>
-
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">11. Your rights</h2>
-              <p>Under UK data protection law you have the right to:</p>
+              <p className="mt-3">As a guide:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>access a copy of your personal data;</li>
-                <li>rectify inaccurate data;</li>
-                <li>erase data in certain circumstances;</li>
-                <li>restrict processing in certain circumstances;</li>
-                <li>object to processing based on legitimate interests or for direct marketing;</li>
-                <li>data portability for data you provided where processing is automated and based on consent or contract;</li>
-                <li>withdraw consent where processing is consent-based, without affecting earlier lawful processing;</li>
                 <li>
-                  lodge a complaint with the UK Information Commissioner&apos;s Office (
-                  <a href="https://ico.org.uk" target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
-                    ico.org.uk
-                  </a>
-                  ).
+                  website enquiry and demo request data is usually kept for up to 24 months after the last meaningful
+                  contact;
+                </li>
+                <li>
+                  marketing-contact records are kept until you unsubscribe or object, plus a suppression record so we do
+                  not contact you again by mistake;
+                </li>
+                <li>
+                  customer account and subscription records are kept for the duration of the customer relationship and
+                  then for a period needed for legal, accounting, tax and dispute purposes;
+                </li>
+                <li>billing, invoice and accounting records are usually kept for up to 6 years;</li>
+                <li>support records are usually kept for up to 3 years after the matter is closed;</li>
+                <li>
+                  technical, audit and security logs are usually kept for a shorter period unless needed to investigate
+                  misuse, fraud, security incidents or legal issues;
+                </li>
+                <li>
+                  guest booking and client data controlled by venues is retained in accordance with the relevant
+                  venue&apos;s settings, instructions and our customer terms;
+                </li>
+                <li>
+                  backups may retain limited data for a temporary period before being overwritten or deleted in the
+                  ordinary backup cycle.
                 </li>
               </ul>
               <p className="mt-3">
-                To exercise rights against Reserve NI, email hello@reserveni.com. Where your booking data is
-                controlled by a venue, we may need to direct you to them or work with them to respond.
+                We may retain limited information for longer where necessary to comply with law, maintain suppression
+                lists, resolve disputes, prevent fraud, enforce terms or establish, exercise or defend legal claims.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">12. Cookies and similar technologies</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">15. Security</h2>
               <p>
-                We use cookies and similar technologies that are strictly necessary to operate the site (for example
-                session and security cookies). Where non-essential cookies are introduced in the future, we will
-                obtain consent as required by PECR and UK GDPR. We do not use third-party advertising cookies on the
-                core Service as described here.
+                We use technical and organisational measures designed to protect personal data against unauthorised
+                access, loss, misuse, alteration or disclosure.
+              </p>
+              <p className="mt-3">
+                These measures may include access controls, authentication, encryption in transit, logging,
+                monitoring, backups, staff access controls, vendor due diligence and internal procedures.
+              </p>
+              <p className="mt-3">
+                No website, platform or transmission method is completely secure. Business customers are responsible
+                for keeping their own accounts, passwords, devices, staff permissions and venue configurations secure.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">13. Children</h2>
-              <p>
-                The Service is aimed at businesses and adults making bookings. It is not directed at children under
-                13 for commercial use. If you believe we hold data about a child in error, contact us and we will
-                take appropriate steps.
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">16. Your rights</h2>
+              <p>Depending on the circumstances and applicable law, you may have rights to:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>access your personal data;</li>
+                <li>correct inaccurate personal data;</li>
+                <li>request deletion of your personal data;</li>
+                <li>restrict processing;</li>
+                <li>object to processing;</li>
+                <li>request data portability;</li>
+                <li>withdraw consent where processing is based on consent;</li>
+                <li>complain to the Information Commissioner&apos;s Office.</li>
+              </ul>
+              <p className="mt-3">
+                To exercise your rights, email{' '}
+                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
+                  hello@reserveni.com
+                </a>{' '}
+                and clearly mark your message as a privacy request.
+              </p>
+              <p className="mt-3">
+                If your request relates to venue-controlled guest/client data, we may need to refer you to the relevant
+                venue or consult the venue before responding.
+              </p>
+              <p className="mt-3">We may need to verify your identity before acting on a request.</p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">17. Children and minors</h2>
+              <p>ReserveNI is not intended for children to create business accounts or manage venue services.</p>
+              <p className="mt-3">
+                Some venues may use ReserveNI to manage bookings made by adults on behalf of children or young people. In
+                those cases, the venue is responsible for ensuring it has appropriate privacy information, permissions
+                and safeguards for the booking and service provided.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">14. Automated decision-making</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">18. Automated decision-making</h2>
               <p>
-                We do not use solely automated decision-making that produces legal or similarly significant effects
-                about you in the sense of Article 22 UK GDPR for core booking flows. Venues may apply their own
-                rules (for example waitlists); those are the venue&apos;s responsibility.
+                We do not currently use personal data collected through the public website to make decisions based solely
+                on automated processing that produce legal or similarly significant effects on individuals.
+              </p>
+              <p className="mt-3">
+                If this changes, we will update this policy and provide any information required by law.
               </p>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">15. Changes to this policy</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">19. Complaints</h2>
               <p>
-                We may update this Privacy Policy to reflect changes to our practices or the law. We will revise the
-                &ldquo;Last updated&rdquo; date and, where changes are material for venue customers, notify them by
-                reasonable means (such as email or an in-product notice).
+                If you have concerns about how we handle personal data, please contact us first so we can try to resolve
+                the issue.
+              </p>
+              <p className="mt-3">
+                You also have the right to complain to the Information Commissioner&apos;s Office, the UK data protection
+                regulator. Further information is available at{' '}
+                <a
+                  href="https://www.ico.org.uk"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-600 hover:underline"
+                >
+                  www.ico.org.uk
+                </a>
+                .
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">20. Changes to this policy</h2>
+              <p>
+                We may update this Privacy Policy from time to time. The latest version will be published on this page
+                with the updated date shown above.
               </p>
             </section>
           </div>
@@ -289,11 +509,11 @@ export default function PrivacyPage() {
 
         <div className="mt-6 text-center text-xs text-slate-400">
           <Link href="/terms" className="hover:text-brand-600">
-            Terms of Service
+            Website Terms of Use
           </Link>
           {' · '}
           <Link href="/" className="hover:text-brand-600">
-            Back to Reserve NI
+            Back to ReserveNI
           </Link>
         </div>
       </main>

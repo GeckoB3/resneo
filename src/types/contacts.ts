@@ -14,6 +14,8 @@ export interface GuestListRow {
   total_bookings: number;
   cancelled_count?: number;
   upcoming_booking_count?: number;
+  next_booking_date?: string | null;
+  next_booking_time?: string | null;
   paid_deposit_pence?: number;
   marketing_opt_out?: boolean;
   marketing_consent?: boolean;

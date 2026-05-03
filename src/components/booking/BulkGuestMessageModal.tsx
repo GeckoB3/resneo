@@ -4,18 +4,26 @@ import { useState } from 'react';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { GuestMessageChannelSelect } from './GuestMessageChannelSelect';
 
+export interface BulkGuestMessageModalProps {
+  onClose: () => void;
+  recipientCount: number;
+  sending: boolean;
+  onSend: (message: string, channel: GuestMessageChannel) => void;
+  /** Overrides default subtitle (booking-oriented copy). */
+  description?: string;
+  /** Overrides "Message X guest(s)" when set. */
+  title?: string;
+}
+
 /** Mount only when shown so form state resets without effects. */
 export function BulkGuestMessageModal({
   onClose,
   recipientCount,
   sending,
   onSend,
-}: {
-  onClose: () => void;
-  recipientCount: number;
-  sending: boolean;
-  onSend: (message: string, channel: GuestMessageChannel) => void;
-}) {
+  description,
+  title,
+}: BulkGuestMessageModalProps) {
   const [message, setMessage] = useState('');
   const [channel, setChannel] = useState<GuestMessageChannel>('both');
 
@@ -33,10 +41,11 @@ export function BulkGuestMessageModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id="bulk-guest-msg-title" className="text-lg font-semibold text-slate-900">
-          Message {recipientCount} guest{recipientCount !== 1 ? 's' : ''}
+          {title ?? `Message ${recipientCount} guest${recipientCount !== 1 ? 's' : ''}`}
         </h3>
         <p className="mt-1 text-sm text-slate-600">
-          The same message is sent to each selected booking. Guests without the chosen contact method are skipped.
+          {description ??
+            'The same message is sent to each selected booking. Guests without the chosen contact method are skipped.'}
         </p>
         <label htmlFor="bulk-guest-channel" className="mt-4 block text-xs font-medium text-slate-600">
           Channel
@@ -47,7 +56,7 @@ export function BulkGuestMessageModal({
             value={channel}
             onChange={setChannel}
             disabled={sending}
-            className="w-full min-h-[44px] text-sm"
+            className="w-full min-h-[44px] text-xs"
           />
         </div>
         <label htmlFor="bulk-guest-body" className="mt-3 block text-xs font-medium text-slate-600">

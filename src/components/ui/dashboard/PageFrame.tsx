@@ -12,7 +12,7 @@ export function PageFrame({
 }) {
   return (
     <div
-      className={`mx-auto w-full px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom,0px))] sm:px-6 sm:py-6 sm:pb-6 lg:px-8 lg:py-8 lg:pb-8 ${maxWidthClass} ${className}`}
+      className={`mx-auto min-w-0 w-full px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom,0px))] sm:px-6 sm:py-6 sm:pb-6 lg:px-8 lg:py-8 lg:pb-8 ${maxWidthClass} ${className}`}
     >
       {children}
     </div>

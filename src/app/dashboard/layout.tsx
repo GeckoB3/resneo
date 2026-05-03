@@ -164,7 +164,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           venueTerminology,
         }}
       >
-      <main className="dashboard-coarse-inputs min-h-0 flex-1 overflow-y-auto bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
+      <main className="dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
         {isAdmin ? null : (
           <div className="sr-only" aria-hidden>
             Staff users do not have plan-management access.
@@ -175,7 +175,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="mx-auto flex max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <Pill variant="info" size="sm" className="mb-2 w-fit">
-                  Reserve NI support
+                  ReserveNI support
                 </Pill>
                 <p className="text-sm font-medium text-slate-900">
                   ReserveNI support ({supportSession.superuserDisplayName}) is currently signed in to your account
@@ -256,7 +256,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </Pill>
                 <p className="min-w-0 text-sm text-rose-950">
                   {pricingTier === 'light'
-                    ? `Your free period has ended. Add a payment method to continue using Reserve NI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
+                    ? `Your free period has ended. Add a payment method to continue using ReserveNI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
                     : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
                 </p>
               </div>

@@ -20,7 +20,11 @@ export function PageHeader({
         <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{title}</h1>
         {subtitle ? <p className="mt-1 max-w-2xl text-sm text-slate-600">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex w-full min-w-0 shrink-0 flex-col items-stretch gap-2 pt-1 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-2 sm:pt-0 [&>a.inline-flex]:justify-center">
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

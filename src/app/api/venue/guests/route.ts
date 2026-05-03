@@ -20,6 +20,8 @@ function shapeGuestListRow(
     cancelled: Map<string, number>;
     upcoming: Map<string, number>;
     paidDepositPence: Map<string, number>;
+    nextBookingDate: Map<string, string>;
+    nextBookingTime: Map<string, string>;
   },
   includeCustomFieldValues: boolean,
 ) {
@@ -45,6 +47,8 @@ function shapeGuestListRow(
     total_bookings: signals.totalBookings.get(row.id) ?? 0,
     cancelled_count: signals.cancelled.get(row.id) ?? 0,
     upcoming_booking_count: signals.upcoming.get(row.id) ?? 0,
+    next_booking_date: signals.nextBookingDate.get(row.id) ?? null,
+    next_booking_time: signals.nextBookingTime.get(row.id) ?? null,
     paid_deposit_pence: signals.paidDepositPence.get(row.id) ?? 0,
     ...(custom_fields ? { custom_fields } : {}),
   };
@@ -182,12 +186,12 @@ export async function GET(request: NextRequest) {
       const byId = new Map(rowList.map((r) => [r.id, r]));
       const orderedRows = pageIds.map((id) => byId.get(id)).filter(Boolean) as GuestRowBase[];
       const ids = orderedRows.map((r) => r.id);
-      const { totalBookings, cancelled, upcoming, paidDepositPence: dep } =
+      const { totalBookings, cancelled, upcoming, paidDepositPence: dep, nextBookingDate: nbd1, nextBookingTime: nbt1 } =
         await aggregateBookingSignalsForGuests(staff.db, staff.venue_id, ids, today);
       const guests = orderedRows.map((row) =>
         shapeGuestListRow(
           row,
-          { totalBookings, cancelled, upcoming, paidDepositPence: dep },
+          { totalBookings, cancelled, upcoming, paidDepositPence: dep, nextBookingDate: nbd1, nextBookingTime: nbt1 },
           include_custom_fields,
         ),
       );
@@ -249,14 +253,14 @@ export async function GET(request: NextRequest) {
       const total = sorted.length;
       const slice = sorted.slice(from, to + 1);
       const ids = slice.map((r) => r.id);
-      const { totalBookings, cancelled, upcoming, paidDepositPence } = await aggregateBookingSignalsForGuests(
+      const { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime } = await aggregateBookingSignalsForGuests(
         staff.db,
         staff.venue_id,
         ids,
         today,
       );
       const guests = slice.map((row) =>
-        shapeGuestListRow(row, { totalBookings, cancelled, upcoming, paidDepositPence }, include_custom_fields),
+        shapeGuestListRow(row, { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime }, include_custom_fields),
       );
       return NextResponse.json({
         guests,
@@ -283,7 +287,7 @@ export async function GET(request: NextRequest) {
     const rows = (data ?? []) as unknown as GuestRowBase[];
     const ids = rows.map((r) => r.id);
 
-    const { totalBookings, cancelled, upcoming, paidDepositPence } = await aggregateBookingSignalsForGuests(
+    const { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime } = await aggregateBookingSignalsForGuests(
       staff.db,
       staff.venue_id,
       ids,
@@ -291,7 +295,7 @@ export async function GET(request: NextRequest) {
     );
 
     const guests = rows.map((row) =>
-      shapeGuestListRow(row, { totalBookings, cancelled, upcoming, paidDepositPence }, include_custom_fields),
+      shapeGuestListRow(row, { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime }, include_custom_fields),
     );
 
     return NextResponse.json({

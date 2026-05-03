@@ -53,7 +53,9 @@ export function StatTile({
       ) : null}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-1">
         {label ? (
-          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{label}</p>
+          <p className="min-w-0 break-words text-xs font-semibold uppercase tracking-wide leading-snug opacity-80">
+            {label}
+          </p>
         ) : (
           <span />
         )}

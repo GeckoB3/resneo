@@ -73,6 +73,8 @@ const phoneBookingSchema = z.object({
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   source: z.enum(['phone', 'walk-in']).optional(),
   area_id: z.string().uuid().optional(),
+  /** Override venue-derived cover time for table reservations (minutes at the table). */
+  duration_minutes: z.number().int().min(15).max(300).optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -1063,13 +1065,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
     }
 
-    const { durationMinutes, bufferMinutes } = await resolveDurationAndBufferForTableAssignment(
+    const { durationMinutes: engineDurationMinutes, bufferMinutes } = await resolveDurationAndBufferForTableAssignment(
       admin,
       engineInput,
       booking_date,
       party_size,
       slot.service_id,
     );
+    const durationMinutes =
+      parsed.data.duration_minutes != null ? parsed.data.duration_minutes : engineDurationMinutes;
     const [y, mo, d] = booking_date.split('-').map(Number);
     const [hh, mm] = timeStr.split(':').map(Number);
     const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));

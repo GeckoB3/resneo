@@ -11,6 +11,7 @@ import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calend
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
@@ -1413,14 +1414,11 @@ export function EventManagerView({
                 }
                 right={
                   isAdmin || (detail.calendar_id !== null && linkedPractitionerIds.includes(detail.calendar_id)) ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleEditEvent(detail)}
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                      >
-                        Edit event
-                      </button>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <DashboardEntityRowActions
+                        onEdit={() => handleEditEvent(detail)}
+                        onDelete={() => void handleDeleteEvent(detail.id)}
+                      />
                       {isAdmin && detail.is_active ? (
                         <button
                           type="button"
@@ -1429,17 +1427,6 @@ export function EventManagerView({
                           className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-100 disabled:opacity-50"
                         >
                           {cancelLoading ? 'Cancelling…' : 'Cancel event & notify guests'}
-                        </button>
-                      ) : null}
-                      {(isAdmin ||
-                        (detail.calendar_id !== null &&
-                          linkedPractitionerIds.includes(detail.calendar_id))) ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteEvent(detail.id)}
-                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-100"
-                        >
-                          Delete event
                         </button>
                       ) : null}
                     </div>
@@ -1598,8 +1585,8 @@ function EventCard({
         onClick={onSelect}
         className="w-full px-5 py-4 text-left"
       >
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-slate-900">{event.name}</h3>
             <p className="text-sm text-slate-500">
               {event.event_date} &middot; {event.start_time.slice(0, 5)} – {event.end_time.slice(0, 5)}
@@ -1608,16 +1595,19 @@ function EventCard({
               <p className="mt-1 text-sm text-slate-600 line-clamp-2">{event.description}</p>
             )}
           </div>
-          <div className="text-right text-sm">
-            <Pill variant="neutral" size="sm" className="tabular-nums">
-              {event.capacity} cap
-            </Pill>
+          <div className="flex shrink-0 flex-col items-end gap-2 text-right text-sm">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Pill variant="neutral" size="sm" className="tabular-nums">
+                {event.capacity} cap
+              </Pill>
+              {canEdit ? (
+                <DashboardEntityRowActions stopPropagation onEdit={onEdit} onDelete={onDelete} />
+              ) : null}
+            </div>
             {!event.is_active ? (
-              <div className="mt-2 flex justify-end">
-                <Pill variant="warning" size="sm">
-                  Inactive
-                </Pill>
-              </div>
+              <Pill variant="warning" size="sm">
+                Inactive
+              </Pill>
             ) : null}
           </div>
         </div>
@@ -1633,27 +1623,6 @@ function EventCard({
         )}
         <p className="mt-2 text-xs text-slate-500">{selected ? 'Hide details' : 'View attendees & actions'}</p>
       </button>
-      {selected && canEdit && (
-        <div className="flex gap-2 border-t border-slate-100 px-5 py-3">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            className="text-sm font-medium text-brand-600 hover:text-brand-800"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="text-sm font-medium text-red-500 hover:text-red-700"
-          >
-            Delete
-          </button>
-        </div>
-      )}
     </div>
   );
 }

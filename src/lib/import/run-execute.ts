@@ -878,8 +878,8 @@ async function sendImportCompleteEmail(
   if (!to?.trim()) return;
 
   const name = (staff as { name?: string } | null)?.name ?? 'there';
-  const vname = (venue as { name?: string } | null)?.name ?? 'Reserve NI';
-  const subject = 'Your data import to Reserve NI is complete';
+  const vname = (venue as { name?: string } | null)?.name ?? 'ReserveNI';
+  const subject = 'Your data import to ReserveNI is complete';
   const undoDate = new Date(summary.undoUntil).toLocaleString('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',

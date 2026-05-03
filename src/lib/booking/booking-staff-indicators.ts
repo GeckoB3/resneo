@@ -40,6 +40,18 @@ export function showAttendanceConfirmedPill(row: BookingStaffIndicatorInput): bo
   return isAttendanceConfirmed(row);
 }
 
+/**
+ * Second "Confirmed" pill for lists/cards: guest and/or staff confirmed, but lifecycle `status`
+ * is not already `Confirmed` (the primary status pill already shows Confirmed).
+ */
+export function showAttendanceConfirmedSupplementPill(row: BookingStaffIndicatorInput): boolean {
+  if (row.status === 'Confirmed') return false;
+  return (
+    Boolean(row.guest_attendance_confirmed_at?.trim()) ||
+    Boolean(row.staff_attendance_confirmed_at?.trim())
+  );
+}
+
 export interface AttendanceConfirmationSources {
   guestAt: string | null;
   staffAt: string | null;
@@ -59,7 +71,9 @@ export function canShowConfirmBookingAttendanceAction(
   row: BookingStaffIndicatorInput & { source?: string | null; status: string },
 ): boolean {
   if (row.source === 'walk-in') return false;
-  if (isAttendanceConfirmed(row)) return false;
+  if (Boolean(row.staff_attendance_confirmed_at?.trim())) return false;
+  /** Lifecycle already `Confirmed`; use Cancel confirmation / status actions instead. */
+  if (row.status === 'Confirmed') return false;
   return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
 }
 

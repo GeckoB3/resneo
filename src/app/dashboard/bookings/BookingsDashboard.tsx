@@ -18,10 +18,16 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import {
+  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
+  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  bookingStatusVisualForKey,
+} from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
@@ -36,8 +42,10 @@ import {
 } from '@/lib/booking/infer-booking-row-model';
 import {
   isAttendanceConfirmed,
-  showAttendanceConfirmedPill,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
+  canShowConfirmBookingAttendanceAction,
+  canShowCancelStaffAttendanceConfirmationAction,
 } from '@/lib/booking/booking-staff-indicators';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -1816,6 +1824,7 @@ export function BookingsDashboard({
           coversChangeTableEnabled={coversChangeTableEnabled}
           onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
           venueId={venueId}
+          venueCurrency={currency ?? 'GBP'}
           onToggleExpand={toggleExpand}
           onSendMessage={sendMessageToBooking}
           onStatusAction={requestStatusChange}
@@ -1857,6 +1866,7 @@ export function BookingsDashboard({
                 coversChangeTableEnabled={coversChangeTableEnabled}
                 onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
                 venueId={venueId}
+                venueCurrency={currency ?? 'GBP'}
                 onToggleExpand={toggleExpand}
                 onSendMessage={sendMessageToBooking}
                 onStatusAction={requestStatusChange}
@@ -2048,30 +2058,8 @@ export function BookingsDashboard({
   );
 }
 
-function statusBorderClass(status: string): string {
-  switch (status) {
-    case 'Pending': return 'border-l-amber-400';
-    case 'Booked': return 'border-l-sky-400';
-    case 'Confirmed': return 'border-l-emerald-500';
-    case 'Seated': return 'border-l-brand-500';
-    case 'Completed': return 'border-l-slate-300';
-    case 'Cancelled': return 'border-l-red-300';
-    case 'No-Show': return 'border-l-rose-500';
-    default: return 'border-l-transparent';
-  }
-}
-
-function statusPillVariant(status: string): PillVariant {
-  switch (status) {
-    case 'Pending': return 'warning';
-    case 'Booked': return 'info';
-    case 'Confirmed': return 'success';
-    case 'Seated': return 'brand';
-    case 'Completed': return 'neutral';
-    case 'Cancelled': return 'neutral';
-    case 'No-Show': return 'danger';
-    default: return 'neutral';
-  }
+function statusBorderClass(booking: BookingRow): string {
+  return bookingStatusVisualForKey(booking.status).listBorderLeft;
 }
 
 function sourceBadge(s: string) {
@@ -2103,18 +2091,6 @@ function depositBadge(status: string, amountPence: number | null) {
   return <Pill variant={variant} size="sm" dot={status === 'Pending'}>{label}</Pill>;
 }
 
-function canShowConfirmBookingAttendanceRow(b: BookingRow): boolean {
-  if (b.source === 'walk-in') return false;
-  if (showAttendanceConfirmedPill(b)) return false;
-  return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
-}
-
-function canShowCancelStaffAttendanceConfirmationRow(b: BookingRow): boolean {
-  if (b.source === 'walk-in') return false;
-  if (!b.staff_attendance_confirmed_at) return false;
-  return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
-}
-
 function BookingsAccordionList({
   bookings,
   selectedIds,
@@ -2129,6 +2105,7 @@ function BookingsAccordionList({
   coversChangeTableEnabled,
   onRequestChangeTable,
   venueId,
+  venueCurrency = 'GBP',
   onToggleExpand,
   onSendMessage,
   onStatusAction,
@@ -2152,6 +2129,7 @@ function BookingsAccordionList({
   coversChangeTableEnabled: boolean;
   onRequestChangeTable: (booking: BookingRow) => void;
   venueId: string;
+  venueCurrency?: string;
   onToggleExpand: (id: string) => void;
   onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
@@ -2182,7 +2160,7 @@ function BookingsAccordionList({
           <span className="text-[11px] font-medium text-slate-400">{bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}</span>
         </div>
       </div>
-      <div className="divide-y divide-slate-200/70">
+      <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3">
         {bookings.map((booking) => {
           const expanded = expandedIds.includes(booking.id);
           const detail = detailById[booking.id];
@@ -2209,9 +2187,9 @@ function BookingsAccordionList({
                 onPrefetchBookingDetail?.(booking.id);
               }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
-              className={`cursor-pointer border-l-[3px] py-2 pl-2 pr-2 transition-colors even:bg-slate-50/30 sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(booking.status)} ${expanded ? 'bg-brand-50/25 even:bg-brand-50/25' : 'hover:bg-slate-50/70'}`}
+              className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-2 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(booking)} ${expanded ? 'border-slate-200 bg-brand-50/50 shadow-md ring-brand-900/12' : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'}`}
             >
-              <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+              <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
                 <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
                   <input
                     type="checkbox"
@@ -2244,11 +2222,23 @@ function BookingsAccordionList({
                         </span>
                       </>
                     ) : null}
-                    <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
-                    <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(booking.source)}</span>
-                    <Pill variant={statusPillVariant(booking.status)} size="sm">{displayStatus}</Pill>
+                    <span
+                      className={
+                        expanded
+                          ? 'inline shrink-0 text-slate-300'
+                          : 'hidden shrink-0 text-slate-300 sm:inline'
+                      }
+                    >
+                      ·
+                    </span>
+                    <span
+                      className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}
+                    >
+                      {sourceBadge(booking.source)}
+                    </span>
+                    <BookingStatusPill statusKey={booking.status}>{displayStatus}</BookingStatusPill>
                     {isTableBooking && showAreaBadge && booking.area_name && (
-                      <span className="hidden sm:inline-flex">
+                      <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="neutral" size="sm">{booking.area_name}</Pill>
                       </span>
                     )}
@@ -2258,8 +2248,8 @@ function BookingsAccordionList({
                         <span className="hidden sm:inline">Deposit pending</span>
                       </Pill>
                     )}
-                    {showAttendanceConfirmedPill(booking) && (
-                      <Pill variant="success" size="sm" dot>Confirmed</Pill>
+                    {showAttendanceConfirmedSupplementPill(booking) && (
+                      <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill>
                     )}
                     {!isTableBooking && (
                       <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
@@ -2267,21 +2257,29 @@ function BookingsAccordionList({
                       </Pill>
                     )}
                     {booking.dietary_notes && (
-                      <span className="hidden sm:inline-flex">
+                      <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="warning" size="sm" dot>Dietary</Pill>
                       </span>
                     )}
                     {tableLabel && (
-                      <span className="hidden max-w-[10rem] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 sm:inline-block">
+                      <span
+                        className={
+                          expanded
+                            ? 'inline-block max-w-[10rem] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700'
+                            : 'hidden max-w-[10rem] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 sm:inline-block'
+                        }
+                      >
                         {tableLabel}
                       </span>
                     )}
                     {booking.group_booking_id && (
-                      <span className="hidden sm:inline-flex">
-                        <Pill variant="neutral" size="sm" className="hidden sm:inline-flex">{booking.person_label ? `Group · ${booking.person_label}` : 'Group'}</Pill>
+                      <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
+                        <Pill variant="neutral" size="sm">
+                          {booking.person_label ? `Group · ${booking.person_label}` : 'Group'}
+                        </Pill>
                       </span>
                     )}
-                    <span className="hidden sm:inline-flex">
+                    <span className={expanded ? 'inline-flex shrink-0' : 'hidden sm:inline-flex'}>
                       {depositBadge(booking.deposit_status, booking.deposit_amount_pence)}
                     </span>
                   </div>
@@ -2294,8 +2292,8 @@ function BookingsAccordionList({
                   const showUndoStart =
                     booking.status === 'Seated' && !tableStyle;
                   const showChangeTable = isTableBooking && coversChangeTableEnabled && booking.status === 'Seated';
-                  const showAttendanceConfirm = canShowConfirmBookingAttendanceRow(booking);
-                  const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationRow(booking);
+                  const showAttendanceConfirm = canShowConfirmBookingAttendanceAction(booking);
+                  const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(booking);
                   if (!action && !showChangeTable && !showUndoStart && !showAttendanceConfirm && !showAttendanceCancel) {
                     return null;
                   }
@@ -2306,13 +2304,13 @@ function BookingsAccordionList({
                           type="button"
                           disabled={confirmAttendanceLoadingId === booking.id}
                           onClick={() => onConfirmBookingAttendance(booking.id)}
-                          className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs"
+                          className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
                           aria-label={`Confirm attendance for ${booking.guest_name}`}
                           aria-busy={confirmAttendanceLoadingId === booking.id}
                         >
                           {confirmAttendanceLoadingId === booking.id ? (
                             <span
-                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                              className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                               aria-hidden
                             />
                           ) : null}
@@ -2379,20 +2377,23 @@ function BookingsAccordionList({
                 </svg>
               </div>
               {expanded && (
-                <ExpandedBookingContent
-                  booking={booking}
-                  detail={detail}
-                  detailLoading={detailLoading}
-                  tableManagementEnabled={tableManagementEnabled}
-                  venueId={venueId}
-                  draftMessage={draftMessage}
-                  sendingMessage={sendingMessage}
-                  onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}
-                  onSendMessage={(ch) => { void onSendMessage(booking.id, draftMessage, ch); }}
-                  onStatusAction={(status) => { onStatusAction(booking, status); }}
-                  onDetailUpdated={() => onDetailUpdated(booking.id)}
-                  onRequestChangeTable={isTableBooking && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
-                />
+                <div className="border-t border-slate-100/95 bg-slate-50/30">
+                  <ExpandedBookingContent
+                    booking={booking}
+                    detail={detail}
+                    detailLoading={detailLoading}
+                    tableManagementEnabled={tableManagementEnabled}
+                    venueId={venueId}
+                    venueCurrency={venueCurrency}
+                    draftMessage={draftMessage}
+                    sendingMessage={sendingMessage}
+                    onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}
+                    onSendMessage={(ch) => { void onSendMessage(booking.id, draftMessage, ch); }}
+                    onStatusAction={(status) => { onStatusAction(booking, status); }}
+                    onDetailUpdated={() => onDetailUpdated(booking.id)}
+                    onRequestChangeTable={isTableBooking && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
+                  />
+                </div>
               )}
             </div>
           );

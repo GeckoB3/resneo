@@ -32,6 +32,7 @@ import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calend
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -222,9 +223,10 @@ export function AppointmentServicesView({
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ServiceFormData>(DEFAULT_FORM);
+  /** Admins editing variants: base duration/price fields are hidden; options carry those values. */
+  const usesVariants = isAdmin && form.variants.length > 0;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [linkSavingKey, setLinkSavingKey] = useState<string | null>(null);
   const [overrideService, setOverrideService] = useState<Service | null>(null);
   const [overrideCalendarId, setOverrideCalendarId] = useState<string | null>(null);
@@ -525,11 +527,13 @@ export function AppointmentServicesView({
   }
 
   async function handleSave() {
+    const usesVariants = isAdmin && form.variants.length > 0;
+    const activeVariants = usesVariants ? form.variants.filter((v) => v.is_active) : [];
     if (!form.name.trim()) {
       setError('Service name is required');
       return;
     }
-    if (form.duration_minutes < 5) {
+    if (!usesVariants && form.duration_minutes < 5) {
       setError('Duration must be at least 5 minutes');
       return;
     }
@@ -541,10 +545,24 @@ export function AppointmentServicesView({
       }
     }
     if (form.payment_requirement === 'full_payment') {
-      const p = poundsToPence(form.price);
-      if (p == null || p <= 0) {
-        setError('Set a price when charging full payment online');
-        return;
+      if (usesVariants) {
+        if (activeVariants.length === 0) {
+          setError('Turn on at least one bookable option, or switch back to a single offering.');
+          return;
+        }
+        for (const v of activeVariants) {
+          const p = poundsToPence(v.price);
+          if (p == null || p <= 0) {
+            setError(`Option "${v.name.trim()}": set a price — full online payment applies to each option.`);
+            return;
+          }
+        }
+      } else {
+        const p = poundsToPence(form.price);
+        if (p == null || p <= 0) {
+          setError('Set a price when charging full payment online');
+          return;
+        }
       }
     }
 
@@ -554,22 +572,26 @@ export function AppointmentServicesView({
     }
 
     if (isAdmin && form.variants.length > 0) {
+      if (activeVariants.length === 0) {
+        setError('Turn on at least one bookable option, or switch back to a single offering.');
+        return;
+      }
       for (let i = 0; i < form.variants.length; i++) {
         const v = form.variants[i]!;
         if (!v.name.trim()) {
-          setError(`Variant ${i + 1}: name is required`);
+          setError(`Option ${i + 1}: name is required`);
           return;
         }
         if (v.duration_minutes < 5 || v.duration_minutes > 480) {
-          setError(`Variant "${v.name.trim()}" duration must be between 5 and 480 minutes`);
+          setError(`Option "${v.name.trim()}" duration must be between 5 and 480 minutes`);
           return;
         }
         if (v.price.trim() && poundsToPence(v.price) == null) {
-          setError(`Variant "${v.name.trim()}" has an invalid price`);
+          setError(`Option "${v.name.trim()}" has an invalid price`);
           return;
         }
         if (v.deposit.trim() && poundsToPence(v.deposit) == null) {
-          setError(`Variant "${v.name.trim()}" has an invalid deposit`);
+          setError(`Option "${v.name.trim()}" has an invalid deposit`);
           return;
         }
       }
@@ -583,15 +605,27 @@ export function AppointmentServicesView({
     setSaving(true);
     setError(null);
     try {
+      const usesVariantsPayload = isAdmin && form.variants.length > 0;
+      const primaryForParent =
+        usesVariantsPayload && form.variants.length > 0
+          ? form.variants.find((v) => v.is_active) ?? form.variants[0]
+          : null;
+      const durationMinutesPayload =
+        usesVariantsPayload && primaryForParent ? primaryForParent.duration_minutes : form.duration_minutes;
+      const bufferMinutesPayload =
+        usesVariantsPayload && primaryForParent ? primaryForParent.buffer_minutes : form.buffer_minutes;
+      const priceStrPayload =
+        usesVariantsPayload && primaryForParent ? primaryForParent.price : form.price;
+
       const depositPence =
         form.payment_requirement === 'deposit' ? (poundsToPence(form.deposit) ?? 0) : 0;
       const payload: Record<string, unknown> = {
         ...(editingId ? { id: editingId } : {}),
         name: form.name.trim(),
         description: form.description.trim() || undefined,
-        duration_minutes: form.duration_minutes,
-        buffer_minutes: form.buffer_minutes,
-        price_pence: poundsToPence(form.price) ?? undefined,
+        duration_minutes: durationMinutesPayload,
+        buffer_minutes: bufferMinutesPayload,
+        price_pence: poundsToPence(priceStrPayload) ?? undefined,
         payment_requirement: form.payment_requirement,
         deposit_pence: depositPence,
         colour: form.colour,
@@ -648,6 +682,7 @@ export function AppointmentServicesView({
   }
 
   async function handleDelete(id: string) {
+    if (!window.confirm('Delete this service? Calendar links to it will be removed.')) return;
     try {
       const res = await fetch('/api/venue/appointment-services', {
         method: 'DELETE',
@@ -658,7 +693,6 @@ export function AppointmentServicesView({
         setError('Failed to delete service. Please try again.');
         return;
       }
-      setDeleteConfirm(null);
       await fetchAll();
     } catch {
       setError('Failed to delete service. Please try again.');
@@ -902,40 +936,11 @@ export function AppointmentServicesView({
                     </div>
 
                   {(isAdmin || linkedPractitionerIds.length > 0) && (
-                    <div className="flex flex-shrink-0 items-center gap-1 sm:pt-1">
-                      <button
-                        onClick={() => openEdit(svc)}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                        title="Edit"
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                      </button>
-                      {deleteConfirm === svc.id ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleDelete(svc.id)}
-                            className="rounded-lg p-2 text-red-600 hover:bg-red-50"
-                            title="Confirm delete"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 13l4 4L19 7"/></svg>
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirm(null)}
-                            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
-                            title="Cancel"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12"/></svg>
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setDeleteConfirm(svc.id)}
-                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                          title="Delete"
-                        >
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-                        </button>
-                      )}
+                    <div className="flex flex-shrink-0 items-center sm:pt-1">
+                      <DashboardEntityRowActions
+                        onEdit={() => openEdit(svc)}
+                        onDelete={() => void handleDelete(svc.id)}
+                      />
                     </div>
                   )}
                   </div>
@@ -1000,45 +1005,332 @@ export function AppointmentServicesView({
                 />
               </div>
 
-              {/* Duration + Buffer */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
-                  <NumericInput
-                    value={form.duration_minutes}
-                    onChange={(v) => setForm({ ...form, duration_minutes: v })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    min={5}
-                    max={480}
-                  />
+              {isAdmin && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">How will clients book this service?</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Pick one. Use multiple options when length, price, or the type of session changes what the client
+                      selects (before they pick a time).
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      className={`flex cursor-pointer gap-3 rounded-xl border bg-white p-3 transition-colors ${
+                        !usesVariants
+                          ? 'border-brand-300 ring-1 ring-brand-200/60'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="service-booking-mode"
+                        className="mt-1 shrink-0"
+                        checked={!usesVariants}
+                        onChange={() => {
+                          if (form.variants.length === 0) return;
+                          if (
+                            !window.confirm(
+                              'Switch to one fixed offering? All bookable options you added will be removed from this service.',
+                            )
+                          ) {
+                            return;
+                          }
+                          setForm((f) => ({ ...f, variants: [] }));
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">One fixed offering</p>
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          One duration, buffer, and price. What you set below applies to every booking.
+                        </p>
+                      </div>
+                    </label>
+                    <label
+                      className={`flex cursor-pointer gap-3 rounded-xl border bg-white p-3 transition-colors ${
+                        usesVariants
+                          ? 'border-brand-300 ring-1 ring-brand-200/60'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="service-booking-mode"
+                        className="mt-1 shrink-0"
+                        checked={usesVariants}
+                        onChange={() => {
+                          setForm((f) => {
+                            if (f.variants.length > 0) return f;
+                            return {
+                              ...f,
+                              variants: [
+                                {
+                                  ...DEFAULT_VARIANT_ROW,
+                                  duration_minutes: f.duration_minutes,
+                                  buffer_minutes: f.buffer_minutes,
+                                  price: f.price,
+                                  deposit: f.payment_requirement === 'deposit' ? f.deposit : '',
+                                },
+                              ],
+                            };
+                          });
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">Multiple bookable options</p>
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          Clients choose an option first. Each option has its own duration, buffer, price, optional
+                          description, and optional deposit override.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
-                  <NumericInput
-                    value={form.buffer_minutes}
-                    onChange={(v) => setForm({ ...form, buffer_minutes: v })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    min={0}
-                    max={120}
-                  />
-                </div>
-              </div>
+              )}
 
-              {/* Price */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
-                <div className="relative max-w-[200px]">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    placeholder="0.00"
-                  />
+              {usesVariants && (
+                <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3 ring-1 ring-slate-100/80">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">Bookable options</p>
+                      <p className="mt-0.5 max-w-xl text-xs text-slate-500">
+                        These values are what guests use when they book. Payment type is still chosen in{' '}
+                        <span className="font-medium text-slate-700">Online payment when booking</span> below — for
+                        deposits, set a default on the service; leave an option&apos;s deposit blank to use that
+                        default.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => {
+                          const last = f.variants[f.variants.length - 1];
+                          return {
+                            ...f,
+                            variants: [
+                              ...f.variants,
+                              {
+                                ...DEFAULT_VARIANT_ROW,
+                                duration_minutes: last?.duration_minutes ?? DEFAULT_VARIANT_ROW.duration_minutes,
+                                buffer_minutes: last?.buffer_minutes ?? 0,
+                              },
+                            ],
+                          };
+                        })
+                      }
+                      className="shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                    >
+                      Add option
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {form.variants.map((variant, idx) => (
+                      <div
+                        key={variant.id ?? `new-${idx}`}
+                        className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2.5"
+                      >
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="text"
+                            value={variant.name}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                variants: f.variants.map((row, i) =>
+                                  i === idx ? { ...row, name: e.target.value } : row,
+                                ),
+                              }))
+                            }
+                            placeholder="Option name (e.g. 60 minutes, Full head)"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setForm((f) => ({
+                                ...f,
+                                variants: f.variants.filter((_, i) => i !== idx),
+                              }))
+                            }
+                            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-red-700"
+                            aria-label={`Remove option ${variant.name || idx + 1}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div>
+                          <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                            Optional description (shown when they pick this option)
+                          </label>
+                          <textarea
+                            value={variant.description}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                variants: f.variants.map((row, i) =>
+                                  i === idx ? { ...row, description: e.target.value } : row,
+                                ),
+                              }))
+                            }
+                            placeholder="e.g. Includes toner — allow 15 extra minutes."
+                            rows={2}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <div>
+                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                              Duration (mins) *
+                            </label>
+                            <NumericInput
+                              min={5}
+                              max={480}
+                              value={variant.duration_minutes}
+                              onChange={(v) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, duration_minutes: v } : row,
+                                  ),
+                                }))
+                              }
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                              Buffer (mins)
+                            </label>
+                            <NumericInput
+                              min={0}
+                              max={120}
+                              value={variant.buffer_minutes}
+                              onChange={(v) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, buffer_minutes: v } : row,
+                                  ),
+                                }))
+                              }
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                              Price ({sym})
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={variant.price}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, price: e.target.value } : row,
+                                  ),
+                                }))
+                              }
+                              placeholder="0.00"
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
+                              Deposit ({sym}) <span className="font-normal text-slate-400">optional</span>
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={variant.deposit}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  variants: f.variants.map((row, i) =>
+                                    i === idx ? { ...row, deposit: e.target.value } : row,
+                                  ),
+                                }))
+                              }
+                              placeholder={
+                                form.payment_requirement === 'deposit' ? 'Uses service default' : '—'
+                              }
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={variant.is_active}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                variants: f.variants.map((row, i) =>
+                                  i === idx ? { ...row, is_active: e.target.checked } : row,
+                                ),
+                              }))
+                            }
+                            className="h-3.5 w-3.5 rounded border-slate-300"
+                          />
+                          Offer this option to clients
+                        </label>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {!usesVariants && (
+                <>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
+                      <NumericInput
+                        value={form.duration_minutes}
+                        onChange={(v) => setForm({ ...form, duration_minutes: v })}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        min={5}
+                        max={480}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
+                      <NumericInput
+                        value={form.buffer_minutes}
+                        onChange={(v) => setForm({ ...form, buffer_minutes: v })}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        min={0}
+                        max={120}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
+                    <div className="relative max-w-[200px]">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={form.price}
+                        onChange={(e) => setForm({ ...form, price: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {usesVariants ? (
+                <p className="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950/90">
+                  <span className="font-semibold">Payment &amp; booking rules below apply to every option.</span> For
+                  full online payment, each turned-on option must have a price. For deposits, the service default
+                  deposit fills in when an option&apos;s deposit is left blank.
+                </p>
+              ) : null}
 
               {/* Online payment at booking */}
               <SectionCard>
@@ -1078,7 +1370,18 @@ export function AppointmentServicesView({
                 </div>
                 {form.payment_requirement === 'deposit' && (
                   <div>
-                    <label className="mb-1 block text-sm text-slate-600">Deposit amount ({sym})</label>
+                    <label className="mb-1 block text-sm text-slate-600">
+                      {usesVariants ? (
+                        <>
+                          Default deposit ({sym}){' '}
+                          <span className="font-normal text-slate-500">
+                            — used when an option leaves its deposit field blank
+                          </span>
+                        </>
+                      ) : (
+                        <>Deposit amount ({sym})</>
+                      )}
+                    </label>
                     <div className="relative max-w-[200px]">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
                       <input
@@ -1094,7 +1397,9 @@ export function AppointmentServicesView({
                 )}
                 {form.payment_requirement === 'full_payment' && (
                   <p className="text-xs text-slate-500">
-                    The full service price (above) is charged when the guest completes booking online.
+                    {usesVariants
+                      ? 'Each option offered to clients needs its own price — that is what they pay online at booking.'
+                      : 'The full service price (above) is charged when the guest completes booking online.'}
                   </p>
                 )}
                 <StripePaymentWarning
@@ -1202,205 +1507,23 @@ export function AppointmentServicesView({
                 <span className="text-sm text-slate-700">Active (visible to clients)</span>
               </div>
 
-              {/* Variants — optional sub-options that override duration / price */}
-              {isAdmin && (
-                <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">
-                        Variants{' '}
-                        <span className="text-xs font-normal text-slate-500">(optional)</span>
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        Add variants when this service has options that change duration or price (e.g. Full
-                        Head vs Roots, or 30 / 60 / 90 minute massage). When variants are listed, customers
-                        must pick one before booking and the variant&apos;s duration and price are used.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          variants: [...f.variants, { ...DEFAULT_VARIANT_ROW, duration_minutes: f.duration_minutes }],
-                        }))
-                      }
-                      className="shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
-                    >
-                      Add variant
-                    </button>
-                  </div>
-
-                  {form.variants.length === 0 ? (
-                    <p className="text-xs italic text-slate-500">
-                      No variants. Customers will book with the base duration and price above.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {form.variants.map((variant, idx) => (
-                        <div
-                          key={variant.id ?? `new-${idx}`}
-                          className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2"
-                        >
-                          <div className="flex items-start gap-2">
-                            <input
-                              type="text"
-                              value={variant.name}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, name: e.target.value } : row,
-                                  ),
-                                }))
-                              }
-                              placeholder="Variant name (e.g. Full Head Long Hair)"
-                              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.filter((_, i) => i !== idx),
-                                }))
-                              }
-                              className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-red-700"
-                              aria-label={`Remove variant ${variant.name || idx + 1}`}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <div>
-                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                                Duration (mins)
-                              </label>
-                              <NumericInput
-                                min={5}
-                                max={480}
-                                value={variant.duration_minutes}
-                                onChange={(v) =>
-                                  setForm((f) => ({
-                                    ...f,
-                                    variants: f.variants.map((row, i) =>
-                                      i === idx ? { ...row, duration_minutes: v } : row,
-                                    ),
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                                Buffer (mins)
-                              </label>
-                              <NumericInput
-                                min={0}
-                                max={120}
-                                value={variant.buffer_minutes}
-                                onChange={(v) =>
-                                  setForm((f) => ({
-                                    ...f,
-                                    variants: f.variants.map((row, i) =>
-                                      i === idx ? { ...row, buffer_minutes: v } : row,
-                                    ),
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                                Price ({sym})
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={variant.price}
-                                onChange={(e) =>
-                                  setForm((f) => ({
-                                    ...f,
-                                    variants: f.variants.map((row, i) =>
-                                      i === idx ? { ...row, price: e.target.value } : row,
-                                    ),
-                                  }))
-                                }
-                                placeholder="0.00"
-                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                                Deposit ({sym})
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={variant.deposit}
-                                onChange={(e) =>
-                                  setForm((f) => ({
-                                    ...f,
-                                    variants: f.variants.map((row, i) =>
-                                      i === idx ? { ...row, deposit: e.target.value } : row,
-                                    ),
-                                  }))
-                                }
-                                placeholder={form.payment_requirement === 'deposit' ? form.deposit || '0.00' : '—'}
-                                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                              />
-                            </div>
-                          </div>
-                          <div>
-                            <input
-                              type="text"
-                              value={variant.description}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, description: e.target.value } : row,
-                                  ),
-                                }))
-                              }
-                              placeholder="Optional description"
-                              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600"
-                            />
-                          </div>
-                          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={variant.is_active}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, is_active: e.target.checked } : row,
-                                  ),
-                                }))
-                              }
-                              className="h-3.5 w-3.5 rounded border-slate-300"
-                            />
-                            Active (offered to customers)
-                          </label>
-                        </div>
-                      ))}
-                      <p className="text-[11px] text-slate-500">
-                        Deposit is optional — leave blank to fall back to the parent service deposit when
-                        deposit payment is enabled.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Per-calendar overrides (Model B) — admin sets which fields staff may customise */}
               {isAdmin && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
                   <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
                   <p className="text-xs text-slate-500">
-                    Allow staff users assigned to an individual calendar to adjust the following values for their calendar
-                    only. Leave unticked and all calendars use the value set above.
+                    {usesVariants ? (
+                      <>
+                        Allow staff on a calendar to override these fields for their column only. For services with
+                        multiple options, duration, buffer, price, and deposit refer to each bookable option once a
+                        client has chosen it.
+                      </>
+                    ) : (
+                      <>
+                        Allow staff users assigned to an individual calendar to adjust the following values for their
+                        calendar only. Leave unticked and all calendars use the value set above.
+                      </>
+                    )}
                   </p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {(

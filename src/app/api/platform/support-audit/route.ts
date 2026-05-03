@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
         .in('id', sessionIds);
       for (const s of sessRows ?? []) {
         const row = s as { id: string; superuser_display_name?: string | null; superuser_email?: string | null };
-        const label = row.superuser_display_name?.trim() || row.superuser_email?.trim() || 'Reserve NI support';
+        const label = row.superuser_display_name?.trim() || row.superuser_email?.trim() || 'ReserveNI support';
         superNameBySessionId.set(row.id, label);
       }
     }
@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
       const superName =
         (r.support_session_id && superNameBySessionId.get(r.support_session_id)) ||
         r.superuser_email?.trim() ||
-        'Reserve NI support';
+        'ReserveNI support';
       const apparentName = r.apparent_staff_id ? staffNameById.get(r.apparent_staff_id) ?? 'Venue user' : 'Venue user';
       return {
         id: r.id,

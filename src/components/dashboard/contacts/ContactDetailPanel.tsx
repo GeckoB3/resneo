@@ -1,6 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { useToast } from '@/components/ui/Toast';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
@@ -10,7 +14,6 @@ import { ContactDocumentsSection } from '@/components/dashboard/contacts/Contact
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
 import { ContactTimelineSection } from '@/components/dashboard/contacts/ContactTimelineSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
-import { ContactLoyaltySection } from '@/components/dashboard/contacts/ContactLoyaltySection';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
 
 export function ContactDetailPanel({
@@ -60,6 +63,16 @@ export function ContactDetailPanel({
   onEraseGuest: (guestId: string) => Promise<void>;
   onOpenMerge?: () => void;
 }) {
+  const { addToast } = useToast();
+  const [messageChannel, setMessageChannel] = useState<GuestMessageChannel>('both');
+  const [messageDraft, setMessageDraft] = useState('');
+  const [messageSending, setMessageSending] = useState(false);
+
+  useEffect(() => {
+    setMessageDraft('');
+    setMessageChannel('both');
+  }, [selectedId]);
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
       {detailLoading && <p className="text-sm text-slate-500">Loading…</p>}
@@ -159,8 +172,6 @@ export function ContactDetailPanel({
 
           <ContactHouseholdSection guestId={detail.guest.id} clientLower={clientLower} onChanged={() => void loadDetail(detail.guest.id)} />
 
-          <ContactLoyaltySection guestId={detail.guest.id} isAdmin={isAdmin} />
-
           <ContactGdprSection guestId={detail.guest.id} clientLower={clientLower} isAdmin={isAdmin} />
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -223,20 +234,80 @@ export function ContactDetailPanel({
             <h3 className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
               Communications
             </h3>
-            {detail.communications.length === 0 ? (
-              <p className="px-3 py-4 text-sm text-slate-500">No logged communications for this guest yet.</p>
-            ) : (
-              <ul className="max-h-56 divide-y divide-slate-50 overflow-y-auto">
-                {detail.communications.map((c) => (
-                  <li key={c.id} className="px-3 py-2 text-sm">
-                    <div className="font-medium text-slate-800">{c.message_type}</div>
-                    <div className="text-xs text-slate-500">
-                      {c.channel} · {c.status} · {new Date(c.created_at).toLocaleString()}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="space-y-3 p-3">
+              <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Send message via</span>
+                  <GuestMessageChannelSelect
+                    value={messageChannel}
+                    onChange={setMessageChannel}
+                    disabled={messageSending}
+                  />
+                </div>
+                <textarea
+                  value={messageDraft}
+                  onChange={(e) => setMessageDraft(e.target.value)}
+                  rows={3}
+                  disabled={messageSending}
+                  placeholder={`SMS / email to ${clientLower}…`}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  disabled={messageSending || messageDraft.trim().length === 0}
+                  onClick={async () => {
+                    setMessageSending(true);
+                    try {
+                      const res = await fetch(`/api/venue/guests/${detail.guest.id}/message`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: messageDraft.trim(), channel: messageChannel }),
+                      });
+                      const payload = (await res.json().catch(() => ({}))) as {
+                        success?: boolean;
+                        error?: string;
+                        errors?: string[];
+                      };
+                      if (!res.ok || !payload.success) {
+                        const detailErr =
+                          (payload.errors && payload.errors.length > 0
+                            ? payload.errors.join('; ')
+                            : payload.error) ?? 'Failed to send message';
+                        addToast(detailErr, 'error');
+                        return;
+                      }
+                      if (payload.errors && payload.errors.length > 0) {
+                        addToast(`Sent with issues — ${payload.errors.join('; ')}`, 'error');
+                      } else {
+                        addToast('Message sent', 'success');
+                      }
+                      setMessageDraft('');
+                      await loadDetail(detail.guest.id);
+                    } finally {
+                      setMessageSending(false);
+                    }
+                  }}
+                  className="mt-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {messageSending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+
+              {detail.communications.length === 0 ? (
+                <p className="text-sm text-slate-500">No logged communications for this guest yet.</p>
+              ) : (
+                <ul className="max-h-56 divide-y divide-slate-50 overflow-y-auto rounded-lg border border-slate-100">
+                  {detail.communications.map((c) => (
+                    <li key={c.id} className="px-3 py-2 text-sm">
+                      <div className="font-medium text-slate-800">{c.message_type}</div>
+                      <div className="text-xs text-slate-500">
+                        {c.channel} · {c.status} · {new Date(c.created_at).toLocaleString()}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       ) : null}

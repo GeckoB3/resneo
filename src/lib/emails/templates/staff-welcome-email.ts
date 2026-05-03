@@ -24,7 +24,7 @@ export function renderStaffWelcomeEmail(params: StaffWelcomeEmailParams): {
   const roleLabel = params.role === "admin" ? "Admin" : "Staff";
 
   const mainContent = [
-    '<p style="margin:0 0 12px">A dashboard account has been created for you on Reserve NI.</p>',
+    '<p style="margin:0 0 12px">A dashboard account has been created for you on ReserveNI.</p>',
     `<p style="margin:0 0 8px"><strong>Sign-in email:</strong> ${escapeHtml(params.email)}</p>`,
     `<p style="margin:0 0 8px"><strong>Password:</strong> ${escapeHtml(params.password)}</p>`,
     `<p style="margin:0 0 16px"><strong>Access level:</strong> ${escapeHtml(roleLabel)}</p>`,
@@ -37,11 +37,11 @@ export function renderStaffWelcomeEmail(params: StaffWelcomeEmailParams): {
     heading: "Your dashboard login details",
     mainContent,
     footerNote:
-      "You received this email because a team member created a Reserve NI dashboard account for you.",
+      "You received this email because a team member created a ReserveNI dashboard account for you.",
   });
 
   const text = [
-    `Your Reserve NI dashboard account for ${params.venueName}`,
+    `Your ReserveNI dashboard account for ${params.venueName}`,
     "",
     `Sign-in email: ${params.email}`,
     `Password: ${params.password}`,

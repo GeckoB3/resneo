@@ -89,7 +89,7 @@ function sourceLabel(source: string | null): string {
 
 function actorLabel(actorType: string | null, staff: StaffRow | null, fallback: string): string {
   if (staff) return staff.name?.trim() || staff.email || 'Named staff user';
-  if (actorType === 'system') return 'Reserve NI automation';
+  if (actorType === 'system') return 'ReserveNI automation';
   if (actorType === 'staff') return 'Staff user';
   if (actorType === 'import') return 'Data import';
   if (actorType === 'customer') return 'Customer';
@@ -246,7 +246,7 @@ export async function sendBookingLogEmail(params: {
       <div style="max-width:720px;margin:0 auto;padding:28px 16px;">
         <div style="overflow:hidden;border-radius:24px;background:#ffffff;box-shadow:0 20px 45px rgba(15,23,42,.08);">
           <div style="background:linear-gradient(135deg,#4E6B78,#6B8A9A);padding:28px;color:#ffffff;">
-            <div style="font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.85;">Reserve NI daily booking log</div>
+            <div style="font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.85;">ReserveNI daily booking log</div>
             <h1 style="margin:10px 0 0;font-size:28px;line-height:1.2;">${escapeHtml(venue.name)}</h1>
             <p style="margin:8px 0 0;font-size:14px;opacity:.9;">${escapeHtml(periodLabel)}</p>
           </div>
@@ -287,7 +287,7 @@ export async function sendBookingLogEmail(params: {
             </table>
           </div>
         </div>
-        <p style="margin:16px 8px 0;text-align:center;font-size:12px;color:#64748b;">Sent by Reserve NI. You can change this schedule in Dashboard → Reports.</p>
+        <p style="margin:16px 8px 0;text-align:center;font-size:12px;color:#64748b;">Sent by ReserveNI. You can change this schedule in Dashboard → Reports.</p>
       </div>
     </div>
   `.trim();
@@ -314,7 +314,7 @@ export async function sendBookingLogEmail(params: {
     subject,
     html,
     text,
-    fromDisplayName: 'Reserve NI',
+    fromDisplayName: 'ReserveNI',
     disableTracking: true,
   });
 }

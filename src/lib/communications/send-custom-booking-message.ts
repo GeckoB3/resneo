@@ -46,8 +46,8 @@ function explainReason(reason: string | undefined): string {
       return 'Already sent';
     case 'send_error':
       return 'Delivery failed (check provider configuration)';
-    case 'not_configured':
-      return 'Email/SMS provider not configured on this server';
+    case 'sms_quota':
+      return 'SMS quota exceeded for this billing period';
     default:
       return reason ?? 'Not sent';
   }

@@ -169,25 +169,29 @@ export async function aggregateBookingSignalsForGuests(
   cancelled: Map<string, number>;
   upcoming: Map<string, number>;
   paidDepositPence: Map<string, number>;
+  nextBookingDate: Map<string, string>;
+  nextBookingTime: Map<string, string>;
 }> {
   const totalBookings = new Map<string, number>();
   const cancelled = new Map<string, number>();
   const upcoming = new Map<string, number>();
   const paidDepositPence = new Map<string, number>();
+  const nextBookingDate = new Map<string, string>();
+  const nextBookingTime = new Map<string, string>();
 
   if (guestIds.length === 0) {
-    return { totalBookings, cancelled, upcoming, paidDepositPence };
+    return { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime };
   }
 
   const { data, error } = await db
     .from('bookings')
-    .select('guest_id, status, booking_date, deposit_status, deposit_amount_pence')
+    .select('guest_id, status, booking_date, booking_time, deposit_status, deposit_amount_pence')
     .eq('venue_id', venueId)
     .in('guest_id', guestIds);
 
   if (error) {
     console.error('[guest-contacts-list] booking aggregates failed:', error.message);
-    return { totalBookings, cancelled, upcoming, paidDepositPence };
+    return { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime };
   }
 
   for (const row of data ?? []) {
@@ -195,6 +199,7 @@ export async function aggregateBookingSignalsForGuests(
     if (!gid) continue;
     const status = String((row as { status?: string }).status ?? '');
     const bd = (row as { booking_date?: string | null }).booking_date;
+    const bt = (row as { booking_time?: string | null }).booking_time;
     const depSt = (row as { deposit_status?: string | null }).deposit_status;
     const depP = (row as { deposit_amount_pence?: number | null }).deposit_amount_pence;
 
@@ -210,13 +215,18 @@ export async function aggregateBookingSignalsForGuests(
       UPCOMING_BOOKING_STATUSES.includes(status as (typeof UPCOMING_BOOKING_STATUSES)[number])
     ) {
       upcoming.set(gid, (upcoming.get(gid) ?? 0) + 1);
+      const existing = nextBookingDate.get(gid);
+      if (!existing || bd < existing || (bd === existing && bt && bt < (nextBookingTime.get(gid) ?? ''))) {
+        nextBookingDate.set(gid, bd);
+        if (bt) nextBookingTime.set(gid, bt);
+      }
     }
     if (depSt === 'Paid' && typeof depP === 'number' && Number.isFinite(depP)) {
       paidDepositPence.set(gid, (paidDepositPence.get(gid) ?? 0) + depP);
     }
   }
 
-  return { totalBookings, cancelled, upcoming, paidDepositPence };
+  return { totalBookings, cancelled, upcoming, paidDepositPence, nextBookingDate, nextBookingTime };
 }
 
 const SPEND_SORT_MAX_IDS = 800;

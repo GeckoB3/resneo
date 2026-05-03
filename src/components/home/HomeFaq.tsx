@@ -10,6 +10,9 @@ import {
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 
 type FaqItem = { question: string; answer: string };
 
@@ -40,15 +43,16 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       items: [
         {
           question: 'What does ReserveNI cost?',
-          answer: `Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month (card at signup) for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS is pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per message with none included. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. Cancel anytime with 30 days notice.`,
+          answer: `Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month (card at signup) for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS is pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per message with none included. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
         },
         {
           question: 'Are there any hidden fees or commissions?',
-          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. On Appointments Light there is no SMS bundle: each message is billed at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p. On Appointments Plus, Pro, and Restaurant you get a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
+          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} On Appointments Light there is no SMS bundle: each message is billed at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p. On Appointments Plus, Pro, and Restaurant you get a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
         },
         {
-          question: 'How does ReserveNI compare to Fresha, Booksy, or ResDiary on price?',
-          answer: `Fresha charges a 20% commission every time a new client books through their marketplace. Booksy charges per team member, so a salon with 4 staff pays over £90 per month. ResDiary starts at £89 per month for restaurants. ReserveNI offers Appointments Light at £${APPOINTMENTS_LIGHT_PRICE} per month for a single calendar, Appointments Plus at £${APPOINTMENTS_PLUS_PRICE} for up to 5 calendars and users, Appointments Pro at £${APPOINTMENTS_PRO_PRICE} with unlimited team members and no commission, or Restaurant at £${RESTAURANT_PRICE} per month for dining-focused tools. You keep more of what you earn.`,
+          question: 'How does ReserveNI compare to competitors on price?',
+          answer:
+            'Many competing platforms charge commission, per-staff pricing or higher monthly fees. ReserveNI uses simple monthly pricing with no booking commission.',
         },
       ],
     },
@@ -68,12 +72,12 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Does ReserveNI send booking reminders to my clients?',
           answer:
-            'Yes. Automated email reminders are included on every plan. On Appointments Plus, Pro, and Restaurant you also get SMS reminders within your monthly allowance (overage priced per message). Appointments Light includes email reminders; SMS is pay-as-you-go when you send messages. Reminders include a one-tap confirm or cancel link, which typically reduces no-shows by 30-40%.',
+            'Yes. Automated email reminders are included on every plan. On Appointments Plus, Pro, and Restaurant you also get SMS reminders within your monthly allowance (overage priced per message). Appointments Light includes email reminders; SMS is pay-as-you-go when you send messages. Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
         },
         {
           question: 'Can I collect deposits to protect against no-shows?',
           answer:
-            'Yes. You can require a deposit at the time of booking, collected securely through Stripe. You set the amount per service. If the client does not show up, you keep the deposit. If they cancel within your policy window, the deposit is refunded automatically. Payments go directly to your bank account. ReserveNI never holds your money.',
+            `Yes. You can require a deposit at the time of booking, collected securely through Stripe. You set the amount and cancellation rules for each service. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD} Where configured, eligible refunds can be processed automatically according to your cancellation rules.`,
         },
         {
           question: 'Can my staff each have their own calendar and booking link?',
@@ -81,8 +85,8 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
             'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login—upgrade to Plus or Pro when you need multiple staff with separate calendars.',
         },
         {
-          question: 'I run a restaurant. How does ReserveNI compare to ResDiary?',
-          answer: `ReserveNI offers table management with a visual timeline grid, interactive floor plan editor, covers-based availability, deposit collection, SMS confirm-or-cancel, and automated reminders: the core features restaurants need. The key differences: ReserveNI costs £${RESTAURANT_PRICE} per month versus ResDiary's £89-£245, we charge zero commission on bookings from any source, and our floor plan editor lets you set up your restaurant visually in minutes rather than through complex configuration forms.`,
+          question: 'I run a restaurant. How does ReserveNI compare to other options?',
+          answer: `ReserveNI is built for restaurants with the tools most venues use every day: a visual timeline grid, an interactive floor plan editor, covers-based availability, deposit collection, SMS confirm-or-cancel, and automated reminders. Compared with many booking platforms, ReserveNI keeps pricing to a simple monthly subscription with no commission on bookings from any source, and your floor plan can be laid out visually instead of through long, fiddly configuration forms. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
         },
       ],
     },
@@ -92,12 +96,11 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Is my data safe?',
           answer:
-            "Yes. ReserveNI runs on enterprise-grade infrastructure with Supabase (built on PostgreSQL) for data storage and Vercel for hosting. All data is encrypted in transit and at rest. Payments are handled by Stripe, the world's most trusted payment processor. We never store card details on our servers.",
+            'Yes. We use reputable cloud infrastructure providers, access controls, encryption in transit, and provider-level security measures. Payments are handled by Stripe, the world\'s most trusted payment processor. We never store card details on our servers.',
         },
         {
           question: 'What happens if I want to leave ReserveNI?',
-          answer:
-            'You can export all your client data and booking history as a CSV file at any time. Your data belongs to you, not us. Cancel your subscription with 30 days notice and your account remains active until the end of your billing period. We do not lock you into contracts or make it difficult to leave.',
+          answer: `Your business records remain under your control. You can export your client data and booking history as a CSV file while your account is active. ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE} We do not lock you into contracts or make it difficult to leave.`,
         },
         {
           question: 'What support do you offer if I get stuck?',

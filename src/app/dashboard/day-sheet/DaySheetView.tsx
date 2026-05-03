@@ -19,6 +19,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBookingContent';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import {
   bookingStatusDisplayLabel,
@@ -26,9 +27,16 @@ import {
   isTableReservationBooking,
 } from '@/lib/booking/infer-booking-row-model';
 import {
-  showAttendanceConfirmedPill,
+  canShowConfirmBookingAttendanceAction,
+  canShowCancelStaffAttendanceConfirmationAction,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
+  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  bookingStatusVisualForKey,
+} from '@/lib/table-management/booking-status-visual';
 import {
   computeNextBookingsSlotFromBookingRows,
   nextBookingsTileContent,
@@ -206,29 +214,7 @@ function formatDateFull(date: string): string {
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 function statusBorderClass(status: string): string {
-  switch (status) {
-    case 'Pending': return 'border-l-amber-400';
-    case 'Booked': return 'border-l-sky-400';
-    case 'Confirmed': return 'border-l-emerald-500';
-    case 'Seated': return 'border-l-brand-500';
-    case 'Completed': return 'border-l-slate-300';
-    case 'Cancelled': return 'border-l-red-300';
-    case 'No-Show': return 'border-l-rose-500';
-    default: return 'border-l-transparent';
-  }
-}
-
-function statusPillVariant(status: string): PillVariant {
-  switch (status) {
-    case 'Pending': return 'warning';
-    case 'Booked': return 'info';
-    case 'Confirmed': return 'success';
-    case 'Seated': return 'brand';
-    case 'Completed': return 'neutral';
-    case 'Cancelled': return 'neutral';
-    case 'No-Show': return 'danger';
-    default: return 'neutral';
-  }
+  return bookingStatusVisualForKey(status).listBorderLeft;
 }
 
 function sourceBadge(source: string) {
@@ -269,7 +255,6 @@ function depositBadge(status: string, amountPence: number | null) {
 
 /**
  * Confirm Booking when no attendance yet; Cancel confirmation clears staff timestamp when set.
- * (Guest-only confirmation hides the button — same as bookings list; clear still available when staff marked.)
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
   status: string;
@@ -279,8 +264,10 @@ function canShowDaySheetStaffAttendanceToggle(b: {
 }): boolean {
   if (b.source === 'walk-in' || b.source === 'Walk-in') return false;
   if (['Cancelled', 'No-Show', 'Completed'].includes(b.status)) return false;
-  if (b.staff_attendance_confirmed_at) return true;
-  return !showAttendanceConfirmedPill(b);
+  return (
+    canShowConfirmBookingAttendanceAction(b) ||
+    canShowCancelStaffAttendanceConfirmationAction(b)
+  );
 }
 
 const isTerminal = isDestructiveBookingStatus;
@@ -1278,7 +1265,7 @@ export function DaySheetView({
                   No {period.label.toLowerCase()} bookings yet.
                 </div>
               ) : (
-                <ul className="divide-y divide-slate-200/70">
+                <ul className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3">
                   {period.bookings.map((b) => {
                     const hasAllergy = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests).some((t) => t.isAllergy) || hasAllergyKeywords([b.dietary_notes, b.special_requests].filter(Boolean).join(' '));
                     const isExpanded = expandedId === b.id;
@@ -1295,7 +1282,11 @@ export function DaySheetView({
                       : null;
 
                     return (
-                      <li key={b.id} id={`booking-row-${b.id}`} className={`transition-colors even:bg-slate-50/30 ${isTerminalStatus ? 'bg-slate-50/50 opacity-70' : ''}`}>
+                      <li
+                        key={b.id}
+                        id={`booking-row-${b.id}`}
+                        className={`rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04] transition-[box-shadow,border-color,opacity] duration-150 overflow-hidden border-l-[3px] print:border print:shadow-none print:ring-0 ${hasAllergy ? 'border-l-red-500' : statusBorderClass(b.status)} ${isTerminalStatus ? 'opacity-[0.78] saturate-[0.92]' : ''}`}
+                      >
                         {/* Collapsed row */}
                         <div
                           role="button"
@@ -1305,7 +1296,7 @@ export function DaySheetView({
                           onClick={() => toggleExpand(b.id)}
                           onPointerEnter={() => prefetchBookingDetail(b.id)}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(b.id); } }}
-                          className={`flex w-full cursor-pointer items-center gap-1.5 border-l-[3px] py-2 pl-2 pr-2 text-left transition-colors sm:gap-2 sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(b.status)} ${hasAllergy ? 'border-l-red-400' : ''} ${isExpanded ? 'bg-brand-50/25' : 'hover:bg-slate-50/70'}`}
+                          className={`flex min-h-[2.75rem] w-full cursor-pointer items-center gap-1.5 py-2 pl-2 pr-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 sm:min-h-[3rem] sm:gap-2 sm:py-3 sm:pl-3 sm:pr-3 ${isExpanded ? 'bg-brand-50/40' : hasAllergy && !isTerminalStatus ? 'bg-red-50/25 hover:bg-red-50/35' : isTerminalStatus ? 'bg-slate-50/55 hover:bg-slate-50/70' : 'hover:bg-slate-50/60'}`}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs sm:text-sm">
@@ -1319,7 +1310,7 @@ export function DaySheetView({
                               </span>
                               <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
                               <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
-                              <Pill variant={statusPillVariant(b.status)} size="sm">{bookingStatusDisplayLabel(b.status, true)}</Pill>
+                              <BookingStatusPill statusKey={b.status}>{bookingStatusDisplayLabel(b.status, true)}</BookingStatusPill>
                               {b.area_name ? (
                                 <span className="hidden sm:inline-flex">
                                   <Pill variant="neutral" size="sm">{b.area_name}</Pill>
@@ -1332,7 +1323,7 @@ export function DaySheetView({
                                   <span className="hidden sm:inline">Deposit pending</span>
                                 </Pill>
                               ) : null}
-                              {showAttendanceConfirmedPill(b) ? <Pill variant="success" size="sm" dot>Confirmed</Pill> : null}
+                              {showAttendanceConfirmedSupplementPill(b) ? <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill> : null}
                               {b.dietary_notes || hasAllergy ? (
                                 <span className="hidden sm:inline-flex">
                                   <Pill variant="warning" size="sm" dot>Dietary</Pill>
@@ -1389,13 +1380,13 @@ export function DaySheetView({
                                 e.stopPropagation();
                                 void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at));
                               }}
-                              className={`${b.staff_attendance_confirmed_at ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400/30' : 'border-teal-200 bg-teal-50 text-teal-900 hover:bg-teal-100 focus:ring-teal-400/30'} inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs print:hidden`}
+                              className={`${b.staff_attendance_confirmed_at ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400/30' : BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON} inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs print:hidden`}
                               aria-label={`${b.staff_attendance_confirmed_at ? 'Cancel staff attendance confirmation' : 'Confirm attendance'} for ${b.guest_name}`}
                               aria-busy={staffAttendanceLoadingId === b.id}
                             >
                               {staffAttendanceLoadingId === b.id ? (
                                 <span
-                                  className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${b.staff_attendance_confirmed_at ? 'border-slate-400/30 border-t-slate-600' : 'border-teal-700/25 border-t-teal-800'}`}
+                                  className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${b.staff_attendance_confirmed_at ? 'border-slate-400/30 border-t-slate-600' : BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                                   aria-hidden
                                 />
                               ) : null}
@@ -1420,23 +1411,26 @@ export function DaySheetView({
                         </div>
 
                         {isExpanded && (
-                          <ExpandedBookingContent
-                            booking={bookingRow}
-                            detail={detailById[b.id]}
-                            detailLoading={detailLoadingIds.includes(b.id)}
-                            tableManagementEnabled={tableManagementEnabled}
-                            venueId={venueId}
-                            draftMessage={messageDraftById[b.id] ?? ''}
-                            sendingMessage={sendingMessageIds.includes(b.id)}
-                            onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
-                            onSendMessage={(channel) => { void sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel); }}
-                            onStatusAction={(status) => { requestStatusChange(b, status); }}
-                            onDetailUpdated={() => handleDetailUpdated(b.id)}
-                            onRequestChangeTable={!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {
-                              setChangeTableBookingId(b.id);
-                              setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
-                            } : undefined}
-                          />
+                          <div className="border-t border-slate-100/95 bg-slate-50/30">
+                            <ExpandedBookingContent
+                              booking={bookingRow}
+                              detail={detailById[b.id]}
+                              detailLoading={detailLoadingIds.includes(b.id)}
+                              tableManagementEnabled={tableManagementEnabled}
+                              venueId={venueId}
+                              venueCurrency={currency ?? 'GBP'}
+                              draftMessage={messageDraftById[b.id] ?? ''}
+                              sendingMessage={sendingMessageIds.includes(b.id)}
+                              onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
+                              onSendMessage={(channel) => { void sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel); }}
+                              onStatusAction={(status) => { requestStatusChange(b, status); }}
+                              onDetailUpdated={() => handleDetailUpdated(b.id)}
+                              onRequestChangeTable={!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {
+                                setChangeTableBookingId(b.id);
+                                setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
+                              } : undefined}
+                            />
+                          </div>
                         )}
                       </li>
                     );

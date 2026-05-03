@@ -22,9 +22,17 @@ import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/ena
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import {
   isAttendanceConfirmed,
-  showAttendanceConfirmedPill,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
+  canShowConfirmBookingAttendanceAction,
+  canShowCancelStaffAttendanceConfirmationAction,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
+  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  bookingStatusVisualForKey,
+} from '@/lib/table-management/booking-status-visual';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -33,6 +41,12 @@ import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import {
+  bookingExpandAccordionBodyClass,
+  bookingExpandAccordionDetailsClass,
+  bookingExpandAccordionMessagingBodyClass,
+  bookingExpandAccordionSummaryClass,
+} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -159,31 +173,9 @@ function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel(rowForInference(b));
 }
 
-/** Left-edge status strip color — mirrors the main BookingsDashboard for visual parity. */
-function statusBorderClass(status: string): string {
-  switch (status) {
-    case 'Pending': return 'border-l-amber-400';
-    case 'Booked': return 'border-l-sky-400';
-    case 'Confirmed': return 'border-l-emerald-500';
-    case 'Seated': return 'border-l-brand-500';
-    case 'Completed': return 'border-l-slate-300';
-    case 'Cancelled': return 'border-l-red-300';
-    case 'No-Show': return 'border-l-rose-500';
-    default: return 'border-l-transparent';
-  }
-}
-
-function statusPillVariant(status: string): PillVariant {
-  switch (status) {
-    case 'Pending': return 'warning';
-    case 'Booked': return 'info';
-    case 'Confirmed': return 'success';
-    case 'Seated': return 'brand';
-    case 'Completed': return 'neutral';
-    case 'Cancelled': return 'neutral';
-    case 'No-Show': return 'danger';
-    default: return 'neutral';
-  }
+/** Left-edge status strip — same palette as table grid / main bookings list. */
+function statusBorderClass(b: RegistryAppointment): string {
+  return bookingStatusVisualForKey(b.status).listBorderLeft;
 }
 
 function bookingTypePillVariant(model: BookingModel): PillVariant {
@@ -753,18 +745,6 @@ export function AppointmentBookingsDashboard({
     return list;
   }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
 
-  function canShowConfirmBookingAttendance(b: RegistryAppointment): boolean {
-    if (b.source === 'walk-in') return false;
-    if (showAttendanceConfirmedPill(b)) return false;
-    return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
-  }
-
-  function canShowCancelStaffAttendanceConfirmation(b: RegistryAppointment): boolean {
-    if (b.source === 'walk-in') return false;
-    if (!b.staff_attendance_confirmed_at) return false;
-    return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
-  }
-
   async function confirmBookingAttendance(bookingId: string) {
     setConfirmAttendanceLoadingId(bookingId);
     try {
@@ -1140,7 +1120,7 @@ export function AppointmentBookingsDashboard({
             </span>
           </div>
         </div>
-        <div className="divide-y divide-slate-100">
+        <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3">
           {list.map((b) => renderAppointmentRow(b))}
         </div>
       </div>
@@ -1158,8 +1138,8 @@ export function AppointmentBookingsDashboard({
     const expanded = expandedIds.includes(b.id);
     const startTime = b.booking_time.slice(0, 5);
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
-    const showConfirm = canShowConfirmBookingAttendance(b);
-    const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
+    const showConfirm = canShowConfirmBookingAttendanceAction(b);
+    const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
     const duration = svc?.duration_minutes ?? null;
     const priceDisplay =
       b.deposit_amount_pence != null
@@ -1167,7 +1147,7 @@ export function AppointmentBookingsDashboard({
         : null;
     const draftMessage = messageDraftById[b.id] ?? '';
     const sendingMessage = sendingMessageIds.includes(b.id);
-    const messageChannel = messageChannelById[b.id] ?? 'both';
+    const messageChannel = messageChannelById[b.id] ?? 'email';
 
     return (
       <div
@@ -1183,9 +1163,9 @@ export function AppointmentBookingsDashboard({
             toggleExpanded(b.id);
           }
         }}
-        className={`cursor-pointer border-l-[3px] py-2 pl-2 pr-2 transition-colors sm:py-2.5 sm:pl-3 sm:pr-3 ${statusBorderClass(b.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
+        className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-2 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded ? 'border-slate-200 bg-brand-50/50 shadow-md ring-brand-900/12' : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'}`}
       >
-        <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+        <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
           <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
             <input
               type="checkbox"
@@ -1204,52 +1184,106 @@ export function AppointmentBookingsDashboard({
                 {startTime}
                 {endTime ? <span className="text-slate-400">-{endTime}</span> : null}
               </span>
-              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
-              <span className="hidden shrink-0 text-[11px] font-medium text-slate-500 sm:inline">
+              <span
+                className={
+                  expanded
+                    ? 'inline shrink-0 text-slate-300'
+                    : 'hidden shrink-0 text-slate-300 sm:inline'
+                }
+              >
+                ·
+              </span>
+              <span
+                className={
+                  expanded
+                    ? 'inline shrink-0 text-[11px] font-medium text-slate-500'
+                    : 'hidden shrink-0 text-[11px] font-medium text-slate-500 sm:inline'
+                }
+              >
                 {formatDayHeader(b.booking_date)}
               </span>
-              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
-              <span className="hidden max-w-[10rem] truncate text-[11px] font-medium text-slate-600 sm:inline">
+              <span
+                className={
+                  expanded
+                    ? 'inline shrink-0 text-slate-300'
+                    : 'hidden shrink-0 text-slate-300 sm:inline'
+                }
+              >
+                ·
+              </span>
+              <span
+                className={
+                  expanded
+                    ? 'inline max-w-[10rem] truncate text-[11px] font-medium text-slate-600'
+                    : 'hidden max-w-[10rem] truncate text-[11px] font-medium text-slate-600 sm:inline'
+                }
+              >
                 {svcName}
               </span>
-              <span className="hidden shrink-0 text-slate-300 md:inline">·</span>
-              <span className="hidden max-w-[8rem] truncate text-[11px] text-slate-500 md:inline">
+              <span
+                className={
+                  expanded
+                    ? 'inline shrink-0 text-slate-300'
+                    : 'hidden shrink-0 text-slate-300 md:inline'
+                }
+              >
+                ·
+              </span>
+              <span
+                className={
+                  expanded
+                    ? 'inline max-w-[8rem] truncate text-[11px] text-slate-500'
+                    : 'hidden max-w-[8rem] truncate text-[11px] text-slate-500 md:inline'
+                }
+              >
                 {pracName}
               </span>
-              <Pill variant={statusPillVariant(b.status)} size="sm">
+              <BookingStatusPill statusKey={b.status}>
                 {tableStatusLabel(b.status)}
-              </Pill>
+              </BookingStatusPill>
               {showDepositPendingPill(b) && (
                 <Pill variant="warning" size="sm" dot>
                   <span className="sm:hidden">Deposit</span>
                   <span className="hidden sm:inline">Deposit pending</span>
                 </Pill>
               )}
-              {showAttendanceConfirmedPill(b) && (
-                <Pill variant="success" size="sm" dot>
+              {showAttendanceConfirmedSupplementPill(b) && (
+                <BookingStatusPill statusKey="Confirmed" dot>
                   Confirmed
-                </Pill>
+                </BookingStatusPill>
               )}
               <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
                 {typeLabel}
               </Pill>
               {duration != null && (
-                <span className="hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block">
+                <span
+                  className={
+                    expanded
+                      ? 'inline-block rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500'
+                      : 'hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block'
+                  }
+                >
                   {duration} min
                 </span>
               )}
               {b.party_size > 1 && (
-                <span className="hidden rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 sm:inline-block">
+                <span
+                  className={
+                    expanded
+                      ? 'inline-block rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700'
+                      : 'hidden rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 sm:inline-block'
+                  }
+                >
                   {b.party_size} people
                 </span>
               )}
-              <span className="hidden sm:inline-flex">
+              <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                 <Pill variant={sourcePillVariant(b.source)} size="sm">
                   {sourceLabelShort(b.source)}
                 </Pill>
               </span>
               {priceDisplay && (
-                <span className="hidden sm:inline-flex">
+                <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                   <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
                     {priceDisplay} · {b.deposit_status}
                   </Pill>
@@ -1263,13 +1297,13 @@ export function AppointmentBookingsDashboard({
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void confirmBookingAttendance(b.id)}
-                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60 sm:min-w-[4.75rem] sm:px-2.5 sm:text-xs"
+                className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[4.75rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
                 aria-label={`Confirm attendance for ${b.guest_name}`}
                 aria-busy={confirmAttendanceLoadingId === b.id}
               >
                 {confirmAttendanceLoadingId === b.id ? (
                   <span
-                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                     aria-hidden
                   />
                 ) : null}
@@ -1311,7 +1345,7 @@ export function AppointmentBookingsDashboard({
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
-            className="mt-1.5 space-y-2 px-0.5 pb-2.5 sm:px-1"
+            className="border-t border-slate-100/95 bg-slate-50/30 px-2 pb-2.5 pt-2 space-y-2 sm:px-3"
           >
             {renderExpandedAppointment(b, {
               svcName,
@@ -1341,8 +1375,8 @@ export function AppointmentBookingsDashboard({
     },
   ) {
     const { svcName, pracName, duration, priceDisplay, draftMessage, sendingMessage, messageChannel } = ctx;
-    const showConfirm = canShowConfirmBookingAttendance(b);
-    const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
+    const showConfirm = canShowConfirmBookingAttendanceAction(b);
+    const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
     const notes = b.special_requests?.trim() || null;
     const internal = b.internal_notes?.trim() || null;
@@ -1354,7 +1388,6 @@ export function AppointmentBookingsDashboard({
           month: 'short',
         })
       : null;
-    const firstName = b.guest_name.split(' ')[0] || 'guest';
 
     const infoTile = (label: string, value: ReactNode, tone = 'slate') => (
       <div className={`rounded-lg border px-2 py-1.5 ${
@@ -1372,8 +1405,8 @@ export function AppointmentBookingsDashboard({
     );
 
     return (
-      <div className="space-y-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm shadow-slate-900/[0.03] sm:p-3">
+      <div className="flex flex-col gap-2.5">
+        <section className="rounded-xl border border-slate-200/90 bg-white p-2.5 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-3">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2.5">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
@@ -1438,8 +1471,8 @@ export function AppointmentBookingsDashboard({
           </div>
         </section>
 
-        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
             <span>SMS / email guest</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {b.guest_phone && b.guest_email ? 'SMS + email' : b.guest_phone ? 'SMS' : b.guest_email ? 'Email' : 'No contact'}
@@ -1448,16 +1481,16 @@ export function AppointmentBookingsDashboard({
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
-          <div className="border-t border-slate-100 bg-brand-50/20 p-2.5 sm:p-3">
+          <div className={bookingExpandAccordionMessagingBodyClass}>
             <textarea
               value={draftMessage}
               onChange={(e) => setMessageDraftById((prev) => ({ ...prev, [b.id]: e.target.value }))}
               rows={3}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-              placeholder={`Write a message to ${firstName}...`}
+              placeholder="Write a message"
             />
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <label className="flex items-center justify-between gap-2 text-xs font-medium text-slate-500 sm:justify-start">
+              <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
                 Send via
                 <GuestMessageChannelSelect
                   value={messageChannel}
@@ -1481,26 +1514,26 @@ export function AppointmentBookingsDashboard({
           </div>
         </details>
 
-        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
             <span>Appointment details</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{svcName}</span>
             <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
-          <div className="border-t border-slate-100 p-2.5">
-            <dl className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          <div className={bookingExpandAccordionBodyClass}>
+            <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {infoTile('Client', b.guest_name)}
               {infoTile('Email', b.guest_email ? <a href={`mailto:${b.guest_email}`} className="hover:text-brand-700">{b.guest_email}</a> : 'Not provided')}
               {infoTile('Phone', b.guest_phone ? <a href={`tel:${b.guest_phone}`} className="hover:text-brand-700">{b.guest_phone}</a> : 'Not provided')}
-              {infoTile('Status', <Pill variant={statusPillVariant(b.status)} size="sm">{tableStatusLabel(b.status)}</Pill>)}
+              {infoTile('Status', <BookingStatusPill statusKey={b.status}>{tableStatusLabel(b.status)}</BookingStatusPill>)}
             </dl>
           </div>
         </details>
 
-        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]" open={Boolean(notes || internal)}>
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+        <details className={bookingExpandAccordionDetailsClass} open={Boolean(notes || internal)}>
+          <summary className={bookingExpandAccordionSummaryClass}>
             <span>Notes and preferences</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {[notes, internal].filter(Boolean).length || 'None'}
@@ -1509,7 +1542,7 @@ export function AppointmentBookingsDashboard({
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
-          <section className="space-y-2 border-t border-slate-100 p-2.5">
+          <section className={`${bookingExpandAccordionBodyClass} space-y-3`}>
             {notes && (
               <div>
                 <h5 className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
@@ -1530,7 +1563,7 @@ export function AppointmentBookingsDashboard({
           </section>
         </details>
 
-        <section className="flex flex-wrap items-end gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm shadow-slate-900/[0.03]">
+        <section className="flex flex-wrap items-end gap-2 overflow-x-auto rounded-xl border border-slate-200/90 bg-white p-2 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-3">
           <label className="flex min-w-0 flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Status
@@ -1553,12 +1586,12 @@ export function AppointmentBookingsDashboard({
               type="button"
               disabled={confirmAttendanceLoadingId === b.id}
               onClick={() => void confirmBookingAttendance(b.id)}
-              className="inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 shadow-sm transition-colors duration-150 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-60"
+              className={`inline-flex min-h-9 min-w-[7rem] items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
               aria-busy={confirmAttendanceLoadingId === b.id}
             >
               {confirmAttendanceLoadingId === b.id ? (
                 <span
-                  className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-teal-700/25 border-t-teal-800"
+                  className={`h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                   aria-hidden
                 />
               ) : null}

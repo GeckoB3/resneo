@@ -1,5 +1,5 @@
 /**
- * Reserve NI availability: service engine (computeAvailability, fetchEngineInput)
+ * ReserveNI availability: service engine (computeAvailability, fetchEngineInput)
  * plus legacy JSON helpers (getAvailableSlots) retained for tests and tooling.
  */
 

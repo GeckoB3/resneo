@@ -269,7 +269,7 @@ async function generateConfirmLinkAndSendEmail(
     `&type=magiclink` +
     `&next=${encodeURIComponent('/auth/set-password')}`;
 
-  const subject = `Sign in to ${venueName} — Reserve NI`;
+  const subject = `Sign in to ${venueName} — ReserveNI`;
   const text = [
     `You were invited to access the dashboard for ${venueName}.`,
     '',

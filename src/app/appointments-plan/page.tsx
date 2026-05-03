@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
+import {
+  RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
+  RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD,
+} from "@/lib/booking-funds-copy";
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 
 export const metadata: Metadata = {
   title: "ReserveNI for Appointments | Online Booking for Northern Ireland Businesses",
@@ -68,8 +74,7 @@ const ownerBenefits = [
   },
   {
     title: "Protect your income with deposits",
-    description:
-      "Require a deposit on any booking. Funds settle straight to your bank via Stripe. ReserveNI never touches your money.",
+    description: `Require a deposit on any booking. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
     icon: ShieldPoundIcon,
   },
   {
@@ -93,7 +98,7 @@ const ownerBenefits = [
   {
     title: "Fair, honest pricing",
     description:
-      "One flat subscription. No commission on bookings. Most plans include a monthly SMS allowance; when you go beyond it, you pay as you go at a clear, published rate. Cancel anytime.",
+      `One flat subscription. No commission on bookings. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Most plans include a monthly SMS allowance; when you go beyond it, you pay as you go at a clear, published rate. ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
     icon: TagIcon,
   },
 ];
@@ -213,7 +218,7 @@ const faqs = [
   },
   {
     q: "How do deposits actually work?",
-    a: "You connect your own Stripe account in a few clicks. When a client pays a deposit, the money goes directly into your account. ReserveNI never holds your funds. You control the amount and your cancellation policy. If a client no-shows, the deposit is yours.",
+    a: `You connect your own Stripe account in a few clicks. When a client pays a deposit, ${RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON} You control the amount and your cancellation policy. If a client no-shows, the deposit is yours.`,
   },
   {
     q: "How do SMS costs work?",
@@ -264,7 +269,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <a
@@ -371,9 +376,9 @@ function Hero() {
               <TickIcon />
               Website embed included
             </span>
-            <span className="inline-flex items-center gap-2">
+            <span className="inline-flex basis-full max-w-2xl items-start gap-2">
               <TickIcon />
-              Cancel anytime
+              <span>{SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}</span>
             </span>
           </div>
         </div>
@@ -1310,9 +1315,16 @@ function ClosingCta() {
 
               <div className="mt-6 grid max-w-xl grid-cols-1 gap-3 text-xs text-white/85 sm:grid-cols-2">
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Set up in under 30 minutes</div>
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">No commission or booking fees</div>
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Cancel anytime</div>
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Local NI support</div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 leading-snug">
+                  No commission or booking fees on ReserveNI.
+                  <span className="mt-1 block text-white/75">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</span>
+                </div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">
+                  {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+                </div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">
+                  Local NI support
+                </div>
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -1334,7 +1346,8 @@ function ClosingCta() {
               <div className="mt-10 grid grid-cols-2 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
                 <div>
                   <p className="text-2xl font-bold text-white">0%</p>
-                  <p className="text-xs">commission on bookings</p>
+                  <p className="text-xs">ReserveNI commission on bookings</p>
+                  <p className="mt-1 text-[10px] leading-snug text-white/60">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white">Local</p>
@@ -1363,7 +1376,9 @@ function Footer() {
   return (
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p>&copy; 2026 Reserve&nbsp;NI</p>
+        <p className="max-w-xl text-center leading-snug sm:text-left">
+          &copy; 2026 ReserveNI · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+        </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">
             Home
@@ -1378,10 +1393,10 @@ function Footer() {
             Contact
           </a>
           <Link href="/terms" className="transition-colors hover:text-slate-900">
-            Terms
+            Website Terms of Use
           </Link>
           <Link href="/privacy" className="transition-colors hover:text-slate-900">
-            Privacy
+            Privacy Policy
           </Link>
         </div>
       </div>

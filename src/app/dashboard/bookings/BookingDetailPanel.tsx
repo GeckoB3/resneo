@@ -1,13 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
-import { NumericInput } from '@/components/ui/NumericInput';
+import {
+  BOOKING_STATUS_TRANSITIONS,
+  BOOKING_REVERT_ACTIONS,
+  canMarkNoShowForSlot,
+  isDestructiveBookingStatus,
+  isRevertTransition,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import type { CountryCode } from 'libphonenumber-js';
-import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
+import {
+  ModifyTableBookingModal,
+  bookingDetailToEditSnapshot,
+  type UnifiedBookingEditSnapshot,
+} from '@/components/booking/ModifyTableBookingModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
@@ -17,31 +27,11 @@ import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
-import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
+import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
-
-function detailStatusPillVariant(status: string): PillVariant {
-  switch (status) {
-    case 'Pending':
-      return 'warning';
-    case 'Booked':
-      return 'info';
-    case 'Confirmed':
-      return 'success';
-    case 'Seated':
-      return 'brand';
-    case 'Completed':
-      return 'neutral';
-    case 'No-Show':
-      return 'danger';
-    case 'Cancelled':
-      return 'neutral';
-    default:
-      return 'neutral';
-  }
-}
 
 interface Guest {
   id: string;
@@ -98,6 +88,8 @@ interface BookingDetail {
   inferred_booking_model?: BookingModel;
   area_id?: string | null;
   area_name?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
 }
 
 function timeToMinutes(value: string): number {
@@ -245,16 +237,8 @@ export function BookingDetailPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [showModify, setShowModify] = useState(false);
-  const [modifyDurationMinutes, setModifyDurationMinutes] = useState(90);
-  const [modifyGuestName, setModifyGuestName] = useState('');
-  const [modifyGuestPhone, setModifyGuestPhone] = useState('');
-  const [modifyGuestEmail, setModifyGuestEmail] = useState('');
-  const [modifyDietary, setModifyDietary] = useState('');
-  const [modifyOccasion, setModifyOccasion] = useState('');
-  const [modifySpecialRequests, setModifySpecialRequests] = useState('');
-  const [modifyInternalNotes, setModifyInternalNotes] = useState('');
-  const [modifyTableIds, setModifyTableIds] = useState<string[]>([]);
+  const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
+  const [modifyFrozenSnapshot, setModifyFrozenSnapshot] = useState<UnifiedBookingEditSnapshot | null>(null);
   const [assignedTables, setAssignedTables] = useState<Array<{ id: string; name: string }>>([]);
   const [allTables, setAllTables] = useState<Array<{ id: string; name: string; max_covers: number }>>([]);
   const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
@@ -308,18 +292,6 @@ export function BookingDetailPanel({
 
     const data = (await bookingRes.json()) as BookingDetail;
     setDetail(data);
-    const startMinutes = timeToMinutes(data.booking_time?.slice(0, 5) ?? '12:00');
-    const endHHMM = endHHMMOrFallback(data.estimated_end_time, data.booking_time?.slice(0, 5) ?? '12:00', 90);
-    const endMinutes = timeToMinutes(endHHMM);
-    setModifyDurationMinutes(Math.max(15, endMinutes - startMinutes));
-    setModifyGuestName(data.guest?.name ?? '');
-    setModifyGuestPhone(data.guest?.phone ?? '');
-    setModifyGuestEmail(data.guest?.email ?? '');
-    setModifyDietary(data.dietary_notes ?? '');
-    setModifyOccasion(data.occasion ?? '');
-    setModifySpecialRequests(data.special_requests ?? '');
-    setModifyInternalNotes(data.internal_notes ?? '');
-    setModifyTableIds((data.table_assignments ?? []).map((t: { id: string }) => t.id));
 
     try {
       const tablesRes = await tablesPromise;
@@ -393,7 +365,7 @@ export function BookingDetailPanel({
   useEffect(() => {
     setDetail(null);
     setCustomMessage('');
-    setShowModify(false);
+    setModifyBookingOpen(false);
     setShowAssignModal(false);
     setLoading(true);
     setError(null);
@@ -518,115 +490,6 @@ export function BookingDetailPanel({
     }
     void executeStatusChange(newStatus);
   }, [detail, executeStatusChange, isAppointment]);
-
-  const submitModify = useCallback(async () => {
-    if (!detail) return;
-    setActionLoading(true);
-    try {
-      const currentTime = detail.booking_time?.slice(0, 5) ?? '12:00';
-
-      const phoneTrim = modifyGuestPhone.trim();
-      const guestPhoneNormalized = phoneTrim ? normalizeToE164(modifyGuestPhone, guestPhoneDefaultCountry) : null;
-      if (phoneTrim && !guestPhoneNormalized) {
-        setError('Enter a valid phone number');
-        setActionLoading(false);
-        return;
-      }
-
-      const metadataPayload: Record<string, unknown> = {
-        guest_name: modifyGuestName,
-        guest_phone: guestPhoneNormalized,
-        guest_email: modifyGuestEmail,
-        occasion: modifyOccasion,
-        special_requests: modifySpecialRequests,
-        internal_notes: modifyInternalNotes,
-      };
-      if (notesVariant === 'table') {
-        metadataPayload.dietary_notes = modifyDietary;
-      }
-
-      const metadataRes = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(metadataPayload),
-      });
-      if (!metadataRes.ok) {
-        const payload = await metadataRes.json().catch(() => ({}));
-        setError(payload.error ?? 'Failed to update booking details');
-        return;
-      }
-
-      const expectedEnd = minutesToTime(timeToMinutes(currentTime) + modifyDurationMinutes);
-      const currentEnd = endHHMMOrFallback(detail.estimated_end_time, currentTime, 90);
-      if (expectedEnd !== currentEnd) {
-        const resizeRes = await fetch('/api/venue/tables/assignments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'change_time',
-            booking_id: bookingId,
-            new_time: currentTime,
-            new_estimated_end_time: `${detail.booking_date}T${expectedEnd}:00.000Z`,
-          }),
-        });
-        if (!resizeRes.ok) {
-          const payload = await resizeRes.json().catch(() => ({}));
-          setError(payload.error ?? 'Failed to update booking duration');
-          return;
-        }
-      }
-
-      const oldTableIds = assignedTables.map((table) => table.id).sort();
-      const newTableIds = [...modifyTableIds].sort();
-      if (oldTableIds.join('|') !== newTableIds.join('|')) {
-        const assignBody = newTableIds.length === 0
-          ? { action: 'unassign', booking_id: bookingId }
-          : oldTableIds.length > 0
-          ? {
-              action: 'reassign',
-              booking_id: bookingId,
-              old_table_ids: oldTableIds,
-              new_table_ids: newTableIds,
-            }
-          : {
-              booking_id: bookingId,
-              table_ids: newTableIds,
-            };
-        const assignRes = await fetch('/api/venue/tables/assignments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(assignBody),
-        });
-        if (!assignRes.ok) {
-          const payload = await assignRes.json().catch(() => ({}));
-          setError(payload.error ?? 'Failed to update table assignment');
-          return;
-        }
-      }
-
-      setError(null);
-      setShowModify(false);
-      await load();
-      onUpdated();
-    } finally { setActionLoading(false); }
-  }, [
-    detail,
-    bookingId,
-    modifyDurationMinutes,
-    modifyGuestName,
-    modifyGuestPhone,
-    modifyGuestEmail,
-    modifyDietary,
-    modifyOccasion,
-    modifySpecialRequests,
-    modifyInternalNotes,
-    modifyTableIds,
-    assignedTables,
-    load,
-    onUpdated,
-    notesVariant,
-    guestPhoneDefaultCountry,
-  ]);
 
   const runDepositAction = useCallback(async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
     setActionLoading(true);
@@ -801,6 +664,7 @@ export function BookingDetailPanel({
                 guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
                 guest_email: d.guest?.email ?? null,
                 guest_phone: d.guest?.phone ?? null,
+                guest_id: d.guest?.id,
                 table_assignments: initialSnapshot?.tableNames?.map((name, index) => ({ id: `snapshot-table-${index}`, name })),
                 service_id: d.service_id,
                 area_id: d.area_id,
@@ -811,6 +675,7 @@ export function BookingDetailPanel({
               detailLoading
               tableManagementEnabled={tableManagementEnabled}
               venueId={d.venue_id || venueId || ''}
+              venueCurrency={venueCurrency ?? 'GBP'}
               draftMessage=""
               sendingMessage={false}
               onMessageDraftChange={() => {}}
@@ -841,6 +706,7 @@ export function BookingDetailPanel({
       guest_name: d.guest?.name ?? initialSnapshot?.guestName ?? 'Guest',
       guest_email: d.guest?.email ?? null,
       guest_phone: d.guest?.phone ?? null,
+      guest_id: d.guest?.id,
       table_assignments:
         assignedTables.length > 0
           ? assignedTables
@@ -912,6 +778,7 @@ export function BookingDetailPanel({
               detailLoading={false}
               tableManagementEnabled={tableManagementEnabled}
               venueId={d.venue_id || venueId || ''}
+              venueCurrency={venueCurrency ?? 'GBP'}
               draftMessage={customMessage}
               sendingMessage={actionLoading}
               onMessageDraftChange={setCustomMessage}
@@ -1129,9 +996,9 @@ export function BookingDetailPanel({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className={`truncate font-semibold text-slate-900 ${isPopover ? 'text-[13px]' : 'text-base'}`}>{d.guest?.name ?? 'Booking'}</h2>
-                <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot className="shrink-0">
+                <BookingStatusPill statusKey={d.status} dot className="shrink-0">
                   {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
-                </Pill>
+                </BookingStatusPill>
                 {loading && optimisticDetail != null && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
@@ -1240,9 +1107,9 @@ export function BookingDetailPanel({
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Next action</p>
                       <p className="mt-0.5 text-xs text-slate-500">Update this booking without leaving the grid.</p>
                     </div>
-                    <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot>
+                    <BookingStatusPill statusKey={d.status} dot>
                       {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
-                    </Pill>
+                    </BookingStatusPill>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                   {forwardStatuses.map((status) => (
@@ -1657,118 +1524,41 @@ export function BookingDetailPanel({
             </SectionCard>
           )}
 
-          {/* Modify section */}
-          {!showModify ? (
-            <button
-              type="button"
-              disabled={!isHydrated}
-              onClick={() => setShowModify(true)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Modify booking
-            </button>
-          ) : (
-            <div className={`rounded-xl border border-slate-200 bg-slate-50 ${isPopover ? 'space-y-3 p-3' : 'space-y-4 p-4'}`}>
-              {/* Date / Time / Party Size - availability-aware */}
-              <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                <p className="mb-2.5 text-xs font-semibold text-slate-700">Date / Time / Party Size</p>
-                {depositPaid && <p className="mb-2.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Changing party size won&apos;t adjust the deposit already paid.</p>}
-                <ModifyBookingInline
-                  bookingId={bookingId}
-                  venueId={d.venue_id || venueId || ''}
-                  currentDate={d.booking_date}
-                  currentTime={d.booking_time}
-                  currentPartySize={d.party_size}
-                  onSaved={async () => { await load(); onUpdated(); }}
-                  onCancel={() => {}}
-                />
-              </div>
-
-              {/* Guest details, duration, table assignment */}
-              <div className={isPopover ? 'space-y-2.5' : 'space-y-3'}>
-                <p className="text-xs font-semibold text-slate-700">Guest &amp; Booking Details</p>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Guest Name</label>
-                  <input type="text" value={modifyGuestName} onChange={(e) => setModifyGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Guest Phone</label>
-                  <PhoneWithCountryField
-                    value={modifyGuestPhone}
-                    onChange={setModifyGuestPhone}
-                    defaultCountry={guestPhoneDefaultCountry}
-                    inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+          {/* Modify booking — same flow as new booking (modal) */}
+          {bookingStyleIsTable &&
+            ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(d.status)) && (
+              <>
+                <button
+                  type="button"
+                  disabled={!isHydrated}
+                  onClick={() => {
+                    setModifyFrozenSnapshot(bookingDetailToEditSnapshot(d));
+                    setModifyBookingOpen(true);
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Modify booking
+                </button>
+                {modifyBookingOpen && modifyFrozenSnapshot && (
+                  <ModifyTableBookingModal
+                    open
+                    onClose={() => {
+                      setModifyBookingOpen(false);
+                      setModifyFrozenSnapshot(null);
+                    }}
+                    onSaved={async () => {
+                      await load();
+                      onUpdated();
+                    }}
+                    venueId={d.venue_id || venueId || ''}
+                    currency={venueCurrency ?? 'GBP'}
+                    advancedMode={tableManagementEnabled}
+                    bookingId={bookingId}
+                    editSnapshot={modifyFrozenSnapshot}
                   />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Guest Email</label>
-                  <input type="email" value={modifyGuestEmail} onChange={(e) => setModifyGuestEmail(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Duration (mins)</label>
-                  <NumericInput
-                    min={15}
-                    max={480}
-                    value={modifyDurationMinutes}
-                    onChange={(v) => setModifyDurationMinutes(Math.max(15, Math.round(v / 15) * 15))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                  />
-                </div>
-                {notesVariant === 'table' && (
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Dietary Notes</label>
-                    <input type="text" value={modifyDietary} onChange={(e) => setModifyDietary(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                  </div>
                 )}
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Occasion</label>
-                  <input type="text" value={modifyOccasion} onChange={(e) => setModifyOccasion(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">
-                    {notesVariant === 'cde' ? 'Booking notes' : 'Special Requests'}
-                  </label>
-                  <textarea value={modifySpecialRequests} onChange={(e) => setModifySpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">
-                    {notesVariant === 'cde' ? 'Staff notes' : 'Internal Notes'}
-                  </label>
-                  <textarea value={modifyInternalNotes} onChange={(e) => setModifyInternalNotes(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                {(tableManagementEnabled || allTables.length > 0) && (
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-slate-500">Assigned Tables</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {allTables.map((table) => {
-                        const selected = modifyTableIds.includes(table.id);
-                        return (
-                          <button
-                            key={table.id}
-                            type="button"
-                            onClick={() => {
-                              setModifyTableIds((prev) => selected ? prev.filter((id) => id !== table.id) : [...prev, table.id]);
-                            }}
-                            className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
-                              selected
-                                ? 'border-brand-300 bg-brand-50 text-brand-700'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            {table.name} ({table.max_covers})
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Save Details</button>
-                  <button type="button" onClick={() => setShowModify(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
-                </div>
-              </div>
-            </div>
-          )}
+              </>
+            )}
 
           <div className={isPopover ? 'grid gap-1.5 md:grid-cols-2' : 'grid gap-3'}>
           {/* Timeline */}
@@ -1819,7 +1609,7 @@ export function BookingDetailPanel({
               )}
               <div className={`rounded-xl border border-slate-100 bg-slate-50/80 ${isPopover ? 'p-2' : 'p-3'}`}>
                 <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Send message via</span>
+                  <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Send message via</span>
                   <GuestMessageChannelSelect
                     value={guestMessageChannel}
                     onChange={setGuestMessageChannel}

@@ -22,10 +22,12 @@ import type { BookingModel } from '@/types/booking-models';
 export function staffSurfaceBookingWidthClass(
   surfaceTabs: StaffBookingSurfaceTab[],
   activeTab: StaffBookingSurfaceTabId,
+  options?: { tableAdvancedMode?: boolean },
 ): string {
-  if (surfaceTabs.length > 1 && activeTab === 'table_reservation') return 'max-w-lg';
-  if (surfaceTabs.length > 1) return 'max-w-5xl';
-  return activeTab === 'table_reservation' ? 'max-w-lg' : 'max-w-5xl';
+  const tableWidth = options?.tableAdvancedMode ? 'max-w-2xl' : 'max-w-lg';
+  if (surfaceTabs.length > 1 && activeTab === 'table_reservation') return tableWidth;
+  if (surfaceTabs.length > 1) return 'max-w-3xl';
+  return activeTab === 'table_reservation' ? tableWidth : 'max-w-3xl';
 }
 
 export interface StaffSurfaceBookingStackProps {
@@ -233,6 +235,10 @@ function StaffSurfaceBookingStackInner({
     }
   };
 
+  const contentWidthClass = staffSurfaceBookingWidthClass(surfaceTabs, activeTab, {
+    tableAdvancedMode: advancedMode,
+  });
+
   return (
     <>
       <StaffBookingSurfaceTabsBar
@@ -245,7 +251,7 @@ function StaffSurfaceBookingStackInner({
             : 'Booking type — table, appointments, events, classes, resources'
         }
       />
-      {body()}
+      <div className={`mx-auto w-full ${contentWidthClass}`}>{body()}</div>
     </>
   );
 }

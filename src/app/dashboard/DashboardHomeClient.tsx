@@ -22,6 +22,7 @@ import {
 } from '@/lib/booking/active-models';
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 import { bookingModelShortLabel, bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import type { DashboardHomePayload } from '@/lib/dashboard/dashboard-home-payload';
 import type { SetupStatus } from '@/lib/venue/compute-setup-status';
@@ -122,6 +123,21 @@ function stripClassForBookingStatus(status: string): string {
   }
 }
 
+/** Stable display order · table first · then BOOKING_MODEL_ORDER for non-table chips. */
+function sortTodayByBookingModelEntries(entries: [string, number][]): [string, number][] {
+  return [...entries].sort((a, b) => {
+    const ia =
+      BOOKING_MODEL_ORDER.indexOf(a[0] as BookingModel) >= 0
+        ? BOOKING_MODEL_ORDER.indexOf(a[0] as BookingModel)
+        : BOOKING_MODEL_ORDER.length;
+    const ib =
+      BOOKING_MODEL_ORDER.indexOf(b[0] as BookingModel) >= 0
+        ? BOOKING_MODEL_ORDER.indexOf(b[0] as BookingModel)
+        : BOOKING_MODEL_ORDER.length;
+    return ia - ib;
+  });
+}
+
 export function DashboardHomeClient({
   initialData,
   setupStatusFromServer,
@@ -167,30 +183,64 @@ export function DashboardHomeClient({
     (payload.booking_model as BookingModel) ?? 'table_reservation',
   );
   const enabledNorm = activeModelsToLegacyEnabledModels(activeModels, primaryModel);
-  const isAppointment = isAppointmentDashboardExperience(
+  const tableFocusSecondariesEnabled = Boolean(payload.table_focus_secondaries_enabled);
+  const secondaryBookingActivity = payload.secondary_booking_activity ?? null;
+  const hasAppointmentVenueExperience = isAppointmentDashboardExperience(
     (payload.pricing_tier as string | null | undefined) ?? null,
     primaryModel,
     enabledNorm,
   );
+  /** Restaurant table-first home: suppress pure-appointments wording when secondaries exist. */
+  const useAppointmentPhraseology = hasAppointmentVenueExperience && !tableFocusSecondariesEnabled;
   const calendarEligible = isVenueScheduleCalendarEligible(primaryModel, enabledNorm);
   const scheduleHref = calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet';
   const hasSecondaryModels = enabledNorm.length > 0;
   const showTypeColumn =
-    hasSecondaryModels || Object.keys(payload.today_by_booking_model ?? {}).length > 1;
+    hasSecondaryModels ||
+    Boolean(tableFocusSecondariesEnabled) ||
+    Object.keys(payload.today_by_booking_model ?? {}).length > 1;
   const covers = n(t.covers);
   const bookings = n(t.bookings);
   const confirmed = n(t.confirmed);
   const pending = n(t.pending);
   const seated = n(t.seated);
-  const revenue = n(t.revenue);
+  const bookingsCountAllModes = payload.today_by_booking_model
+    ? Object.values(payload.today_by_booking_model).reduce((sum, c) => sum + c, 0)
+    : bookings;
   const peakCovers = n(t.peak_in_house_covers);
   const inHouseNow = n(t.covers_in_house_now);
   const arrivingSoon = n(t.arriving_within_30_min);
   const fillPct = n(t.peak_fill_percent);
   const hasCap = t.concurrent_cap != null;
   const cap = t.concurrent_cap;
-  const forecastSpark = payload.forecast.map((f) => (isAppointment ? f.bookings : f.covers));
+  const attendanceConfirmedPct = bookings > 0 ? Math.round((confirmed / bookings) * 100) : null;
+  const forecastSpark = payload.forecast.map((f) => (useAppointmentPhraseology ? f.bookings : f.covers));
   const hasServiceCapacityOutlook = payload.heatmap.some((h) => (h.by_service?.length ?? 0) > 0);
+  /** Max simultaneous dining-service stripes in heatmap rows — drives unified column/block heights */
+  const capacityOutlookStackDepth = payload.heatmap.reduce(
+    (mx, h) => Math.max(mx, h.by_service?.length ?? 0),
+    0,
+  );
+
+  const STACK_ROW_GAP_PX = 6;
+  /** Fits fixed stats band (~3rem) + minimum tint height + gutters per row */
+  const STACK_BAND_AND_STATS_PX = 80;
+
+  const capacityOutlookUnifiedBodyPx = (() => {
+    const d = capacityOutlookStackDepth;
+    if (!hasServiceCapacityOutlook || d < 1) {
+      return 76;
+    }
+    return Math.round(d * STACK_BAND_AND_STATS_PX + Math.max(d - 1, 0) * STACK_ROW_GAP_PX);
+  })();
+
+
+  function diaryPartyLine(b: (typeof payload.recent_bookings)[number]): string {
+    if (useAppointmentPhraseology && !tableFocusSecondariesEnabled) return '';
+    if ((b.booking_model ?? 'table_reservation') === 'table_reservation') return `${b.party_size} covers`;
+    if (tableFocusSecondariesEnabled) return `${b.party_size} guest${b.party_size !== 1 ? 's' : ''}`;
+    return `${b.party_size} covers`;
+  }
 
   return (
     <PageFrame>
@@ -222,7 +272,7 @@ export function DashboardHomeClient({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
                 </svg>
-                {isAppointment ? 'All appointments' : 'All bookings'}
+                {useAppointmentPhraseology ? 'All appointments' : 'All bookings'}
               </Link>
             </>
           }
@@ -235,14 +285,14 @@ export function DashboardHomeClient({
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
           <DashboardStatCard
-            label={isAppointment ? 'Appointments today' : 'Covers today'}
-            value={isAppointment ? bookings : covers}
+            label={useAppointmentPhraseology ? 'Appointments today' : 'Covers today'}
+            value={useAppointmentPhraseology ? bookings : covers}
             color="brand"
             sparklineValues={forecastSpark}
             subValue={
-              isAppointment
+              useAppointmentPhraseology
                 ? bookings > 0
-                  ? `${confirmed} confirmed`
+                  ? `${confirmed}/${bookings} confirmed`
                   : 'no appointments yet'
                 : bookings > 0
                   ? `across ${bookings} booking${bookings !== 1 ? 's' : ''}`
@@ -250,40 +300,56 @@ export function DashboardHomeClient({
             }
           />
           <DashboardStatCard
-            label="Confirmed"
-            value={confirmed}
+            label={useAppointmentPhraseology ? 'Confirmed' : 'Attendance confirmed'}
+            value={bookings > 0 ? `${confirmed}/${bookings}` : '—'}
             color="emerald"
             sparklineValues={forecastSpark}
             subValue={
+              bookings > 0 && attendanceConfirmedPct != null ? `${attendanceConfirmedPct}% of bookings` : 'No bookings today'
+            }
+            subValue2={
               pending > 0 || seated > 0
                 ? [seated > 0 ? `${seated} seated` : '', pending > 0 ? `${pending} pending` : '']
                     .filter(Boolean)
-                    .join(', ')
+                    .join(' · ')
                 : undefined
             }
           />
-          <DashboardStatCard label="Deposit revenue" value={`£${revenue.toFixed(2)}`} color="emerald" />
+          <DashboardStatCard
+            label="Arriving soon"
+            value={arrivingSoon}
+            color="violet"
+            subValue={
+              useAppointmentPhraseology
+                ? 'Party sizes due in next 30 min'
+                : tableFocusSecondariesEnabled
+                  ? 'Table covers due in next 30 min'
+                  : 'Covers due in next 30 min'
+            }
+          />
           <DashboardStatCard
             label="Next up"
             value={t.next_booking ? t.next_booking.time : '-'}
             color="amber"
             subValue={
               t.next_booking
-                ? isAppointment
+                ? useAppointmentPhraseology
                   ? 'next appointment'
                   : `party of ${t.next_booking.party_size}`
-                : isAppointment
+                : useAppointmentPhraseology
                   ? 'no upcoming appointments'
                   : 'no upcoming bookings'
             }
           />
         </div>
 
-        {payload.today_by_booking_model && Object.keys(payload.today_by_booking_model).length > 0 && (
+        {payload.today_by_booking_model &&
+          Object.keys(payload.today_by_booking_model).length > 0 &&
+          !tableFocusSecondariesEnabled && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Today by booking type</h2>
             <div className="mt-2 flex flex-wrap gap-2">
-              {Object.entries(payload.today_by_booking_model).map(([k, count]) => (
+              {sortTodayByBookingModelEntries(Object.entries(payload.today_by_booking_model)).map(([k, count]) => (
                 <span
                   key={k}
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
@@ -300,7 +366,7 @@ export function DashboardHomeClient({
           </div>
         )}
 
-        {!isAppointment && (
+        {!useAppointmentPhraseology && (
           <div className="rounded-xl border border-slate-200 bg-white p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex-1">
@@ -338,12 +404,6 @@ export function DashboardHomeClient({
                       {fillPct}%
                     </span>
                   </div>
-                )}
-
-                {!hasCap && bookings > 0 && (
-                  <p className="mt-2 text-[11px] text-slate-400">
-                    Set up your availability capacity to see a percentage bar here.
-                  </p>
                 )}
               </div>
 
@@ -387,18 +447,21 @@ export function DashboardHomeClient({
           </div>
         )}
 
-        <div className={`grid gap-5 ${isAppointment ? 'lg:grid-cols-1' : 'lg:grid-cols-2'}`}>
-          {!isAppointment && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className={`grid min-w-0 grid-cols-1 gap-5 ${useAppointmentPhraseology ? '' : 'xl:grid-cols-2'}`}>
+          {!useAppointmentPhraseology && (
+            <div className="min-w-0 w-full max-w-full rounded-xl border border-slate-200 bg-white p-5">
               <h2 className="text-sm font-semibold text-slate-700">7-day capacity outlook</h2>
               <p className="mb-4 mt-1 text-xs text-slate-400">
                 {hasServiceCapacityOutlook
-                  ? 'Peak load vs slot capacity for each dining service (busiest moment that day).'
-                  : 'How full each day gets at its busiest time.'}
+                  ? 'Peak covers vs capacity, by dining service.'
+                  : 'Peak load versus capacity each day.'}
               </p>
-              <HorizontalScrollHint />
-              <div className="-mx-1 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:overflow-visible">
-                <div className="flex min-w-min gap-2 sm:min-w-0 sm:w-full">
+              <HorizontalScrollHint below="xl" message="Swipe horizontally to see all seven days." />
+              <div
+                className="max-w-full min-w-0 overflow-x-auto overflow-y-visible pb-2 [-webkit-overflow-scrolling:touch] max-xl:snap-x max-xl:snap-mandatory max-xl:px-0.5 xl:mx-0 xl:overflow-visible xl:pb-0"
+                style={{ scrollbarGutter: 'stable' }}
+              >
+                <div className="flex w-max flex-nowrap items-stretch gap-2 pr-4 max-xl:min-h-0 xl:grid xl:w-full xl:max-w-none xl:grid-cols-7 xl:gap-3 xl:pr-0">
                   {payload.heatmap.map((h, idx) => {
                     const hPeak = n(h.peak_in_house_covers);
                     const hTotal = n(h.daily_total_covers);
@@ -410,18 +473,21 @@ export function DashboardHomeClient({
                     return (
                       <div
                         key={h.date}
-                        className={`flex shrink-0 flex-col items-center gap-1.5 sm:w-0 sm:min-w-0 sm:flex-1 sm:shrink ${
-                          useServiceStack ? 'w-[6rem] min-w-[5.25rem]' : 'w-[4.5rem]'
-                        }`}
+                        className={`flex shrink-0 flex-col items-center gap-1.5 max-xl:w-[5.625rem] max-xl:snap-start max-xl:flex-none xl:min-w-0`}
                       >
-                        <span className={`text-xs font-medium ${isToday ? 'text-brand-600' : 'text-slate-500'}`}>
+                        <span className={`shrink-0 text-xs font-medium ${isToday ? 'text-brand-600' : 'text-slate-500'}`}>
                           {isToday ? 'Today' : h.day}
                         </span>
                         {useServiceStack && segments ? (
                           <div
-                            className={`flex w-full min-h-[5.75rem] flex-col gap-0.5 rounded-lg p-0.5 ${
-                              isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''
+                            className={`grid w-full shrink-0 gap-1 rounded-lg box-border p-1 ${
+                              isToday ? 'ring-2 ring-brand-300 ring-offset-1 ring-offset-white' : ''
                             }`}
+                            style={{
+                              height: capacityOutlookUnifiedBodyPx,
+                              minHeight: capacityOutlookUnifiedBodyPx,
+                              gridTemplateRows: `repeat(${segments.length}, minmax(0, 1fr))`,
+                            }}
                           >
                             {segments.map((s) => {
                               const sPct = s.fill_percent;
@@ -430,35 +496,40 @@ export function DashboardHomeClient({
                               const sTotal = n(s.daily_total_covers);
                               const sHasCap = s.concurrent_cap != null;
                               return (
-                                <div key={s.service_id} className="flex w-full flex-col gap-0.5">
+                                <div
+                                  key={s.service_id}
+                                  className="flex min-h-0 flex-col gap-0.5 overflow-hidden rounded-sm py-px"
+                                >
                                   <div
                                     title={`${s.service_name}: ${sTotal} covers booked${
                                       sHasCap ? ` · busiest moment ${sPeak}/${s.concurrent_cap}` : ''
                                     }`}
-                                    className={`flex min-h-[1.85rem] flex-1 items-center justify-center rounded-md px-0.5 py-1 transition-colors ${getHeatColor(heatInput)}`}
+                                    className={`flex min-h-0 flex-1 items-center justify-center rounded-md px-0.5 py-1 transition-colors ${getHeatColor(
+                                      heatInput,
+                                    )}`}
                                   >
-                                    <span className="truncate text-center text-[8px] font-semibold leading-tight text-slate-800 sm:text-[9px]">
+                                    <span className="line-clamp-2 text-center text-[8px] font-semibold leading-tight text-slate-800 sm:text-[9px]">
                                       {s.service_name}
                                     </span>
                                   </div>
-                                  <div className="text-center leading-tight">
+                                  <div className="flex h-[3rem] shrink-0 flex-col justify-center gap-0 text-center leading-tight">
                                     {sHasCap && sPct != null ? (
                                       <span className="block text-[10px] font-bold tabular-nums text-slate-700">
                                         {sPct}%
                                       </span>
                                     ) : null}
                                     {sHasCap ? (
-                                      <span className="block text-[10px] tabular-nums text-slate-500">
+                                      <span className="block truncate text-[10px] tabular-nums text-slate-500">
                                         {sPeak}/{s.concurrent_cap}
                                       </span>
                                     ) : sTotal > 0 ? (
-                                      <span className="block text-[10px] tabular-nums text-slate-500">
+                                      <span className="block truncate text-[10px] tabular-nums text-slate-500">
                                         {sPeak} at once
                                       </span>
                                     ) : (
                                       <span className="block text-[10px] tabular-nums text-slate-400">—</span>
                                     )}
-                                    <span className="block text-[10px] tabular-nums text-slate-400">
+                                    <span className="block truncate text-[10px] tabular-nums text-slate-400">
                                       {sTotal} cover{sTotal !== 1 ? 's' : ''}
                                     </span>
                                   </div>
@@ -468,7 +539,10 @@ export function DashboardHomeClient({
                           </div>
                         ) : (
                           <div
-                            className={`flex h-14 w-full items-center justify-center rounded-lg transition-colors ${getHeatColor(hPct)} ${isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''}`}
+                            className={`flex w-full shrink-0 items-center justify-center rounded-lg transition-colors ${getHeatColor(hPct)} ${
+                              isToday ? 'ring-2 ring-brand-300 ring-offset-1 ring-offset-white' : ''
+                            }`}
+                            style={{ height: capacityOutlookUnifiedBodyPx, minHeight: capacityOutlookUnifiedBodyPx }}
                           >
                             <span className={`text-xs font-bold ${hPct >= 40 ? 'text-white' : 'text-slate-600'}`}>
                               {hHasCap ? `${hPct}%` : hTotal > 0 ? `${hTotal}` : '-'}
@@ -476,7 +550,7 @@ export function DashboardHomeClient({
                           </div>
                         )}
                         {!useServiceStack ? (
-                          <div className="text-center leading-tight">
+                          <div className="flex min-h-[2.875rem] w-full flex-col justify-center text-center leading-tight">
                             {hHasCap ? (
                               <span className="block text-[10px] tabular-nums text-slate-500">
                                 {hPeak}/{h.concurrent_cap}
@@ -514,27 +588,139 @@ export function DashboardHomeClient({
             </div>
           )}
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="min-w-0 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-slate-700">
-              {isAppointment ? '7-day appointments' : '7-day covers'}
+              {useAppointmentPhraseology
+                ? '7-day appointments'
+                : tableFocusSecondariesEnabled
+                  ? '7-day · table covers'
+                  : '7-day covers'}
             </h2>
             <p className="mb-4 mt-1 text-xs text-slate-400">
-              {isAppointment ? 'Total appointments booked each day.' : 'Total covers booked each day.'}
+              {useAppointmentPhraseology
+                ? 'Total appointments booked each day.'
+                : tableFocusSecondariesEnabled
+                  ? 'Table reservation covers booked each day (dining floor).'
+                  : 'Total covers booked each day.'}
             </p>
-            <DashboardHomeForecastChart forecast={payload.forecast} isAppointment={isAppointment} />
+            <DashboardHomeForecastChart forecast={payload.forecast} isAppointment={useAppointmentPhraseology} />
           </div>
         </div>
+
+        {tableFocusSecondariesEnabled && secondaryBookingActivity ? (
+          <div className="space-y-6">
+            <div className="border-b border-slate-200/90 pb-2">
+              <h2 className="text-lg font-bold tracking-tight text-slate-900">Other booking types</h2>
+            </div>
+
+            {payload.today_by_booking_model &&
+            Object.keys(payload.today_by_booking_model).length > 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Today by booking type</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {sortTodayByBookingModelEntries(Object.entries(payload.today_by_booking_model)).map(([k, count]) => (
+                    <span
+                      key={k}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
+                        count === 0
+                          ? 'border-dashed border-slate-200 bg-slate-50/80 text-slate-500'
+                          : 'border-slate-100 bg-slate-50 text-slate-800'
+                      }`}
+                    >
+                      <span className="font-medium">{bookingModelShortLabel(k as BookingModel)}</span>
+                      <span className={`tabular-nums ${count === 0 ? 'text-slate-400' : 'text-slate-600'}`}>{count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+              <DashboardStatCard
+                label="Bookings · other types today"
+                value={secondaryBookingActivity.today.bookings}
+                color="violet"
+                sparklineValues={secondaryBookingActivity.forecast.map((f) => f.bookings)}
+                subValue={
+                  secondaryBookingActivity.today.bookings > 0
+                    ? `${secondaryBookingActivity.today.confirmed} confirmed`
+                    : 'no bookings of other types'
+                }
+              />
+              <DashboardStatCard
+                label="Confirmed · other types"
+                value={secondaryBookingActivity.today.confirmed}
+                color="emerald"
+                sparklineValues={secondaryBookingActivity.forecast.map((f) => f.bookings)}
+                subValue={
+                  secondaryBookingActivity.today.pending > 0 || secondaryBookingActivity.today.seated > 0
+                    ? [
+                        secondaryBookingActivity.today.seated > 0
+                          ? `${secondaryBookingActivity.today.seated} started`
+                          : '',
+                        secondaryBookingActivity.today.pending > 0
+                          ? `${secondaryBookingActivity.today.pending} pending`
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(', ')
+                    : undefined
+                }
+              />
+              <DashboardStatCard
+                label="Deposit revenue · other types"
+                value={`£${secondaryBookingActivity.today.revenue.toFixed(2)}`}
+                color="emerald"
+              />
+              <DashboardStatCard
+                label="Next up · other types"
+                value={secondaryBookingActivity.today.next_booking ? secondaryBookingActivity.today.next_booking.time : '-'}
+                color="amber"
+                subValue={
+                  secondaryBookingActivity.today.next_booking
+                    ? `party ${secondaryBookingActivity.today.next_booking.party_size}`
+                    : 'no upcoming non-table bookings'
+                }
+              />
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-700">7-day · other bookings (count)</h2>
+              <p className="mb-4 mt-1 text-xs text-slate-400">
+                Number of bookings that are not table reservations (covers still shown for party size comparison).
+              </p>
+              <DashboardHomeForecastChart
+                forecast={secondaryBookingActivity.forecast}
+                isAppointment={false}
+                bookingsSeriesLabel="Non-table bookings"
+              />
+            </div>
+          </div>
+        ) : null}
 
         <SectionCard elevated>
           <SectionCard.Header
             eyebrow="Diary"
-            title={isAppointment ? "Today's appointments" : "Today's bookings"}
+            title={
+              tableFocusSecondariesEnabled
+                ? "Today's diary · all booking types"
+                : useAppointmentPhraseology
+                  ? "Today's appointments"
+                  : "Today's bookings"
+            }
             right={
               <Link
-                href={isAppointment ? '/dashboard/bookings' : scheduleHref}
+                href={tableFocusSecondariesEnabled || useAppointmentPhraseology ? '/dashboard/bookings' : scheduleHref}
                 className="text-xs font-semibold text-brand-600 hover:text-brand-800"
               >
-                {isAppointment ? 'View all' : calendarEligible ? 'View calendar' : 'View day sheet'} &rarr;
+                {tableFocusSecondariesEnabled
+                  ? 'View bookings list'
+                  : useAppointmentPhraseology
+                    ? 'View all'
+                    : calendarEligible
+                      ? 'View calendar'
+                      : 'View day sheet'}{' '}
+                &rarr;
               </Link>
             }
           />
@@ -542,8 +728,20 @@ export function DashboardHomeClient({
             {payload.recent_bookings.length === 0 ? (
               <div className="px-5 pb-8">
                 <EmptyState
-                  title={`No ${isAppointment ? 'appointments' : 'bookings'} today`}
-                  description={`${isAppointment ? 'Appointments' : 'Bookings'} will appear here as they come in.`}
+                  title={
+                    tableFocusSecondariesEnabled
+                      ? 'No bookings yet today'
+                      : useAppointmentPhraseology
+                        ? 'No appointments today'
+                        : 'No bookings today'
+                  }
+                  description={
+                    tableFocusSecondariesEnabled
+                      ? 'Reservation activity from all booking types will show here as bookings come in.'
+                      : useAppointmentPhraseology
+                        ? 'Appointments will appear here as they come in.'
+                        : 'Bookings will appear here as they come in.'
+                  }
                 />
               </div>
             ) : (
@@ -555,7 +753,7 @@ export function DashboardHomeClient({
                     timeLabel={b.time}
                     title={b.guest_name}
                     subtitle={
-                      [!isAppointment ? `${b.party_size} covers` : '', showTypeColumn ? (b.kind_label ?? '') : '']
+                      [diaryPartyLine(b), showTypeColumn ? (b.kind_label ?? '') : '']
                         .filter(Boolean)
                         .join(' · ') || undefined
                     }
@@ -576,7 +774,10 @@ export function DashboardHomeClient({
                           }
                           size="sm"
                         >
-                          {bookingStatusDisplayLabel(b.status, !isAppointment)}
+                          {bookingStatusDisplayLabel(
+                            b.status,
+                            (b.booking_model ?? 'table_reservation') === 'table_reservation',
+                          )}
                         </Pill>
                         <Pill variant="neutral" size="sm">
                           {b.deposit_status}
@@ -590,7 +791,7 @@ export function DashboardHomeClient({
                     timeLabel={b.time}
                     title={b.guest_name}
                     subtitle={
-                      [!isAppointment ? `${b.party_size} covers` : '', showTypeColumn ? (b.kind_label ?? '') : '']
+                      [diaryPartyLine(b), showTypeColumn ? (b.kind_label ?? '') : '']
                         .filter(Boolean)
                         .join(' · ') || undefined
                     }
@@ -611,7 +812,10 @@ export function DashboardHomeClient({
                           }
                           size="sm"
                         >
-                          {bookingStatusDisplayLabel(b.status, !isAppointment)}
+                          {bookingStatusDisplayLabel(
+                            b.status,
+                            (b.booking_model ?? 'table_reservation') === 'table_reservation',
+                          )}
                         </Pill>
                         <Pill variant="neutral" size="sm">
                           {b.deposit_status}
@@ -623,14 +827,13 @@ export function DashboardHomeClient({
               />
             )}
           </SectionCard.Body>
-          {payload.recent_bookings.length > 0 && bookings > 10 ? (
+          {payload.recent_bookings.length > 0 && bookingsCountAllModes > 10 ? (
             <SectionCard.Footer className="text-center">
               <Link
                 href="/dashboard/bookings"
                 className="text-xs font-semibold text-brand-600 hover:text-brand-800"
               >
-                {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}
-                {bookings - 10 !== 1 ? 's' : ''}, view all &rarr;
+                {bookingsCountAllModes - 10} more booking{bookingsCountAllModes - 10 !== 1 ? 's' : ''}, view all &rarr;
               </Link>
             </SectionCard.Footer>
           ) : null}

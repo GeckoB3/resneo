@@ -1,4 +1,5 @@
 import type { HelpCategory } from '../types';
+import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 
 export const gettingStartedCategory: HelpCategory = {
   slug: 'getting-started',
@@ -20,7 +21,7 @@ ReserveNI is a booking and guest management platform built for hospitality and a
 ## What you can do
 
 - Take **table reservations**, **appointments**, **classes**, **ticketed events**, or **resource** bookings, depending on your plan and which booking types you turn on.
-- Collect **deposits and full payments** with **Stripe Connect** (guest payments go to your connected Stripe account, not to ReserveNI).
+- Collect **deposits and full payments** with **Stripe Connect**. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
 - Automate **email and SMS** (confirmations, reminders, deposit prompts, and more).
 - Use **reports**, **exports**, and (on appointment plans) **import** clients and bookings from other systems.
 

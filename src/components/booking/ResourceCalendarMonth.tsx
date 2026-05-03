@@ -88,7 +88,7 @@ export function ResourceCalendarMonth({
       </div>
 
       <div
-        className={`mt-1 grid grid-cols-7 gap-1 transition-opacity ${loading ? 'animate-pulse opacity-90' : ''}`}
+        className={`mt-1 grid grid-cols-7 gap-0.5 transition-opacity ${loading ? 'animate-pulse opacity-90' : ''}`}
       >
         {cells.map((d, idx) => {
           if (d === null) {
@@ -101,7 +101,7 @@ export function ResourceCalendarMonth({
           const disabled = isPast || !hasAvail;
 
           let cellClass =
-            'flex aspect-square items-center justify-center rounded-lg text-sm font-medium transition ';
+            'flex aspect-square items-center justify-center rounded-md text-sm font-medium transition ';
           if (disabled) {
             cellClass += isPast ? 'cursor-not-allowed text-slate-300 ' : 'cursor-not-allowed bg-slate-50 text-slate-400 ';
           } else if (isSelected) {

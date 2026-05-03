@@ -34,6 +34,7 @@ import { isServiceCustomScheduleEmpty } from '@/lib/service-custom-availability'
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
+import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { AppointmentsWelcomeStep } from '@/components/onboarding/AppointmentsWelcomeStep';
 import { AppointmentsDashboardStep } from '@/components/onboarding/AppointmentsDashboardStep';
@@ -61,6 +62,7 @@ import {
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
   syncedMinBookingMinutesFromSlot,
 } from '@/lib/booking/resource-booking-defaults';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -2266,12 +2268,12 @@ export default function OnboardingPage() {
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Payments (Stripe)</h2>
             <p className="mb-3 text-sm text-slate-600">
-              Use this step to connect Stripe so you can <strong className="font-medium text-slate-800">accept payments from your customers</strong>
-              {' '}(for example deposits, tickets, or paid bookings). Payments are processed by Stripe and go directly to your
-              business. Reserve NI does not hold customer funds.
+              Use this step to connect Stripe so you can <strong className="font-medium text-slate-800">accept payments from your customers</strong>{' '}
+              (for example deposits, tickets, or paid bookings). Payments are processed by Stripe.{' '}
+              {RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
             </p>
             <p className="mb-4 text-sm text-slate-600">
-              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">Reserve NI subscription</strong>{' '}
+              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">ReserveNI subscription</strong>{' '}
               is billed separately. Manage your plan and payment method under{' '}
               <Link
                 href="/dashboard/settings?tab=plan"
@@ -2281,6 +2283,7 @@ export default function OnboardingPage() {
               </Link>
               .
             </p>
+            <p className="mb-4 text-sm text-slate-600">{SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}</p>
             <p className="mb-4 text-sm text-slate-500">
               Optional: use <span className="font-medium text-slate-700">Continue</span> to skip for now and connect later in{' '}
               <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-600 underline hover:text-brand-700">

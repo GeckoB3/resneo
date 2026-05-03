@@ -181,6 +181,16 @@ export function DashboardSidebar({
     return () => window.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
+  /** Keep page content from scrolling underneath the mobile drawer */
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileOpen]);
+
   useDismissibleLayer({
     open: mobileOpen,
     refs: [asideRef],
@@ -313,6 +323,12 @@ export function DashboardSidebar({
 
   return (
     <>
+      {mobileOpen ? (
+        <div
+          className="fixed inset-x-0 bottom-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-30 bg-slate-900/40 backdrop-blur-[2px] transition-opacity lg:hidden"
+          aria-hidden
+        />
+      ) : null}
       {/* Mobile top bar — fixed 3.5rem content height to match the layout's pt-[calc(3.5rem+…)] offset. */}
       <div
         className="fixed top-0 right-0 left-0 z-40 border-b border-slate-200/80 bg-white/95 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:hidden"
@@ -329,7 +345,7 @@ export function DashboardSidebar({
             >
               {mobileOpen ? <XIcon /> : <MenuIcon />}
             </button>
-            <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto shrink-0" />
+            <img src="/Logo.png" alt="ReserveNI" className="h-7 w-auto shrink-0" />
             {venueName ? (
               <span
                 className="min-w-0 truncate pl-1 text-sm font-semibold text-slate-800"

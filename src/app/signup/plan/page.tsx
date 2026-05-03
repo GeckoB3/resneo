@@ -15,6 +15,8 @@ import {
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
+import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
@@ -24,6 +26,7 @@ export default function PlanPage() {
   const [businessType, setBusinessType] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [foundingRemaining, setFoundingRemaining] = useState<number | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,11 +173,17 @@ export default function PlanPage() {
             <FeatureItem text="Priority support" />
           </ul>
         </div>
-        <div className="mt-8 flex justify-center">
+        <p className="mt-6 text-center text-xs text-slate-500">
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+        </p>
+        <LegalAcceptanceCheckbox accepted={termsAccepted} onChange={setTermsAccepted} />
+        <div className="mt-4 flex justify-center">
           <button
             type="button"
             onClick={handleContinue}
-            className="rounded-xl bg-emerald-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
+            disabled={!termsAccepted}
+            className="rounded-xl bg-emerald-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Activate Founding Partner Plan
           </button>
@@ -213,11 +222,17 @@ export default function PlanPage() {
             <FeatureItem text="Priority support" />
           </ul>
         </div>
-        <div className="mt-8 flex justify-center">
+        <p className="mt-6 text-center text-xs text-slate-500">
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+        </p>
+        <LegalAcceptanceCheckbox accepted={termsAccepted} onChange={setTermsAccepted} />
+        <div className="mt-4 flex justify-center">
           <button
             type="button"
             onClick={handleContinue}
-            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
+            disabled={!termsAccepted}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Continue
           </button>
@@ -256,13 +271,16 @@ export default function PlanPage() {
           </ul>
         </div>
         <p className="mt-6 text-center text-xs text-slate-500">
-          No per-booking fees. No commission. Cancel anytime.
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
         </p>
-        <div className="mt-6 flex justify-center">
+        <LegalAcceptanceCheckbox accepted={termsAccepted} onChange={setTermsAccepted} />
+        <div className="mt-4 flex justify-center">
           <button
             type="button"
             onClick={handleContinue}
-            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+            disabled={!termsAccepted}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Get Started
           </button>
@@ -301,13 +319,16 @@ export default function PlanPage() {
           </ul>
         </div>
         <p className="mt-6 text-center text-xs text-slate-500">
-          No per-booking fees. No commission. Cancel anytime.
+          No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
+          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
         </p>
-        <div className="mt-6 flex justify-center">
+        <LegalAcceptanceCheckbox accepted={termsAccepted} onChange={setTermsAccepted} />
+        <div className="mt-4 flex justify-center">
           <button
             type="button"
             onClick={handleContinue}
-            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+            disabled={!termsAccepted}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Get Started
           </button>
@@ -317,6 +338,68 @@ export default function PlanPage() {
   }
 
   return null;
+}
+
+function LegalAcceptanceCheckbox({
+  accepted,
+  onChange,
+}: {
+  accepted: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <input
+        type="checkbox"
+        checked={accepted}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+      />
+      <span className="text-xs leading-relaxed text-slate-600">
+        By signing up, I confirm I have authority to act for this business and agree to the ReserveNI{' '}
+        <a
+          href="/terms/customer"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          customer terms
+        </a>
+        {', '}
+        <a
+          href="/terms/data-processing"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          data processing terms
+        </a>
+        {', '}
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Website Terms of Use
+        </a>
+        {' and '}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Privacy Policy
+        </a>
+        .
+      </span>
+    </label>
+  );
 }
 
 function FeatureItem({ text }: { text: string }) {

@@ -89,8 +89,7 @@ export function WalkInModal({
 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);
-  const [tablePickerOpen, setTablePickerOpen] = useState(false);
-  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [tableAssignMode, setTableAssignMode] = useState<'suggested' | 'floor'>('suggested');
   const [manualTableIds, setManualTableIds] = useState<string[]>([]);
   const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
@@ -98,9 +97,8 @@ export function WalkInModal({
   const [temporaryTableName, setTemporaryTableName] = useState('');
 
   const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
-  const [publicBookingAreaMode, setPublicBookingAreaMode] = useState<'auto' | 'manual'>('auto');
   const [diningAreas, setDiningAreas] = useState<Array<{ id: string; name: string; colour: string }>>([]);
-  /** Which dining area layout to show; in manual tab mode also scopes table suggestions. */
+  /** Dining area for suggestions, floor plan, and optional walk-in `area_id`. */
   const [floorPlanViewAreaId, setFloorPlanViewAreaId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -113,20 +111,16 @@ export function WalkInModal({
 
   const walkInSuggestInputKey = useMemo(() => {
     const timePart = bookingTime.length >= 5 ? bookingTime.slice(0, 5) : bookingTime;
-    const areaPart =
-      publicBookingAreaMode === 'manual' && floorPlanViewAreaId ? floorPlanViewAreaId : '';
+    const areaPart = diningAreas.length > 1 && floorPlanViewAreaId ? floorPlanViewAreaId : '';
     return `${bookingDate}|${timePart}|${partySize}|${areaPart}`;
-  }, [bookingDate, bookingTime, partySize, publicBookingAreaMode, floorPlanViewAreaId]);
+  }, [bookingDate, bookingTime, partySize, diningAreas.length, floorPlanViewAreaId]);
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      fetch('/api/venue').then((r) => r.json()),
-      fetch('/api/venue/areas').then((r) => (r.ok ? r.json() : { areas: [] })),
-    ])
-      .then(([v, a]: [Record<string, unknown>, { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> }]) => {
+    void fetch('/api/venue/areas')
+      .then((r) => (r.ok ? r.json() : { areas: [] }))
+      .then((a: { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> }) => {
         if (cancelled) return;
-        setPublicBookingAreaMode(v.public_booking_area_mode === 'manual' ? 'manual' : 'auto');
         const active = (a.areas ?? []).filter((x) => x.is_active);
         const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
         setDiningAreas(mapped);
@@ -176,9 +170,21 @@ export function WalkInModal({
         const payload = await res.json();
         const tables: TableForSelector[] = (payload.tables ?? [])
           .filter((t: { is_active: boolean }) => t.is_active)
-          .map((t: { id: string; name: string; max_covers: number; sort_order: number }) => ({
-            id: t.id, name: t.name, max_covers: t.max_covers, sort_order: t.sort_order,
-          }));
+          .map(
+            (t: {
+              id: string;
+              name: string;
+              max_covers: number;
+              sort_order: number;
+              area_id?: string | null;
+            }) => ({
+              id: t.id,
+              name: t.name,
+              max_covers: t.max_covers,
+              sort_order: t.sort_order,
+              area_id: t.area_id ?? null,
+            }),
+          );
         if (!cancelled) {
           setCoversTables(tables);
           setCoversOccupancy({});
@@ -218,7 +224,7 @@ export function WalkInModal({
 
     let cancelled = false;
     if (advancedMode) {
-      setSuggestionLoading(true);
+      setLoadingSuggestions(true);
     }
 
     const timeParam = bookingTime.length >= 5 ? bookingTime.slice(0, 5) : bookingTime;
@@ -227,7 +233,7 @@ export function WalkInModal({
       time: timeParam,
       party_size: String(partySize),
     });
-    if (publicBookingAreaMode === 'manual' && floorPlanViewAreaId) {
+    if (diningAreas.length > 1 && floorPlanViewAreaId) {
       durationParams.set('area_id', floorPlanViewAreaId);
     }
 
@@ -252,7 +258,13 @@ export function WalkInModal({
           String(effectiveDurationDirty ? coverDurationMinutes : durationForSuggestions),
         );
         const res = await fetch(`/api/venue/tables/combinations/suggest?${suggestionParams.toString()}`);
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setSuggestions([]);
+          setSelectedSuggestionKey(null);
+          setOccupiedTableIds([]);
+          return;
+        }
         const payload = await res.json() as {
           suggestions?: Suggestion[];
           occupied_table_ids?: string[];
@@ -266,12 +278,17 @@ export function WalkInModal({
         const busy = payload.occupied_table_ids ?? [];
         setSuggestions(next);
         setOccupiedTableIds(Array.isArray(busy) ? busy : []);
-        setSelectedSuggestionKey((prev) => {
-          if (prev !== null) return prev;
-          return next.length > 0 ? `${next[0].source}:${next[0].table_ids.join('|')}` : null;
-        });
+        setSelectedSuggestionKey(
+          next.length > 0 ? `${next[0].source}:${next[0].table_ids.join('|')}` : null,
+        );
+      } catch {
+        if (!cancelled) {
+          setSuggestions([]);
+          setSelectedSuggestionKey(null);
+          setOccupiedTableIds([]);
+        }
       } finally {
-        if (advancedMode && !cancelled) setSuggestionLoading(false);
+        if (advancedMode && !cancelled) setLoadingSuggestions(false);
       }
     })();
 
@@ -286,7 +303,6 @@ export function WalkInModal({
     coverDurationMinutes,
     floorPlanViewAreaId,
     partySize,
-    publicBookingAreaMode,
     walkInSuggestInputKey,
   ]);
 
@@ -296,6 +312,22 @@ export function WalkInModal({
     if (!floorPlanViewAreaId) return prefetchedTables;
     return prefetchedTables.filter((t) => t.area_id === floorPlanViewAreaId);
   }, [prefetchedTables, diningAreas.length, floorPlanViewAreaId]);
+
+  const coversTablesForArea = useMemo(() => {
+    if (advancedMode) return [];
+    if (diningAreas.length <= 1) return coversTables;
+    if (!floorPlanViewAreaId) return coversTables;
+    return coversTables.filter((t) => (t.area_id ?? null) === floorPlanViewAreaId);
+  }, [advancedMode, coversTables, diningAreas.length, floorPlanViewAreaId]);
+
+  useEffect(() => {
+    if (advancedMode || diningAreas.length <= 1) return;
+    setCoversSelectedTableIds((prev) =>
+      prev.filter((id) =>
+        coversTables.some((t) => t.id === id && (t.area_id ?? null) === floorPlanViewAreaId),
+      ),
+    );
+  }, [advancedMode, coversTables, diningAreas.length, floorPlanViewAreaId]);
 
   const selectedSuggestion = useMemo(
     () => suggestions.find((s) => `${s.source}:${s.table_ids.join('|')}` === selectedSuggestionKey) ?? null,
@@ -316,7 +348,7 @@ export function WalkInModal({
     return null;
   }, [manualTableIds, selectedSuggestion, tableAssignMode, useTemporaryTable]);
 
-  const temporaryTableOverrideAvailable = advancedMode && !suggestionLoading && suggestions.length === 0;
+  const temporaryTableOverrideAvailable = advancedMode && !loadingSuggestions && suggestions.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -358,6 +390,9 @@ export function WalkInModal({
       }
       if (!advancedMode && coversSelectedTableIds.length > 0) {
         walkinBody.table_ids = coversSelectedTableIds;
+      }
+      if (diningAreas.length > 1 && floorPlanViewAreaId) {
+        walkinBody.area_id = floorPlanViewAreaId;
       }
       const res = await fetch('/api/venue/bookings/walk-in', {
         method: 'POST',
@@ -638,8 +673,33 @@ export function WalkInModal({
               <p className="mb-1.5 text-sm font-medium text-slate-700">
                 Table <span className="text-slate-400">(optional)</span>
               </p>
-              <div className="flex flex-wrap gap-2">
-                {coversTables.map((table) => {
+              {diningAreas.length > 1 && (
+                <div className="mb-2 min-h-[4.25rem]">
+                  <div className="flex flex-nowrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1">
+                    {diningAreas.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setFloorPlanViewAreaId(a.id)}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          floorPlanViewAreaId === a.id
+                            ? 'border-brand-500 bg-brand-50 text-brand-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: a.colour || '#6366F1' }}
+                          aria-hidden
+                        />
+                        {a.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex min-h-[5.5rem] flex-wrap content-start gap-2">
+                {coversTablesForArea.map((table) => {
                   const isSelected = coversSelectedTableIds.includes(table.id);
                   const occupant = coversOccupancy[table.id] ?? null;
                   return (
@@ -669,22 +729,51 @@ export function WalkInModal({
             </div>
           )}
 
-          {/* Table assignment - advanced mode only */}
+          {/* Table assignment — match UnifiedBookingForm (new booking) */}
           {advancedMode && (
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-slate-700">Table assignment</p>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 sm:rounded-xl sm:p-3.5">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:mb-2.5 sm:text-xs">
+                Table Assignment
+              </p>
 
-              <div className="mb-2 inline-flex rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner ring-1 ring-slate-100/80">
+              {diningAreas.length > 1 && (
+                <div className="mb-2 min-h-[4.25rem] rounded-lg border border-slate-100 bg-white/80 p-2 sm:mb-2.5">
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">Area</p>
+                  <div className="flex flex-nowrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1">
+                    {diningAreas.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setFloorPlanViewAreaId(a.id)}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+                          floorPlanViewAreaId === a.id
+                            ? 'border-brand-500 bg-brand-50 text-brand-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: a.colour || '#6366F1' }}
+                          aria-hidden
+                        />
+                        {a.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-2 inline-flex w-full rounded-lg border border-slate-200 bg-white p-0.5 sm:mb-2.5 sm:w-auto">
                 <button
                   type="button"
                   onClick={() => {
                     setTableAssignMode('suggested');
                     setManualTableIds([]);
                   }}
-                  className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-150 ${
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
                     tableAssignMode === 'suggested'
-                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-brand-200/80'
-                      : 'text-slate-600 hover:bg-white/70'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Suggested
@@ -698,10 +787,10 @@ export function WalkInModal({
                       setManualTableIds(selectedSuggestion.table_ids);
                     }
                   }}
-                  className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-150 ${
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
                     tableAssignMode === 'floor'
-                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-brand-200/80'
-                      : 'text-slate-600 hover:bg-white/70'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Floor plan
@@ -709,186 +798,107 @@ export function WalkInModal({
               </div>
 
               {tableAssignMode === 'suggested' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setTablePickerOpen((v) => !v)}
-                    className={`w-full rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors ${
-                      selectedSuggestion
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={selectedSuggestion ? 'font-medium' : ''}>
-                        {selectedSuggestion
-                          ? selectedSuggestion.table_names.join(' + ')
-                          : !suggestionLoading && suggestions.length === 0
-                            ? 'No tables available. Add temporary table?'
-                            : 'Select table...'}
-                      </span>
-                      <div className="flex flex-shrink-0 items-center gap-2">
-                        {suggestionLoading && (
-                          <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent opacity-50" />
-                        )}
-                        <svg
-                          className={`h-4 w-4 transition-transform duration-200 ${tablePickerOpen ? 'rotate-180' : ''} ${selectedSuggestion ? 'text-emerald-600' : 'text-slate-400'}`}
-                          fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
-                        </svg>
+                <div className="min-h-[280px]">
+                  {loadingSuggestions ? (
+                    <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-xs text-slate-400">
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                      Loading suggestions…
+                    </div>
+                  ) : suggestions.length === 0 ? (
+                    <div className="flex min-h-[280px] flex-col justify-center gap-3">
+                      <p className="text-xs text-slate-500">
+                        No table suggestions available for this time and party size. Try floor plan to pick manually.
+                      </p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+                        <p className="mb-2 text-xs text-amber-900">
+                          Or seat this walk-in at a temporary table (created when you submit).
+                        </p>
+                        <label className="flex items-start gap-2 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={useTemporaryTable}
+                            onChange={(event) => {
+                              setUseTemporaryTable(event.target.checked);
+                              if (event.target.checked) {
+                                setSelectedSuggestionKey(null);
+                                setManualTableIds([]);
+                              }
+                            }}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          <span>
+                            <span className="block font-semibold text-slate-900">Seat at a temporary table</span>
+                            <span className="block text-slate-500">
+                              Appears on the grid and is removed when the booking is completed.
+                            </span>
+                          </span>
+                        </label>
+                        {useTemporaryTable ? (
+                          <div className="mt-2">
+                            <label htmlFor="temporary-table-name" className="mb-1 block text-xs font-semibold text-slate-700">
+                              Temporary table name
+                            </label>
+                            <input
+                              id="temporary-table-name"
+                              type="text"
+                              value={temporaryTableName}
+                              onChange={(event) => setTemporaryTableName(event.target.value)}
+                              placeholder="e.g. Temp 1, Bar squeeze"
+                              maxLength={50}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
-                  </button>
-
-                  {tablePickerOpen && (
-                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
-                      <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Table Assignment
-                      </p>
-                      {suggestionLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
-                          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-                          Loading suggestions...
-                        </div>
-                      ) : suggestions.length === 0 ? (
-                        <div className="space-y-3">
-                          <p className="text-xs text-amber-700">
-                            No table suggestions for a party of {partySize} at this time. You can still seat this walk-in at a temporary table.
-                          </p>
-                          <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={useTemporaryTable}
-                              onChange={(event) => {
-                                setUseTemporaryTable(event.target.checked);
-                                if (event.target.checked) {
-                                  setSelectedSuggestionKey(null);
-                                  setManualTableIds([]);
-                                }
-                              }}
-                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                            />
-                            <span>
-                              <span className="block font-semibold text-slate-900">Seat at a temporary table</span>
-                              <span className="block text-slate-500">
-                                This table appears at the bottom of the grid and is deleted when the booking is completed.
-                              </span>
-                            </span>
-                          </label>
-                          {useTemporaryTable ? (
-                            <div>
-                              <label htmlFor="temporary-table-name" className="mb-1 block text-xs font-semibold text-slate-700">
-                                Temporary table name
-                              </label>
-                              <input
-                                id="temporary-table-name"
-                                type="text"
-                                value={temporaryTableName}
-                                onChange={(event) => setTemporaryTableName(event.target.value)}
-                                placeholder="e.g. Temp 1, Bar squeeze"
-                                maxLength={50}
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                              />
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedSuggestionKey(null); setTablePickerOpen(false); }}
-                            className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
-                              selectedSuggestionKey === null
-                                ? 'border-slate-300 bg-slate-100 text-slate-700 ring-1 ring-slate-200'
-                                : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                            }`}
-                          >
-                            No table assignment
-                          </button>
-
-                          {suggestions.slice(0, 5).map((suggestion) => {
-                            const key = `${suggestion.source}:${suggestion.table_ids.join('|')}`;
-                            const isSelected = selectedSuggestionKey === key;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => { setSelectedSuggestionKey(key); setTablePickerOpen(false); }}
-                                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
-                                  isSelected
-                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
-                                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium">{suggestion.table_names.join(' + ')}</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-slate-500">
-                                      Cap {suggestion.combined_capacity}
-                                    </span>
-                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                                      isSelected
-                                        ? 'bg-emerald-100 text-emerald-700'
-                                        : 'bg-slate-100 text-slate-500'
-                                    }`}>
-                                      {suggestion.source === 'manual' ? 'Manual' : suggestion.source === 'auto' ? 'Auto' : 'Single'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {tableAssignMode === 'floor' && (
-                <>
-                  {diningAreas.length > 1 && (
-                    <div
-                      className="mb-2 flex flex-wrap gap-1.5"
-                      role="tablist"
-                      aria-label="Floor plan dining area"
-                    >
-                      {diningAreas.map((a) => {
-                        const active = floorPlanViewAreaId === a.id;
+                  ) : (
+                    <div className="space-y-1">
+                      {suggestions.slice(0, 5).map((suggestion) => {
+                        const key = `${suggestion.source}:${suggestion.table_ids.join('|')}`;
+                        const isSelected = selectedSuggestionKey === key;
                         return (
                           <button
-                            key={a.id}
+                            key={key}
                             type="button"
-                            role="tab"
-                            aria-selected={active}
-                            onClick={() => setFloorPlanViewAreaId(a.id)}
-                            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                              active
-                                ? 'border-slate-800 bg-slate-900 text-white'
-                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            onClick={() => setSelectedSuggestionKey(key)}
+                            className={`w-full rounded-lg border px-2.5 py-2 text-left text-sm transition-all ${
+                              isSelected
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                             }`}
                           >
-                            <span
-                              className="h-2 w-2 shrink-0 rounded-full"
-                              style={{ background: a.colour || '#94a3b8' }}
-                              aria-hidden
-                            />
-                            {a.name}
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                              <span className="break-words font-medium">{suggestion.table_names.join(' + ')}</span>
+                              <div className="flex flex-shrink-0 items-center gap-2">
+                                <span className="text-xs text-slate-500">Cap {suggestion.combined_capacity}</span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                    isSelected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {suggestion.source === 'manual' ? 'Manual' : suggestion.source === 'auto' ? 'Auto' : 'Single'}
+                                </span>
+                              </div>
+                            </div>
                           </button>
                         );
                       })}
                     </div>
                   )}
+                </div>
+              )}
+
+              {tableAssignMode === 'floor' && (
+                <div className="min-h-[280px]">
                   <MiniFloorPlanPicker
                     tables={tablesForFloorPlanPicker}
                     selectedIds={manualTableIds}
                     onChange={setManualTableIds}
                     occupiedTableIds={occupiedTableIds}
                     partySize={partySize}
-                    minHeight={220}
+                    minHeight={248}
                   />
-                </>
+                </div>
               )}
             </div>
           )}

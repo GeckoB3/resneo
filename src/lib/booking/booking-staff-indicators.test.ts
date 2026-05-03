@@ -4,6 +4,7 @@ import {
   canShowCancelStaffAttendanceConfirmationAction,
   canShowConfirmBookingAttendanceAction,
   showAttendanceConfirmedPill,
+  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from './booking-staff-indicators';
 
@@ -52,6 +53,30 @@ describe('showAttendanceConfirmedPill', () => {
   });
 });
 
+describe('showAttendanceConfirmedSupplementPill', () => {
+  it('false when status is already Confirmed', () => {
+    expect(
+      showAttendanceConfirmedSupplementPill({
+        status: 'Confirmed',
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('true when Booked and guest confirmed', () => {
+    expect(
+      showAttendanceConfirmedSupplementPill({
+        status: 'Booked',
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('false when nothing confirmed', () => {
+    expect(showAttendanceConfirmedSupplementPill({ status: 'Booked' })).toBe(false);
+  });
+});
+
 describe('canShowConfirmBookingAttendanceAction', () => {
   it('true for pending booking without attendance when not walk-in', () => {
     expect(
@@ -81,6 +106,28 @@ describe('canShowConfirmBookingAttendanceAction', () => {
         status: 'Pending',
         source: 'booking_page',
         staff_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('true when guest confirmed but staff has not (status Booked)', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Booked',
+        source: 'booking_page',
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(true);
+  });
+
+  it('false when lifecycle status is Confirmed', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Confirmed',
+        source: 'booking_page',
+        guest_attendance_confirmed_at: null,
+        staff_attendance_confirmed_at: null,
       }),
     ).toBe(false);
   });

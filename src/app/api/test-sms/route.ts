@@ -25,7 +25,7 @@ export async function POST() {
 
     const result = await sendSMS(
       TEST_RECIPIENT,
-      'Reserve NI test: SMS integration is working.'
+      'ReserveNI test: SMS integration is working.'
     );
     return NextResponse.json({
       success: true,

@@ -9,7 +9,11 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
+import {
+  ModifyTableBookingModal,
+  expandedRowToEditSnapshot,
+  type UnifiedBookingEditSnapshot,
+} from '@/components/booking/ModifyTableBookingModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
@@ -20,8 +24,16 @@ import {
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import {
+  bookingExpandAccordionBodyClass,
+  bookingExpandAccordionDetailsClass,
+  bookingExpandAccordionMessagingBodyClass,
+  bookingExpandAccordionSummaryClass,
+  bookingExpandActionsBarClass,
+} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 
 interface BookingRow {
   id: string;
@@ -39,6 +51,7 @@ interface BookingRow {
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
+  guest_id?: string;
   table_assignments?: Array<{ id: string; name: string }>;
   service_id?: string | null;
   group_booking_id?: string | null;
@@ -113,12 +126,14 @@ export function ExpandedBookingContent({
   onStatusAction,
   onDetailUpdated,
   onRequestChangeTable,
+  venueCurrency = 'GBP',
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
   detailLoading: boolean;
   tableManagementEnabled: boolean;
   venueId: string;
+  venueCurrency?: string;
   draftMessage: string;
   sendingMessage: boolean;
   onMessageDraftChange: (value: string) => void;
@@ -128,8 +143,9 @@ export function ExpandedBookingContent({
   onRequestChangeTable?: () => void;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
-  const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('both');
-  const [showModify, setShowModify] = useState(false);
+  const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
+  const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
+  const [modifyFrozenSnapshot, setModifyFrozenSnapshot] = useState<UnifiedBookingEditSnapshot | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
@@ -164,6 +180,8 @@ export function ExpandedBookingContent({
   const inferredBookingModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
   const tableStyle = inferredBookingModel === 'table_reservation';
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
+  const canStaffModifyTableBooking =
+    tableStyle && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
 
   if (detailLoading) {
     return (
@@ -181,6 +199,10 @@ export function ExpandedBookingContent({
   const guestName = detail?.guest?.name ?? booking.guest_name;
   const guestPhone = detail?.guest?.phone ?? booking.guest_phone;
   const guestEmail = detail?.guest?.email ?? booking.guest_email;
+  const contactsGuestId = detail?.guest?.id ?? booking.guest_id ?? null;
+  const contactsHref = contactsGuestId
+    ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
+    : null;
   const visitCount = detail?.guest?.visit_count ?? 0;
   const previousVisitDate = detail?.guest?.last_visit_date ?? null;
   const tableNames = (detail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
@@ -267,8 +289,13 @@ export function ExpandedBookingContent({
   };
 
   return (
-    <div id={`booking-expand-${booking.id}`} className="mt-1.5 space-y-2 px-0.5 pb-2.5 sm:px-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <SectionCard className="rounded-xl">
+    <div
+      id={`booking-expand-${booking.id}`}
+      className="mt-1.5 flex flex-col gap-2.5 px-0.5 pb-2.5 sm:px-1"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <SectionCard className="rounded-xl ring-1 ring-slate-900/[0.04]">
         <SectionCard.Body className="p-2.5 sm:p-3">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2.5">
@@ -278,6 +305,18 @@ export function ExpandedBookingContent({
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
                   <p className="max-w-[12rem] truncate text-sm font-bold text-slate-900 sm:max-w-[18rem]">{guestName}</p>
+                  {contactsHref ? (
+                    <Link
+                      href={contactsHref}
+                      className="-m-1 inline-flex shrink-0 rounded-md p-1 text-slate-400 outline-none transition-colors hover:text-brand-600 focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+                      aria-label={`Open ${guestName} in Contacts`}
+                      title="Open in Contacts"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                      </svg>
+                    </Link>
+                  ) : null}
                   <Pill variant="neutral" size="sm">{visitCount > 0 ? `${visitCount} visit${visitCount !== 1 ? 's' : ''}` : 'First visit'}</Pill>
                   {detail?.guest?.customer_profile_notes ? <Pill variant="info" size="sm">Guest note</Pill> : null}
                 </div>
@@ -385,7 +424,7 @@ export function ExpandedBookingContent({
       </SectionCard>
 
       {/* Actions bar */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
+      <div className={bookingExpandActionsBarClass}>
         <div className="px-2 py-1.5 sm:px-3">
           <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
             {forwardActions.map((action) => (
@@ -431,16 +470,23 @@ export function ExpandedBookingContent({
 
             <div className="min-w-1.5 flex-1" />
 
-            <button
-              type="button"
-              onClick={() => { setShowModify(!showModify); if (!showModify) setShowMessageBox(false); }}
-              className={`inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors sm:text-[11px] ${showModify ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-            >
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
-              Modify
-            </button>
-
-            <div className="mx-0.5 h-3.5 w-px bg-slate-200" />
+            {canStaffModifyTableBooking && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModifyFrozenSnapshot(expandedRowToEditSnapshot(booking, detail));
+                    setModifyBookingOpen(true);
+                    setShowMessageBox(false);
+                  }}
+                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 sm:text-[11px]"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
+                  Modify
+                </button>
+                <div className="mx-0.5 h-3.5 w-px bg-slate-200" />
+              </>
+            )}
 
             {canCancel && (
               <button
@@ -465,8 +511,8 @@ export function ExpandedBookingContent({
       </div>
 
       {detail?.guest?.id ? (
-        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
             <span>Guest profile</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {(detail.guest.tags ?? []).length > 0
@@ -479,7 +525,7 @@ export function ExpandedBookingContent({
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
-          <div className="space-y-2 border-t border-slate-100 p-2.5">
+          <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Name</p>
@@ -545,15 +591,15 @@ export function ExpandedBookingContent({
         </details>
       ) : null}
 
-      <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
           <span>Payments and confirmation</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{booking.deposit_status}</span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
-        <div className="space-y-2 border-t border-slate-100 p-2.5">
+        <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
           <div className="flex flex-wrap gap-1.5">
             {booking.deposit_status !== 'Paid' && booking.deposit_status !== 'Refunded' ? (
               <>
@@ -577,15 +623,15 @@ export function ExpandedBookingContent({
       </details>
 
       <details
-        className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]"
+        className={bookingExpandAccordionDetailsClass}
         open={showMessageBox}
         onToggle={(event) => {
           const nextOpen = event.currentTarget.open;
           setShowMessageBox(nextOpen);
-          if (nextOpen) setShowModify(false);
+          if (nextOpen) setModifyBookingOpen(false);
         }}
       >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+        <summary className={bookingExpandAccordionSummaryClass}>
           <span>SMS / email guest</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
             {(detail?.communications ?? []).length > 0
@@ -602,7 +648,7 @@ export function ExpandedBookingContent({
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
-        <div className="border-t border-slate-100 bg-brand-50/20 p-2.5 sm:p-3">
+        <div className={bookingExpandAccordionMessagingBodyClass}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-slate-700">Message {guestName.split(' ')[0]}</p>
             {(detail?.communications ?? []).length > 0 && (
@@ -616,10 +662,10 @@ export function ExpandedBookingContent({
             onChange={(e) => onMessageDraftChange(e.target.value)}
             rows={3}
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-            placeholder={`Write a message to ${guestName.split(' ')[0]}…`}
+            placeholder="Write a message"
           />
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex items-center justify-between gap-2 text-xs font-medium text-slate-500 sm:justify-start">
+            <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
               Send via
               <GuestMessageChannelSelect
                 value={guestMessageChannel}
@@ -655,8 +701,8 @@ export function ExpandedBookingContent({
         </div>
       </details>
 
-      <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
           <span>Notes and preferences</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
             {[booking.dietary_notes, detail?.special_requests, detail?.internal_notes].filter(Boolean).length || 'None'}
@@ -665,7 +711,7 @@ export function ExpandedBookingContent({
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
-        <div className="border-t border-slate-100 p-2.5">
+        <div className={bookingExpandAccordionBodyClass}>
           <BookingNotesEditablePanel
             bookingId={booking.id}
             dietaryNotes={booking.dietary_notes}
@@ -723,33 +769,10 @@ export function ExpandedBookingContent({
         </SectionCard>
       )}
 
-      {/* Modify booking (collapsible) */}
-      {showModify && (
-        <SectionCard className="rounded-xl border-brand-200 bg-brand-50/20">
-          <SectionCard.Body className="p-2.5 sm:p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-brand-800">Modify booking</p>
-              <button type="button" onClick={() => setShowModify(false)} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-white/70">
-                Close
-              </button>
-            </div>
-            <ModifyBookingInline
-              bookingId={booking.id}
-              venueId={venueId}
-              currentDate={booking.booking_date}
-              currentTime={booking.booking_time}
-              currentPartySize={booking.party_size}
-              onSaved={() => { setShowModify(false); onDetailUpdated(); }}
-              onCancel={() => setShowModify(false)}
-            />
-          </SectionCard.Body>
-        </SectionCard>
-      )}
-
       {/* Communications and booking activity */}
-      {((detail?.communications ?? []).length > 0 || (detail?.events ?? []).length > 0) && !showMessageBox && (
-        <details className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.03]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+      {((detail?.communications ?? []).length > 0 || (detail?.events ?? []).length > 0) && (
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
             <span>Activity</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {(detail?.communications ?? []).length} comms · {(detail?.events ?? []).length} events
@@ -758,13 +781,13 @@ export function ExpandedBookingContent({
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
-          <div className="space-y-2 border-t border-slate-100 p-2.5">
+          <div className={`${bookingExpandAccordionBodyClass} space-y-3`}>
             {(detail?.communications ?? []).length > 0 ? (
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Communications</p>
-                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Communications</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {(detail?.communications ?? []).slice(0, 6).map((comm) => (
-                    <div key={comm.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5 text-[11px] text-slate-600">
+                    <div key={comm.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
                       <span className="min-w-0 truncate">
                         <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${comm.status === 'sent' ? 'bg-emerald-400' : comm.status === 'failed' ? 'bg-red-400' : 'bg-amber-400'}`} />
                         {comm.message_type.replace(/_/g, ' ')}
@@ -777,10 +800,10 @@ export function ExpandedBookingContent({
             ) : null}
             {(detail?.events ?? []).length > 0 ? (
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Timeline</p>
-                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Timeline</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {(detail?.events ?? []).slice(0, 6).map((event) => (
-                    <div key={event.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-600">
+                    <div key={event.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
                       <span className="min-w-0 truncate font-medium">{event.event_type.replace(/_/g, ' ')}</span>
                       <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
                     </div>
@@ -819,6 +842,26 @@ export function ExpandedBookingContent({
             </div>
           </SectionCard.Body>
         </SectionCard>
+      )}
+
+      {modifyBookingOpen && modifyFrozenSnapshot && (
+        <ModifyTableBookingModal
+          open
+          onClose={() => {
+            setModifyBookingOpen(false);
+            setModifyFrozenSnapshot(null);
+          }}
+          onSaved={() => {
+            setModifyBookingOpen(false);
+            setModifyFrozenSnapshot(null);
+            onDetailUpdated();
+          }}
+          venueId={venueId}
+          currency={venueCurrency}
+          advancedMode={tableManagementEnabled}
+          bookingId={booking.id}
+          editSnapshot={modifyFrozenSnapshot}
+        />
       )}
     </div>
   );

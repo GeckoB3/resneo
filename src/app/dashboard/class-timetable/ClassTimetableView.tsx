@@ -11,6 +11,7 @@ import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calend
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
@@ -991,26 +992,12 @@ export function ClassTimetableView({
                           </div>
                         )}
                       </div>
-                      <div className="flex shrink-0 flex-col gap-1 sm:items-end">
-                        {(isAdmin || staffManagesClassType(ct)) && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleEditClassType(ct)}
-                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium leading-4 text-slate-700 hover:bg-slate-50"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteClassType(ct.id)}
-                              className="rounded-md border border-transparent px-2 py-1 text-xs font-medium leading-4 text-red-600 hover:bg-red-50"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </div>
+                      {(isAdmin || staffManagesClassType(ct)) && (
+                        <DashboardEntityRowActions
+                          onEdit={() => handleEditClassType(ct)}
+                          onDelete={() => void handleDeleteClassType(ct.id)}
+                        />
+                      )}
                     </div>
                   </div>
                 );

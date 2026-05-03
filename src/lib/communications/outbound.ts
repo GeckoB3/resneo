@@ -1,15 +1,16 @@
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import type { CommunicationChannel, CommunicationMessageKey } from './policies';
 import { resolveCommPolicy } from './policy-resolver';
+import { renderCommunicationEmail, renderCommunicationSms } from './renderer';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
   deliverEmailMessage,
   deliverSmsMessage,
   type CommunicationSendResult,
+  type LogMode,
 } from './delivery';
-import { renderCommunicationEmail, renderCommunicationSms } from './renderer';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 
-export type SendMode = 'dedupe' | 'upsert';
+export type { LogMode };
 
 export interface SendPolicyMessageOptions {
   venueId: string;
@@ -17,7 +18,7 @@ export interface SendPolicyMessageOptions {
   venue: VenueEmailData;
   messageKey: CommunicationMessageKey;
   channel: CommunicationChannel;
-  mode: SendMode;
+  mode: LogMode;
   paymentLink?: string | null;
   confirmLink?: string | null;
   cancelLink?: string | null;
@@ -30,6 +31,8 @@ export interface SendPolicyMessageOptions {
   cancellationPolicy?: string | null;
   changeSummary?: string | null;
   message?: string | null;
+  /** When set, log with guest_id and null booking (contacts CRM / no booking anchor). */
+  guestIdForLog?: string;
 }
 
 async function fetchVenueBookingModel(venueId: string): Promise<string | null> {
@@ -71,9 +74,12 @@ export async function sendPolicyMessage(
     };
   }
 
+  const deliverMode: LogMode = opts.guestIdForLog ? 'guest_log' : opts.mode;
+
   const deliveryContext = {
     venueId: opts.venueId,
-    bookingId: opts.booking.id,
+    bookingId: opts.guestIdForLog ? null : opts.booking.id,
+    guestId: opts.guestIdForLog ?? null,
     lane: resolved.lane,
     messageType: resolved.logMessageTypeByChannel[opts.channel]!,
     recipient,
@@ -103,7 +109,7 @@ export async function sendPolicyMessage(
       message: opts.message ?? null,
     });
     if (!rendered) return { sent: false, reason: 'disabled' };
-    return deliverEmailMessage(deliveryContext, rendered, opts.mode);
+    return deliverEmailMessage(deliveryContext, rendered, deliverMode);
   }
 
   const rendered = renderCommunicationSms({
@@ -127,5 +133,5 @@ export async function sendPolicyMessage(
     message: opts.message ?? null,
   });
   if (!rendered) return { sent: false, reason: 'disabled' };
-  return deliverSmsMessage(deliveryContext, rendered, opts.mode);
+  return deliverSmsMessage(deliveryContext, rendered, deliverMode);
 }

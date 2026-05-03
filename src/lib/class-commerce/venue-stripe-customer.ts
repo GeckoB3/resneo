@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { stripe } from '@/lib/stripe';
 
 /**
- * Ensure a Stripe Customer exists on the venue connected account for this Reserve NI user.
+ * Ensure a Stripe Customer exists on the venue connected account for this ReserveNI user.
  */
 export async function ensureVenueStripeCustomerForUser(
   admin: SupabaseClient,

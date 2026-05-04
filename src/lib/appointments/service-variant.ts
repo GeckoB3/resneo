@@ -1,4 +1,5 @@
 import type { AppointmentService, ServiceVariant } from '@/types/booking-models';
+import { effectiveProcessingBlocksForTemplate } from '@/lib/appointments/processing-time';
 
 /**
  * Returns true when the service has at least one active variant; the booking flow
@@ -44,6 +45,10 @@ export function applyVariantToService(
     name: `${service.name} - ${variant.name}`,
     duration_minutes: variant.duration_minutes,
     buffer_minutes: variant.buffer_minutes,
+    processing_time_blocks: effectiveProcessingBlocksForTemplate({
+      parentBlocks: service.processing_time_blocks ?? [],
+      variantBlocks: variant.processing_time_blocks,
+    }),
     price_pence: variant.price_pence,
     deposit_pence: variant.deposit_pence ?? service.deposit_pence ?? null,
   };

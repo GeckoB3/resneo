@@ -87,11 +87,11 @@ interface DaySheetBooking {
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   area_name?: string | null;
+  booking_model?: string | null;
 }
 
 interface DaySheetBookingRow extends DaySheetBooking {
   booking_date: string;
-  inferred_booking_model?: BookingModel;
 }
 
 interface ActiveTable {
@@ -1272,7 +1272,7 @@ export function DaySheetView({
                     const isTerminalStatus = isTerminal(b.status);
                     const primaryAction = PRIMARY_ACTIONS[b.status];
                     const isReturning = b.visit_count > 0;
-                    const bookingRow: DaySheetBookingRow = { ...b, booking_date: date, inferred_booking_model: 'table_reservation' };
+                    const bookingRow: DaySheetBookingRow = { ...b, booking_date: date };
                     const inferredModel = inferBookingRowModel(bookingRow);
                     const isTableBooking = inferredModel === 'table_reservation';
                     const tableLabel = isTableBooking && b.table_assignments && b.table_assignments.length > 0

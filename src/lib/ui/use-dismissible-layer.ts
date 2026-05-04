@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
 interface UseDismissibleLayerOptions {
   open: boolean;
@@ -20,7 +20,6 @@ function consumeEvent(event: Event): void {
 }
 
 function installOneShotGestureBlocker(): void {
-  let timeoutId: number | undefined;
   let removed = false;
 
   const cleanup = () => {
@@ -28,7 +27,7 @@ function installOneShotGestureBlocker(): void {
     removed = true;
     document.removeEventListener('mousedown', block, true);
     document.removeEventListener('click', block, true);
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    window.clearTimeout(timeoutId);
   };
 
   const block = (event: MouseEvent) => {
@@ -38,7 +37,7 @@ function installOneShotGestureBlocker(): void {
 
   document.addEventListener('mousedown', block, true);
   document.addEventListener('click', block, true);
-  timeoutId = window.setTimeout(cleanup, 750);
+  const timeoutId = window.setTimeout(cleanup, 750);
 }
 
 /**
@@ -48,8 +47,11 @@ function installOneShotGestureBlocker(): void {
 export function useDismissibleLayer({ open, refs, onDismiss }: UseDismissibleLayerOptions): void {
   const refsRef = useRef(refs);
   const onDismissRef = useRef(onDismiss);
-  refsRef.current = refs;
-  onDismissRef.current = onDismiss;
+
+  useLayoutEffect(() => {
+    refsRef.current = refs;
+    onDismissRef.current = onDismiss;
+  });
 
   useEffect(() => {
     if (!open) return;

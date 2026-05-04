@@ -9,10 +9,6 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
-import { normalizeToE164 } from '@/lib/phone/e164';
-import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
-import type { CountryCode } from 'libphonenumber-js';
 import {
   ModifyTableBookingModal,
   bookingDetailToEditSnapshot,
@@ -32,6 +28,9 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
 
 interface Guest {
   id: string;
@@ -86,6 +85,11 @@ interface BookingDetail {
   combination_staff_notes?: string | null;
   /** Set by GET /api/venue/bookings/[id] for notes UI (table vs C/D/E). */
   inferred_booking_model?: BookingModel;
+  appointment_service_id?: string | null;
+  service_item_id?: string | null;
+  service_variant_id?: string | null;
+  booking_end_time?: string | null;
+  processing_time_blocks?: unknown | null;
   area_id?: string | null;
   area_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
@@ -229,10 +233,6 @@ export function BookingDetailPanel({
   anchor?: { x: number; y: number } | null;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const guestPhoneDefaultCountry: CountryCode = useMemo(
-    () => defaultPhoneCountryForVenueCurrency(venueCurrency),
-    [venueCurrency],
-  );
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -249,6 +249,7 @@ export function BookingDetailPanel({
   const [assignmentSuggestions, setAssignmentSuggestions] = useState<AssignmentSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
+  const [processingBlocksDraft, setProcessingBlocksDraft] = useState<ProcessingTimeBlock[]>([]);
 
   const optimisticDetail = useMemo(() => {
     if (!initialSnapshot || !venueId) return null;
@@ -279,6 +280,19 @@ export function BookingDetailPanel({
     if (m != null) return 'cde';
     return isAppointment ? 'cde' : 'table';
   }, [displayDetail?.inferred_booking_model, isAppointment]);
+
+  const appointmentCoreMinutesForProcessing = useMemo(() => {
+    const det = displayDetail;
+    if (!det) return 15;
+    const st = det.booking_time?.slice(0, 5) ?? '00:00';
+    const et = endHHMMOrFallback(det.estimated_end_time, st, 90);
+    const durationMins = Math.max(15, timeToMinutes(et) - timeToMinutes(st));
+    const bt = det.booking_end_time;
+    if (typeof bt === 'string' && bt.trim().length >= 5) {
+      return Math.max(15, timeToMinutes(bt.slice(0, 5)) - timeToMinutes(st));
+    }
+    return Math.max(15, durationMins);
+  }, [displayDetail]);
 
   const load = useCallback(async () => {
     const bookingPromise = fetch(`/api/venue/bookings/${bookingId}`);
@@ -373,6 +387,11 @@ export function BookingDetailPanel({
   }, [load]);
 
   useEffect(() => {
+    if (!detail) return;
+    setProcessingBlocksDraft(parseProcessingTimeBlocksFromDb(detail.processing_time_blocks));
+  }, [detail?.id, detail?.processing_time_blocks, detail]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
@@ -455,6 +474,31 @@ export function BookingDetailPanel({
       setActionLoading(false);
     }
   }, [bookingId, onUpdated, onClose]);
+
+  const persistProcessingBlocks = useCallback(async () => {
+    if (!detail) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processing_time_blocks: processingBlocksDraft }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(j.error ?? 'Could not save processing time');
+        return;
+      }
+      await load();
+      onUpdated();
+    } catch (e) {
+      console.error('processing_time_blocks patch failed:', e);
+      setError('Could not save processing time');
+    } finally {
+      setActionLoading(false);
+    }
+  }, [bookingId, detail, load, onUpdated, processingBlocksDraft]);
 
   const updateStatus = useCallback(async (newStatus: BookingStatus) => {
     if (!detail) return;
@@ -615,6 +659,10 @@ export function BookingDetailPanel({
   const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
   const endTime = endHHMMOrFallback(d.estimated_end_time, startTime, 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
+  const showAppointmentProcessingEditor =
+    isHydrated &&
+    (d.inferred_booking_model === 'unified_scheduling' || d.inferred_booking_model === 'practitioner_appointment') &&
+    (Boolean(d.service_item_id) || Boolean(d.appointment_service_id));
   const tableLine =
     optimisticTableLabel ??
     (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
@@ -1247,6 +1295,35 @@ export function BookingDetailPanel({
                 )}
               </SectionCard.Body>
             </SectionCard>
+
+            {showAppointmentProcessingEditor ? (
+              <SectionCard>
+                <SectionCard.Body className={sectionPadding}>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Processing time</p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Gaps inside this appointment where another booking can be scheduled. Guests still see the full
+                    service length.
+                  </p>
+                  <div className="mt-2">
+                    <ProcessingTimeTimelineEditor
+                      durationMinutes={appointmentCoreMinutesForProcessing}
+                      bufferMinutes={0}
+                      blocks={processingBlocksDraft}
+                      onChange={setProcessingBlocksDraft}
+                      compact={isPopover}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => void persistProcessingBlocks()}
+                    className="mt-3 w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    Save processing time
+                  </button>
+                </SectionCard.Body>
+              </SectionCard>
+            ) : null}
           </div>
 
           {confirmationSentAt && !isPopover && (

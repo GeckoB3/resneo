@@ -91,6 +91,10 @@ interface BookingRow {
   staff_attendance_confirmed_at?: string | null;
   area_id?: string | null;
   area_name?: string | null;
+  /** Persisted model; drives {@link inferBookingRowModel} with FK fallbacks. */
+  booking_model?: string | null;
+  /** Resolved service / event / class / resource / dining-service label for the booking bar. */
+  booking_item_name?: string | null;
 }
 
 interface BookingDetailLite {
@@ -1326,6 +1330,7 @@ export function BookingsDashboard({
         booking.guest_name.toLowerCase().includes(q)
         || (booking.guest_phone ?? '').toLowerCase().includes(q)
         || (booking.guest_email ?? '').toLowerCase().includes(q)
+        || (booking.booking_item_name ?? '').toLowerCase().includes(q)
         || booking.id.toLowerCase().includes(q)
         || booking.source.toLowerCase().includes(q)
       );
@@ -2207,6 +2212,14 @@ function BookingsAccordionList({
                       {booking.guest_name}
                     </span>
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
+                    {booking.booking_item_name?.trim() ? (
+                      <>
+                        <span className="shrink-0 text-slate-300">·</span>
+                        <span className="min-w-0 max-w-[11rem] truncate text-[11px] font-semibold text-slate-800 sm:max-w-[16rem] sm:text-xs">
+                          {booking.booking_item_name.trim()}
+                        </span>
+                      </>
+                    ) : null}
                     {isTableBooking ? (
                       <>
                         <span className="shrink-0 text-slate-300">·</span>

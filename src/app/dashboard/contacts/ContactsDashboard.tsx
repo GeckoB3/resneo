@@ -15,7 +15,7 @@ import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { VenueTerminology } from '@/types/booking-models';
 import type { CustomClientFieldDefinition, GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import { CONTACTS_LIFECYCLE_OPTIONS, CONTACTS_SORT_OPTIONS } from '@/lib/guests/contacts-constants';
-import { formatRelativeVisitDate } from '@/lib/guests/contact-formatting';
+import { formatNextBookingSummary, formatRelativeVisitDate } from '@/lib/guests/contact-formatting';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -51,67 +51,30 @@ function isoDateToday(): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 }
 
-function formatNextAppt(date: string | null | undefined, time: string | null | undefined): string | null {
-  if (!date) return null;
-  try {
-    const d = new Date(`${date}T12:00:00`);
-    if (Number.isNaN(d.getTime())) return null;
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    let dayStr: string;
-    if (d.toDateString() === today.toDateString()) {
-      dayStr = 'Today';
-    } else if (d.toDateString() === tomorrow.toDateString()) {
-      dayStr = 'Tomorrow';
-    } else {
-      dayStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    }
-    const timeStr = time ? time.slice(0, 5) : null;
-    return timeStr ? `${dayStr} ${timeStr}` : dayStr;
-  } catch {
-    return null;
-  }
-}
-
 function ContactRow({
   row: g,
   displayNameStr,
   isAnonRow,
-  active,
+  expanded,
   selected,
   visitsLabel,
-  onOpen,
   onToggleSelected,
 }: {
   row: GuestListRow;
   displayNameStr: string;
   isAnonRow: boolean;
-  active: boolean;
+  expanded: boolean;
   selected: boolean;
   visitsLabel: string;
-  onOpen: () => void;
   onToggleSelected: () => void;
 }) {
   const email = g.email?.trim() || null;
   const phone = g.phone?.trim() || null;
-  const nextAppt = formatNextAppt(g.next_booking_date, g.next_booking_time);
+  const nextAppt = formatNextBookingSummary(g.next_booking_date, g.next_booking_time);
   const tags = g.tags ?? [];
   const MAX_TAGS = 3;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-expanded={active}
-      onClick={() => onOpen()}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
-      className={`cursor-pointer rounded-xl border px-2 py-1.5 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 sm:px-3 sm:py-2 ${
-        active
-          ? 'border-brand-200 bg-brand-50/50 shadow-md ring-brand-900/10'
-          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60 hover:shadow-md'
-      }`}
-    >
       <div className="flex min-h-[2.25rem] min-w-0 items-center gap-1.5 sm:min-h-[2.5rem] sm:gap-2">
         {/* Checkbox */}
         <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
@@ -192,13 +155,12 @@ function ContactRow({
 
         {/* Chevron */}
         <svg
-          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${active ? 'rotate-180' : ''}`}
+          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
           fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
         </svg>
       </div>
-    </div>
   );
 }
 
@@ -308,7 +270,7 @@ export function ContactsDashboard({
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedGuestId, setExpandedGuestId] = useState<string | null>(null);
   const [detail, setDetail] = useState<GuestDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editName, setEditName] = useState('');
@@ -317,7 +279,6 @@ export function ContactsDashboard({
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [eraseLoadingId, setEraseLoadingId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
@@ -506,16 +467,19 @@ export function ContactsDashboard({
   }, []);
 
   useEffect(() => {
-    if (!selectedId) {
+    if (!expandedGuestId) {
       setDetail(null);
       return;
     }
-    void loadDetail(selectedId);
-  }, [selectedId, loadDetail]);
+    void loadDetail(expandedGuestId);
+  }, [expandedGuestId, loadDetail]);
 
   const openContact = useCallback((id: string) => {
-    setSelectedId(id);
-    setPanelOpen(true);
+    setExpandedGuestId(id);
+  }, []);
+
+  const toggleContactExpand = useCallback((id: string) => {
+    setExpandedGuestId((prev) => (prev === id ? null : id));
   }, []);
 
   useEffect(() => {
@@ -524,12 +488,6 @@ export function ContactsDashboard({
     openContact(guestIdFromQuery);
     router.replace('/dashboard/contacts', { scroll: false });
   }, [openContact, router, searchParams]);
-
-  const closePanel = useCallback(() => {
-    setPanelOpen(false);
-    setSelectedId(null);
-    setDetail(null);
-  }, []);
 
   const toggleTagFilter = useCallback((tag: string) => {
     setTagFilter((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -666,7 +624,8 @@ export function ContactsDashboard({
         if (!res.ok) {
           throw new Error(typeof j.error === 'string' ? j.error : 'Erase failed');
         }
-        closePanel();
+        setExpandedGuestId(null);
+        setDetail(null);
         await loadList();
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Erase failed');
@@ -674,7 +633,7 @@ export function ContactsDashboard({
         setEraseLoadingId(null);
       }
     },
-    [clientLower, loadList, closePanel],
+    [clientLower, loadList],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
@@ -868,8 +827,8 @@ export function ContactsDashboard({
   );
 
   return (
-    <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-start">
-      <div className="min-w-0 w-full flex-1 space-y-3">
+    <div className="min-w-0 w-full space-y-3">
+      <div className="min-w-0 space-y-3">
         <div className="min-w-0 space-y-3 pb-1">
           <OperationsWorkspaceToolbar
             title="Contacts"
@@ -1026,22 +985,74 @@ export function ContactsDashboard({
                 <span className="text-[11px] font-medium text-slate-400">{guests.length} {guests.length === 1 ? clientLower : `${clientLower}s`}</span>
               </div>
 
-              <div className="space-y-1.5" role="list" aria-label={`${clientWord} directory`}>
+              <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3" role="list" aria-label={`${clientWord} directory`}>
                 {guests.map((g) => {
                   const isAnonRow = filter === 'anonymous' || g.identifiability_tier === 'anonymous';
-                  const active = selectedId === g.id && panelOpen;
+                  const expanded = expandedGuestId === g.id;
                   return (
-                    <div key={g.id} role="listitem">
-                      <ContactRow
-                        row={g}
-                        displayNameStr={displayName(g)}
-                        isAnonRow={isAnonRow}
-                        active={active}
-                        selected={selectedIds.includes(g.id)}
-                        visitsLabel={visitsLabel}
-                        onOpen={() => openContact(g.id)}
-                        onToggleSelected={() => toggleSelected(g.id)}
-                      />
+                    <div
+                      key={g.id}
+                      role="listitem"
+                      className="min-w-0"
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        aria-controls={`contact-expand-${g.id}`}
+                        onClick={() => toggleContactExpand(g.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleContactExpand(g.id);
+                          }
+                        }}
+                        className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 sm:px-3 sm:py-2 ${
+                          expanded
+                            ? 'border-brand-200 bg-brand-50/50 shadow-md ring-brand-900/12'
+                            : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'
+                        }`}
+                      >
+                        <ContactRow
+                          row={g}
+                          displayNameStr={displayName(g)}
+                          isAnonRow={isAnonRow}
+                          expanded={expanded}
+                          selected={selectedIds.includes(g.id)}
+                          visitsLabel={visitsLabel}
+                          onToggleSelected={() => toggleSelected(g.id)}
+                        />
+                        {expanded ? (
+                          <div className="border-t border-slate-100/95 bg-slate-50/30">
+                            <ContactDetailPanel
+                              id={`contact-expand-${g.id}`}
+                              clientLower={clientLower}
+                              bookingWord={bookingWord}
+                              currencySymbol={currencySymbol}
+                              venueId={venueId}
+                              isAdmin={isAdmin}
+                              listRow={g}
+                              selectedId={g.id}
+                              detail={detail?.guest.id === g.id ? detail : null}
+                              detailLoading={detailLoading && expandedGuestId === g.id}
+                              editError={editError}
+                              editName={editName}
+                              setEditName={setEditName}
+                              editEmail={editEmail}
+                              setEditEmail={setEditEmail}
+                              editPhone={editPhone}
+                              setEditPhone={setEditPhone}
+                              editSaving={editSaving}
+                              onSaveGuestDetails={onSaveGuestDetails}
+                              loadDetail={loadDetail}
+                              loadList={loadList}
+                              eraseLoadingId={eraseLoadingId}
+                              onEraseGuest={onEraseGuest}
+                              onOpenMerge={isAdmin ? () => setMergeOpen(true) : undefined}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}
@@ -1076,64 +1087,6 @@ export function ContactsDashboard({
       </SectionCard>
       </div>
 
-      {/* Mobile backdrop */}
-      {panelOpen ? (
-        <button
-          type="button"
-          aria-label="Close contact details"
-          className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
-          onClick={closePanel}
-        />
-      ) : null}
-
-      {/* Detail drawer / panel */}
-      {panelOpen && selectedId ? (
-        <aside
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl lg:sticky lg:top-4 lg:z-auto lg:h-[calc(100dvh-5rem)] lg:max-h-[calc(100dvh-5rem)] lg:w-[420px] lg:max-w-[420px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-lg xl:w-[460px] xl:max-w-[460px]"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="contact-panel-title"
-        >
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 lg:rounded-t-2xl lg:border lg:border-b-0 lg:border-slate-200">
-            <h2 id="contact-panel-title" className="text-lg font-semibold text-slate-900">
-              {clientWord} details
-            </h2>
-            <button
-              type="button"
-              onClick={closePanel}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-              aria-label="Close"
-            >
-              <span aria-hidden>✕</span>
-            </button>
-          </div>
-          <ContactDetailPanel
-            clientLower={clientLower}
-            bookingWord={bookingWord}
-            currencySymbol={currencySymbol}
-            venueId={venueId}
-            isAdmin={isAdmin}
-            selectedId={selectedId}
-            detail={detail}
-            detailLoading={detailLoading}
-            editError={editError}
-            editName={editName}
-            setEditName={setEditName}
-            editEmail={editEmail}
-            setEditEmail={setEditEmail}
-            editPhone={editPhone}
-            setEditPhone={setEditPhone}
-            editSaving={editSaving}
-            onSaveGuestDetails={onSaveGuestDetails}
-            loadDetail={loadDetail}
-            loadList={loadList}
-            eraseLoadingId={eraseLoadingId}
-            onEraseGuest={onEraseGuest}
-            onOpenMerge={isAdmin ? () => setMergeOpen(true) : undefined}
-          />
-        </aside>
-      ) : null}
-
       {bulkContactMessageOpen && selectedIds.length > 0 ? (
         <BulkGuestMessageModal
           onClose={() => {
@@ -1149,12 +1102,12 @@ export function ContactsDashboard({
         />
       ) : null}
 
-      {mergeOpen && selectedId && isAdmin ? (
+      {mergeOpen && expandedGuestId && isAdmin ? (
         <MergeContactsModal
-          targetGuestId={selectedId}
+          targetGuestId={expandedGuestId}
           onClose={() => setMergeOpen(false)}
           onMerged={() => {
-            void loadDetail(selectedId);
+            void loadDetail(expandedGuestId);
             void loadList();
             setMergeOpen(false);
           }}

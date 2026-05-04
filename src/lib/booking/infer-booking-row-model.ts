@@ -1,7 +1,20 @@
 import type { BookingModel } from '@/types/booking-models';
+import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 
-/** Infer booking model from row FKs (no `bookings.booking_model` column required). */
+const VALID_BOOKING_MODEL = new Set<string>(BOOKING_MODEL_ORDER);
+
+function bookingModelFromStoredColumn(raw: unknown): BookingModel | null {
+  if (raw == null || raw === '') return null;
+  const s = typeof raw === 'string' ? raw : String(raw);
+  return VALID_BOOKING_MODEL.has(s) ? (s as BookingModel) : null;
+}
+
+/**
+ * Infer booking model for staff UI and filters.
+ * Prefer persisted `bookings.booking_model` (authoritative for inserts); fall back to FK inference for legacy rows.
+ */
 export function inferBookingRowModel(row: {
+  booking_model?: string | null;
   experience_event_id?: string | null;
   class_instance_id?: string | null;
   resource_id?: string | null;
@@ -11,6 +24,9 @@ export function inferBookingRowModel(row: {
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
 }): BookingModel {
+  const fromDb = bookingModelFromStoredColumn(row.booking_model);
+  if (fromDb != null) return fromDb;
+
   if (row.experience_event_id) return 'event_ticket';
   if (row.class_instance_id) return 'class_session';
   if (row.resource_id) return 'resource_booking';
@@ -35,6 +51,7 @@ export function bookingModelShortLabel(model: BookingModel): string {
 
 /** True for plain table reservations; false for appointments, classes, events, and resource bookings (use Start / Undo Start instead of Seat / Unseat). */
 export function isTableReservationBooking(row: {
+  booking_model?: string | null;
   experience_event_id?: string | null;
   class_instance_id?: string | null;
   resource_id?: string | null;

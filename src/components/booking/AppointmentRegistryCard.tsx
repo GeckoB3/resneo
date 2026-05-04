@@ -36,6 +36,9 @@ export interface RegistryAppointment {
   class_instance_id?: string | null;
   resource_id?: string | null;
   event_session_id?: string | null;
+  booking_model?: string | null;
+  /** Server-resolved service / event / class / resource / dining-service name for the booking bar. */
+  booking_item_name?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {

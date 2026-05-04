@@ -10,6 +10,12 @@ import {
 } from '@/lib/class-instances/instructor-calendar-block';
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import {
+  hasActiveBookingsForClassInstance,
+  hasUpcomingActiveBookingsForClassTimetableEntry,
+  hasUpcomingActiveBookingsForClassType,
+  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
+} from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 
 const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
@@ -710,6 +716,13 @@ export async function DELETE(request: NextRequest) {
           return NextResponse.json({ error: scope.error }, { status: scope.status });
         }
       }
+      const instGuard = await hasActiveBookingsForClassInstance(admin, staff.venue_id, id);
+      if (instGuard.error) {
+        return NextResponse.json({ error: instGuard.error }, { status: 500 });
+      }
+      if (instGuard.blocked) {
+        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      }
       const { error } = await admin.from('class_instances').delete().eq('id', id);
       if (error) {
         console.error('DELETE /api/venue/classes (instance) failed:', error);
@@ -751,6 +764,13 @@ export async function DELETE(request: NextRequest) {
           return NextResponse.json({ error: scope.error }, { status: scope.status });
         }
       }
+      const ttGuard = await hasUpcomingActiveBookingsForClassTimetableEntry(admin, staff.venue_id, id);
+      if (ttGuard.error) {
+        return NextResponse.json({ error: ttGuard.error }, { status: 500 });
+      }
+      if (ttGuard.blocked) {
+        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      }
       const { error } = await admin.from('class_timetable').delete().eq('id', id);
       if (error) {
         console.error('DELETE /api/venue/classes (timetable) failed:', error);
@@ -768,6 +788,14 @@ export async function DELETE(request: NextRequest) {
       if (!scope.ok) {
         return NextResponse.json({ error: scope.error }, { status: scope.status });
       }
+    }
+
+    const typeGuard = await hasUpcomingActiveBookingsForClassType(admin, staff.venue_id, id);
+    if (typeGuard.error) {
+      return NextResponse.json({ error: typeGuard.error }, { status: 500 });
+    }
+    if (typeGuard.blocked) {
+      return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
     }
 
     const { error } = await admin.from('class_types').delete().eq('id', id).eq('venue_id', staff.venue_id);

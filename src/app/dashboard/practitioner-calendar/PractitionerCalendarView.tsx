@@ -79,6 +79,13 @@ import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
+import {
+  customerOccupyMinutes,
+  effectiveProcessingBlocksForTemplate,
+  parseProcessingTimeBlocksFromDb,
+  practitionerBusyMinuteOffsets,
+} from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 
 interface Practitioner {
   id: string;
@@ -92,10 +99,19 @@ interface Practitioner {
   working_hours?: WorkingHours;
 }
 
+interface CalendarVariantRow {
+  id: string;
+  processing_time_blocks?: ProcessingTimeBlock[];
+}
+
 interface AppointmentService {
   id: string;
   name: string;
   duration_minutes: number;
+  buffer_minutes?: number;
+  processing_time_minutes?: number;
+  processing_time_blocks?: ProcessingTimeBlock[];
+  variants?: CalendarVariantRow[];
   colour: string;
   price_pence?: number | null;
 }
@@ -112,6 +128,8 @@ interface Booking {
   calendar_id: string | null;
   appointment_service_id: string | null;
   service_item_id: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown | null;
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
@@ -417,6 +435,142 @@ function bookingDurationMinutes(b: Booking, serviceMap: Map<string, AppointmentS
     return serviceMap.get(sid)?.duration_minutes ?? 30;
   }
   return 30;
+}
+
+/** Wall span for painting the block (core + buffer when using catalogue defaults). */
+function bookingCalendarDisplaySpanMinutes(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): number {
+  if (b.booking_end_time) {
+    return Math.max(
+      SLOT_MINUTES,
+      timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time),
+    );
+  }
+  if (minutesBetweenBookingStartAndEstimatedEnd(b) != null) {
+    return bookingDurationMinutes(b, serviceMap);
+  }
+  const sid = serviceIdForBooking(b);
+  const core = sid ? serviceMap.get(sid)?.duration_minutes ?? 30 : 30;
+  const buf = sid ? serviceMap.get(sid)?.buffer_minutes ?? 0 : 0;
+  return Math.max(SLOT_MINUTES, customerOccupyMinutes(core, buf));
+}
+
+function bookingCoreDurationForProcessing(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): number {
+  return bookingDurationMinutes(b, serviceMap);
+}
+
+function bookingBufferMinutes(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): number {
+  const sid = serviceIdForBooking(b);
+  return Math.max(0, sid ? serviceMap.get(sid)?.buffer_minutes ?? 0 : 0);
+}
+
+function bookingProcessingBlocksForLayout(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): ProcessingTimeBlock[] {
+  const fromBooking = parseProcessingTimeBlocksFromDb(b.processing_time_blocks);
+  if (fromBooking.length > 0) return fromBooking;
+  const sid = serviceIdForBooking(b);
+  const svc = sid ? serviceMap.get(sid) : undefined;
+  if (!svc) return [];
+  const vid = b.service_variant_id;
+  const variant =
+    typeof vid === 'string' && vid.trim().length > 0 ? svc.variants?.find((v) => v.id === vid) : undefined;
+  return effectiveProcessingBlocksForTemplate({
+    parentBlocks: svc.processing_time_blocks ?? [],
+    variantBlocks: variant?.processing_time_blocks,
+  });
+}
+
+function bookingLegacyProcessingTail(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): number {
+  if (bookingProcessingBlocksForLayout(b, serviceMap).length > 0) return 0;
+  const sid = serviceIdForBooking(b);
+  return Math.max(0, sid ? serviceMap.get(sid)?.processing_time_minutes ?? 0 : 0);
+}
+
+function practitionerWallBusyIntervalsForBooking(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): Array<{ start: number; end: number }> {
+  const wall0 = timeToMinutes(b.booking_time.slice(0, 5));
+  const coreDur = bookingCoreDurationForProcessing(b, serviceMap);
+  const buf = bookingBufferMinutes(b, serviceMap);
+  const blocks = bookingProcessingBlocksForLayout(b, serviceMap);
+  const legacy = bookingLegacyProcessingTail(b, serviceMap);
+  const offsets = practitionerBusyMinuteOffsets({
+    durationMinutes: coreDur,
+    bufferMinutes: buf,
+    processingBlocks: blocks,
+    legacyProcessingTailMinutes: legacy,
+  });
+  return offsets.map((o) => ({ start: wall0 + o.start, end: wall0 + o.end }));
+}
+
+function practitionerWallBusyIntervalsForCandidateAtSlot(
+  b: Booking,
+  slotStartWallMin: number,
+  serviceMap: Map<string, AppointmentService>,
+): Array<{ start: number; end: number }> {
+  const coreDur = bookingCoreDurationForProcessing(b, serviceMap);
+  const buf = bookingBufferMinutes(b, serviceMap);
+  const blocks = bookingProcessingBlocksForLayout(b, serviceMap);
+  const legacy = bookingLegacyProcessingTail(b, serviceMap);
+  const offsets = practitionerBusyMinuteOffsets({
+    durationMinutes: coreDur,
+    bufferMinutes: buf,
+    processingBlocks: blocks,
+    legacyProcessingTailMinutes: legacy,
+  });
+  return offsets.map((o) => ({ start: slotStartWallMin + o.start, end: slotStartWallMin + o.end }));
+}
+
+function BookingProcessingStrip({
+  b,
+  serviceMap,
+  wallPaintMinutes,
+}: {
+  b: Booking;
+  serviceMap: Map<string, AppointmentService>;
+  /** When embedded in a multi-service segment, pass that segment's vertical span in minutes. */
+  wallPaintMinutes?: number;
+}) {
+  const display = wallPaintMinutes ?? bookingCalendarDisplaySpanMinutes(b, serviceMap);
+  const core = bookingCoreDurationForProcessing(b, serviceMap);
+  if (display <= 0 || core <= 0) return null;
+  const blocks = bookingProcessingBlocksForLayout(b, serviceMap);
+  if (blocks.length === 0) return null;
+  const corePct = Math.min(100, (core / display) * 100);
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 z-0 rounded-t-2xl"
+      style={{ height: `${corePct}%` }}
+      aria-hidden
+    >
+      {blocks.map((blk) => (
+        <div
+          key={blk.id}
+          className="absolute inset-x-0 bg-sky-400/25"
+          style={{
+            top: `${(blk.start_minute / core) * 100}%`,
+            height: `${(blk.duration_minutes / core) * 100}%`,
+            backgroundImage:
+              'repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(15,23,42,0.08) 5px 10px)',
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 function calendarGridLineClass(minutes: number): string {
@@ -906,14 +1060,13 @@ function slotOccupied(
   options?: { ignoreBookings?: boolean },
 ): boolean {
   if (!options?.ignoreBookings) {
+    const slotEnd = slotStart + SLOT_MINUTES;
     for (const b of bookings) {
       if (excludeBookingId && b.id === excludeBookingId) continue;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
       if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
-      const dur = bookingDurationMinutes(b, serviceMap);
-      const b0 = timeToMinutes(b.booking_time);
-      const b1 = b0 + Math.max(dur, SLOT_MINUTES);
-      if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+      const busyIv = practitionerWallBusyIntervalsForBooking(b, serviceMap);
+      if (busyIv.some((iv) => overlapsRange(slotStart, slotEnd, iv.start, iv.end))) return true;
     }
   }
   for (const bl of blocks) {
@@ -950,37 +1103,49 @@ function appointmentWindowCollides(
   classScheduleBlocks: ScheduleBlockDTO[],
   eventColumnBlocks: ScheduleBlockDTO[],
   resourceParentById: Map<string, string>,
-  options?: { ignoreBookings?: boolean },
+  options?: { ignoreBookings?: boolean; candidatePractitionerBusy?: Array<{ start: number; end: number }> | null },
 ): boolean {
   if (endMin <= startMin) return true;
+  const candIntervals =
+    options?.candidatePractitionerBusy && options.candidatePractitionerBusy.length > 0
+      ? options.candidatePractitionerBusy
+      : [{ start: startMin, end: endMin }];
   if (!options?.ignoreBookings) {
     for (const b of bookings) {
       if (excludeBookingId && b.id === excludeBookingId) continue;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
       if (['Cancelled', 'No-Show'].includes(b.status)) continue;
-      const dur = bookingDurationMinutes(b, serviceMap);
-      const b0 = timeToMinutes(b.booking_time);
-      const b1 = b0 + Math.max(dur, SLOT_MINUTES);
-      if (overlapsRange(startMin, endMin, b0, b1)) return true;
+      const otherBusy = practitionerWallBusyIntervalsForBooking(b, serviceMap);
+      for (const c of candIntervals) {
+        for (const o of otherBusy) {
+          if (overlapsRange(c.start, c.end, o.start, o.end)) return true;
+        }
+      }
     }
   }
   for (const bl of blocks) {
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = timeToMinutes(bl.end_time);
-    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+    for (const c of candIntervals) {
+      if (overlapsRange(c.start, c.end, b0, b1)) return true;
+    }
   }
   for (const cb of classScheduleBlocks) {
     if (cb.kind !== 'class_session') continue;
     const b0 = timeToMinutes(cb.start_time);
     const b1 = timeToMinutes(cb.end_time);
-    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+    for (const c of candIntervals) {
+      if (overlapsRange(c.start, c.end, b0, b1)) return true;
+    }
   }
   for (const eb of eventColumnBlocks) {
     if (eb.kind !== 'event_ticket') continue;
     const b0 = timeToMinutes(eb.start_time);
     const b1 = timeToMinutes(eb.end_time);
-    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+    for (const c of candIntervals) {
+      if (overlapsRange(c.start, c.end, b0, b1)) return true;
+    }
   }
   return false;
 }
@@ -1019,7 +1184,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       onClick={(e) => {
         if (!disabled) onEmptyClick(e, pracId, dateStr, tlabel);
       }}
-      className={`absolute left-0 right-0 z-0 touch-pan-x border-t ${gridLineClass} ${slotBandClass} transition-colors ${
+      className={`absolute left-0 right-0 z-0 [touch-action:pan-x_pan-y] border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
       style={{ top, height: SLOT_HEIGHT }}
@@ -1364,7 +1529,7 @@ export function PractitionerCalendarView({
       for (const booking of bookings) {
         if (booking.booking_date !== activeDayDate) continue;
         const startM = timeToMinutes(booking.booking_time);
-        const endM = startM + bookingDurationMinutes(booking, serviceMapForBounds);
+        const endM = startM + bookingCalendarDisplaySpanMinutes(booking, serviceMapForBounds);
         minM = Math.min(minM, startM);
         maxM = Math.max(maxM, endM);
       }
@@ -1662,7 +1827,7 @@ export function PractitionerCalendarView({
       const main = node?.closest('main');
       if (!node || !main) return;
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        main.scrollLeft += e.deltaX;
+        node.scrollLeft += e.deltaX;
         e.preventDefault();
         return;
       }
@@ -1751,7 +1916,7 @@ export function PractitionerCalendarView({
   }
 
   function getBookingDuration(b: Booking): number {
-    return bookingDurationMinutes(b, serviceMap);
+    return bookingCalendarDisplaySpanMinutes(b, serviceMap);
   }
 
   function slotTop(time: string): number {
@@ -2083,6 +2248,7 @@ export function PractitionerCalendarView({
     const dayEndMin = endHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
+    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(b, slotStartMins, serviceMap);
     const invalid =
       slotStartMins < dayStartMin ||
       endMin > dayEndMin ||
@@ -2098,7 +2264,7 @@ export function PractitionerCalendarView({
         pracClassBlocks,
         pracEventBlocks,
         resourceParentById,
-        { ignoreBookings: true },
+        { ignoreBookings: false, candidatePractitionerBusy: candBusy },
       );
     const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
     const timeLabel = minutesToTime(slotStartMins);
@@ -2570,7 +2736,7 @@ export function PractitionerCalendarView({
       ) : viewMode === 'week' ? (
         <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03]">
           <HorizontalScrollHint />
-          <div className="overflow-x-auto touch-pan-x [-webkit-overflow-scrolling:touch]">
+          <div className="overflow-x-auto [overflow-y:clip] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch]">
             <div className="min-w-[920px]">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -2744,7 +2910,7 @@ export function PractitionerCalendarView({
           >
             <div
               ref={scrollRef}
-              className={`min-w-0 w-full touch-pan-x overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] ${
+              className={`min-w-0 w-full [touch-action:pan-x_pan-y] overflow-x-auto [overflow-y:clip] overscroll-x-contain [-webkit-overflow-scrolling:touch] rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] ${
                 mousePanning ? 'cursor-grabbing' : 'cursor-grab'
               }`}
               onMouseDown={handleCalendarMouseDown}
@@ -3115,10 +3281,11 @@ export function PractitionerCalendarView({
                                   }`}
                                   style={bookingBlockCardStyle(palette)}
                                 >
+                                  <BookingProcessingStrip b={b} serviceMap={serviceMap} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       type="button"
-                                      className={`${isOverlapLane ? 'w-3 text-[0]' : 'w-6 text-[10px]'} shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing`}
+                                      className={`relative z-[2] ${isOverlapLane ? 'w-3 text-[0]' : 'w-6 text-[10px]'} shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing`}
                                       aria-label="Drag to reschedule"
                                       {...handle.listeners}
                                       {...handle.attributes}
@@ -3127,7 +3294,7 @@ export function PractitionerCalendarView({
                                     </button>
                                   ) : null}
                                     <div
-                                      className={`flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
+                                      className={`relative z-[1] flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
                                         isOverlapLane ? 'flex-col' : 'flex-row'
                                       }`}
                                       style={
@@ -3275,13 +3442,14 @@ export function PractitionerCalendarView({
                                       return (
                                         <div
                                           key={b.id}
-                                          className="flex min-h-0 flex-col overflow-hidden"
+                                          className="relative flex min-h-0 flex-col overflow-hidden"
                                           style={{ flex: dur, backgroundColor: palette.bg }}
                                         >
+                                          <BookingProcessingStrip b={b} serviceMap={serviceMap} wallPaintMinutes={dur} />
                                           <button
                                             type="button"
                                             onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
-                                            className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+                                            className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
                                             aria-label={`Open booking details for ${b.guest_name}`}
                                           >
                                             <div className="flex min-w-0 shrink-0 flex-col gap-0.5 overflow-hidden">

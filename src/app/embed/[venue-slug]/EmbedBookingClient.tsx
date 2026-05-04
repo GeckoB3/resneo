@@ -12,6 +12,10 @@ function sendHeight(height: number) {
   window.parent.postMessage({ type: 'reserve-ni-height', height }, '*');
 }
 
+function measureEmbedMain(root: HTMLElement): number {
+  return Math.ceil(root.scrollHeight);
+}
+
 export function EmbedBookingClient({
   venue,
   accentColour,
@@ -21,30 +25,34 @@ export function EmbedBookingClient({
 }) {
   const contentRef = useRef<HTMLElement>(null);
 
-  const onHeightChange = useCallback(() => {
-    sendHeight(document.documentElement.scrollHeight);
+  /** Re-measure the widget shell after flows change step or async layout; avoids iframe viewport bleed. */
+  const bumpEmbedHeight = useCallback(() => {
+    requestAnimationFrame(() => {
+      const root = contentRef.current;
+      if (!root) return;
+      sendHeight(measureEmbedMain(root));
+    });
   }, []);
 
   useEffect(() => {
-    const el = contentRef.current ?? document.body;
-    const observer = new ResizeObserver(() => {
-      sendHeight(document.documentElement.scrollHeight);
-    });
-    observer.observe(el);
-    sendHeight(document.documentElement.scrollHeight);
+    const root = contentRef.current;
+    if (!root) return;
+    const observer = new ResizeObserver(() => bumpEmbedHeight());
+    observer.observe(root);
+    bumpEmbedHeight();
     return () => observer.disconnect();
-  }, []);
+  }, [bumpEmbedHeight]);
 
   const accentStyle = accentColour
     ? ({ '--accent': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties)
     : undefined;
 
   return (
-    <main ref={contentRef} className="bg-white p-4" style={accentStyle}>
+    <main ref={contentRef} className="bg-white px-4 pb-4 pt-6" style={accentStyle}>
       <BookPublicBookingFlow
         venue={venue}
         embed
-        onHeightChange={onHeightChange}
+        onHeightChange={bumpEmbedHeight}
         accentColour={accentColour ?? undefined}
       />
     </main>

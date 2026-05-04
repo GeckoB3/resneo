@@ -13,11 +13,14 @@ import type {
   AppointmentService,
   ClassPaymentRequirement,
   PractitionerService,
+  ProcessingTimeBlock,
   ServiceCustomScheduleStored,
   ServiceCustomScheduleV2,
   ServiceVariant,
   WorkingHours,
 } from '@/types/booking-models';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
 import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
 import { ServiceAvailabilityCalendar } from '@/components/scheduling/ServiceAvailabilityCalendar';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
@@ -65,6 +68,7 @@ interface Service {
   custom_working_hours?: ServiceCustomScheduleStored | null;
   /** Optional sub-options the customer must pick from before completing a booking. */
   variants?: ServiceVariant[];
+  processing_time_blocks?: ProcessingTimeBlock[];
 }
 
 /** One editable row in the variants section of the service modal. Pence values come back as strings while editing. */
@@ -78,6 +82,7 @@ interface VariantFormRow {
   price: string;
   deposit: string;
   is_active: boolean;
+  processing_time_blocks: ProcessingTimeBlock[];
 }
 
 const DEFAULT_VARIANT_ROW: VariantFormRow = {
@@ -88,6 +93,7 @@ const DEFAULT_VARIANT_ROW: VariantFormRow = {
   price: '',
   deposit: '',
   is_active: true,
+  processing_time_blocks: [],
 };
 
 interface Practitioner {
@@ -139,6 +145,7 @@ interface ServiceFormData {
   custom_working_hours: ServiceCustomScheduleV2;
   /** Optional sub-options. When non-empty, customers must pick one before booking. */
   variants: VariantFormRow[];
+  processing_time_blocks: ProcessingTimeBlock[];
 }
 
 const COLOUR_OPTIONS = [
@@ -175,6 +182,7 @@ const DEFAULT_FORM: ServiceFormData = {
   custom_availability_enabled: false,
   custom_working_hours: { version: 2, rules: [] },
   variants: [],
+  processing_time_blocks: [],
 };
 
 function formatDuration(mins: number): string {
@@ -234,6 +242,8 @@ export function AppointmentServicesView({
   const [newCalendarName, setNewCalendarName] = useState('');
   const [creatingCalendar, setCreatingCalendar] = useState(false);
   const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
+  const [serviceToDelete, setServiceToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleteServiceBusy, setDeleteServiceBusy] = useState(false);
   const [venueOpeningHours, setVenueOpeningHours] = useState<OpeningHours | null>(null);
   const [venueOpeningExceptions, setVenueOpeningExceptions] = useState<VenueOpeningException[]>([]);
 
@@ -453,6 +463,9 @@ export function AppointmentServicesView({
         svc.custom_availability_enabled && svc.custom_working_hours && typeof svc.custom_working_hours === 'object'
           ? toServiceCustomScheduleV2(svc.custom_working_hours)
           : { version: 2, rules: [] },
+      processing_time_blocks: parseProcessingTimeBlocksFromDb(
+        (svc as { processing_time_blocks?: unknown }).processing_time_blocks,
+      ),
       variants: (svc.variants ?? []).map((v) => ({
         id: v.id,
         name: v.name,
@@ -462,6 +475,9 @@ export function AppointmentServicesView({
         price: penceToPounds(v.price_pence),
         deposit: penceToPounds(v.deposit_pence),
         is_active: v.is_active,
+        processing_time_blocks: parseProcessingTimeBlocksFromDb(
+          (v as { processing_time_blocks?: unknown }).processing_time_blocks,
+        ),
       })),
     });
     setEditingId(svc.id);
@@ -648,6 +664,7 @@ export function AppointmentServicesView({
         payload.custom_working_hours = form.custom_availability_enabled
           ? form.custom_working_hours
           : null;
+        payload.processing_time_blocks = usesVariantsPayload ? [] : form.processing_time_blocks;
         payload.variants = form.variants.map((v, idx) => ({
           ...(v.id ? { id: v.id } : {}),
           name: v.name.trim(),
@@ -658,6 +675,7 @@ export function AppointmentServicesView({
           deposit_pence: poundsToPence(v.deposit),
           sort_order: idx,
           is_active: v.is_active,
+          processing_time_blocks: v.processing_time_blocks,
         }));
       }
 
@@ -681,21 +699,26 @@ export function AppointmentServicesView({
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!window.confirm('Delete this service? Calendar links to it will be removed.')) return;
+  async function confirmDeleteService() {
+    if (!serviceToDelete) return;
+    setDeleteServiceBusy(true);
+    setError(null);
     try {
       const res = await fetch('/api/venue/appointment-services', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id: serviceToDelete.id }),
       });
       if (!res.ok) {
         setError('Failed to delete service. Please try again.');
         return;
       }
       await fetchAll();
+      setServiceToDelete(null);
     } catch {
       setError('Failed to delete service. Please try again.');
+    } finally {
+      setDeleteServiceBusy(false);
     }
   }
 
@@ -939,7 +962,10 @@ export function AppointmentServicesView({
                     <div className="flex flex-shrink-0 items-center sm:pt-1">
                       <DashboardEntityRowActions
                         onEdit={() => openEdit(svc)}
-                        onDelete={() => void handleDelete(svc.id)}
+                        onDelete={() => {
+                          setError(null);
+                          setServiceToDelete({ id: svc.id, name: svc.name });
+                        }}
                       />
                     </div>
                   )}
@@ -1276,6 +1302,22 @@ export function AppointmentServicesView({
                           />
                           Offer this option to clients
                         </label>
+                        {isAdmin ? (
+                          <ProcessingTimeTimelineEditor
+                            compact
+                            durationMinutes={variant.duration_minutes}
+                            bufferMinutes={variant.buffer_minutes}
+                            blocks={variant.processing_time_blocks}
+                            onChange={(blocks) =>
+                              setForm((f) => ({
+                                ...f,
+                                variants: f.variants.map((row, i) =>
+                                  i === idx ? { ...row, processing_time_blocks: blocks } : row,
+                                ),
+                              }))
+                            }
+                          />
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -1306,6 +1348,15 @@ export function AppointmentServicesView({
                       />
                     </div>
                   </div>
+
+                  {isAdmin ? (
+                    <ProcessingTimeTimelineEditor
+                      durationMinutes={form.duration_minutes}
+                      bufferMinutes={form.buffer_minutes}
+                      blocks={form.processing_time_blocks}
+                      onChange={(blocks) => setForm((f) => ({ ...f, processing_time_blocks: blocks }))}
+                    />
+                  ) : null}
 
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
@@ -1790,6 +1841,58 @@ export function AppointmentServicesView({
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {serviceToDelete && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+          onClick={() => {
+            if (!deleteServiceBusy) setServiceToDelete(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-service-title"
+            aria-describedby="delete-service-desc"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-service-title" className="text-base font-semibold text-slate-900">
+              Delete this service?
+            </h3>
+            <p id="delete-service-desc" className="mt-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">{serviceToDelete.name}</span> will be removed. Calendar
+              links to this service will be cleared. This cannot be undone.
+            </p>
+            {error ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {error}
+              </div>
+            ) : null}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setServiceToDelete(null)}
+                disabled={deleteServiceBusy}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteService()}
+                disabled={deleteServiceBusy}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteServiceBusy ? 'Deleting…' : 'Delete service'}
               </button>
             </div>
           </div>

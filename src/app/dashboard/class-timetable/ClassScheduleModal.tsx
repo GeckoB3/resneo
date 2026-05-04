@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { monthGrid, ymd } from '@/lib/calendar/month-grid';
 
 const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -169,6 +169,8 @@ export function ClassScheduleModal({
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [instanceDeleteConfirm, setInstanceDeleteConfirm] = useState<ClassScheduleInstance | null>(null);
+  const [instanceDeleteDialogError, setInstanceDeleteDialogError] = useState<string | null>(null);
   /** Shown inside this modal (parent page notice sits under the overlay). */
   const [scheduleFormError, setScheduleFormError] = useState<string | null>(null);
 
@@ -176,13 +178,17 @@ export function ClassScheduleModal({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (instanceDeleteConfirm) {
+          if (!deletingId) setInstanceDeleteConfirm(null);
+          return;
+        }
         if (sheetIso) setSheetIso(null);
         else onClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, sheetIso]);
+  }, [open, onClose, sheetIso, instanceDeleteConfirm, deletingId]);
 
   useEffect(() => {
     if (open) {
@@ -191,6 +197,8 @@ export function ClassScheduleModal({
       setViewMonth(t.getMonth());
       setSheetIso(null);
       setScheduleFormError(null);
+      setInstanceDeleteConfirm(null);
+      setInstanceDeleteDialogError(null);
     }
   }, [open]);
 
@@ -276,16 +284,16 @@ export function ClassScheduleModal({
     setIntervalUntil('');
   }, []);
 
-  const deleteInstance = async (inst: ClassScheduleInstance) => {
-    const cn = classTypeById.get(inst.class_type_id)?.name ?? 'Class';
-    const booked = inst.booked_spots ?? 0;
-    const base = `Remove "${cn}" on ${inst.instance_date} at ${inst.start_time.slice(0, 5)}?`;
-    const msg =
-      booked > 0
-        ? `${base} ${booked} booking(s) will stay on file but will no longer be linked to this class time.`
-        : base;
-    if (!window.confirm(msg)) return;
+  const requestDeleteInstance = (inst: ClassScheduleInstance) => {
+    setInstanceDeleteDialogError(null);
+    setInstanceDeleteConfirm(inst);
+  };
+
+  const confirmDeleteInstance = async () => {
+    const inst = instanceDeleteConfirm;
+    if (!inst) return;
     setDeletingId(inst.id);
+    setInstanceDeleteDialogError(null);
     try {
       const res = await fetch('/api/venue/classes', {
         method: 'DELETE',
@@ -294,15 +302,16 @@ export function ClassScheduleModal({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setScheduleFormError((json as { error?: string }).error ?? 'Could not remove session');
+        setInstanceDeleteDialogError((json as { error?: string }).error ?? 'Could not remove session');
         return;
       }
+      setInstanceDeleteConfirm(null);
       setScheduleFormError(null);
       setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
       onInstanceRemoved?.(inst.id);
       await onRefresh();
     } catch {
-      setScheduleFormError('Could not remove session');
+      setInstanceDeleteDialogError('Could not remove session');
     } finally {
       setDeletingId(null);
     }
@@ -489,9 +498,11 @@ export function ClassScheduleModal({
     : '';
 
   return (
+    <Fragment>
     <div
       className="fixed inset-0 z-[45] flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onClick={(e) => {
+        if (instanceDeleteConfirm) return;
         if (e.target === e.currentTarget) onClose();
       }}
     >
@@ -725,7 +736,7 @@ export function ClassScheduleModal({
                               className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void deleteInstance(inst);
+                                requestDeleteInstance(inst);
                               }}
                               aria-label="Remove session"
                             >
@@ -1077,7 +1088,7 @@ export function ClassScheduleModal({
                             type="button"
                             className="font-medium text-red-600 hover:underline disabled:opacity-50"
                             disabled={deletingId === inst.id}
-                            onClick={() => void deleteInstance(inst)}
+                            onClick={() => requestDeleteInstance(inst)}
                           >
                             {deletingId === inst.id ? '…' : 'Remove'}
                           </button>
@@ -1101,5 +1112,68 @@ export function ClassScheduleModal({
         </div>
       </div>
     </div>
+
+    {instanceDeleteConfirm && (
+      <div
+        className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
+        onClick={() => {
+          if (!deletingId) setInstanceDeleteConfirm(null);
+        }}
+      >
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="schedule-remove-session-title"
+          aria-describedby="schedule-remove-session-desc"
+          className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="schedule-remove-session-title" className="text-base font-semibold text-slate-900">
+            Remove this session?
+          </h3>
+          <p id="schedule-remove-session-desc" className="mt-2 text-sm text-slate-600">
+            Remove{' '}
+            <span className="font-medium text-slate-800">
+              {classTypeById.get(instanceDeleteConfirm.class_type_id)?.name ?? 'Class'}
+            </span>{' '}
+            on {instanceDeleteConfirm.instance_date} at {instanceDeleteConfirm.start_time.slice(0, 5)}?
+            {(instanceDeleteConfirm.booked_spots ?? 0) > 0 ? (
+              <>
+                {' '}
+                {instanceDeleteConfirm.booked_spots} booking(s) will stay on file but will no longer be linked to this
+                class time.
+              </>
+            ) : null}
+          </p>
+          {instanceDeleteDialogError ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {instanceDeleteDialogError}
+            </div>
+          ) : null}
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setInstanceDeleteConfirm(null)}
+              disabled={deletingId !== null}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void confirmDeleteInstance()}
+              disabled={deletingId !== null}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+            >
+              {deletingId ? 'Removing…' : 'Remove session'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </Fragment>
   );
 }

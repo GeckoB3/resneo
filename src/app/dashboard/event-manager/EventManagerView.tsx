@@ -180,6 +180,9 @@ export function EventManagerView({
   const [eventForm, setEventForm] = useState<EventFormState>({ ...BLANK_EVENT });
   const [eventSaving, setEventSaving] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
+  const [eventToDelete, setEventToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleteEventBusy, setDeleteEventBusy] = useState(false);
+  const [deleteEventModalError, setDeleteEventModalError] = useState<string | null>(null);
   const [teamCalendars, setTeamCalendars] = useState<Array<{ id: string; name: string; calendar_type?: string }>>(
     [],
   );
@@ -534,33 +537,42 @@ export function EventManagerView({
     setSelectedId(null);
   };
 
-  const handleDeleteEvent = async (id: string) => {
-    if (!window.confirm('Permanently delete this event? This cannot be undone.')) return;
+  const requestDeleteEvent = (id: string) => {
+    const row = events.find((e) => e.id === id);
+    const name =
+      row?.name ?? (detail?.id === id ? detail.name : null) ?? 'this event';
+    setDeleteEventModalError(null);
+    setEventToDelete({ id, name });
+  };
+
+  const confirmDeleteEvent = async () => {
+    const target = eventToDelete;
+    if (!target) return;
+    setDeleteEventBusy(true);
+    setDeleteEventModalError(null);
     try {
       const res = await fetch('/api/venue/experience-events', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id: target.id }),
       });
       if (!res.ok) {
         const json = (await res.json()) as { error?: string; booking_count?: number };
-        if (res.status === 409) {
-          addToast(
-            json.booking_count
-              ? `${json.error} (${json.booking_count} booking(s))`
-              : (json.error ?? 'Cannot delete this event'),
-            'error',
-          );
-        } else {
-          addToast(json.error ?? 'Delete failed', 'error');
-        }
+        const msg =
+          res.status === 409 && json.booking_count
+            ? `${json.error ?? 'Cannot delete this event'} (${json.booking_count} booking(s))`
+            : (json.error ?? 'Delete failed');
+        setDeleteEventModalError(msg);
         return;
       }
+      setEventToDelete(null);
       addToast('Event deleted.', 'success');
-      if (selectedId === id) setSelectedId(null);
+      if (selectedId === target.id) setSelectedId(null);
       await fetchEvents();
     } catch {
-      addToast('Delete failed', 'error');
+      setDeleteEventModalError('Delete failed');
+    } finally {
+      setDeleteEventBusy(false);
     }
   };
 
@@ -1259,7 +1271,7 @@ export function EventManagerView({
                       (event.calendar_id !== null && linkedPractitionerIds.includes(event.calendar_id))
                     }
                     onEdit={() => handleEditEvent(event)}
-                    onDelete={() => void handleDeleteEvent(event.id)}
+                    onDelete={() => requestDeleteEvent(event.id)}
                   />
                 ))}
               </SectionCard.Body>
@@ -1281,7 +1293,7 @@ export function EventManagerView({
                       (event.calendar_id !== null && linkedPractitionerIds.includes(event.calendar_id))
                     }
                     onEdit={() => handleEditEvent(event)}
-                    onDelete={() => void handleDeleteEvent(event.id)}
+                    onDelete={() => requestDeleteEvent(event.id)}
                   />
                 ))}
               </SectionCard.Body>
@@ -1417,7 +1429,7 @@ export function EventManagerView({
                     <div className="flex flex-wrap items-end gap-2">
                       <DashboardEntityRowActions
                         onEdit={() => handleEditEvent(detail)}
-                        onDelete={() => void handleDeleteEvent(detail.id)}
+                        onDelete={() => requestDeleteEvent(detail.id)}
                       />
                       {isAdmin && detail.is_active ? (
                         <button
@@ -1552,6 +1564,58 @@ export function EventManagerView({
             </>
           )}
         </SectionCard>
+      )}
+
+      {eventToDelete && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+          onClick={() => {
+            if (!deleteEventBusy) setEventToDelete(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-event-title"
+            aria-describedby="delete-event-desc"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-event-title" className="text-base font-semibold text-slate-900">
+              Permanently delete this event?
+            </h3>
+            <p id="delete-event-desc" className="mt-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">{eventToDelete.name}</span> will be removed. Ticket types and
+              settings for this event row are discarded. This cannot be undone.
+            </p>
+            {deleteEventModalError ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {deleteEventModalError}
+              </div>
+            ) : null}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEventToDelete(null)}
+                disabled={deleteEventBusy}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteEvent()}
+                disabled={deleteEventBusy}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteEventBusy ? 'Deleting…' : 'Delete event'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

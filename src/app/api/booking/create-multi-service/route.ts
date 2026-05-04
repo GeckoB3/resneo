@@ -21,6 +21,8 @@ import {
   resolveBookableServiceWithVariant,
 } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
@@ -175,6 +177,7 @@ export async function POST(request: NextRequest) {
       estimated_end_time: string | null;
       service_display_name: string;
       service_price_pence: number | null;
+      processing_time_blocks: ProcessingTimeBlock[];
     };
 
     const validated: ValidatedSeg[] = [];
@@ -267,6 +270,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const processingSnap =
+        mergedSvc && svc
+          ? snapshotProcessingTimeBlocksFromCatalog({ service: mergedSvc, variant: chosenVariant })
+          : [];
+
       validated.push({
         practitioner_id: practitionerId,
         appointment_service_id: seg.service_id,
@@ -279,6 +287,7 @@ export async function POST(request: NextRequest) {
         estimated_end_time: estimatedEndTime,
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
+        processing_time_blocks: processingSnap,
       });
 
       phantoms.push({
@@ -286,6 +295,8 @@ export async function POST(request: NextRequest) {
         start_time: timeStr,
         duration_minutes: durationMins,
         buffer_minutes: bufferMins,
+        processing_time_minutes: svc?.processing_time_minutes ?? 0,
+        processing_time_blocks: svc?.processing_time_blocks ?? [],
       });
     }
 
@@ -371,6 +382,7 @@ export async function POST(request: NextRequest) {
         service_variant_id: seg.service_variant_id,
         group_booking_id: groupBookingId,
         person_label: null,
+        processing_time_blocks: seg.processing_time_blocks,
         ...(useUnifiedBookingRows
           ? {
               calendar_id: seg.practitioner_id,

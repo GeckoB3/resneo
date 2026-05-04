@@ -19,10 +19,13 @@ import type { AvailabilityBlock } from '@/types/availability';
 import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
+  resolveEngineBookingProcessingBlocks,
   type AppointmentBooking,
   type AppointmentEngineInput,
   type PractitionerCalendarBlockedRange,
 } from '@/lib/availability/appointment-engine';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
@@ -142,6 +145,7 @@ function mapServiceItemToAppointmentService(raw: Record<string, unknown>, venueI
     duration_minutes: (raw.duration_minutes as number) ?? 30,
     buffer_minutes: (raw.buffer_minutes as number) ?? 0,
     processing_time_minutes: (raw.processing_time_minutes as number) ?? 0,
+    processing_time_blocks: parseProcessingTimeBlocksFromDb(raw.processing_time_blocks),
     price_pence: (raw.price_pence as number | null) ?? null,
     payment_requirement: (raw.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (raw.deposit_pence as number | null) ?? null,
@@ -159,6 +163,7 @@ function bookingRowsToAppointmentBookings(
   servicesForBookings: Map<string, AppointmentService>,
   practitionerServices: PractitionerService[],
   fallbackPractitionerId: string,
+  variantBlocksById: Map<string, ProcessingTimeBlock[]>,
 ): AppointmentBooking[] {
   return rows.map((b) => {
     const practitionerId = ((b.practitioner_id as string | null) ?? (b.calendar_id as string | null) ?? fallbackPractitionerId);
@@ -168,6 +173,13 @@ function bookingRowsToAppointmentBookings(
       ? practitionerServices.find((row) => row.practitioner_id === practitionerId && row.service_id === serviceId)
       : undefined;
     const merged = service ? mergeAppointmentServiceWithPractitionerLink(service, practitionerService) : null;
+    const variantId = b.service_variant_id as string | null | undefined;
+    const variantBl = variantId ? variantBlocksById.get(variantId) : undefined;
+    const processingBlocks = resolveEngineBookingProcessingBlocks({
+      snapshotRaw: b.processing_time_blocks,
+      mergedService: merged,
+      variantBlocks: variantBl,
+    });
     return {
       id: b.id as string,
       practitioner_id: practitionerId,
@@ -175,6 +187,7 @@ function bookingRowsToAppointmentBookings(
       duration_minutes: merged?.duration_minutes ?? 30,
       buffer_minutes: merged?.buffer_minutes ?? 0,
       processing_time_minutes: merged?.processing_time_minutes ?? 0,
+      processing_time_blocks: processingBlocks,
       status: b.status as string,
     };
   });
@@ -422,7 +435,9 @@ async function buildLegacyPractitionerMonthInputFactory({
       .eq('practitioners.venue_id', venueId),
     supabase
       .from('bookings')
-      .select('id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, status')
+      .select(
+        'id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+      )
       .eq('venue_id', venueId)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
@@ -461,26 +476,57 @@ async function buildLegacyPractitionerMonthInputFactory({
   if (allServices.length > 0) {
     const { data: processingRows } = await supabase
       .from('service_items')
-      .select('id, processing_time_minutes')
+      .select('id, processing_time_minutes, processing_time_blocks')
       .eq('venue_id', venueId)
       .in(
         'id',
         allServices.map((service) => service.id),
       );
     const processingByServiceId = new Map(
-      (processingRows ?? []).map((row) => [
-        (row as { id: string }).id,
-        (row as { processing_time_minutes?: number }).processing_time_minutes ?? 0,
-      ]),
+      (processingRows ?? []).map((row) => {
+        const r = row as { id: string; processing_time_minutes?: number; processing_time_blocks?: unknown };
+        return [
+          r.id,
+          {
+            processing_time_minutes: r.processing_time_minutes ?? 0,
+            processing_time_blocks: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+          },
+        ] as const;
+      }),
     );
-    allServices = allServices.map((service) => ({
-      ...service,
-      processing_time_minutes: processingByServiceId.get(service.id) ?? service.processing_time_minutes ?? 0,
-    }));
+    allServices = allServices.map((service) => {
+      const meta = processingByServiceId.get(service.id);
+      if (!meta) return service;
+      return {
+        ...service,
+        processing_time_minutes: meta.processing_time_minutes,
+        processing_time_blocks: meta.processing_time_blocks,
+      };
+    });
   }
   const services = allServices.filter((service) => service.id === serviceId);
   const practitionerServices = (practitionerServicesRes.data ?? []) as PractitionerService[];
   const servicesForBookings = new Map(allServices.map((service) => [service.id, service]));
+  const monthVariantIdsLegacy = [
+    ...new Set(
+      (bookingsRes.data ?? [])
+        .map((row) => (row as { service_variant_id?: string | null }).service_variant_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  ];
+  let monthVariantBlocksLegacy = new Map<string, ProcessingTimeBlock[]>();
+  if (monthVariantIdsLegacy.length > 0) {
+    const { data: vrows } = await supabase
+      .from('service_variants')
+      .select('id, processing_time_blocks')
+      .in('id', monthVariantIdsLegacy);
+    monthVariantBlocksLegacy = new Map(
+      (vrows ?? []).map((r) => {
+        const row = r as { id: string; processing_time_blocks?: unknown };
+        return [row.id, parseProcessingTimeBlocksFromDb(row.processing_time_blocks)];
+      }),
+    );
+  }
   const bookingsByDate = rowsByDate((bookingsRes.data ?? []) as Record<string, unknown>[], 'booking_date');
   const blocksByDate = rowsByDate((blocksRes.data ?? []) as Record<string, unknown>[], 'block_date');
   const leaveRows = (leaveRes.data ?? []) as Array<{
@@ -507,6 +553,7 @@ async function buildLegacyPractitionerMonthInputFactory({
       servicesForBookings,
       practitionerServices,
       practitionerId,
+      monthVariantBlocksLegacy,
     );
 
     return {
@@ -598,7 +645,9 @@ async function buildUnifiedCalendarMonthInputFactory({
   ] = await Promise.all([
     supabase
       .from('bookings')
-      .select('id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, status')
+      .select(
+        'id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+      )
       .eq('venue_id', venueId)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
@@ -643,6 +692,27 @@ async function buildUnifiedCalendarMonthInputFactory({
     fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, calendarId, monthStart, monthEnd),
   ]);
 
+  const monthVariantIdsCal = [
+    ...new Set(
+      (bookingsRes.data ?? [])
+        .map((row) => (row as { service_variant_id?: string | null }).service_variant_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  ];
+  let monthVariantBlocksCal = new Map<string, ProcessingTimeBlock[]>();
+  if (monthVariantIdsCal.length > 0) {
+    const { data: vrowsCal } = await supabase
+      .from('service_variants')
+      .select('id, processing_time_blocks')
+      .in('id', monthVariantIdsCal);
+    monthVariantBlocksCal = new Map(
+      (vrowsCal ?? []).map((r) => {
+        const row = r as { id: string; processing_time_blocks?: unknown };
+        return [row.id, parseProcessingTimeBlocksFromDb(row.processing_time_blocks)];
+      }),
+    );
+  }
+
   const bookingsByDate = rowsByDate((bookingsRes.data ?? []) as Record<string, unknown>[], 'booking_date');
   const legacyBlocksByDate = rowsByDate((legacyBlocksRes.data ?? []) as Record<string, unknown>[], 'block_date');
   const calendarBlocksByDate = rowsByDate((calendarBlocksRes.data ?? []) as Record<string, unknown>[], 'block_date');
@@ -686,6 +756,7 @@ async function buildUnifiedCalendarMonthInputFactory({
         servicesForBookings,
         practitionerServices,
         calendarId,
+        monthVariantBlocksCal,
       ),
       practitionerBlockedRanges: [
         ...legacyBlocks,

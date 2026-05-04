@@ -72,6 +72,13 @@ export type ServiceCustomScheduleStored = WorkingHours | ServiceCustomScheduleV2
 /** Stored as Postgres enum `class_payment_requirement` (shared with classes / resources). */
 export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
 
+/** Salon processing gap inside service core duration (see `lib/appointments/processing-time.ts`). */
+export interface ProcessingTimeBlock {
+  id: string;
+  start_minute: number;
+  duration_minutes: number;
+}
+
 export interface Practitioner {
   id: string;
   venue_id: string;
@@ -128,6 +135,11 @@ export interface AppointmentService {
   buffer_minutes: number;
   /** Turnover after service (resource / unified); included in slot occupancy in appointment engine. */
   processing_time_minutes?: number;
+  /**
+   * Internal gaps within `duration_minutes` where the practitioner is free for another booking.
+   * When non-empty, `processing_time_minutes` is not used for practitioner conflict math.
+   */
+  processing_time_blocks?: ProcessingTimeBlock[];
   price_pence: number | null;
   /** How much to charge online at booking (reuses class_payment_requirement enum). */
   payment_requirement?: ClassPaymentRequirement;
@@ -197,6 +209,7 @@ export interface ServiceVariant {
   description: string | null;
   duration_minutes: number;
   buffer_minutes: number;
+  processing_time_blocks?: ProcessingTimeBlock[];
   price_pence: number | null;
   /** When null and the parent uses deposit payment, fall back to the parent's deposit. */
   deposit_pence: number | null;

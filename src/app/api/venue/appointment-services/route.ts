@@ -11,6 +11,11 @@ import {
   hasBlockingBookingsRemovingServicesFromCalendarUnified,
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
+import {
+  hasUpcomingActiveBookingsForVenueAppointmentService,
+  hasUpcomingActiveBookingsForVenueServiceItem,
+  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
+} from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 import type { ClassPaymentRequirement, PractitionerService, ServiceCustomScheduleStored } from '@/types/booking-models';
 import { customWorkingHoursRequestSchema } from '@/lib/service-custom-schedule-zod';
@@ -22,6 +27,11 @@ import {
   replaceServiceVariants,
   variantsArraySchema,
 } from '@/lib/venue/service-variants';
+import {
+  parseProcessingTimeBlocksFromDb,
+  processingTimeBlocksSchema,
+  validateProcessingTimeBlocks,
+} from '@/lib/appointments/processing-time';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -64,6 +74,7 @@ const serviceSchema = z
     allow_same_day_booking: z.boolean().optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
+    processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -97,6 +108,17 @@ const serviceSchema = z
         path: ['custom_working_hours'],
       });
     }
+    const pb = validateProcessingTimeBlocks(
+      parseProcessingTimeBlocksFromDb(data.processing_time_blocks ?? []),
+      data.duration_minutes,
+    );
+    if (!pb.ok) {
+      ctx.addIssue({
+        code: 'custom',
+        message: pb.error ?? 'Invalid processing time',
+        path: ['processing_time_blocks'],
+      });
+    }
   });
 
 const servicePatchSchema = z
@@ -117,6 +139,7 @@ const servicePatchSchema = z
     allow_same_day_booking: z.boolean().optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
+    processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -477,6 +500,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    const normalizedParentProcessing =
+      validateProcessingTimeBlocks(
+        parseProcessingTimeBlocksFromDb(parsed.data.processing_time_blocks ?? []),
+        parsed.data.duration_minutes,
+      )
+        .normalized ?? [];
+
     const variantsRaw = (body as { variants?: unknown }).variants;
     const variantsProvided = variantsRaw !== undefined;
     let parsedVariants: z.infer<typeof variantsArraySchema> = [];
@@ -561,6 +591,7 @@ export async function POST(request: NextRequest) {
         duration_minutes: parsed.data.duration_minutes,
         buffer_minutes: parsed.data.buffer_minutes ?? 0,
         processing_time_minutes: 0,
+        processing_time_blocks: normalizedParentProcessing,
         price_pence: parsed.data.price_pence ?? null,
         payment_requirement: pay.payment_requirement,
         deposit_pence: pay.deposit_pence,
@@ -646,6 +677,7 @@ export async function POST(request: NextRequest) {
       venue_id: staff.venue_id,
       ...restCreate,
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
+      processing_time_blocks: normalizedParentProcessing,
       payment_requirement: pay.payment_requirement,
       deposit_pence: pay.deposit_pence,
       max_advance_booking_days: parsed.data.max_advance_booking_days ?? 90,
@@ -900,6 +932,24 @@ export async function PATCH(request: NextRequest) {
         updatePayload.custom_working_hours = null;
       }
 
+      const rowDurU = (serviceRow as { duration_minutes?: number }).duration_minutes ?? 30;
+      const effectiveDurU =
+        typeof updatePayload.duration_minutes === 'number' ? updatePayload.duration_minutes : rowDurU;
+      const rowBlocksU = parseProcessingTimeBlocksFromDb(
+        (serviceRow as { processing_time_blocks?: unknown }).processing_time_blocks,
+      );
+      const effectiveBlocksU =
+        updatePayload.processing_time_blocks !== undefined
+          ? (updatePayload.processing_time_blocks as import('@/types/booking-models').ProcessingTimeBlock[])
+          : rowBlocksU;
+      const procCheckU = validateProcessingTimeBlocks(effectiveBlocksU, effectiveDurU);
+      if (!procCheckU.ok) {
+        return NextResponse.json({ error: procCheckU.error }, { status: 400 });
+      }
+      if (Object.prototype.hasOwnProperty.call(updatePayload, 'processing_time_blocks')) {
+        updatePayload.processing_time_blocks = procCheckU.normalized ?? [];
+      }
+
       let savedRow = serviceRow as Record<string, unknown>;
       if (Object.keys(updatePayload).length > 0) {
         const { data, error } = await admin
@@ -1085,6 +1135,24 @@ export async function PATCH(request: NextRequest) {
       patchPayload.custom_working_hours = null;
     }
 
+    const rowDurL = (serviceRow as { duration_minutes?: number }).duration_minutes ?? 30;
+    const effectiveDurL =
+      typeof patchPayload.duration_minutes === 'number' ? patchPayload.duration_minutes : rowDurL;
+    const rowBlocksL = parseProcessingTimeBlocksFromDb(
+      (serviceRow as { processing_time_blocks?: unknown }).processing_time_blocks,
+    );
+    const effectiveBlocksL =
+      patchPayload.processing_time_blocks !== undefined
+        ? (patchPayload.processing_time_blocks as import('@/types/booking-models').ProcessingTimeBlock[])
+        : rowBlocksL;
+    const procCheckL = validateProcessingTimeBlocks(effectiveBlocksL, effectiveDurL);
+    if (!procCheckL.ok) {
+      return NextResponse.json({ error: procCheckL.error }, { status: 400 });
+    }
+    if (Object.prototype.hasOwnProperty.call(patchPayload, 'processing_time_blocks')) {
+      patchPayload.processing_time_blocks = procCheckL.normalized ?? [];
+    }
+
     let savedRow = serviceRow as Record<string, unknown>;
     if (Object.keys(patchPayload).length > 0) {
       const { data, error } = await admin
@@ -1147,6 +1215,42 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
+    if (useUnified) {
+      const { data: row } = await admin
+        .from('service_items')
+        .select('id')
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (!row) {
+        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      }
+      const venueGuard = await hasUpcomingActiveBookingsForVenueServiceItem(admin, staff.venue_id, id);
+      if (venueGuard.error) {
+        return NextResponse.json({ error: venueGuard.error }, { status: 500 });
+      }
+      if (venueGuard.blocked) {
+        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      }
+    } else {
+      const { data: row } = await admin
+        .from('appointment_services')
+        .select('id')
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (!row) {
+        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      }
+      const venueGuard = await hasUpcomingActiveBookingsForVenueAppointmentService(admin, staff.venue_id, id);
+      if (venueGuard.error) {
+        return NextResponse.json({ error: venueGuard.error }, { status: 500 });
+      }
+      if (venueGuard.blocked) {
+        return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
+      }
+    }
+
     if (staff.role !== 'admin') {
       const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
       if (!scope.ok) {
@@ -1154,16 +1258,6 @@ export async function DELETE(request: NextRequest) {
       }
 
       if (useUnified) {
-        const { data: row } = await admin
-          .from('service_items')
-          .select('id')
-          .eq('id', id)
-          .eq('venue_id', staff.venue_id)
-          .maybeSingle();
-        if (!row) {
-          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-        }
-
         const { data: links, error: linksErr } = await admin
           .from('calendar_service_assignments')
           .select('calendar_id')
@@ -1182,30 +1276,7 @@ export async function DELETE(request: NextRequest) {
             { status: 403 },
           );
         }
-        for (const cid of calIds) {
-          const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
-            venueId: staff.venue_id,
-            calendarId: cid,
-            serviceItemIds: [id],
-          });
-          if (check.error) {
-            return NextResponse.json({ error: check.error }, { status: 500 });
-          }
-          if (check.blocked) {
-            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
-          }
-        }
       } else {
-        const { data: row } = await admin
-          .from('appointment_services')
-          .select('id')
-          .eq('id', id)
-          .eq('venue_id', staff.venue_id)
-          .maybeSingle();
-        if (!row) {
-          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-        }
-
         const { data: links, error: linksErr } = await admin
           .from('practitioner_services')
           .select('practitioner_id')
@@ -1223,19 +1294,6 @@ export async function DELETE(request: NextRequest) {
             },
             { status: 403 },
           );
-        }
-        for (const pid of pids) {
-          const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
-            venueId: staff.venue_id,
-            practitionerId: pid,
-            appointmentServiceIds: [id],
-          });
-          if (check.error) {
-            return NextResponse.json({ error: check.error }, { status: 500 });
-          }
-          if (check.blocked) {
-            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
-          }
         }
       }
     }

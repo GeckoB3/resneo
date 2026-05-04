@@ -193,6 +193,14 @@ export function ClassTimetableView({
   const [editInstanceForm, setEditInstanceForm] = useState({ date: '', time: '', capacity: '' });
   const [patchSaving, setPatchSaving] = useState(false);
   const [instanceDeletingId, setInstanceDeletingId] = useState<string | null>(null);
+  const [classDeleteDialog, setClassDeleteDialog] = useState<
+    | null
+    | { kind: 'class_type'; id: string }
+    | { kind: 'timetable'; id: string }
+    | { kind: 'instance'; inst: ClassInstance }
+  >(null);
+  const [classDeleteBusy, setClassDeleteBusy] = useState(false);
+  const [classDeleteDialogError, setClassDeleteDialogError] = useState<string | null>(null);
 
   const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
@@ -579,23 +587,65 @@ export function ClassTimetableView({
     setShowClassTypeForm(true);
   };
 
-  const handleDeleteClassType = async (id: string) => {
-    if (!window.confirm('Delete this class type? Existing instances will remain but new ones won\'t be generated.')) return;
+  const requestDeleteClassType = (id: string) => {
+    setClassDeleteDialogError(null);
+    setClassDeleteDialog({ kind: 'class_type', id });
+  };
+
+  const requestDeleteTimetableEntry = (id: string) => {
+    setClassDeleteDialogError(null);
+    setClassDeleteDialog({ kind: 'timetable', id });
+  };
+
+  const requestDeleteInstance = (inst: ClassInstance) => {
+    setClassDeleteDialogError(null);
+    setClassDeleteDialog({ kind: 'instance', inst });
+  };
+
+  const confirmClassDelete = async () => {
+    const target = classDeleteDialog;
+    if (!target) return;
+    setClassDeleteBusy(true);
+    setClassDeleteDialogError(null);
+    if (target.kind === 'instance') {
+      setInstanceDeletingId(target.inst.id);
+    }
     try {
+      const body =
+        target.kind === 'class_type'
+          ? { id: target.id, entity_type: 'class_type' as const }
+          : target.kind === 'timetable'
+            ? { id: target.id, entity_type: 'timetable' as const }
+            : { id: target.inst.id, entity_type: 'instance' as const };
       const res = await fetch('/api/venue/classes', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, entity_type: 'class_type' }),
+        body: JSON.stringify(body),
       });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        const json = await res.json();
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Delete failed' });
+        setClassDeleteDialogError(json.error ?? 'Delete failed');
         return;
       }
-      setNotice({ kind: 'success', message: 'Class type deleted.' });
+      setClassDeleteDialog(null);
+      if (target.kind === 'instance') {
+        setEditingInstance(null);
+        removeInstanceFromList(target.inst.id);
+        if (classInstanceSheet?.instanceId === target.inst.id) {
+          setClassInstanceSheet(null);
+        }
+        setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
+      } else if (target.kind === 'class_type') {
+        setNotice({ kind: 'success', message: 'Class type deleted.' });
+      } else {
+        setNotice({ kind: 'success', message: 'Schedule entry removed.' });
+      }
       await fetchData({ silent: true });
     } catch {
-      setNotice({ kind: 'error', message: 'Delete failed' });
+      setClassDeleteDialogError('Delete failed');
+    } finally {
+      setClassDeleteBusy(false);
+      setInstanceDeletingId(null);
     }
   };
 
@@ -626,30 +676,6 @@ export function ClassTimetableView({
       setNotice({ kind: 'error', message: 'Update failed' });
     } finally {
       setPatchSaving(false);
-    }
-  };
-
-  const handleDeleteTimetableEntry = async (id: string) => {
-    if (
-      !window.confirm(
-        'Remove this weekly rule? Existing dated sessions stay on the calendar; only future generation from this rule stops. Delete individual sessions from the list if needed.',
-      )
-    )
-      return;
-    try {
-      const res = await fetch('/api/venue/classes', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, entity_type: 'timetable' }),
-      });
-      if (!res.ok) {
-        setNotice({ kind: 'error', message: 'Failed to remove schedule entry' });
-        return;
-      }
-      setNotice({ kind: 'success', message: 'Schedule entry removed.' });
-      await fetchData({ silent: true });
-    } catch {
-      setNotice({ kind: 'error', message: 'Failed to remove schedule entry' });
     }
   };
 
@@ -710,36 +736,6 @@ export function ClassTimetableView({
       time: inst.start_time.slice(0, 5),
       capacity: inst.capacity_override != null ? String(inst.capacity_override) : '',
     });
-  };
-
-  const handleDeleteInstance = async (inst: ClassInstance) => {
-    const booked = inst.booked_spots ?? 0;
-    const msg =
-      booked > 0
-        ? `Remove this session from the calendar? ${booked} booking(s) will stay on file but will no longer be linked to this class time.`
-        : 'Remove this session from the calendar?';
-    if (!window.confirm(msg)) return;
-    setInstanceDeletingId(inst.id);
-    try {
-      const res = await fetch('/api/venue/classes', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: inst.id, entity_type: 'instance' }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not remove session' });
-        return;
-      }
-      setEditingInstance(null);
-      removeInstanceFromList(inst.id);
-      setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
-      await fetchData({ silent: true });
-    } catch {
-      setNotice({ kind: 'error', message: 'Could not remove session' });
-    } finally {
-      setInstanceDeletingId(null);
-    }
   };
 
   return (
@@ -979,7 +975,7 @@ export function ClassTimetableView({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => void handleDeleteTimetableEntry(e.id)}
+                                      onClick={() => requestDeleteTimetableEntry(e.id)}
                                       className="text-slate-400 hover:text-red-500"
                                       aria-label="Remove schedule entry"
                                     >
@@ -995,7 +991,7 @@ export function ClassTimetableView({
                       {(isAdmin || staffManagesClassType(ct)) && (
                         <DashboardEntityRowActions
                           onEdit={() => handleEditClassType(ct)}
-                          onDelete={() => void handleDeleteClassType(ct.id)}
+                          onDelete={() => requestDeleteClassType(ct.id)}
                         />
                       )}
                     </div>
@@ -1141,7 +1137,7 @@ export function ClassTimetableView({
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => void handleDeleteInstance(inst)}
+                                    onClick={() => requestDeleteInstance(inst)}
                                     disabled={instanceDeletingId === inst.id}
                                     className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50"
                                   >
@@ -1816,7 +1812,7 @@ export function ClassTimetableView({
                   staffManagesClassType(typeMap.get(editingInstance.class_type_id))) && (
                 <button
                   type="button"
-                  onClick={() => void handleDeleteInstance(editingInstance)}
+                  onClick={() => requestDeleteInstance(editingInstance)}
                   disabled={instanceDeletingId === editingInstance.id || patchSaving}
                   className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
                 >
@@ -1855,6 +1851,95 @@ export function ClassTimetableView({
         onSessionMutated={() => void fetchData({ silent: true })}
         onNotice={(n) => setNotice(n)}
       />
+
+      {classDeleteDialog && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+          onClick={() => {
+            if (!classDeleteBusy) setClassDeleteDialog(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="class-delete-title"
+            aria-describedby="class-delete-desc"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="class-delete-title" className="text-base font-semibold text-slate-900">
+              {classDeleteDialog.kind === 'class_type'
+                ? 'Delete this class type?'
+                : classDeleteDialog.kind === 'timetable'
+                  ? 'Remove this schedule rule?'
+                  : 'Remove this session?'}
+            </h3>
+            <p id="class-delete-desc" className="mt-2 text-sm text-slate-600">
+              {classDeleteDialog.kind === 'class_type' ? (
+                <>
+                  <span className="font-medium text-slate-800">
+                    {classTypes.find((c) => c.id === classDeleteDialog.id)?.name ?? 'This class'}
+                  </span>{' '}
+                  will be removed. Existing dated sessions stay on the calendar; new ones will not be generated from
+                  this type. This cannot be undone.
+                </>
+              ) : classDeleteDialog.kind === 'timetable' ? (
+                <>
+                  Existing dated sessions stay on the calendar; only future generation from this weekly rule stops.
+                  Delete individual sessions from the list if you still need to clear dates.
+                </>
+              ) : (
+                <>
+                  Remove{' '}
+                  <span className="font-medium text-slate-800">
+                    {typeMap.get(classDeleteDialog.inst.class_type_id)?.name ?? 'Class'}
+                  </span>{' '}
+                  on {classDeleteDialog.inst.instance_date} at {classDeleteDialog.inst.start_time.slice(0, 5)}?
+                  {(classDeleteDialog.inst.booked_spots ?? 0) > 0 ? (
+                    <>
+                      {' '}
+                      {classDeleteDialog.inst.booked_spots} booking(s) will stay on file but will no longer be linked to
+                      this class time.
+                    </>
+                  ) : null}
+                </>
+              )}
+            </p>
+            {classDeleteDialogError ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {classDeleteDialogError}
+              </div>
+            ) : null}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setClassDeleteDialog(null)}
+                disabled={classDeleteBusy}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmClassDelete()}
+                disabled={classDeleteBusy}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {classDeleteBusy
+                  ? 'Deleting…'
+                  : classDeleteDialog.kind === 'instance'
+                    ? 'Remove session'
+                    : classDeleteDialog.kind === 'timetable'
+                      ? 'Remove rule'
+                      : 'Delete class type'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

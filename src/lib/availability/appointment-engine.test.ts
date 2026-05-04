@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import type { OpeningHours } from '@/types/availability';
 import type { PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
-import { computeAppointmentAvailability, type AppointmentEngineInput } from './appointment-engine';
+import {
+  computeAppointmentAvailability,
+  validateAppointmentCustomInterval,
+  type AppointmentEngineInput,
+  type AppointmentBooking,
+} from './appointment-engine';
 
 /** Explicit link required for p1 to offer s1 (no “implicit all services”). */
 const PS_P1_S1: PractitionerService[] = [
@@ -349,5 +354,125 @@ describe('computeAppointmentAvailability', () => {
     const r = computeAppointmentAvailability(input);
     const slot1200 = r.practitioners[0]?.slots.find((s) => s.start_time === '12:00' && s.service_id === 's1');
     expect(slot1200).toBeDefined();
+  });
+});
+
+describe('validateAppointmentCustomInterval (salon processing)', () => {
+  function processingInput(existing: AppointmentBooking[]): AppointmentEngineInput {
+    const date = '2030-06-02';
+    const dk = workingHoursDayKey(date);
+    return {
+      date,
+      skipPastSlotFilter: true,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's60',
+          name: 'Colour',
+          duration_minutes: 60,
+          buffer_minutes: 10,
+          processing_time_minutes: 0,
+          processing_time_blocks: [],
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+        {
+          id: 's15',
+          name: 'Quick',
+          duration_minutes: 15,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's60', custom_duration_minutes: null, custom_price_pence: null },
+        { id: 'ps2', practitioner_id: 'p1', service_id: 's15', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: existing,
+    };
+  }
+
+  it('allows a short booking fully inside another appointment’s processing gap', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'long',
+        practitioner_id: 'p1',
+        booking_time: '10:00',
+        duration_minutes: 60,
+        buffer_minutes: 10,
+        status: 'Confirmed',
+        processing_time_blocks: [{ id: 'g', start_minute: 15, duration_minutes: 30 }],
+      },
+    ];
+    const input = processingInput(existing);
+    const ok = validateAppointmentCustomInterval(input, 'p1', 's15', '10:20', '10:35', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it('rejects a candidate that overlaps practitioner-busy before the processing gap', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'long',
+        practitioner_id: 'p1',
+        booking_time: '10:00',
+        duration_minutes: 60,
+        buffer_minutes: 10,
+        status: 'Confirmed',
+        processing_time_blocks: [{ id: 'g', start_minute: 15, duration_minutes: 30 }],
+      },
+    ];
+    const input = processingInput(existing);
+    const bad = validateAppointmentCustomInterval(input, 'p1', 's15', '10:05', '10:20', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(bad.ok).toBe(false);
+  });
+
+  it('rejects candidate processing blocks that extend past the core duration', () => {
+    const date = '2030-06-02';
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      skipPastSlotFilter: true,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's45',
+          name: 'Slot',
+          duration_minutes: 45,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's45', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: [],
+    };
+    const invalid = validateAppointmentCustomInterval(input, 'p1', 's45', '10:00', '10:45', undefined, {
+      processingTimeBlocks: [{ id: 'x', start_minute: 40, duration_minutes: 10 }],
+    });
+    expect(invalid.ok).toBe(false);
   });
 });

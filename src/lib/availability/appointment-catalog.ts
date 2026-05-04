@@ -19,6 +19,7 @@ import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 
 export interface AppointmentCatalogVariant {
   id: string;
@@ -29,6 +30,8 @@ export interface AppointmentCatalogVariant {
   price_pence: number | null;
   deposit_pence: number | null;
   sort_order: number;
+  /** Salon-style gaps inside duration; guest still sees total duration only. */
+  processing_time_blocks?: import('@/types/booking-models').ProcessingTimeBlock[];
 }
 
 export interface AppointmentCatalogPractitioner {
@@ -46,6 +49,8 @@ export interface AppointmentCatalogPractitioner {
     cancellation_notice_hours: number;
     /** Active sub-options. When non-empty the booking flow must collect a variant choice. */
     variants?: AppointmentCatalogVariant[];
+    /** Salon-style internal processing gaps (single-offering services). */
+    processing_time_blocks?: import('@/types/booking-models').ProcessingTimeBlock[];
   }>;
 }
 
@@ -59,6 +64,7 @@ function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
     price_pence: v.price_pence,
     deposit_pence: v.deposit_pence,
     sort_order: v.sort_order,
+    processing_time_blocks: v.processing_time_blocks ?? [],
   };
 }
 
@@ -84,6 +90,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     allow_same_day_booking: entityBookingWindowFromRow(row).allow_same_day_booking,
     custom_availability_enabled: Boolean(row.custom_availability_enabled),
     custom_working_hours: parseCustomWorkingHoursFromDb(row.custom_working_hours),
+    processing_time_blocks: parseProcessingTimeBlocksFromDb((row as { processing_time_blocks?: unknown }).processing_time_blocks),
   };
 }
 
@@ -174,6 +181,7 @@ async function fetchUnifiedAppointmentCatalog(
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
+        processing_time_blocks: svc.processing_time_blocks ?? [],
       })),
     });
   }
@@ -254,6 +262,7 @@ export async function fetchAppointmentCatalog(
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
+        processing_time_blocks: svc.processing_time_blocks ?? [],
       })),
     });
   }

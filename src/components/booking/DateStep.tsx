@@ -150,7 +150,11 @@ export function DateStep({
   useEffect(() => {
     if (!selectedDate) return;
     const d = new Date(selectedDate + 'T00:00');
-    setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+    const next = new Date(d.getFullYear(), d.getMonth(), 1);
+    const id = requestAnimationFrame(() => {
+      setCalendarMonth(next);
+    });
+    return () => cancelAnimationFrame(id);
   }, [selectedDate]);
 
   // Fetch per-month availability indicators for the calendar date picker
@@ -203,8 +207,11 @@ export function DateStep({
     const rounded = Math.round(totalMin / 30) * 30;
     const h = String(Math.floor(rounded / 60)).padStart(2, '0');
     const m = String(rounded % 60).padStart(2, '0');
-    setGridCenter(`${h}:${m}`);
-    hasAutoSetGridCenter.current = true;
+    const id = requestAnimationFrame(() => {
+      setGridCenter(`${h}:${m}`);
+      hasAutoSetGridCenter.current = true;
+    });
+    return () => cancelAnimationFrame(id);
   }, [mergedSlots]);
 
   // Half-hour boundary options from real slot times (mirrors staff form exactly)

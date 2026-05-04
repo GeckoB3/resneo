@@ -11,6 +11,7 @@ import {
   fetchAppointmentInput,
   validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
+import { parseProcessingTimeBlocksFromDb, validateProcessingTimeBlocks } from '@/lib/appointments/processing-time';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -142,6 +143,7 @@ export async function GET(
     const cde_context = await resolveCdeBookingContext(staff.db, booking as Parameters<typeof resolveCdeBookingContext>[1]);
     const inferred_booking_model = inferBookingRowModel(
       booking as {
+        booking_model?: string | null;
         experience_event_id?: string | null;
         class_instance_id?: string | null;
         resource_id?: string | null;
@@ -312,6 +314,115 @@ export async function PATCH(
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
       }
+    }
+
+    /** Per-booking salon processing blocks only (no reschedule). */
+    const isProcessingBlocksOnlyPatch =
+      bodyKeys.length === 1 &&
+      bodyKeys[0] === 'processing_time_blocks' &&
+      !(booking as { experience_event_id?: string | null }).experience_event_id &&
+      !(booking as { class_instance_id?: string | null }).class_instance_id &&
+      !(booking as { resource_id?: string | null }).resource_id &&
+      (Boolean((booking as { practitioner_id?: string | null }).practitioner_id) ||
+        Boolean((booking as { calendar_id?: string | null }).calendar_id)) &&
+      (Boolean((booking as { appointment_service_id?: string | null }).appointment_service_id) ||
+        Boolean((booking as { service_item_id?: string | null }).service_item_id));
+
+    if (isProcessingBlocksOnlyPatch) {
+      const bookingTimeStr =
+        typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00';
+      const startMin = timeToMinutes(bookingTimeStr);
+      let coreDuration = 30;
+      const bet = (booking as { booking_end_time?: string | null }).booking_end_time;
+      if (typeof bet === 'string' && bet.trim().length >= 5) {
+        coreDuration = Math.max(15, timeToMinutes(bet.slice(0, 5)) - startMin);
+      } else {
+        const appointmentSvcIdForDuration = booking.appointment_service_id as string | null | undefined;
+        const serviceItemIdForDuration = booking.service_item_id as string | null | undefined;
+        if (appointmentSvcIdForDuration) {
+          const { data: svcRow } = await admin
+            .from('appointment_services')
+            .select('duration_minutes')
+            .eq('id', appointmentSvcIdForDuration)
+            .single();
+          coreDuration = svcRow?.duration_minutes ?? 30;
+        } else if (serviceItemIdForDuration) {
+          const { data: siRow } = await admin
+            .from('service_items')
+            .select('duration_minutes')
+            .eq('id', serviceItemIdForDuration)
+            .single();
+          coreDuration = (siRow as { duration_minutes?: number } | null)?.duration_minutes ?? 30;
+        }
+      }
+
+      const parsedBlocks = parseProcessingTimeBlocksFromDb(body.processing_time_blocks);
+      const procChk = validateProcessingTimeBlocks(parsedBlocks, coreDuration);
+      if (!procChk.ok) {
+        return NextResponse.json({ error: procChk.error }, { status: 400 });
+      }
+
+      const practId =
+        ((booking as { calendar_id?: string | null }).calendar_id as string | null) ??
+        (booking.practitioner_id as string | null);
+      const svcId =
+        ((booking as { appointment_service_id?: string | null }).appointment_service_id as string | null) ??
+        ((booking as { service_item_id?: string | null }).service_item_id as string | null);
+      if (!practId || !svcId) {
+        return NextResponse.json({ error: 'Cannot update processing time for this booking' }, { status: 400 });
+      }
+
+      const apptInput = await fetchAppointmentInput({
+        supabase: admin,
+        venueId: staff.venue_id,
+        date: booking.booking_date as string,
+        practitionerId: practId,
+        serviceId: svcId,
+      });
+      apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== id.toLowerCase());
+      apptInput.skipPastSlotFilter = true;
+      const { data: venueClock } = await admin
+        .from('venues')
+        .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
+        .eq('id', staff.venue_id)
+        .single();
+      attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
+
+      const endCoreHHmm = minutesToTime(startMin + coreDuration);
+      const intervalCheck = validateAppointmentCustomInterval(
+        apptInput,
+        practId,
+        svcId,
+        bookingTimeStr,
+        endCoreHHmm,
+        id,
+        { processingTimeBlocks: procChk.normalized ?? [] },
+      );
+      if (!intervalCheck.ok) {
+        return NextResponse.json(
+          { error: intervalCheck.reason ?? 'Selected processing pattern conflicts with another booking' },
+          { status: 409 },
+        );
+      }
+
+      const { error: procUpdErr } = await staff.db
+        .from('bookings')
+        .update({
+          processing_time_blocks: procChk.normalized ?? [],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+      if (procUpdErr) {
+        console.error('PATCH processing_time_blocks only failed:', procUpdErr);
+        return NextResponse.json({ error: 'Could not save processing time' }, { status: 500 });
+      }
+
+      const { data: updatedProc, error: procSelErr } = await staff.db.from('bookings').select('*').eq('id', id).single();
+      if (procSelErr || !updatedProc) {
+        return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+      }
+      return NextResponse.json(updatedProc);
     }
 
     if (body.status !== undefined) {
@@ -763,9 +874,11 @@ export async function PATCH(
       body.booking_time !== undefined ||
       body.party_size !== undefined ||
       body.booking_end_time !== undefined ||
-      body.duration_minutes !== undefined
+      body.duration_minutes !== undefined ||
+      body.processing_time_blocks !== undefined
     ) {
       const inferredForModify = inferBookingRowModel({
+        booking_model: (booking as { booking_model?: string | null }).booking_model,
         experience_event_id: booking.experience_event_id as string | null | undefined,
         class_instance_id: booking.class_instance_id as string | null | undefined,
         resource_id: booking.resource_id as string | null | undefined,
@@ -891,7 +1004,17 @@ export async function PATCH(
           timeStr,
           endCoreHHmm,
           id,
-          { allowBookingOverlap: allowManualCalendarOverlap },
+          {
+            allowBookingOverlap: allowManualCalendarOverlap,
+            processingTimeBlocks:
+              body.processing_time_blocks !== undefined
+                ? parseProcessingTimeBlocksFromDb(body.processing_time_blocks)
+                : booking.processing_time_blocks != null
+                  ? parseProcessingTimeBlocksFromDb(
+                      (booking as { processing_time_blocks?: unknown }).processing_time_blocks,
+                    )
+                  : undefined,
+          },
         );
         if (!intervalCheck.ok) {
           return NextResponse.json(
@@ -1000,6 +1123,17 @@ export async function PATCH(
         rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
         bookingUpdate.estimated_end_time = rEnd.toISOString();
         bookingUpdate.booking_end_time = `${String(rEnd.getUTCHours()).padStart(2, '0')}:${String(rEnd.getUTCMinutes()).padStart(2, '0')}:00`;
+
+        if (body.processing_time_blocks !== undefined) {
+          const procChk = validateProcessingTimeBlocks(
+            parseProcessingTimeBlocksFromDb(body.processing_time_blocks),
+            durationMinutes,
+          );
+          if (!procChk.ok) {
+            return NextResponse.json({ error: procChk.error }, { status: 400 });
+          }
+          bookingUpdate.processing_time_blocks = procChk.normalized ?? [];
+        }
       }
 
       if (!isAppointment && tableRescheduleServiceId && tableModifyEngineInput) {

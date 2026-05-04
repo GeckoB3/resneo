@@ -325,6 +325,9 @@ export function ResourceTimelineView({
   const [inlineCalendarError, setInlineCalendarError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resourceToDelete, setResourceToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleteResourceBusy, setDeleteResourceBusy] = useState(false);
+  const [deleteResourceModalError, setDeleteResourceModalError] = useState<string | null>(null);
 
   const {
     entitlement: calendarEntitlement,
@@ -794,20 +797,35 @@ export function ResourceTimelineView({
     }
   }
 
-  async function handleDelete(id: string) {
+  function requestDeleteResource(id: string) {
     const r = resources.find((x) => x.id === id);
-    if (!window.confirm(`Delete "${r?.name ?? 'this resource'}"? Existing bookings are not affected.`)) return;
+    setDeleteResourceModalError(null);
+    setResourceToDelete({ id, name: r?.name ?? 'this resource' });
+  }
+
+  async function confirmDeleteResource() {
+    const target = resourceToDelete;
+    if (!target) return;
+    setDeleteResourceBusy(true);
+    setDeleteResourceModalError(null);
     try {
       const res = await fetch('/api/venue/resources', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id: target.id }),
       });
-      if (!res.ok) { const j = await res.json(); window.alert((j as { error?: string }).error ?? 'Delete failed'); return; }
-      if (selectedId === id) setSelectedId(null);
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setDeleteResourceModalError(j.error ?? 'Delete failed');
+        return;
+      }
+      setResourceToDelete(null);
+      if (selectedId === target.id) setSelectedId(null);
       await fetchResources();
     } catch {
-      window.alert('Delete failed');
+      setDeleteResourceModalError('Delete failed');
+    } finally {
+      setDeleteResourceBusy(false);
     }
   }
 
@@ -1635,7 +1653,7 @@ export function ResourceTimelineView({
                         linkedPractitionerIds.includes(selected.display_on_calendar_id))) ? (
                       <DashboardEntityRowActions
                         onEdit={() => openEdit(selected)}
-                        onDelete={() => void handleDelete(selected.id)}
+                        onDelete={() => requestDeleteResource(selected.id)}
                       />
                     ) : null}
                   </div>
@@ -1794,6 +1812,59 @@ export function ResourceTimelineView({
         )}
       </div>
       </div>
+
+      {resourceToDelete && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+          onClick={() => {
+            if (!deleteResourceBusy) setResourceToDelete(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-resource-title"
+            aria-describedby="delete-resource-desc"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-resource-title" className="text-base font-semibold text-slate-900">
+              Delete this resource?
+            </h3>
+            <p id="delete-resource-desc" className="mt-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">{resourceToDelete.name}</span> will be removed from your
+              venue. Upcoming bookings linked to this resource cannot be deleted this way; resolve them first if
+              removal is blocked. This cannot be undone.
+            </p>
+            {deleteResourceModalError ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {deleteResourceModalError}
+              </div>
+            ) : null}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResourceToDelete(null)}
+                disabled={deleteResourceBusy}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteResource()}
+                disabled={deleteResourceBusy}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteResourceBusy ? 'Deleting…' : 'Delete resource'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

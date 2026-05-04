@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ServiceVariant } from '@/types/booking-models';
+import {
+  parseProcessingTimeBlocksFromDb,
+  processingTimeBlocksSchema,
+  validateProcessingTimeBlocks,
+} from '@/lib/appointments/processing-time';
 
 /**
  * One variant in a request body. `id` is optional and only used to preserve an existing row
@@ -17,6 +22,7 @@ export const variantInputSchema = z.object({
   deposit_pence: z.number().int().min(0).optional().nullable(),
   sort_order: z.number().int().optional(),
   is_active: z.boolean().optional(),
+  processing_time_blocks: processingTimeBlocksSchema.optional(),
 });
 
 export type VariantInput = z.infer<typeof variantInputSchema>;
@@ -41,6 +47,7 @@ export function mapVariantRow(row: Record<string, unknown>): ServiceVariant {
     sort_order: (row.sort_order as number) ?? 0,
     is_active: row.is_active !== false,
     created_at: (row.created_at as string) ?? new Date().toISOString(),
+    processing_time_blocks: parseProcessingTimeBlocksFromDb(row.processing_time_blocks),
   };
 }
 
@@ -80,20 +87,37 @@ export async function replaceServiceVariants(params: {
     return { ok: true, variants: [] };
   }
 
-  const rows = variants.map((v, idx) => ({
-    venue_id: venueId,
-    service_item_id: parent.kind === 'service_item' ? parent.service_item_id : null,
-    appointment_service_id:
-      parent.kind === 'appointment_service' ? parent.appointment_service_id : null,
-    name: v.name.trim(),
-    description: (v.description ?? null) || null,
-    duration_minutes: v.duration_minutes,
-    buffer_minutes: v.buffer_minutes ?? 0,
-    price_pence: v.price_pence ?? null,
-    deposit_pence: v.deposit_pence ?? null,
-    sort_order: v.sort_order ?? idx,
-    is_active: v.is_active ?? true,
-  }));
+  for (const v of variants) {
+    const chk = validateProcessingTimeBlocks(
+      parseProcessingTimeBlocksFromDb(v.processing_time_blocks ?? []),
+      v.duration_minutes,
+    );
+    if (!chk.ok) {
+      return { ok: false, error: `Option "${v.name.trim()}": ${chk.error ?? 'Invalid processing time'}` };
+    }
+  }
+
+  const rows = variants.map((v, idx) => {
+    const chk = validateProcessingTimeBlocks(
+      parseProcessingTimeBlocksFromDb(v.processing_time_blocks ?? []),
+      v.duration_minutes,
+    );
+    return {
+      venue_id: venueId,
+      service_item_id: parent.kind === 'service_item' ? parent.service_item_id : null,
+      appointment_service_id:
+        parent.kind === 'appointment_service' ? parent.appointment_service_id : null,
+      name: v.name.trim(),
+      description: (v.description ?? null) || null,
+      duration_minutes: v.duration_minutes,
+      buffer_minutes: v.buffer_minutes ?? 0,
+      price_pence: v.price_pence ?? null,
+      deposit_pence: v.deposit_pence ?? null,
+      sort_order: v.sort_order ?? idx,
+      is_active: v.is_active ?? true,
+      processing_time_blocks: chk.normalized ?? [],
+    };
+  });
 
   const insRes = await admin.from('service_variants').insert(rows).select();
   if (insRes.error) {

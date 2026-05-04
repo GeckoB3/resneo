@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
@@ -18,11 +19,11 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 export async function GET(request: NextRequest) {
   try {
@@ -151,6 +152,7 @@ export async function GET(request: NextRequest) {
         booking_date: r.booking_date,
         booking_time: r.booking_time,
         party_size: r.party_size,
+        booking_model: r.booking_model ?? null,
         status: r.status,
         source: r.source ?? null,
         deposit_status: r.deposit_status,
@@ -176,6 +178,8 @@ export async function GET(request: NextRequest) {
         calendar_id: r.calendar_id ?? null,
         appointment_service_id: r.appointment_service_id ?? null,
         service_item_id: r.service_item_id ?? null,
+        service_variant_id: r.service_variant_id ?? null,
+        processing_time_blocks: r.processing_time_blocks ?? null,
         experience_event_id: r.experience_event_id ?? null,
         class_instance_id: r.class_instance_id ?? null,
         resource_id: r.resource_id ?? null,
@@ -238,6 +242,7 @@ export async function GET(request: NextRequest) {
             return false;
           }
           return isTableReservationBooking({
+            booking_model: b.booking_model as string | null | undefined,
             experience_event_id: b.experience_event_id as string | null | undefined,
             class_instance_id: b.class_instance_id as string | null | undefined,
             resource_id: b.resource_id as string | null | undefined,
@@ -251,7 +256,26 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ bookings: enriched });
+    const labelRows = enriched.map((b: Record<string, unknown>) => ({
+      id: b.id as string,
+      booking_model: b.booking_model as string | null | undefined,
+      experience_event_id: b.experience_event_id as string | null | undefined,
+      class_instance_id: b.class_instance_id as string | null | undefined,
+      resource_id: b.resource_id as string | null | undefined,
+      event_session_id: b.event_session_id as string | null | undefined,
+      calendar_id: b.calendar_id as string | null | undefined,
+      service_item_id: b.service_item_id as string | null | undefined,
+      practitioner_id: b.practitioner_id as string | null | undefined,
+      appointment_service_id: b.appointment_service_id as string | null | undefined,
+      service_id: b.service_id as string | null | undefined,
+    }));
+    const labelById = await resolveBookingListRowLabels(staff.db, labelRows);
+    const withItemNames = enriched.map((b: Record<string, unknown>) => ({
+      ...b,
+      booking_item_name: labelById.get(b.id as string) ?? null,
+    }));
+
+    return NextResponse.json({ bookings: withItemNames });
   } catch (err) {
     console.error('GET /api/venue/bookings/list failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -158,6 +158,7 @@ function serviceIdForRegistry(b: RegistryAppointment): string | null {
 
 function rowForInference(b: RegistryAppointment): Parameters<typeof inferBookingRowModel>[0] {
   return {
+    booking_model: b.booking_model,
     experience_event_id: b.experience_event_id,
     class_instance_id: b.class_instance_id,
     resource_id: b.resource_id,
@@ -256,6 +257,7 @@ function filterRegistryAppointments(
       b.guest_name.toLowerCase().includes(q) ||
       (b.guest_phone ?? '').toLowerCase().includes(q) ||
       (b.guest_email ?? '').toLowerCase().includes(q) ||
+      (b.booking_item_name ?? '').toLowerCase().includes(q) ||
       b.id.toLowerCase().includes(q) ||
       b.id.replace(/-/g, '').toLowerCase().includes(q.replace(/-/g, '')),
   );
@@ -708,14 +710,18 @@ export function AppointmentBookingsDashboard({
           cmp = a.guest_name.localeCompare(b.guest_name, undefined, { sensitivity: 'base' });
           break;
         case 'service': {
-          const sa = (() => {
-            const id = serviceIdForRegistry(a);
-            return id ? serviceMap.get(id)?.name ?? '' : '';
-          })();
-          const sb = (() => {
-            const id = serviceIdForRegistry(b);
-            return id ? serviceMap.get(id)?.name ?? '' : '';
-          })();
+          const sa =
+            a.booking_item_name?.trim() ||
+            (() => {
+              const id = serviceIdForRegistry(a);
+              return id ? serviceMap.get(id)?.name ?? '' : '';
+            })();
+          const sb =
+            b.booking_item_name?.trim() ||
+            (() => {
+              const id = serviceIdForRegistry(b);
+              return id ? serviceMap.get(id)?.name ?? '' : '';
+            })();
           cmp = sa.localeCompare(sb, undefined, { sensitivity: 'base' });
           break;
         }
@@ -905,7 +911,8 @@ export function AppointmentBookingsDashboard({
         const cid = columnIdForRegistry(b);
         const sid = serviceIdForRegistry(b);
         const prac = cid ? practitionerMap.get(cid)?.name ?? '' : '';
-        const svc = sid ? serviceMap.get(sid)?.name ?? '' : '';
+        const svc =
+          b.booking_item_name?.trim() || (sid ? serviceMap.get(sid)?.name ?? '' : '');
         const price = effectivePricePence(b);
         return [
           b.booking_date,
@@ -1131,7 +1138,10 @@ export function AppointmentBookingsDashboard({
     const cid = columnIdForRegistry(b);
     const sid = serviceIdForRegistry(b);
     const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
-    const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
+    const svcName =
+      b.booking_item_name?.trim() ||
+      (sid ? serviceMap.get(sid)?.name ?? '' : '') ||
+      '-';
     const svc = sid ? serviceMap.get(sid) ?? null : null;
     const bookingModel = inferRegistryModel(b);
     const typeLabel = bookingModelShortLabel(bookingModel);

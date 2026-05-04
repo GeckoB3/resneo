@@ -24,6 +24,8 @@ import {
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import {
   applyVariantToAppointmentInput,
@@ -597,6 +599,7 @@ async function handleNonTableBooking(
   let resourcePaymentRequirement: ClassPaymentRequirement | null = null;
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
   let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
+  let appointmentProcessingSnapshot: ProcessingTimeBlock[] | null = null;
 
   const SESSION_CAPACITY_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
@@ -800,6 +803,12 @@ async function handleNonTableBooking(
         requiresDeposit = true;
         depositAmountPence = online.amountPence;
       }
+    }
+    if (mergedSvc && svc) {
+      appointmentProcessingSnapshot = snapshotProcessingTimeBlocksFromCatalog({
+        service: mergedSvc,
+        variant: chosenVariant,
+      });
     }
   } else if (effectiveModel === 'event_ticket') {
     if (!experience_event_id) {
@@ -1080,6 +1089,10 @@ async function handleNonTableBooking(
 
   if (effectiveModel === 'resource_booking') {
     bookingInsert.resource_payment_requirement = resourcePaymentRequirement;
+  }
+
+  if (effectiveModel === 'unified_scheduling' && !event_session_id) {
+    bookingInsert.processing_time_blocks = appointmentProcessingSnapshot ?? [];
   }
 
   const { data: booking, error: bookErr } = await supabase

@@ -37,6 +37,7 @@ import {
   isResourceBookingStartInPast,
 } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import {
   isGuestBookingDateAllowed,
@@ -898,6 +899,10 @@ export async function POST(request: NextRequest) {
         apptInsert.practitioner_id = practitioner_id;
         apptInsert.appointment_service_id = appointment_service_id;
       }
+
+      apptInsert.processing_time_blocks = svc
+        ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: null })
+        : [];
 
       const { data: apptBooking, error: apptErr } = await admin
         .from('bookings')

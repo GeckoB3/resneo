@@ -118,15 +118,12 @@ type Step =
 
 const SINGLE_STEPS: Step[] = ['service', 'variant', 'practitioner', 'slot', 'multi_service', 'details'];
 const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'slot', 'multi_service', 'details'];
-const STEP_LABELS: Record<string, string> = {
-  service: 'Service', variant: 'Option', practitioner: 'Staff', slot: 'Time', multi_service: 'Services', details: 'Details',
-};
 
 interface AppointmentBookingFlowProps {
   venue: VenuePublic;
   cancellationPolicy?: string;
   embed?: boolean;
-  onHeightChange?: (height: number) => void;
+  onHeightChange?: () => void;
   accentColour?: string;
   /** From /book/{venue}/{practitioner-slug}: skip staff step; catalog filtered */
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
@@ -264,10 +261,11 @@ export function AppointmentBookingFlow({
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!onHeightChange || !containerRef.current) return;
-    const ro = new ResizeObserver(([entry]) => {
-      if (entry) onHeightChange(Math.ceil(entry.contentRect.height));
+    const ro = new ResizeObserver(() => {
+      onHeightChange();
     });
     ro.observe(containerRef.current);
+    onHeightChange();
     return () => ro.disconnect();
   }, [onHeightChange]);
 
@@ -821,9 +819,6 @@ export function AppointmentBookingFlow({
     selectedServiceId,
   ]);
 
-  const currentStepIdx = singleFlowSteps.indexOf(step);
-  const showSingleProgress = singleFlowSteps.includes(step);
-
   // ── Single booking handlers ──
 
   const validateMultiServiceChain = useCallback(
@@ -1277,40 +1272,7 @@ export function AppointmentBookingFlow({
 
   return (
     <div ref={containerRef} className="mx-auto max-w-lg" style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}>
-      {/* Single flow progress indicator */}
-      {showSingleProgress && (
-        <div className="mb-6 flex items-center justify-between">
-          {singleFlowSteps.map((s, i) => {
-            const isActive = i === currentStepIdx;
-            const isComplete = i < currentStepIdx;
-            return (
-              <div key={s} className="flex items-center flex-1 last:flex-initial">
-                <div className="flex items-center gap-2">
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-colors ${
-                    isActive ? 'bg-brand-600 text-white shadow-md' :
-                    isComplete ? 'bg-brand-100 text-brand-700' :
-                    'bg-slate-100 text-slate-400'
-                  }`}>
-                    {isComplete ? (
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    ) : (
-                      i + 1
-                    )}
-                  </div>
-                  <span className={`hidden sm:inline text-xs font-medium ${isActive ? 'text-brand-700' : isComplete ? 'text-brand-600' : 'text-slate-400'}`}>
-                    {s === 'practitioner' ? terms.staff : STEP_LABELS[s]}
-                  </span>
-                </div>
-                {i < singleFlowSteps.length - 1 && (
-                  <div className={`mx-2 h-0.5 flex-1 rounded ${isComplete ? 'bg-brand-200' : 'bg-slate-100'}`} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {isLockedPractitionerFlow && lockedPractitioner && showSingleProgress && (
+      {isLockedPractitionerFlow && lockedPractitioner && singleFlowSteps.includes(step) && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-3 text-sm text-brand-900">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-800">
             {lockedPractitioner.name.charAt(0).toUpperCase()}

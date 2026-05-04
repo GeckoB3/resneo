@@ -20,6 +20,10 @@ import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
+import {
+  hasUpcomingActiveBookingsForVenueResource,
+  UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE,
+} from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -674,6 +678,14 @@ export async function DELETE(request: NextRequest) {
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
       }
+    }
+
+    const bookingGuard = await hasUpcomingActiveBookingsForVenueResource(admin, staff.venue_id, id);
+    if (bookingGuard.error) {
+      return NextResponse.json({ error: bookingGuard.error }, { status: 500 });
+    }
+    if (bookingGuard.blocked) {
+      return NextResponse.json({ error: UPCOMING_ACTIVE_BOOKINGS_BLOCK_DELETE }, { status: 409 });
     }
 
     const { error } = await admin

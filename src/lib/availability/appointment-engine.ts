@@ -5,7 +5,20 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ClassPaymentRequirement, Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
+import type {
+  ClassPaymentRequirement,
+  Practitioner,
+  AppointmentService,
+  PractitionerService,
+  ProcessingTimeBlock,
+} from '@/types/booking-models';
+import {
+  busyIntervalsOverlap,
+  effectiveProcessingBlocksForTemplate,
+  parseProcessingTimeBlocksFromDb,
+  practitionerBusyMinuteOffsets,
+  validateProcessingTimeBlocks,
+} from '@/lib/appointments/processing-time';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
@@ -34,6 +47,7 @@ export interface PhantomBooking {
   duration_minutes: number;
   buffer_minutes: number;
   processing_time_minutes?: number;
+  processing_time_blocks?: ProcessingTimeBlock[];
 }
 
 /** Staff blocks on the practitioner calendar (breaks / blocked time). Minutes from midnight. */
@@ -118,6 +132,8 @@ export interface AppointmentBooking {
   duration_minutes: number;
   buffer_minutes: number;
   processing_time_minutes?: number;
+  /** Salon processing gaps for this row; when set, overrides template from catalog. */
+  processing_time_blocks?: ProcessingTimeBlock[];
   status: string;
 }
 
@@ -230,41 +246,81 @@ export function leaveRowsToDaysOffAndBlocks(
   return { fullDayPractitionerIds, partialBlocks };
 }
 
-function appointmentBookingBusyEnd(b: AppointmentBooking): number {
+/** Wall-clock end minute for venue hours / breaks (chair span + buffer; legacy tail only when no salon blocks). */
+function appointmentCustomerSpanEndMin(b: AppointmentBooking): number {
   const bStart = timeToMinutes(b.booking_time);
-  const bProc = b.processing_time_minutes ?? 0;
-  return bStart + b.duration_minutes + b.buffer_minutes + bProc;
+  const blocks = b.processing_time_blocks ?? [];
+  const extraLegacy =
+    blocks.length > 0 ? 0 : (b.processing_time_minutes ?? 0);
+  return bStart + b.duration_minutes + b.buffer_minutes + extraLegacy;
 }
 
-function phantomBusyEnd(p: PhantomBooking): number {
-  const pStart = timeToMinutes(p.start_time);
-  const pProc = p.processing_time_minutes ?? 0;
-  return pStart + p.duration_minutes + p.buffer_minutes + pProc;
+function wallBusyIntervalsForBooking(b: AppointmentBooking): Array<{ start: number; end: number }> {
+  const wallStart = timeToMinutes(b.booking_time);
+  const blocks = b.processing_time_blocks ?? [];
+  const offsets = practitionerBusyMinuteOffsets({
+    durationMinutes: b.duration_minutes,
+    bufferMinutes: b.buffer_minutes,
+    processingBlocks: blocks,
+    legacyProcessingTailMinutes: blocks.length > 0 ? 0 : (b.processing_time_minutes ?? 0),
+  });
+  return offsets.map((o) => ({ start: wallStart + o.start, end: wallStart + o.end }));
+}
+
+function wallBusyIntervalsForPhantom(p: PhantomBooking): Array<{ start: number; end: number }> {
+  const wallStart = timeToMinutes(p.start_time);
+  const blocks = p.processing_time_blocks ?? [];
+  const offsets = practitionerBusyMinuteOffsets({
+    durationMinutes: p.duration_minutes,
+    bufferMinutes: p.buffer_minutes,
+    processingBlocks: blocks,
+    legacyProcessingTailMinutes: blocks.length > 0 ? 0 : (p.processing_time_minutes ?? 0),
+  });
+  return offsets.map((o) => ({ start: wallStart + o.start, end: wallStart + o.end }));
+}
+
+/** Scheduling span for breaks / venue clip: core + buffer + legacy tail when no salon blocks. */
+function serviceSchedulingSpanMinutes(svc: AppointmentService): number {
+  const blocks = svc.processing_time_blocks ?? [];
+  const legacy = blocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
+  return svc.duration_minutes + svc.buffer_minutes + legacy;
+}
+
+function wallBusyIntervalsForServiceSlot(
+  startMin: number,
+  svc: AppointmentService,
+): Array<{ start: number; end: number }> {
+  const blocks = svc.processing_time_blocks ?? [];
+  const offsets = practitionerBusyMinuteOffsets({
+    durationMinutes: svc.duration_minutes,
+    bufferMinutes: svc.buffer_minutes,
+    processingBlocks: blocks,
+    legacyProcessingTailMinutes: blocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0),
+  });
+  return offsets.map((o) => ({ start: startMin + o.start, end: startMin + o.end }));
 }
 
 function countOverlappingBookings(
   bookings: AppointmentBooking[],
-  t: number,
-  slotEnd: number,
+  candidateBusyWall: Array<{ start: number; end: number }>,
   excludeBookingId?: string,
 ): number {
   const excludeLc = excludeBookingId?.toLowerCase();
   let n = 0;
   for (const b of bookings) {
     if (excludeLc && b.id.toLowerCase() === excludeLc) continue;
-    const bStart = timeToMinutes(b.booking_time);
-    const bEnd = appointmentBookingBusyEnd(b);
-    if (overlaps(t, slotEnd, bStart, bEnd)) n++;
+    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForBooking(b))) n++;
   }
   return n;
 }
 
-function countOverlappingPhantoms(phantoms: PhantomBooking[], t: number, slotEnd: number): number {
+function countOverlappingPhantoms(
+  phantoms: PhantomBooking[],
+  candidateBusyWall: Array<{ start: number; end: number }>,
+): number {
   let n = 0;
   for (const p of phantoms) {
-    const pStart = timeToMinutes(p.start_time);
-    const pEnd = phantomBusyEnd(p);
-    if (overlaps(t, slotEnd, pStart, pEnd)) n++;
+    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForPhantom(p))) n++;
   }
   return n;
 }
@@ -451,8 +507,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     }> = [];
 
     for (const svc of offeredServices) {
-      const processing = svc.processing_time_minutes ?? 0;
-      const totalDuration = svc.duration_minutes + svc.buffer_minutes + processing;
+      const totalSpan = serviceSchedulingSpanMinutes(svc);
       const serviceSlots: PractitionerSlot[] = [];
 
       practitionerServiceList.push({
@@ -471,11 +526,12 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
       );
 
       for (const range of serviceEffectiveRanges) {
-        for (let t = range.start; t + totalDuration <= range.end; t += 15) {
+        for (let t = range.start; t + totalSpan <= range.end; t += 15) {
           // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
           if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
 
-          const slotEnd = t + totalDuration;
+          const slotEnd = t + totalSpan;
+          const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
 
           // Check breaks
           const hitsBreak = breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end));
@@ -487,8 +543,8 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 
           // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
           const overlapping =
-            countOverlappingBookings(practitionerBookings, t, slotEnd, undefined) +
-            countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
+            countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
+            countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
           if (overlapping >= parallelCap) continue;
 
           serviceSlots.push({
@@ -570,10 +626,10 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Service not available with this staff member' };
   }
 
-  const processing = svc.processing_time_minutes ?? 0;
-  const totalDuration = svc.duration_minutes + svc.buffer_minutes + processing;
+  const totalDuration = serviceSchedulingSpanMinutes(svc);
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const slotEnd = t + totalDuration;
+  const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
 
   const workingRanges = getWorkingRanges(practitioner, date);
   if (workingRanges.length === 0) {
@@ -621,8 +677,8 @@ export function validateExactAppointmentStart(
   const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
   const parallelCap = parallelCapacityFor(practitioner);
   const overlapping =
-    countOverlappingBookings(practitionerBookings, t, slotEnd, undefined) +
-    countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
+    countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
+    countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
   if (overlapping >= parallelCap) {
     return { ok: false, reason: 'Conflicts with another booking' };
   }
@@ -644,7 +700,11 @@ export function validateAppointmentCustomInterval(
   startTimeHHmm: string,
   endCoreHHmm: string,
   excludeBookingId?: string,
-  options?: { allowBookingOverlap?: boolean },
+  options?: {
+    allowBookingOverlap?: boolean;
+    /** Snapshot blocks for this booking; when omitted, uses service template. */
+    processingTimeBlocks?: ProcessingTimeBlock[] | null;
+  },
 ): { ok: boolean; reason?: string } {
   const {
     date,
@@ -686,7 +746,6 @@ export function validateAppointmentCustomInterval(
     return { ok: false, reason: 'Service not available with this staff member' };
   }
 
-  const processing = svc.processing_time_minutes ?? 0;
   const buffer = svc.buffer_minutes ?? 0;
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const endCore = timeToMinutes(endCoreHHmm.slice(0, 5));
@@ -698,7 +757,25 @@ export function validateAppointmentCustomInterval(
     return { ok: false, reason: 'Appointment duration is too long' };
   }
 
-  const busyEnd = t + coreDuration + buffer + processing;
+  const templateBlocks = options?.processingTimeBlocks !== undefined && options.processingTimeBlocks !== null
+    ? options.processingTimeBlocks
+    : (svc.processing_time_blocks ?? []);
+  const blockCheck = validateProcessingTimeBlocks(templateBlocks, coreDuration);
+  if (!blockCheck.ok) {
+    return { ok: false, reason: blockCheck.error ?? 'Invalid processing time for this duration' };
+  }
+  const useBlocks = blockCheck.normalized ?? [];
+  const legacyTail = useBlocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
+  const busyOffsets = practitionerBusyMinuteOffsets({
+    durationMinutes: coreDuration,
+    bufferMinutes: buffer,
+    processingBlocks: useBlocks,
+    legacyProcessingTailMinutes: legacyTail,
+  });
+  const busyWall = busyOffsets.map((o) => ({ start: t + o.start, end: t + o.end }));
+  const customerEnd = t + coreDuration + buffer;
+  const practMaxEnd = busyWall.length > 0 ? Math.max(...busyWall.map((i) => i.end)) : t;
+  const busyEnd = Math.max(customerEnd, practMaxEnd);
 
   const workingRanges = getWorkingRanges(practitioner, date);
   if (workingRanges.length === 0) {
@@ -747,14 +824,28 @@ export function validateAppointmentCustomInterval(
     const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
     const parallelCap = parallelCapacityFor(practitioner);
     const overlapping =
-      countOverlappingBookings(practitionerBookings, t, busyEnd, excludeBookingId) +
-      countOverlappingPhantoms(practitionerPhantoms, t, busyEnd);
+      countOverlappingBookings(practitionerBookings, busyWall, excludeBookingId) +
+      countOverlappingPhantoms(practitionerPhantoms, busyWall);
     if (overlapping >= parallelCap) {
       return { ok: false, reason: 'Conflicts with another booking' };
     }
   }
 
   return { ok: true };
+}
+
+export function resolveEngineBookingProcessingBlocks(params: {
+  snapshotRaw: unknown;
+  mergedService: AppointmentService | null;
+  variantBlocks: ProcessingTimeBlock[] | undefined;
+}): ProcessingTimeBlock[] {
+  if (params.snapshotRaw !== null && params.snapshotRaw !== undefined) {
+    return parseProcessingTimeBlocksFromDb(params.snapshotRaw);
+  }
+  return effectiveProcessingBlocksForTemplate({
+    parentBlocks: params.mergedService?.processing_time_blocks ?? [],
+    variantBlocks: params.variantBlocks,
+  });
 }
 
 // Fetcher
@@ -793,7 +884,9 @@ export async function fetchAppointmentInput(params: {
 
   let bookingsQuery = supabase
     .from('bookings')
-    .select('id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, status')
+    .select(
+      'id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+    )
     .eq('venue_id', venueId)
     .eq('booking_date', date)
     .in('status', CAPACITY_CONSUMING_STATUSES);
@@ -858,30 +951,72 @@ export async function fetchAppointmentInput(params: {
   } else if (leaveRes.error) {
     console.warn('[fetchAppointmentInput] practitioner_leave_periods:', leaveRes.error.message);
   }
-  let allServices = (allServicesRes.data ?? []) as AppointmentService[];
+  let allServices = (allServicesRes.data ?? []).map((raw) => {
+    const s = raw as Record<string, unknown>;
+    return {
+      ...(raw as AppointmentService),
+      processing_time_blocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+    };
+  }) as AppointmentService[];
   if (allServices.length > 0) {
     const { data: procRows } = await supabase
       .from('service_items')
-      .select('id, processing_time_minutes')
+      .select('id, processing_time_minutes, processing_time_blocks')
       .eq('venue_id', venueId)
       .in(
         'id',
         allServices.map((s) => s.id),
       );
     const procMap = new Map(
-      (procRows ?? []).map((r) => [
-        (r as { id: string }).id,
-        (r as { processing_time_minutes?: number }).processing_time_minutes ?? 0,
-      ]),
+      (procRows ?? []).map((r) => {
+        const row = r as {
+          id: string;
+          processing_time_minutes?: number;
+          processing_time_blocks?: unknown;
+        };
+        return [
+          row.id,
+          {
+            processing_time_minutes: row.processing_time_minutes ?? 0,
+            processing_time_blocks: parseProcessingTimeBlocksFromDb(row.processing_time_blocks),
+          },
+        ] as const;
+      }),
     );
-    allServices = allServices.map((s) => ({
-      ...s,
-      processing_time_minutes: procMap.get(s.id) ?? 0,
-    }));
+    allServices = allServices.map((s) => {
+      const meta = procMap.get(s.id);
+      if (!meta) return s;
+      return {
+        ...s,
+        processing_time_minutes: meta.processing_time_minutes,
+        processing_time_blocks: meta.processing_time_blocks,
+      };
+    });
   }
   const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
   const practitionerServices = (psRes.data ?? []) as PractitionerService[];
   const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
+
+  const variantIds = [
+    ...new Set(
+      (bookingsRes.data ?? [])
+        .map((b) => (b as { service_variant_id?: string | null }).service_variant_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  ];
+  let variantBlocksById = new Map<string, ProcessingTimeBlock[]>();
+  if (variantIds.length > 0) {
+    const { data: vrows } = await supabase
+      .from('service_variants')
+      .select('id, processing_time_blocks')
+      .in('id', variantIds);
+    variantBlocksById = new Map(
+      (vrows ?? []).map((r) => {
+        const row = r as { id: string; processing_time_blocks?: unknown };
+        return [row.id, parseProcessingTimeBlocksFromDb(row.processing_time_blocks)];
+      }),
+    );
+  }
 
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
     const row = b as {
@@ -889,6 +1024,8 @@ export async function fetchAppointmentInput(params: {
       calendar_id?: string | null;
       appointment_service_id: string | null;
       service_item_id: string | null;
+      service_variant_id?: string | null;
+      processing_time_blocks?: unknown;
       booking_end_time?: string | null;
     };
     const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
@@ -906,6 +1043,14 @@ export async function fetchAppointmentInput(params: {
       const d = endMin - startMin;
       if (d >= 15) coreDuration = d;
     }
+    const variantBl = row.service_variant_id
+      ? variantBlocksById.get(row.service_variant_id)
+      : undefined;
+    const processingBlocks = resolveEngineBookingProcessingBlocks({
+      snapshotRaw: row.processing_time_blocks,
+      mergedService: merged,
+      variantBlocks: variantBl,
+    });
     return {
       id: b.id,
       practitioner_id: practId!,
@@ -913,6 +1058,7 @@ export async function fetchAppointmentInput(params: {
       duration_minutes: coreDuration,
       buffer_minutes: merged?.buffer_minutes ?? 0,
       processing_time_minutes: merged?.processing_time_minutes ?? 0,
+      processing_time_blocks: processingBlocks,
       status: b.status,
     };
   });
@@ -1063,6 +1209,7 @@ export async function fetchCalendarAppointmentInput(params: {
       duration_minutes: (customDur ?? s.duration_minutes) as number,
       buffer_minutes: (s.buffer_minutes as number) ?? 0,
       processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
+      processing_time_blocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
       price_pence: (customPrice ?? s.price_pence) as number | null,
       payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
       deposit_pence: (s.deposit_pence as number | null) ?? null,
@@ -1124,7 +1271,9 @@ export async function fetchCalendarAppointmentInput(params: {
   const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes, venueBlocksRes] = await Promise.all([
     supabase
       .from('bookings')
-      .select('id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, status')
+      .select(
+        'id, practitioner_id, calendar_id, booking_time, booking_end_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+      )
       .eq('venue_id', venueId)
       .eq('booking_date', date)
       .or(`practitioner_id.eq.${calendarId},calendar_id.eq.${calendarId}`)
@@ -1161,12 +1310,35 @@ export async function fetchCalendarAppointmentInput(params: {
 
   const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
 
+  const calVariantIds = [
+    ...new Set(
+      (bookingsRes.data ?? [])
+        .map((b) => (b as { service_variant_id?: string | null }).service_variant_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  ];
+  let calVariantBlocksById = new Map<string, ProcessingTimeBlock[]>();
+  if (calVariantIds.length > 0) {
+    const { data: calVrows } = await supabase
+      .from('service_variants')
+      .select('id, processing_time_blocks')
+      .in('id', calVariantIds);
+    calVariantBlocksById = new Map(
+      (calVrows ?? []).map((r) => {
+        const row = r as { id: string; processing_time_blocks?: unknown };
+        return [row.id, parseProcessingTimeBlocksFromDb(row.processing_time_blocks)];
+      }),
+    );
+  }
+
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
     const row = b as {
       practitioner_id: string | null;
       calendar_id?: string | null;
       appointment_service_id: string | null;
       service_item_id: string | null;
+      service_variant_id?: string | null;
+      processing_time_blocks?: unknown;
       booking_end_time?: string | null;
     };
     const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
@@ -1184,6 +1356,12 @@ export async function fetchCalendarAppointmentInput(params: {
       const d = endMin - startMin;
       if (d >= 15) coreDuration = d;
     }
+    const variantBl = row.service_variant_id ? calVariantBlocksById.get(row.service_variant_id) : undefined;
+    const processingBlocks = resolveEngineBookingProcessingBlocks({
+      snapshotRaw: row.processing_time_blocks,
+      mergedService: merged,
+      variantBlocks: variantBl,
+    });
     return {
       id: b.id,
       practitioner_id: practKey,
@@ -1191,6 +1369,7 @@ export async function fetchCalendarAppointmentInput(params: {
       duration_minutes: coreDuration,
       buffer_minutes: merged?.buffer_minutes ?? 0,
       processing_time_minutes: merged?.processing_time_minutes ?? 0,
+      processing_time_blocks: processingBlocks,
       status: b.status,
     };
   });

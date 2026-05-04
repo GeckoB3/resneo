@@ -1,22 +1,26 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { normalizeTimeForDb, validateMergedEventTimes } from '@/lib/experience-events/experience-event-validation';
 
 export { normalizeTimeForDb, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 
 /**
- * Counts bookings that should block hard-deleting an experience event (any non-cancelled row).
+ * Counts bookings that should block hard-deleting an experience event or removing it from the calendar:
+ * today-or-later session date and a live booking status (Pending / Booked / Confirmed / Seated).
  */
 export async function countBookingsBlockingEventDelete(
   admin: SupabaseClient,
   venueId: string,
   experienceEventId: string,
 ): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
   const { count, error } = await admin
     .from('bookings')
     .select('id', { count: 'exact', head: true })
     .eq('venue_id', venueId)
     .eq('experience_event_id', experienceEventId)
-    .neq('status', 'Cancelled');
+    .gte('booking_date', today)
+    .in('status', [...BOOKING_ACTIVE_STATUSES]);
 
   if (error) {
     console.error('[countBookingsBlockingEventDelete]', error);
@@ -38,7 +42,7 @@ export async function assertExperienceEventDeletable(
     return {
       ok: false,
       error:
-        'This event has active or past bookings. Cancel the event (to notify guests and refund where applicable) or cancel individual bookings before deleting the event row.',
+        'There are upcoming active bookings for this event. Cancel or reschedule those bookings before deleting the event.',
       booking_count: n,
     };
   }
@@ -46,7 +50,7 @@ export async function assertExperienceEventDeletable(
 }
 
 /**
- * Clearing `calendar_id` (removing the event from the staff grid column) is blocked while non-cancelled bookings exist.
+ * Clearing `calendar_id` (removing the event from the staff grid column) is blocked while upcoming active bookings exist.
  */
 export async function assertExperienceEventCalendarClearable(
   admin: SupabaseClient,
@@ -61,7 +65,7 @@ export async function assertExperienceEventCalendarClearable(
     return {
       ok: false,
       error:
-        'This event has bookings. Cancel or resolve those bookings before removing the event from the calendar.',
+        'There are upcoming active bookings for this event. Cancel or resolve those bookings before removing the event from the calendar.',
     };
   }
   return { ok: true };

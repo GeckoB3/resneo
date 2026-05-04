@@ -48,7 +48,7 @@ interface Props {
   /** Multi-tab public page: which flow to render; defaults to `venue.booking_model`. */
   activeBookingModel?: BookingModel;
   embed?: boolean;
-  onHeightChange?: (height: number) => void;
+  onHeightChange?: () => void;
   cancellationPolicy?: string;
   accentColour?: string;
   /** Model B: pre-selected practitioner from /book/{venue}/{practitioner-slug} */

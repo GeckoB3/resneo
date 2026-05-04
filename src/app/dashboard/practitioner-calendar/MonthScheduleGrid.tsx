@@ -39,7 +39,7 @@ export function MonthScheduleGrid({
   }, [monthDayScheduleCounts]);
 
   return (
-    <div className="w-full min-w-0 touch-pan-x overflow-x-auto [-webkit-overflow-scrolling:touch] rounded-[1.75rem] border border-slate-200 bg-white p-3 shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] sm:p-4">
+    <div className="w-full min-w-0 [touch-action:pan-x_pan-y] overflow-x-auto [overflow-y:clip] [-webkit-overflow-scrolling:touch] rounded-[1.75rem] border border-slate-200 bg-white p-3 shadow-lg shadow-slate-900/[0.06] ring-1 ring-slate-900/[0.03] sm:p-4">
       <div className="grid min-w-[680px] grid-cols-7 gap-1 rounded-2xl bg-gradient-to-br from-white via-slate-50 to-slate-100/90 p-1 text-center text-xs font-bold uppercase tracking-wide text-slate-500 shadow-sm shadow-slate-900/5">
         {WEEK_SHORT.map((d) => (
           <div key={d} className="rounded-xl py-2">

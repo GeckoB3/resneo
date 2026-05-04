@@ -14,7 +14,7 @@ import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-wind
 export interface BookingFlowProps {
   venue: VenuePublic;
   embed?: boolean;
-  onHeightChange?: (height: number) => void;
+  onHeightChange?: () => void;
   cancellationPolicy?: string;
   accentColour?: string;
 }
@@ -67,10 +67,19 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     return Boolean(selectedSlot.deposit_required);
   }, [selectedSlot]);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!embed || !onHeightChange) return;
-    onHeightChange(document.documentElement.scrollHeight);
-  }, [embed, onHeightChange, step, selectedDate, slots.length, slotsLoading, initialLoading, selectedSlot, guestDetails, createResult, paymentComplete]);
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      onHeightChange();
+    });
+    ro.observe(el);
+    onHeightChange();
+    return () => ro.disconnect();
+  }, [embed, onHeightChange]);
 
   const goNext = useCallback(() => {
     setError(null);
@@ -302,7 +311,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   }, [cancellationPolicy, tableRefundNoticeHours]);
 
   return (
-    <div className="mx-auto max-w-lg" style={accentStyle}>
+    <div ref={containerRef} className="mx-auto max-w-lg" style={accentStyle}>
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}

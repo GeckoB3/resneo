@@ -66,18 +66,17 @@ export default async function ReportsPage() {
     <PageFrame maxWidthClass="max-w-5xl" className="space-y-6">
       {smsUsage ? (
         <SectionCard elevated>
-          <SectionCard.Header eyebrow="Usage" title="SMS this month" />
+          <SectionCard.Header eyebrow="Usage" title="SMS segments this period" />
           <SectionCard.Body className="space-y-3">
             {smsUsage.billing_mode === 'light_metered' ? (
               <>
                 <p className="text-sm text-slate-700">
                   <span className="font-semibold text-slate-900">{smsUsage.messages_sent}</span>
-                  {' SMS sent this month'}
+                  {' SMS segments used this period'}
                 </p>
                 <p className="text-xs leading-relaxed text-slate-600">
-                  On Appointments Light there is no included SMS bundle. Each message is billed at £
-                  {smsUsage.billable_unit_gbp.toFixed(2)}. Usage is recorded through the month and charged by Stripe on
-                  the same invoice as your monthly subscription.
+                  On Appointments Light there is no included SMS bundle. Each Twilio segment is billed at £
+                  {smsUsage.billable_unit_gbp.toFixed(2)} through Stripe Billing Meters.
                 </p>
                 {smsUsage.messages_sent > 0 ? (
                   <div className="flex flex-wrap items-start gap-2 rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-800">
@@ -86,7 +85,7 @@ export default async function ReportsPage() {
                     </Pill>
                     <span>
                       About £{(smsUsage.overage_amount_pence / 100).toFixed(2)} for {smsUsage.messages_sent}{' '}
-                      {smsUsage.messages_sent === 1 ? 'message' : 'messages'} at £{smsUsage.billable_unit_gbp.toFixed(2)}{' '}
+                      {smsUsage.messages_sent === 1 ? 'segment' : 'segments'} at £{smsUsage.billable_unit_gbp.toFixed(2)}{' '}
                       each (before invoice). Final amounts appear on your Stripe subscription invoice at period end.
                     </span>
                   </div>
@@ -121,10 +120,9 @@ export default async function ReportsPage() {
                       Overage
                     </Pill>
                     <span>
-                      {smsUsage.overage_count} SMS beyond your included allowance — about £
+                      {smsUsage.overage_count} SMS segments beyond your included allowance — about £
                       {(smsUsage.overage_amount_pence / 100).toFixed(2)} at £{smsUsage.billable_unit_gbp.toFixed(2)} each.
-                      Overage is tallied through the month and charged by Stripe once per month on the same invoice as
-                      your subscription.
+                      Overage is metered against the current Stripe subscription period.
                     </span>
                   </div>
                 ) : null}

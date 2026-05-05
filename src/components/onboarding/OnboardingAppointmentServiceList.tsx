@@ -9,6 +9,9 @@ import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
 import { ServiceAvailabilityCalendar } from '@/components/scheduling/ServiceAvailabilityCalendar';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 
 export type StaffMayFlags = {
   name: boolean;
@@ -234,6 +237,10 @@ interface OnboardingAppointmentServiceListProps {
   roster: Array<{ id: string; name: string }>;
   /** When roster loads, merge into drafts that still have empty practitioner_ids */
   rosterIds: string[];
+  /** Matches dashboard Services: admins see optional per-calendar overrides; staff do not */
+  venueIsAdmin: boolean;
+  /** Venue Stripe Connect — warns when deposits/full payment chosen without Stripe */
+  stripeConnected: boolean;
   /** Appointments Light: single calendar, hide per-staff field customisation UI */
   hideStaffCustomization?: boolean;
   /** Business opening hours (omit for Appointments Light–style flows where only calendar hours apply). */
@@ -251,6 +258,8 @@ export function OnboardingAppointmentServiceList({
   setServices,
   roster,
   rosterIds,
+  venueIsAdmin,
+  stripeConnected,
   hideStaffCustomization = false,
   venueOpeningHours = null,
   venueOpeningExceptions = null,
@@ -293,6 +302,12 @@ export function OnboardingAppointmentServiceList({
         }));
         return (
         <div key={s.clientKey} className="rounded-xl border border-slate-200 p-4 space-y-4">
+          {!venueIsAdmin && !hideStaffCustomization && roster.length > 0 && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Link this service to at least one calendar you control. Only venue admins can change which fields other
+              staff may customise for their calendars.
+            </p>
+          )}
           <div className="flex items-start justify-between gap-2">
             <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
               Service
@@ -315,8 +330,8 @@ export function OnboardingAppointmentServiceList({
               type="text"
               value={s.name}
               onChange={(e) => updateRow(s.clientKey, { name: e.target.value })}
-              placeholder="e.g. Standard appointment, Follow-up"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="e.g. Consultation, Standard session"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -326,8 +341,8 @@ export function OnboardingAppointmentServiceList({
               value={s.description}
               onChange={(e) => updateRow(s.clientKey, { description: e.target.value })}
               rows={2}
-              placeholder="Brief description for guests"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="Brief description of the service"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -339,7 +354,7 @@ export function OnboardingAppointmentServiceList({
                 onChange={(n) => updateRow(s.clientKey, { duration_minutes: n })}
                 min={5}
                 max={480}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
@@ -349,7 +364,7 @@ export function OnboardingAppointmentServiceList({
                 onChange={(n) => updateRow(s.clientKey, { buffer_minutes: n })}
                 min={0}
                 max={120}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -363,14 +378,15 @@ export function OnboardingAppointmentServiceList({
                 inputMode="decimal"
                 value={s.price}
                 onChange={(e) => updateRow(s.clientKey, { price: e.target.value })}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm"
+                className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 placeholder="0.00"
               />
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-            <p className="text-sm font-medium text-slate-800">Online payment when booking</p>
+          <SectionCard>
+            <SectionCard.Header title="Online payment when booking" />
+            <SectionCard.Body className="!pt-0 space-y-3">
             <div className="space-y-2">
               <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
                 <input
@@ -413,7 +429,7 @@ export function OnboardingAppointmentServiceList({
                     inputMode="decimal"
                     value={s.deposit}
                     onChange={(e) => updateRow(s.clientKey, { deposit: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm"
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     placeholder="5.00"
                   />
                 </div>
@@ -424,14 +440,21 @@ export function OnboardingAppointmentServiceList({
                 The full service price (above) is charged when the guest completes booking online.
               </p>
             )}
-          </div>
+            <StripePaymentWarning
+              stripeConnected={stripeConnected}
+              requiresOnlinePayment={
+                s.payment_requirement === 'deposit' || s.payment_requirement === 'full_payment'
+              }
+            />
+            </SectionCard.Body>
+          </SectionCard>
 
           <div className="rounded-lg border border-slate-200 p-4 space-y-3">
             <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
             <p className="text-xs text-slate-500">
-              Applies to online bookings for this service (advance window, notice, and cancellation notice).
+              Applies to online bookings for this service (advance window, notice, and deposit refund notice).
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
                 <NumericInput
@@ -443,7 +466,7 @@ export function OnboardingAppointmentServiceList({
                       max_advance_booking_days: n,
                     })
                   }
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -457,12 +480,19 @@ export function OnboardingAppointmentServiceList({
                       min_booking_notice_hours: n,
                     })
                   }
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm text-slate-700">Cancellation notice (hours)</label>
+                <label htmlFor={`svc-cancel-${s.clientKey}`} className="mb-1 block text-sm text-slate-700">
+                  Cancellation notice (hours){' '}
+                  <HelpTooltip
+                    maxWidth={300}
+                    content="This sets when deposits and online payments are refundable until: guests who cancel at least this many hours before the start time get a full refund (subject to your payment settings)."
+                  />
+                </label>
                 <NumericInput
+                  id={`svc-cancel-${s.clientKey}`}
                   min={0}
                   max={168}
                   value={s.cancellation_notice_hours}
@@ -471,7 +501,7 @@ export function OnboardingAppointmentServiceList({
                       cancellation_notice_hours: n,
                     })
                   }
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div className="flex flex-col justify-end">
@@ -520,12 +550,12 @@ export function OnboardingAppointmentServiceList({
             <span className="text-sm text-slate-700">Active (visible to clients)</span>
           </div>
 
-          {!hideStaffCustomization && (
+          {venueIsAdmin && !hideStaffCustomization && (
             <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
-              <p className="text-sm font-medium text-slate-800">{terms.staff} can customise (their calendar only)</p>
+              <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
               <p className="text-xs text-slate-500">
-                When ticked, linked {terms.staff.toLowerCase()} can set their own value for that field on their
-                calendar.
+                Allow staff users assigned to an individual calendar to adjust the following values for their calendar
+                only. Leave unticked and all calendars use the value set above.
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {(
@@ -564,11 +594,9 @@ export function OnboardingAppointmentServiceList({
 
           {roster.length > 0 && (
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                {terms.staff} who offer this service
-              </label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Calendars that offer this service</label>
               <p className="mb-2 text-xs text-slate-500">
-                All {terms.staff.toLowerCase()} are selected by default. Untick anyone who does not offer this service.
+                Tick the calendars that should offer this service.
               </p>
               <div className="space-y-2">
                 {roster.map((p) => (
@@ -580,7 +608,7 @@ export function OnboardingAppointmentServiceList({
                       type="checkbox"
                       checked={s.practitioner_ids.includes(p.id)}
                       onChange={() => togglePractitioner(s.clientKey, p.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-sm text-slate-700">{p.name}</span>
                   </label>
@@ -611,22 +639,28 @@ export function OnboardingAppointmentServiceList({
               <div>
                 <p className="text-sm font-medium text-slate-800">This service&apos;s schedule</p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Optional — only turn on if this service should be bookable for less time than its
-                  calendars are open.
+                  Optional — only turn on if this service should be bookable for less time than its calendars are open
+                  (for example a brunch menu, or evening-only therapy).
                 </p>
               </div>
-              <ServiceCustomAvailabilityEditor
-                value={getServiceV2(s)}
-                onChange={(next) =>
-                  updateRow(s.clientKey, {
-                    custom_working_hours: next as ServiceCustomScheduleStored,
-                  })
-                }
-                enabled={s.custom_availability_enabled}
-                onEnabledChange={(next) =>
-                  updateRow(s.clientKey, { custom_availability_enabled: next })
-                }
-              />
+              {venueIsAdmin ? (
+                <ServiceCustomAvailabilityEditor
+                  value={getServiceV2(s)}
+                  onChange={(next) =>
+                    updateRow(s.clientKey, {
+                      custom_working_hours: next as ServiceCustomScheduleStored,
+                    })
+                  }
+                  enabled={s.custom_availability_enabled}
+                  onEnabledChange={(next) =>
+                    updateRow(s.clientKey, { custom_availability_enabled: next })
+                  }
+                />
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Only venue admins can change this service&apos;s schedule.
+                </p>
+              )}
             </div>
           </div>
         </div>

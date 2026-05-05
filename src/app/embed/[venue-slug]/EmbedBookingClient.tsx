@@ -13,8 +13,40 @@ function sendHeight(height: number) {
   window.parent.postMessage({ type: 'reserve-ni-height', height }, '*');
 }
 
+/**
+ * Descendants of a vertical scrollport report getBoundingClientRect() for their full layout
+ * box, not the clipped scroll viewport — e.g. every row in a max-height time list. Skipping
+ * those nodes keeps overlay measurement tight while still counting the scroll container box.
+ */
+function isInsideVerticalScrollport(el: HTMLElement, root: HTMLElement): boolean {
+  let p: HTMLElement | null = el.parentElement;
+  while (p && p !== root) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === 'auto' || oy === 'scroll') {
+      return true;
+    }
+    p = p.parentElement;
+  }
+  return false;
+}
+
+/**
+ * Includes overflow from `position: absolute` popovers (e.g. date picker), which do not
+ * always increase `scrollHeight` of the root but still need to fit inside the iframe height.
+ */
 function measureEmbedMain(root: HTMLElement): number {
-  return Math.max(Math.ceil(root.scrollHeight), EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX);
+  const rootRect = root.getBoundingClientRect();
+  let maxBottomFromRootTop = 0;
+  for (const el of root.querySelectorAll<HTMLElement>('*')) {
+    if (isInsideVerticalScrollport(el, root)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    const bottom = r.bottom - rootRect.top;
+    if (bottom > maxBottomFromRootTop) maxBottomFromRootTop = bottom;
+  }
+  const fromScroll = Math.ceil(root.scrollHeight);
+  const fromOverflow = Math.ceil(maxBottomFromRootTop);
+  return Math.max(fromScroll, fromOverflow, EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX);
 }
 
 export function EmbedBookingClient({

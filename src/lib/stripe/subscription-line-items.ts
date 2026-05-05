@@ -1,7 +1,7 @@
 import type Stripe from 'stripe';
 
 /**
- * Metered SMS overage price (Stripe Dashboard → Products → metered £0.05).
+ * Metered SMS overage price (Stripe Dashboard -> Products, backed by SMS usage meter).
  * Not required for core app; SMS logging still works without billing overages.
  */
 export function getStripeSmsOveragePriceId(): string | undefined {
@@ -60,7 +60,7 @@ export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.S
   return sub.items.data[0];
 }
 
-/** Metered line item used for SMS overage usage records (6p or Light 8p). */
+/** Metered line item used for SMS overage meter events (6p or Light 8p). */
 export function findSmsMeteredSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
   const candidates = [
     getStripeSmsOveragePriceId(),
@@ -88,7 +88,7 @@ export function getPersistedSubscriptionItemIds(sub: Stripe.Subscription): Persi
 
 /**
  * Checkout line items: main plan + optional metered SMS price.
- * Metered prices are added without quantity (Stripe bills on reported usage).
+ * Metered prices are added without quantity (Stripe bills on reported meter events).
  */
 export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
   const sms = getStripeSmsOveragePriceId();

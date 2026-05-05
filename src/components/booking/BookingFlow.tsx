@@ -340,6 +340,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           onAreaChange={handleGuestAreaTabChange}
           availabilityAreaId={showAreaTabs ? guestAreaId : null}
           publicBookingAreaMode={venue.public_booking_area_mode}
+          onHeightChange={embed ? onHeightChange : undefined}
         />
       )}
       {step === 'details' && selectedSlot && (

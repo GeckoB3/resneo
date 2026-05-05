@@ -53,7 +53,7 @@ export default function PrivacyPage() {
                 </a>
                 .
               </p>
-              <p className="mt-3">Our ICO registration number is [to be added once issued].</p>
+              <p className="mt-3">Our ICO registration number is ZC137345.</p>
               <p className="mt-3">
                 For privacy or data protection requests, please email{' '}
                 <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">

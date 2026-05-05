@@ -1,7 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
-import { assertSmsSendWithinFreeAccessQuota, recordOutboundSms } from '@/lib/sms-usage';
+import { assertSmsSendWithinFreeAccessQuota, estimateSmsSegments, recordOutboundSms } from '@/lib/sms-usage';
 import type { CommunicationLane } from './policies';
 import type { CommunicationLogMessageType } from './policy-resolver';
 import type { RenderedEmail, RenderedSms } from '@/lib/emails/types';
@@ -241,7 +241,10 @@ export async function deliverSmsMessage(
     if (!prep.ok && mode !== 'upsert')
       return { sent: false, reason: mode === 'guest_log' ? 'send_error' : 'duplicate' };
 
-    const quota = await assertSmsSendWithinFreeAccessQuota({ venueId: ctx.venueId });
+    const quota = await assertSmsSendWithinFreeAccessQuota({
+      venueId: ctx.venueId,
+      additionalSegments: estimateSmsSegments(rendered.body),
+    });
     if (!quota.ok) {
       await finalizeStatus(ctx, { logRowId, status: 'failed', externalId: null, errorMessage: quota.reason });
       return { sent: false, reason: 'sms_quota' };

@@ -177,7 +177,7 @@ const DEFAULT_FORM: ServiceFormData = {
   staffMay: { ...DEFAULT_STAFF_MAY },
   max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
   min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
-  cancellation_notice_hours: 24,
+  cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   custom_availability_enabled: false,
   custom_working_hours: { version: 2, rules: [] },

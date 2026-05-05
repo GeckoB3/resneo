@@ -551,13 +551,13 @@ function PlanSection({
           <p className="text-xs uppercase tracking-wide text-slate-500">SMS usage</p>
           <p className="mt-1 text-sm font-semibold text-slate-900">
             {smsUsed}
-            {isLight ? ' sent' : ` / ${smsIncludedMonthly} included`}
+            {isLight ? ' segments used' : ` / ${smsIncludedMonthly} segments included`}
           </p>
           {isLight ? (
             <p className="mt-2 text-xs text-slate-600">
               {isFreeAccess
                 ? 'Free access: outbound SMS is blocked once you reach your plan allowance (0 included on Light).'
-                : `Light is pay-as-you-go at £${SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per message.`}
+                : `Light is pay-as-you-go at £${SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per Twilio segment.`}
             </p>
           ) : (
             <>
@@ -572,7 +572,7 @@ function PlanSection({
                 {smsUsagePercent ?? 0}% of included allowance used.
                 {isFreeAccess
                   ? ' Free access: no paid overage — sends stop at the cap.'
-                  : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS.`}
+                  : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per Twilio segment.`}
               </p>
             </>
           )}

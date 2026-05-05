@@ -21,6 +21,7 @@ import { Suspense } from 'react';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { getSmsMessagesSentThisMonthForVenue, resolveSmsBillingPeriod } from '@/lib/sms-usage';
 
 export default async function SettingsPage({
   searchParams,
@@ -186,32 +187,14 @@ export default async function SettingsPage({
   let smsMessagesSentThisMonth: number | null = null;
   let smsCountUsesStripePeriod = false;
   if (venueId && venue) {
-    const tier = String((venue as { pricing_tier?: string | null }).pricing_tier ?? '').toLowerCase();
-    const periodStart = (venue as { subscription_current_period_start?: string | null }).subscription_current_period_start?.trim();
-    const periodEnd = (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end?.trim();
-    if (tier === 'light' && periodStart && periodEnd) {
-      smsCountUsesStripePeriod = true;
-      const { count, error: smsCntErr } = await staff.db
-        .from('sms_log')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId)
-        .gte('sent_at', periodStart)
-        .lt('sent_at', periodEnd);
-      if (smsCntErr) {
-        console.error('[settings] sms_log count failed:', smsCntErr.message);
-      }
-      smsMessagesSentThisMonth = count ?? 0;
-    } else {
-      const now = new Date();
-      const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
-      const { data: smsRow } = await staff.db
-        .from('sms_usage')
-        .select('messages_sent')
-        .eq('venue_id', venueId)
-        .eq('billing_month', bm)
-        .maybeSingle();
-      smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
-    }
+    const venueForSms = venue as {
+      pricing_tier?: string | null;
+      subscription_current_period_start?: string | null;
+      subscription_current_period_end?: string | null;
+    };
+    const smsPeriod = resolveSmsBillingPeriod(venueForSms);
+    smsCountUsesStripePeriod = Boolean(smsPeriod.periodStartIso && smsPeriod.periodEndIso);
+    smsMessagesSentThisMonth = await getSmsMessagesSentThisMonthForVenue(venueId, venueForSms);
   }
   const sp = await searchParams;
   const { tab } = sp;

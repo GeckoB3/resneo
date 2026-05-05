@@ -356,6 +356,12 @@ interface ResourceDraft {
   pricePerSlot: string;
   payment_requirement: ResourcePaymentRequirement;
   depositPounds: string;
+  /** Guest booking window (same fields as Resource timeline) */
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
+  is_active: boolean;
   availability_hours: WorkingHours;
 }
 
@@ -390,6 +396,11 @@ function createEmptyResourceDraft(hostCalendarId: string): ResourceDraft {
     pricePerSlot: '',
     payment_requirement: 'none',
     depositPounds: '',
+    max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+    min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+    cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+    allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+    is_active: true,
     availability_hours: defaultPractitionerWorkingHours(),
   };
 }
@@ -2067,8 +2078,11 @@ export default function OnboardingPage() {
                 payment_requirement: payReq,
                 deposit_amount_pence: payReq === 'deposit' ? depPence : null,
                 availability_hours: r.availability_hours,
-                is_active: true,
-                ...DEFAULT_ENTITY_BOOKING_WINDOW,
+                is_active: r.is_active,
+                max_advance_booking_days: r.max_advance_booking_days,
+                min_booking_notice_hours: r.min_booking_notice_hours,
+                cancellation_notice_hours: r.cancellation_notice_hours,
+                allow_same_day_booking: r.allow_same_day_booking,
               }),
             });
             const errBody = (await res.json().catch(() => ({}))) as { error?: string };
@@ -2772,6 +2786,8 @@ export default function OnboardingPage() {
                 setServices={setServices}
                 roster={rosterList}
                 rosterIds={rosterIds}
+                venueIsAdmin={venue.is_admin}
+                stripeConnected={stripeConnected}
                 hideStaffCustomization={isLightPlanVenue}
                 venueOpeningHours={isAppointmentsPlanVenue ? null : (openingHoursDraft as unknown as OpeningHours)}
                 calendarWorkingHoursById={calendarWorkingDraft}
@@ -3091,8 +3107,13 @@ export default function OnboardingPage() {
                   <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                     <p className="text-xs font-medium text-slate-700">Calendar column</p>
                     <p className="text-xs text-slate-500">
-                      Show this event on a team calendar column from the Calendars step. The time must not overlap other
-                      bookings or blocked time on that column.
+                      Show this event on a team calendar column in the dashboard. The time must not overlap other
+                      appointments, classes, resources on that column, or blocked time.
+                      {venue.is_admin && (
+                        <span className="mt-1 block text-slate-600">
+                          Choosing a column here also decides which staff can edit or delete this event later.
+                        </span>
+                      )}
                     </p>
                     {isAppointmentsPlanVenue && rosterList.length === 0 && (
                       <p className="text-xs text-amber-800">
@@ -3193,18 +3214,22 @@ export default function OnboardingPage() {
                         key={i}
                         className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2"
                       >
-                        <div className="min-w-[140px] flex-1">
-                          <label className="mb-1 block text-xs font-medium text-slate-500">Ticket name</label>
+                        <div className="min-w-0 flex-1 sm:min-w-[140px]">
+                          <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">
+                            Ticket name
+                          </label>
                           <input
                             type="text"
                             value={tt.name}
                             onChange={(e) => updateEventTicketType(i, { name: e.target.value })}
                             placeholder="e.g. General Admission"
-                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                           />
                         </div>
-                        <div className="w-28">
-                          <label className="mb-1 block text-xs font-medium text-slate-500">Price ({sym})</label>
+                        <div className="w-full min-w-0 sm:w-28">
+                          <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">
+                            Price ({sym})
+                          </label>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -3212,11 +3237,11 @@ export default function OnboardingPage() {
                             value={tt.price_pence}
                             onChange={(e) => updateEventTicketType(i, { price_pence: e.target.value })}
                             placeholder="0.00"
-                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                           />
                         </div>
-                        <div className="w-24">
-                          <label className="mb-1 block text-xs font-medium text-slate-500">
+                        <div className="w-full min-w-0 sm:w-24">
+                          <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">
                             Cap <span className="font-normal text-slate-400">opt.</span>
                           </label>
                           <input
@@ -3226,14 +3251,14 @@ export default function OnboardingPage() {
                             value={tt.capacity}
                             onChange={(e) => updateEventTicketType(i, { capacity: e.target.value })}
                             placeholder="-"
-                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                           />
                         </div>
                         {eventDraft.ticket_types.length > 1 && (
                           <button
                             type="button"
                             onClick={() => removeEventTicketType(i)}
-                            className="self-end pb-1.5 text-xs text-red-400 hover:text-red-600"
+                            className="min-h-10 self-end rounded-lg px-2 text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-700"
                           >
                             Remove
                           </button>
@@ -3303,16 +3328,15 @@ export default function OnboardingPage() {
                     </div>
                   )}
                   <p className="mt-2 text-xs text-slate-500">
-                    Deposit and full payment require ticket prices greater than zero and a connected Stripe account. If you
-                    have not connected Stripe yet, leave this on None and finish setup under{' '}
-                    <Link
-                      href="/dashboard/settings?tab=payments"
-                      className="font-medium text-brand-600 underline hover:text-brand-700"
-                    >
-                      Settings → Payments
-                    </Link>
-                    .
+                    Deposit and full payment require ticket prices &gt; 0 and a connected Stripe account.
                   </p>
+                  <StripePaymentWarning
+                    stripeConnected={stripeConnected}
+                    requiresOnlinePayment={
+                      eventDraft.payment_requirement === 'deposit' ||
+                      eventDraft.payment_requirement === 'full_payment'
+                    }
+                  />
                 </div>
               </div>
             </div>
@@ -3375,345 +3399,378 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
-                      <input
-                        type="text"
-                        value={c.name}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, name: e.target.value };
-                          setClasses(updated);
-                        }}
-                        placeholder="e.g. Beginner session, Open studio"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
-                      <textarea
-                        value={c.description}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, description: e.target.value };
-                          setClasses(updated);
-                        }}
-                        rows={3}
-                        placeholder="Shown to guests on the booking page."
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
-                      <NumericInput
-                        min={5}
-                        max={480}
-                        value={c.duration_minutes}
-                        onChange={(v) => {
-                          const updated = [...classes];
-                          updated[i] = {
-                            ...c,
-                            duration_minutes: v,
-                          };
-                          setClasses(updated);
-                        }}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
-                      <NumericInput
-                        min={1}
-                        value={c.capacity}
-                        onChange={(v) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, capacity: v };
-                          setClasses(updated);
-                        }}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Price ({sym}) <span className="font-normal text-slate-400">optional</span>
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={c.price}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, price: e.target.value };
-                          setClasses(updated);
-                        }}
-                        placeholder="0.00"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="mb-2 block text-xs font-medium text-slate-600">Online payment (Stripe)</label>
-                      <div className="space-y-2">
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                          <input
-                            type="radio"
-                            name={`onb-class-${i}-payment`}
-                            className="mt-0.5"
-                            checked={c.payment_requirement === 'none'}
-                            onChange={() => {
-                              const updated = [...classes];
-                              updated[i] = { ...c, payment_requirement: 'none', deposit_pounds: '' };
-                              setClasses(updated);
-                            }}
-                          />
-                          <span>None - pay at venue or free class</span>
-                        </label>
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                          <input
-                            type="radio"
-                            name={`onb-class-${i}-payment`}
-                            className="mt-0.5"
-                            checked={c.payment_requirement === 'deposit'}
-                            onChange={() => {
-                              const updated = [...classes];
-                              updated[i] = { ...c, payment_requirement: 'deposit' };
-                              setClasses(updated);
-                            }}
-                          />
-                          <span>Deposit per person (partial payment online)</span>
-                        </label>
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                          <input
-                            type="radio"
-                            name={`onb-class-${i}-payment`}
-                            className="mt-0.5"
-                            checked={c.payment_requirement === 'full_payment'}
-                            onChange={() => {
-                              const updated = [...classes];
-                              updated[i] = { ...c, payment_requirement: 'full_payment', deposit_pounds: '' };
-                              setClasses(updated);
-                            }}
-                          />
-                          <span>Full payment online (per person)</span>
-                        </label>
-                      </div>
-                      {c.payment_requirement === 'deposit' && (
-                        <div className="mt-3 max-w-xs">
-                          <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Deposit amount ({sym}) *
-                          </label>
+                  <div className="space-y-6">
+                    <section className="space-y-3">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Basics</h4>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="sm:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
                           <input
                             type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            value={c.deposit_pounds}
+                            value={c.name}
                             onChange={(e) => {
                               const updated = [...classes];
-                              updated[i] = { ...c, deposit_pounds: e.target.value };
+                              updated[i] = { ...c, name: e.target.value };
                               setClasses(updated);
                             }}
-                            placeholder="e.g. 5.00"
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                            placeholder="e.g. Beginner session, Open studio"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                           />
                         </div>
-                      )}
-                      <p className="mt-2 text-xs text-slate-500">
-                        Deposit and full payment require a price per person and a connected Stripe account.
-                      </p>
-                      <StripePaymentWarning
-                        stripeConnected={stripeConnected}
-                        requiresOnlinePayment={
-                          c.payment_requirement === 'deposit' || c.payment_requirement === 'full_payment'
-                        }
-                      />
-                    </div>
-                    <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-                      <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                          <NumericInput
-                            min={1}
-                            max={365}
-                            value={c.max_advance_booking_days}
-                            onChange={(v) => {
+                        <div className="sm:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
+                          <textarea
+                            value={c.description}
+                            onChange={(e) => {
                               const updated = [...classes];
-                              updated[i] = {
-                                ...c,
-                                max_advance_booking_days: v,
-                              };
+                              updated[i] = { ...c, description: e.target.value };
                               setClasses(updated);
                             }}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            rows={3}
+                            placeholder="Shown to guests on the booking page."
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                           />
                         </div>
                         <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                          <NumericInput
-                            min={0}
-                            max={168}
-                            value={c.min_booking_notice_hours}
-                            onChange={(v) => {
-                              const updated = [...classes];
-                              updated[i] = {
-                                ...c,
-                                min_booking_notice_hours: v,
-                              };
-                              setClasses(updated);
-                            }}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Cancellation notice (hours)
-                          </label>
-                          <NumericInput
-                            min={0}
-                            max={168}
-                            value={c.cancellation_notice_hours}
-                            onChange={(v) => {
-                              const updated = [...classes];
-                              updated[i] = {
-                                ...c,
-                                cancellation_notice_hours: v,
-                              };
-                              setClasses(updated);
-                            }}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                          />
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={c.colour}
+                              onChange={(e) => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, colour: e.target.value };
+                                setClasses(updated);
+                              }}
+                              className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-0.5"
+                            />
+                            <span className="text-xs text-slate-500">{c.colour}</span>
+                          </div>
                         </div>
                         <div className="flex items-end pb-1">
                           <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
                             <input
+                              id={`onb-class-active-${i}`}
                               type="checkbox"
-                              checked={c.allow_same_day_booking}
+                              checked={c.is_active}
                               onChange={(e) => {
                                 const updated = [...classes];
-                                updated[i] = { ...c, allow_same_day_booking: e.target.checked };
+                                updated[i] = { ...c, is_active: e.target.checked };
                                 setClasses(updated);
                               }}
-                              className="h-4 w-4 rounded border-slate-300"
+                              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                             />
-                            Allow same-day bookings
+                            <span>Active (visible to guests)</span>
                           </label>
                         </div>
                       </div>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Select Calendar *</label>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-                        <select
-                          value={c.instructor_id}
-                          onChange={(e) => {
-                            const updated = [...classes];
-                            updated[i] = { ...c, instructor_id: e.target.value };
-                            setClasses(updated);
-                          }}
-                          className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                          required
-                        >
-                          <option value="" disabled>
-                            Choose a calendar…
-                          </option>
-                          {rosterList.length > 0 && (
-                            <optgroup label="Calendar columns">
-                              {rosterList.map((cal) => (
-                                <option key={cal.id} value={cal.id}>
-                                  {cal.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                        <div className="min-w-0 flex-1">
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Class Instructor</label>
-                          <input
-                            type="text"
-                            value={c.instructor_custom_name}
-                            onChange={(e) => {
+                    </section>
+
+                    <section className="space-y-3 border-t border-slate-100 pt-5">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Session defaults
+                      </h4>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
+                          <NumericInput
+                            min={5}
+                            max={480}
+                            value={c.duration_minutes}
+                            onChange={(v) => {
                               const updated = [...classes];
-                              updated[i] = { ...c, instructor_custom_name: e.target.value };
+                              updated[i] = {
+                                ...c,
+                                duration_minutes: v,
+                              };
                               setClasses(updated);
                             }}
-                            placeholder="Optional. Shown to guests instead of calendar name"
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                           />
                         </div>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        The class appears on this team calendar in the schedule. If you add a class instructor name,
-                        guests see that name instead of the calendar name when booking.
-                      </p>
-                      {venue.is_admin && (
-                        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                          {!entitlementLoaded ? (
-                            <p className="text-xs text-slate-500">Loading plan limits…</p>
-                          ) : showOnboardingInlineAddCalendar ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => openInlineAddCalendar({ kind: 'class', index: i })}
-                                className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
-                              >
-                                Add calendar
-                              </button>
-                              <p className="mt-2 text-xs text-slate-500">
-                                Create a new team calendar column without leaving onboarding. It is selected for this
-                                class type automatically. You can edit weekly hours anytime in{' '}
-                                <Link
-                                  href="/dashboard/calendar-availability"
-                                  className="font-medium text-brand-700 underline hover:text-brand-800"
-                                >
-                                  Calendar availability
-                                </Link>
-                                .
-                              </p>
-                            </>
-                          ) : (
-                            <p className="text-xs text-amber-950">
-                              <CalendarLimitMessage
-                                entitlement={entitlement}
-                                linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
+                          <NumericInput
+                            min={1}
+                            value={c.capacity}
+                            onChange={(v) => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, capacity: v };
+                              setClasses(updated);
+                            }}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Calendar column *</label>
+                          <p className="mb-2 text-xs text-slate-500">
+                            Pick the team calendar column this class occupies in the schedule.
+                          </p>
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                            <select
+                              value={c.instructor_id}
+                              onChange={(e) => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, instructor_id: e.target.value };
+                                setClasses(updated);
+                              }}
+                              className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              required
+                            >
+                              <option value="" disabled>
+                                Choose a calendar…
+                              </option>
+                              {rosterList.length > 0 && (
+                                <optgroup label="Calendar columns">
+                                  {rosterList.map((cal) => (
+                                    <option key={cal.id} value={cal.id}>
+                                      {cal.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </select>
+                            <div className="min-w-0 flex-1">
+                              <label className="mb-1 block text-xs font-medium text-slate-600">
+                                Instructor label (optional)
+                              </label>
+                              <input
+                                type="text"
+                                value={c.instructor_custom_name}
+                                onChange={(e) => {
+                                  const updated = [...classes];
+                                  updated[i] = { ...c, instructor_custom_name: e.target.value };
+                                  setClasses(updated);
+                                }}
+                                placeholder="Shown to guests instead of the calendar name"
+                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                               />
-                            </p>
+                            </div>
+                          </div>
+                          {venue.is_admin && (
+                            <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                              {!entitlementLoaded ? (
+                                <p className="text-xs text-slate-500">Loading plan limits…</p>
+                              ) : showOnboardingInlineAddCalendar ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openInlineAddCalendar({ kind: 'class', index: i })}
+                                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
+                                  >
+                                    Add calendar
+                                  </button>
+                                  <p className="mt-2 text-xs text-slate-500">
+                                    Create a new team calendar column without leaving onboarding. It is selected for this
+                                    class type automatically. You can edit weekly hours anytime in{' '}
+                                    <Link
+                                      href="/dashboard/calendar-availability"
+                                      className="font-medium text-brand-700 underline hover:text-brand-800"
+                                    >
+                                      Calendar availability
+                                    </Link>
+                                    .
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-amber-950">
+                                  <CalendarLimitMessage
+                                    entitlement={entitlement}
+                                    linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                                  />
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
-                      <div className="flex items-center gap-2">
+                      </div>
+                    </section>
+
+                    <section className="space-y-3 border-t border-slate-100 pt-5">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Guest booking rules
+                      </h4>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                            <NumericInput
+                              min={1}
+                              max={365}
+                              value={c.max_advance_booking_days}
+                              onChange={(v) => {
+                                const updated = [...classes];
+                                updated[i] = {
+                                  ...c,
+                                  max_advance_booking_days: v,
+                                };
+                                setClasses(updated);
+                              }}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-600">
+                              Min notice (hours)
+                            </label>
+                            <NumericInput
+                              min={0}
+                              max={168}
+                              value={c.min_booking_notice_hours}
+                              onChange={(v) => {
+                                const updated = [...classes];
+                                updated[i] = {
+                                  ...c,
+                                  min_booking_notice_hours: v,
+                                };
+                                setClasses(updated);
+                              }}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-600">
+                              Cancellation notice (hours)
+                            </label>
+                            <NumericInput
+                              min={0}
+                              max={168}
+                              value={c.cancellation_notice_hours}
+                              onChange={(v) => {
+                                const updated = [...classes];
+                                updated[i] = {
+                                  ...c,
+                                  cancellation_notice_hours: v,
+                                };
+                                setClasses(updated);
+                              }}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <div className="flex items-end pb-1">
+                            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={c.allow_same_day_booking}
+                                onChange={(e) => {
+                                  const updated = [...classes];
+                                  updated[i] = { ...c, allow_same_day_booking: e.target.checked };
+                                  setClasses(updated);
+                                }}
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+                              Allow same-day bookings
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-3 border-t border-slate-100 pt-5">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Price & online payment
+                      </h4>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Price ({sym}) <span className="font-normal text-slate-400">optional</span>
+                        </label>
                         <input
-                          type="color"
-                          value={c.colour}
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={c.price}
                           onChange={(e) => {
                             const updated = [...classes];
-                            updated[i] = { ...c, colour: e.target.value };
+                            updated[i] = { ...c, price: e.target.value };
                             setClasses(updated);
                           }}
-                          className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-0.5"
+                          placeholder="0.00"
+                          className="w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                         />
-                        <span className="text-xs text-slate-500">{c.colour}</span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 pt-5">
-                      <input
-                        id={`onb-class-active-${i}`}
-                        type="checkbox"
-                        checked={c.is_active}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, is_active: e.target.checked };
-                          setClasses(updated);
-                        }}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                      />
-                      <label htmlFor={`onb-class-active-${i}`} className="text-sm text-slate-700">
-                        Active (visible to guests)
-                      </label>
-                    </div>
+                      <div>
+                        <label className="mb-2 block text-xs font-medium text-slate-600">
+                          Online payment (Stripe)
+                        </label>
+                        <div className="space-y-2">
+                          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                            <input
+                              type="radio"
+                              name={`onb-class-${i}-payment`}
+                              className="mt-0.5"
+                              checked={c.payment_requirement === 'none'}
+                              onChange={() => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, payment_requirement: 'none', deposit_pounds: '' };
+                                setClasses(updated);
+                              }}
+                            />
+                            <span>None: pay at venue or free class</span>
+                          </label>
+                          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                            <input
+                              type="radio"
+                              name={`onb-class-${i}-payment`}
+                              className="mt-0.5"
+                              checked={c.payment_requirement === 'deposit'}
+                              onChange={() => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, payment_requirement: 'deposit' };
+                                setClasses(updated);
+                              }}
+                            />
+                            <span>Deposit per person (partial payment online)</span>
+                          </label>
+                          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                            <input
+                              type="radio"
+                              name={`onb-class-${i}-payment`}
+                              className="mt-0.5"
+                              checked={c.payment_requirement === 'full_payment'}
+                              onChange={() => {
+                                const updated = [...classes];
+                                updated[i] = {
+                                  ...c,
+                                  payment_requirement: 'full_payment',
+                                  deposit_pounds: '',
+                                };
+                                setClasses(updated);
+                              }}
+                            />
+                            <span>Full payment online (per person)</span>
+                          </label>
+                        </div>
+                        {c.payment_requirement === 'deposit' && (
+                          <div className="mt-3 max-w-xs">
+                            <label className="mb-1 block text-xs font-medium text-slate-600">
+                              Deposit amount ({sym}) *
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              value={c.deposit_pounds}
+                              onChange={(e) => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, deposit_pounds: e.target.value };
+                                setClasses(updated);
+                              }}
+                              placeholder="e.g. 5.00"
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                            />
+                          </div>
+                        )}
+                        <p className="mt-2 text-xs text-slate-500">
+                          Deposit and full payment require a price per person and a connected Stripe account.
+                        </p>
+                        <StripePaymentWarning
+                          stripeConnected={stripeConnected}
+                          requiresOnlinePayment={
+                            c.payment_requirement === 'deposit' || c.payment_requirement === 'full_payment'
+                          }
+                        />
+                      </div>
+                    </section>
                   </div>
                 </div>
               ))}
@@ -3808,12 +3865,28 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
+                  {venue.is_admin && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
+                      <p className="font-semibold text-slate-900">Calendar assignment and permissions</p>
+                      <p className="mt-1.5 leading-relaxed text-slate-600">
+                        You can assign this resource to <strong>any</strong> team calendar column. Staff linked to a
+                        column can <strong>create</strong>, <strong>edit</strong>, and{' '}
+                        <strong>delete</strong> resources on that column only.
+                      </p>
+                    </div>
+                  )}
+                  {!venue.is_admin && (
+                    <p className="text-xs leading-relaxed text-slate-600">
+                      Choose a calendar column you control under <strong>Show on calendar</strong>. Only admins can
+                      assign a resource to columns you do not manage.
+                    </p>
+                  )}
                   <div>
                     <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                      Type (optional)
+                      Type
                       <HelpTooltip
                         icon="?"
-                        content="Choose a suggested type from the list or type your own label. This is shown to guests as extra context, but it does not change availability, price, or booking rules."
+                        content="Choose one of the quick-pick types below or write your own label. This is shown to guests as extra context, but it does not change availability, price, or booking rules."
                       />
                     </label>
                     <input
@@ -3824,18 +3897,32 @@ export default function OnboardingPage() {
                         updated[i] = { ...r, resource_type: e.target.value };
                         setResources(updated);
                       }}
-                      placeholder="e.g. Tennis court, Meeting room"
-                      list={`resource-type-suggestions-${i}`}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      placeholder="Short label (e.g. meeting room, equipment bay)"
+                      autoComplete="off"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     />
-                    <datalist id={`resource-type-suggestions-${i}`}>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Optional. Quick picks (tap to fill — you can still edit the text):
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {RESOURCE_TYPE_SUGGESTIONS.map((s) => (
-                        <option key={s} value={s} />
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => {
+                            const updated = [...resources];
+                            updated[i] = { ...r, resource_type: s };
+                            setResources(updated);
+                          }}
+                          className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                        >
+                          {s}
+                        </button>
                       ))}
-                    </datalist>
+                    </div>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Show on calendar</label>
+                  <div className="max-w-xl">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Show on calendar *</label>
                     <select
                       value={r.display_on_calendar_id}
                       onChange={(e) => {
@@ -3843,20 +3930,25 @@ export default function OnboardingPage() {
                         updated[i] = { ...r, display_on_calendar_id: e.target.value };
                         setResources(updated);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     >
-                      {rosterList.length === 0 ? (
-                        <option value="">Loading team calendars…</option>
-                      ) : (
-                        rosterList.map((cal) => (
-                          <option key={cal.id} value={cal.id}>
-                            {cal.name}
-                          </option>
-                        ))
-                      )}
+                      <option value="">
+                        {rosterList.length === 0 ? 'Loading team calendars…' : 'Select a calendar column'}
+                      </option>
+                      {rosterList.map((cal) => (
+                        <option key={cal.id} value={cal.id}>
+                          {cal.name}
+                        </option>
+                      ))}
                     </select>
                     <p className="mt-1 text-xs text-slate-500">
-                      The resource appears on this staff calendar column (same as Resource timeline).
+                      Resource bookings and free slots appear on that calendar. Two resources can use the same calendar
+                      only if their weekly hours do not overlap (e.g. 9–1 vs 3–6).
+                      {venue.is_admin && (
+                        <span className="mt-1 block text-slate-600">
+                          Staff can only manage resources tied to calendars they control — choose the column accordingly.
+                        </span>
+                      )}
                     </p>
                     {venue.is_admin && (
                       <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
@@ -3894,14 +3986,15 @@ export default function OnboardingPage() {
                       </div>
                     )}
                   </div>
-                  <p className="text-[11px] leading-relaxed text-slate-600">
-                    Start times use a fixed step. Online price uses the same step: total = (price per step) × (length ÷
-                    step).
+                  <h3 className="text-sm font-semibold text-slate-800">Booking rules</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                    Start times use a fixed step. Online price uses the same step: total = (price per step) × (booking
+                    length ÷ step).
                   </p>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                        Start times every (min)
+                      <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                        Start times every (minutes)
                         <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_SLOT_INTERVAL_HELP} />
                       </label>
                       <NumericInput
@@ -3921,34 +4014,41 @@ export default function OnboardingPage() {
                         }}
                         min={RES_SLOT_MIN}
                         max={RES_SLOT_MAX}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                       />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {RES_SLOT_MIN}–{RES_SLOT_MAX} minutes.
+                      </p>
                     </div>
                     <div>
-                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Longest booking (min)</label>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Longest booking (minutes)</label>
                       <NumericInput
                         value={r.max_booking_minutes}
                         onChange={(v) => {
                           const updated = [...resources];
+                          const row = updated[i]!;
                           updated[i] = {
-                            ...r,
+                            ...row,
                             max_booking_minutes: v,
                           };
                           setResources(updated);
                         }}
                         min={RES_MAX_BOOK_MIN}
                         max={RES_MAX_BOOK_MAX}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                       />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {RES_MAX_BOOK_MIN}–{RES_MAX_BOOK_MAX} minutes.
+                      </p>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                  <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="mb-1 flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                        Shortest booking (min)
+                      <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                        Shortest booking (minutes)
                         <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_MIN_BOOKING_HELP} />
                       </label>
-                      <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-slate-600">
+                      <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium text-slate-600">
                         <input
                           type="checkbox"
                           checked={r.longer_minimum_than_slot}
@@ -3966,17 +4066,18 @@ export default function OnboardingPage() {
                             };
                             setResources(updated);
                           }}
-                          className="h-3 w-3 rounded border-slate-300 text-brand-600"
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                         />
-                        Advanced: longer minimum
+                        Advanced: longer minimum than start-time step
                       </label>
                     </div>
                     <NumericInput
                       value={r.min_booking_minutes}
                       onChange={(v) => {
                         const updated = [...resources];
+                        const row = updated[i]!;
                         updated[i] = {
-                          ...r,
+                          ...row,
                           min_booking_minutes: v,
                         };
                         setResources(updated);
@@ -3984,18 +4085,84 @@ export default function OnboardingPage() {
                       min={RES_MIN_BOOK_MIN}
                       max={RES_MIN_BOOK_MAX}
                       disabled={!r.longer_minimum_than_slot}
-                      className="mt-1.5 w-full max-w-[12rem] rounded border border-slate-200 px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                      className="mt-1.5 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
                     />
-                    <p className="mt-1 text-[10px] text-slate-500">
+                    <p className="mt-1 text-[11px] text-slate-500">
                       {r.longer_minimum_than_slot
-                        ? `At least ${RES_MIN_BOOK_MIN}–${RES_MIN_BOOK_MAX} min; must be ≥ start-time step.`
-                        : `Matches start-time step (minimum ${RES_MIN_BOOK_MIN} min).`}
+                        ? `${RES_MIN_BOOK_MIN}–${RES_MIN_BOOK_MAX} minutes; must be at least the start-time step.`
+                        : `Matches the start-time step (minimum ${RES_MIN_BOOK_MIN} minutes).`}
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="mb-2 text-xs font-medium text-slate-700">Guest online booking</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                        <NumericInput
+                          min={1}
+                          max={365}
+                          value={r.max_advance_booking_days}
+                          onChange={(v) => {
+                            const updated = [...resources];
+                            updated[i] = { ...updated[i]!, max_advance_booking_days: v };
+                            setResources(updated);
+                          }}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                        <NumericInput
+                          min={0}
+                          max={168}
+                          value={r.min_booking_notice_hours}
+                          onChange={(v) => {
+                            const updated = [...resources];
+                            updated[i] = { ...updated[i]!, min_booking_notice_hours: v };
+                            setResources(updated);
+                          }}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Cancellation notice (hours)
+                        </label>
+                        <NumericInput
+                          min={0}
+                          max={168}
+                          value={r.cancellation_notice_hours}
+                          onChange={(v) => {
+                            const updated = [...resources];
+                            updated[i] = { ...updated[i]!, cancellation_notice_hours: v };
+                            setResources(updated);
+                          }}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end pb-1">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={r.allow_same_day_booking}
+                            onChange={(e) => {
+                              const updated = [...resources];
+                              updated[i] = { ...updated[i]!, allow_same_day_booking: e.target.checked };
+                              setResources(updated);
+                            }}
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          Allow same-day bookings
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Price per {r.slot_interval_minutes}-minute step ({currencySymbol(currency)})
+                        {Number.isFinite(r.slot_interval_minutes) && r.slot_interval_minutes > 0
+                          ? `Price per ${r.slot_interval_minutes}-minute step (${currencySymbol(currency)})`
+                          : `Price per start-time step (${currencySymbol(currency)})`}
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
@@ -4008,64 +4175,110 @@ export default function OnboardingPage() {
                           value={r.pricePerSlot}
                           onChange={(e) => {
                             const updated = [...resources];
-                            updated[i] = { ...r, pricePerSlot: e.target.value };
+                            updated[i] = { ...updated[i]!, pricePerSlot: e.target.value };
                             setResources(updated);
                           }}
-                          placeholder="0.00"
-                          className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
+                          placeholder="Leave blank for free"
+                          className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                         />
                       </div>
-                      <p className="mt-1 text-[10px] text-slate-500">Per step of the start-time grid above.</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Charged per step of your start-time grid (see above).
+                      </p>
                     </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Payment</label>
-                      <select
-                        value={r.payment_requirement}
-                        onChange={(e) => {
-                          const updated = [...resources];
-                          updated[i] = {
-                            ...r,
-                            payment_requirement: e.target.value as ResourcePaymentRequirement,
-                          };
-                          setResources(updated);
-                        }}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      >
-                        <option value="none">Pay at venue</option>
-                        <option value="deposit">Deposit online</option>
-                        <option value="full_payment">Full payment online</option>
-                      </select>
-                    </div>
-                  </div>
-                  {r.payment_requirement === 'deposit' && (
-                    <div className="max-w-xs">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Deposit ({currencySymbol(currency)})
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                          {currencySymbol(currency)}
-                        </span>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          value={r.depositPounds}
+                          type="checkbox"
+                          checked={r.is_active}
                           onChange={(e) => {
                             const updated = [...resources];
-                            updated[i] = { ...r, depositPounds: e.target.value };
+                            updated[i] = { ...updated[i]!, is_active: e.target.checked };
                             setResources(updated);
                           }}
-                          className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                         />
-                      </div>
+                        Active (bookable by guests)
+                      </label>
                     </div>
-                  )}
+                  </div>
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium text-slate-600">Guest payment</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {(
+                        [
+                          { v: 'none' as const, label: 'Pay at venue' },
+                          { v: 'deposit' as const, label: 'Deposit online' },
+                          { v: 'full_payment' as const, label: 'Pay in full online' },
+                        ] as const
+                      ).map((opt) => (
+                        <label
+                          key={opt.v}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                            r.payment_requirement === opt.v
+                              ? 'border-brand-500 bg-brand-50 text-slate-900'
+                              : 'border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`onb-resource-pay-${i}`}
+                            checked={r.payment_requirement === opt.v}
+                            onChange={() => {
+                              const updated = [...resources];
+                              updated[i] = {
+                                ...updated[i]!,
+                                payment_requirement: opt.v,
+                                ...(opt.v !== 'deposit' ? { depositPounds: '' } : {}),
+                              };
+                              setResources(updated);
+                            }}
+                            className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                    <StripePaymentWarning
+                      stripeConnected={stripeConnected}
+                      requiresOnlinePayment={
+                        r.payment_requirement === 'deposit' || r.payment_requirement === 'full_payment'
+                      }
+                    />
+                    {r.payment_requirement === 'deposit' && (
+                      <div className="mt-3 max-w-xs">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Deposit amount ({currencySymbol(currency)})
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                            {currencySymbol(currency)}
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            value={r.depositPounds}
+                            onChange={(e) => {
+                              const updated = [...resources];
+                              updated[i] = { ...updated[i]!, depositPounds: e.target.value };
+                              setResources(updated);
+                            }}
+                            placeholder="e.g. 10.00"
+                            className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Charged when the guest books (Stripe). Balance due at venue if applicable.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                   <div>
-                    <h3 className="mb-2 text-xs font-semibold text-slate-800">Weekly availability</h3>
-                    <p className="mb-2 text-xs text-slate-500">
-                      When this resource can be booked (must overlap your team calendar hours; adjust in Availability if
-                      needed).
+                    <h3 className="text-sm font-semibold text-slate-800">Weekly availability</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Resource hours can be wider than the calendar, but guests can only book where all opening hours
+                      overlap.
                     </p>
                     <WorkingHoursControl
                       value={r.availability_hours}

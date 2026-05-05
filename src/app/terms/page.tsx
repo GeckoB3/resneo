@@ -62,7 +62,7 @@ export default function TermsPage() {
                 details or contact form made available on our website. We may also provide a dedicated email address
                 for specific legal, privacy, billing or support matters.
               </p>
-              <p className="mt-3">Our ICO registration number is [to be added once issued].</p>
+              <p className="mt-3">Our ICO registration number is ZC137345.</p>
             </section>
 
             <section>

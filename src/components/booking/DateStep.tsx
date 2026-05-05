@@ -77,6 +77,8 @@ interface DateStepProps {
   onAreaChange?: (areaId: string) => void;
   availabilityAreaId?: string | null;
   publicBookingAreaMode?: 'auto' | 'manual';
+  /** Embed iframe: notify parent to remeasure when dropdown panels open (absolutely positioned). */
+  onHeightChange?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -104,6 +106,7 @@ export function DateStep({
   onAreaChange,
   availabilityAreaId = null,
   publicBookingAreaMode = 'auto',
+  onHeightChange,
 }: DateStepProps) {
   const today = useMemo(() => {
     const d = new Date();
@@ -145,6 +148,12 @@ export function DateStep({
 
   // Close any open panel when clicking outside (same hook as staff form)
   useDismissibleLayer({ open: openPanel !== null, refs: [panelRef], onDismiss: () => setOpenPanel(null) });
+
+  useEffect(() => {
+    if (!onHeightChange) return;
+    const id = requestAnimationFrame(() => onHeightChange());
+    return () => cancelAnimationFrame(id);
+  }, [openPanel, calendarMonth, onHeightChange]);
 
   // Sync calendar view to selectedDate when it changes (e.g. from initial load)
   useEffect(() => {

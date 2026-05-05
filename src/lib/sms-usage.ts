@@ -1,12 +1,10 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
-import { isLightPlanTier } from '@/lib/tier-enforcement';
 
-function billingMonthFirstDayUtc(): string {
-  const d = new Date();
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+function billingMonthFirstDayUtcFromDate(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `${y}-${m}-01`;
 }
 
@@ -15,11 +13,100 @@ export function wouldExceedSmsQuota(used: number, allowance: number, additionalS
   return used + additionalSends > allowance;
 }
 
+export function calculateSmsOverageDelta(
+  usedBefore: number,
+  allowance: number,
+  additionalSegments: number,
+): number {
+  const before = Math.max(0, usedBefore - allowance);
+  const after = Math.max(0, usedBefore + Math.max(1, additionalSegments) - allowance);
+  return after - before;
+}
+
 type VenueSmsCountRow = {
   pricing_tier?: string | null;
   subscription_current_period_start?: string | null;
   subscription_current_period_end?: string | null;
 };
+
+type VenueSmsBillingRow = VenueSmsCountRow & {
+  id?: string;
+  billing_access_source?: string | null;
+  sms_monthly_allowance?: number | null;
+  calendar_count?: number | null;
+  stripe_customer_id?: string | null;
+};
+
+type SmsBillingPeriod = {
+  billingMonth: string;
+  periodStartIso: string | null;
+  periodEndIso: string | null;
+  stripeTimestamp: number;
+};
+
+export function resolveSmsBillingPeriod(
+  venue: VenueSmsCountRow,
+  referenceDate = new Date(),
+): SmsBillingPeriod {
+  const periodStart = venue.subscription_current_period_start?.trim();
+  const periodEnd = venue.subscription_current_period_end?.trim();
+  if (periodStart && periodEnd) {
+    const startMs = Date.parse(periodStart);
+    const endMs = Date.parse(periodEnd);
+    const refMs = referenceDate.getTime();
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= refMs && refMs < endMs) {
+      return {
+        billingMonth: billingMonthFirstDayUtcFromDate(new Date(startMs)),
+        periodStartIso: new Date(startMs).toISOString(),
+        periodEndIso: new Date(endMs).toISOString(),
+        stripeTimestamp: Math.floor(refMs / 1000),
+      };
+    }
+  }
+  return {
+    billingMonth: billingMonthFirstDayUtcFromDate(referenceDate),
+    periodStartIso: null,
+    periodEndIso: null,
+    stripeTimestamp: Math.floor(referenceDate.getTime() / 1000),
+  };
+}
+
+async function sendStripeSmsUsageMeterEvent(opts: {
+  stripeCustomerId: string;
+  value: number;
+  timestamp: number;
+  idempotencyKey: string;
+}): Promise<boolean> {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) return false;
+
+  const value = Math.max(0, Math.floor(opts.value));
+  if (value <= 0) return true;
+
+  const params = new URLSearchParams();
+  params.set('event_name', 'sms_usage_over_allowance');
+  params.set('timestamp', String(opts.timestamp));
+  params.set('payload[stripe_customer_id]', opts.stripeCustomerId);
+  params.set('payload[value]', String(value));
+
+  const res = await fetch('https://api.stripe.com/v1/billing/meter_events', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Idempotency-Key': opts.idempotencyKey,
+    },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('[sms-usage] Stripe meter event failed:', res.status, errText);
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * SMS sends counted this month for quota checks (aligned with Settings → Plan tab).
@@ -29,34 +116,116 @@ export async function getSmsMessagesSentThisMonthForVenue(
   venue: VenueSmsCountRow,
 ): Promise<number> {
   const admin = getSupabaseAdminClient();
-  const tier = String(venue.pricing_tier ?? '').toLowerCase();
-  const periodStart = venue.subscription_current_period_start?.trim();
-  const periodEnd = venue.subscription_current_period_end?.trim();
-  if (tier === 'light' && periodStart && periodEnd) {
-    const { count, error } = await admin
-      .from('sms_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', venueId)
-      .gte('sent_at', periodStart)
-      .lt('sent_at', periodEnd);
-    if (error) {
-      console.error('[getSmsMessagesSentThisMonthForVenue] sms_log count failed:', error.message, { venueId });
-      return 0;
-    }
-    return count ?? 0;
-  }
-  const bm = billingMonthFirstDayUtc();
-  const { data: smsRow, error } = await admin
+  const period = resolveSmsBillingPeriod(venue);
+  let query = admin
     .from('sms_usage')
     .select('messages_sent')
-    .eq('venue_id', venueId)
-    .eq('billing_month', bm)
-    .maybeSingle();
+    .eq('venue_id', venueId);
+  if (period.periodStartIso && period.periodEndIso) {
+    query = query
+      .eq('stripe_period_start', period.periodStartIso)
+      .eq('stripe_period_end', period.periodEndIso);
+  } else {
+    query = query.eq('billing_month', period.billingMonth);
+  }
+
+  const { data: smsRow, error } = await query.maybeSingle();
   if (error) {
     console.error('[getSmsMessagesSentThisMonthForVenue] sms_usage read failed:', error.message, { venueId });
     return 0;
   }
   return (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
+}
+
+async function markMeteredSegmentsReported(opts: {
+  usageId: string;
+  reportedCount: number;
+}): Promise<void> {
+  const admin = getSupabaseAdminClient();
+  const { error } = await admin
+    .from('sms_usage')
+    .update({
+      overage_reported_count: opts.reportedCount,
+      overage_billed: true,
+      last_stripe_meter_event_at: new Date().toISOString(),
+    })
+    .eq('id', opts.usageId);
+  if (error) {
+    console.error('[sms-usage] failed to mark meter event reported:', error.message, {
+      usageId: opts.usageId,
+    });
+  }
+}
+
+export async function reportSmsOverageSegmentsToStripe(opts: {
+  venueId: string;
+  stripeCustomerId: string | null | undefined;
+  usageId: string;
+  overageDelta: number;
+  overageCount: number;
+  overageReportedCount: number;
+  timestamp: number;
+}): Promise<boolean> {
+  const customerId = opts.stripeCustomerId?.trim();
+  const delta = Math.max(0, Math.floor(opts.overageDelta));
+  if (!customerId || delta <= 0) return false;
+
+  const ok = await sendStripeSmsUsageMeterEvent({
+    stripeCustomerId: customerId,
+    value: delta,
+    timestamp: opts.timestamp,
+    idempotencyKey: `sms-overage:${opts.usageId}:${opts.overageReportedCount}:${opts.overageCount}`,
+  });
+  if (!ok) return false;
+
+  await markMeteredSegmentsReported({
+    usageId: opts.usageId,
+    reportedCount: Math.max(opts.overageReportedCount + delta, opts.overageCount),
+  });
+  return true;
+}
+
+async function reportSmsUsageBackfillRow(row: {
+  id: string;
+  venue_id: string;
+  overage_count: number;
+  overage_reported_count?: number | null;
+  stripe_period_start?: string | null;
+  stripe_period_end?: string | null;
+  billing_month?: string | null;
+}): Promise<boolean> {
+  const admin = getSupabaseAdminClient();
+  const { data: venue } = await admin
+    .from('venues')
+    .select('stripe_customer_id, billing_access_source')
+    .eq('id', row.venue_id)
+    .maybeSingle();
+  const venueRow = venue as {
+    stripe_customer_id?: string | null;
+    billing_access_source?: string | null;
+  } | null;
+  if (isSuperuserFreeBillingAccess(venueRow?.billing_access_source)) return false;
+
+  const delta = row.overage_count - (row.overage_reported_count ?? 0);
+  if (delta <= 0) return false;
+
+  let timestamp = Math.floor(Date.now() / 1000);
+  const start = row.stripe_period_start ? Date.parse(row.stripe_period_start) : NaN;
+  const end = row.stripe_period_end ? Date.parse(row.stripe_period_end) : NaN;
+  if (Number.isFinite(start) && Number.isFinite(end)) {
+    const safeMs = Math.max(start, Math.min(Date.now(), end - 1000));
+    timestamp = Math.floor(safeMs / 1000);
+  }
+
+  return reportSmsOverageSegmentsToStripe({
+    venueId: row.venue_id,
+    stripeCustomerId: venueRow?.stripe_customer_id,
+    usageId: row.id,
+    overageDelta: delta,
+    overageCount: row.overage_count,
+    overageReportedCount: row.overage_reported_count ?? 0,
+    timestamp,
+  });
 }
 
 /**
@@ -65,6 +234,7 @@ export async function getSmsMessagesSentThisMonthForVenue(
  */
 export async function assertSmsSendWithinFreeAccessQuota(opts: {
   venueId: string;
+  additionalSegments?: number;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
   const admin = getSupabaseAdminClient();
   const { data: venue, error } = await admin
@@ -92,10 +262,11 @@ export async function assertSmsSendWithinFreeAccessQuota(opts: {
   const allowance =
     row.sms_monthly_allowance ?? computeSmsMonthlyAllowance(tier, row.calendar_count ?? null);
   const used = await getSmsMessagesSentThisMonthForVenue(opts.venueId, row);
-  if (wouldExceedSmsQuota(used, allowance, 1)) {
+  const additionalSegments = Math.max(1, opts.additionalSegments ?? 1);
+  if (wouldExceedSmsQuota(used, allowance, additionalSegments)) {
     return {
       ok: false,
-      reason: `SMS allowance exhausted for this venue (${used}/${allowance} this month, free access).`,
+      reason: `SMS allowance exhausted for this venue (${used}/${allowance} segments this period, free access).`,
     };
   }
   return { ok: true };
@@ -114,7 +285,7 @@ export async function recordOutboundSms(opts: {
 }): Promise<void> {
   try {
     const admin = getSupabaseAdminClient();
-    const billingMonth = billingMonthFirstDayUtc();
+    const segmentCount = Math.max(1, opts.segmentCount);
 
     await admin.from('sms_log').insert({
       venue_id: opts.venueId,
@@ -123,12 +294,26 @@ export async function recordOutboundSms(opts: {
       recipient_phone: opts.recipientPhone,
       twilio_message_sid: opts.twilioSid ?? null,
       status: 'sent',
-      segment_count: Math.max(1, opts.segmentCount),
+      segment_count: segmentCount,
     });
 
-    const { error } = await admin.rpc('increment_sms_usage', {
+    const { data: venueRow } = await admin
+      .from('venues')
+      .select(
+        'pricing_tier, billing_access_source, sms_monthly_allowance, calendar_count, stripe_customer_id, subscription_current_period_start, subscription_current_period_end',
+      )
+      .eq('id', opts.venueId)
+      .maybeSingle();
+
+    const venue = (venueRow ?? {}) as VenueSmsBillingRow;
+    const period = resolveSmsBillingPeriod(venue);
+
+    const { data: usageRows, error } = await admin.rpc('increment_sms_usage', {
       p_venue_id: opts.venueId,
-      p_billing_month: billingMonth,
+      p_billing_month: period.billingMonth,
+      p_segment_count: segmentCount,
+      p_period_start: period.periodStartIso,
+      p_period_end: period.periodEndIso,
     });
 
     if (error) {
@@ -136,47 +321,65 @@ export async function recordOutboundSms(opts: {
       return;
     }
 
-    const { data: venueRow } = await admin
-      .from('venues')
-      .select('pricing_tier, stripe_sms_subscription_item_id')
-      .eq('id', opts.venueId)
-      .maybeSingle();
-    const tier = (venueRow as { pricing_tier?: string | null } | null)?.pricing_tier;
-    const smsItemId = (venueRow as { stripe_sms_subscription_item_id?: string | null } | null)
-      ?.stripe_sms_subscription_item_id?.trim();
-    if (isLightPlanTier(tier) && smsItemId) {
-      const secret = process.env.STRIPE_SECRET_KEY;
-      if (secret) {
-        try {
-          const params = new URLSearchParams();
-          params.set('quantity', '1');
-          params.set('timestamp', String(Math.floor(Date.now() / 1000)));
-          params.set('action', 'increment');
-          const res = await fetch(
-            `https://api.stripe.com/v1/subscription_items/${encodeURIComponent(smsItemId)}/usage_records`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${secret}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: params.toString(),
-            },
-          );
-          if (!res.ok) {
-            const errText = await res.text();
-            console.error('[recordOutboundSms] Stripe usage record failed:', res.status, errText, {
-              venueId: opts.venueId,
-            });
-          }
-        } catch (stripeErr) {
-          console.error('[recordOutboundSms] Stripe usage record failed:', stripeErr, { venueId: opts.venueId });
+    if (isSuperuserFreeBillingAccess(venue.billing_access_source)) return;
+
+    const usage = (Array.isArray(usageRows) ? usageRows[0] : usageRows) as
+      | {
+          usage_id?: string;
+          overage_delta?: number;
+          overage_count?: number;
+          overage_reported_count?: number;
         }
-      }
+      | null
+      | undefined;
+    if (!usage?.usage_id || !usage.overage_delta || !usage.overage_count) {
+      return;
     }
+
+    await reportSmsOverageSegmentsToStripe({
+      venueId: opts.venueId,
+      stripeCustomerId: venue.stripe_customer_id,
+      usageId: usage.usage_id,
+      overageDelta: usage.overage_delta,
+      overageCount: usage.overage_count,
+      overageReportedCount: usage.overage_reported_count ?? 0,
+      timestamp: period.stripeTimestamp,
+    });
   } catch (err) {
     console.error('[recordOutboundSms] failed:', err);
   }
+}
+
+export async function reportUnreportedSmsUsageRows(): Promise<{ reported: number }> {
+  const admin = getSupabaseAdminClient();
+  const { data: rows, error } = await admin
+    .from('sms_usage')
+    .select(
+      'id, venue_id, overage_count, overage_reported_count, stripe_period_start, stripe_period_end, billing_month',
+    )
+    .gt('overage_count', 0);
+
+  if (error) {
+    console.error('[reportUnreportedSmsUsageRows] query failed:', error.message);
+    throw new Error(error.message);
+  }
+
+  let reported = 0;
+  for (const row of rows ?? []) {
+    const r = row as {
+      id: string;
+      venue_id: string;
+      overage_count: number;
+      overage_reported_count?: number | null;
+      stripe_period_start?: string | null;
+      stripe_period_end?: string | null;
+      billing_month?: string | null;
+    };
+    if (r.overage_count <= (r.overage_reported_count ?? 0)) continue;
+    if (await reportSmsUsageBackfillRow(r)) reported++;
+  }
+
+  return { reported };
 }
 
 export function estimateSmsSegments(body: string): number {

@@ -47,7 +47,7 @@ export function AppointmentsDashboardStep({
       badge: 'All models',
     },
     {
-      title: 'Customers',
+      title: 'Contacts',
       description: 'Your guest list with contact details and booking history.',
       detail:
         'Search, tag, and take notes on regulars. Spot first-time visitors and follow up on cancellations or no-shows.',

@@ -32,7 +32,6 @@ export default function PaymentPage() {
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [termsAccepted, setTermsAccepted] = useState(false);
   /** Until checked, we do not know if the browser has a Supabase session (required for checkout). */
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState(false);
@@ -314,63 +313,11 @@ export default function PaymentPage() {
           </div>
         )}
 
-        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <input
-            type="checkbox"
-            checked={termsAccepted}
-            onChange={(e) => setTermsAccepted(e.target.checked)}
-            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-          />
-          <span className="text-xs leading-relaxed text-slate-600">
-            By signing up, I confirm I have authority to act for this business and agree to the ReserveNI{' '}
-            <a
-              href="/terms/customer"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-brand-600 underline hover:text-brand-700"
-              onClick={(e) => e.stopPropagation()}
-            >
-              customer terms
-            </a>
-            {', '}
-            <a
-              href="/terms/data-processing"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-brand-600 underline hover:text-brand-700"
-              onClick={(e) => e.stopPropagation()}
-            >
-              data processing terms
-            </a>
-            {', '}
-            <a
-              href="/terms"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-brand-600 underline hover:text-brand-700"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Website Terms of Use
-            </a>
-            {' and '}
-            <a
-              href="/privacy"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-brand-600 underline hover:text-brand-700"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Privacy Policy
-            </a>
-            .
-          </span>
-        </label>
-
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={loading || !hasSession || planFamilyBlocked || !termsAccepted}
-          className="mt-4 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
+          disabled={loading || !hasSession || planFamilyBlocked}
+          className="mt-5 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
           {loading
             ? 'Processing...'

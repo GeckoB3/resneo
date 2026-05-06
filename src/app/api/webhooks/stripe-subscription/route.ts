@@ -463,12 +463,13 @@ async function handleSubscriptionDeleted(
       .subscription_current_period_end;
     const periodStartIso = subscriptionPeriodStartIso(subscription) ?? existingPeriodStart ?? null;
     const periodEndIso = subscriptionPeriodEndIso(subscription) ?? existingPeriodEnd ?? null;
+    const planStatus = mapStripeSubscriptionToPlanStatus(subscription);
 
     await supabase
       .from('venues')
       .update({
-        plan_status: 'cancelled',
-        stripe_subscription_id: null,
+        plan_status: planStatus,
+        stripe_subscription_id: planStatus === 'cancelling' ? deletedId : null,
         stripe_subscription_item_id: null,
         stripe_sms_subscription_item_id: null,
         subscription_current_period_start: periodStartIso,
@@ -485,17 +486,17 @@ async function handleSubscriptionDeleted(
   if (!updatedAny) {
     const periodStartIso = subscriptionPeriodStartIso(subscription) ?? null;
     const periodEndIso = subscriptionPeriodEndIso(subscription) ?? null;
+    const planStatus = mapStripeSubscriptionToPlanStatus(subscription);
     await supabase
       .from('venues')
       .update({
-        plan_status: 'cancelled',
-        stripe_subscription_id: null,
+        plan_status: planStatus,
+        stripe_subscription_id: planStatus === 'cancelling' ? deletedId : null,
         stripe_subscription_item_id: null,
         stripe_sms_subscription_item_id: null,
         subscription_current_period_start: periodStartIso,
         subscription_current_period_end: periodEndIso,
       })
-      .eq('stripe_customer_id', customerId)
-      .neq('plan_status', 'cancelled');
+      .eq('stripe_customer_id', customerId);
   }
 }

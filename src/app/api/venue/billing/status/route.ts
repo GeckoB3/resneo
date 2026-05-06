@@ -36,6 +36,11 @@ function tierFromPriceId(priceId: string | undefined): PlanTier | null {
   return null;
 }
 
+function hasFuturePeriodEnd(sub: unknown): boolean {
+  const end = subscriptionPeriodEndIso(sub);
+  return Boolean(end && Date.parse(end) > Date.now());
+}
+
 /**
  * GET /api/venue/billing/status
  * Live Stripe + DB snapshot for the Settings > Plan tab, including Customer Portal returns.
@@ -79,7 +84,7 @@ export async function GET() {
       });
       const replacement = subscriptions.data.find((sub) =>
         ['active', 'trialing', 'past_due', 'unpaid', 'incomplete'].includes(sub.status),
-      );
+      ) ?? subscriptions.data.find((sub) => sub.status === 'canceled' && hasFuturePeriodEnd(sub));
       subId = replacement?.id ?? '';
     }
 

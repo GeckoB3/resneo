@@ -287,9 +287,14 @@ function PlanSection({
   const planPrice = planPriceLabel(tier);
   const periodEndLabel = formatSubscriptionDateLabel(venue.subscription_current_period_end);
   const periodStartLabel = formatSubscriptionDateLabel(venue.subscription_current_period_start);
+  const periodEndTime = venue.subscription_current_period_end
+    ? Date.parse(venue.subscription_current_period_end)
+    : Number.NaN;
+  const hasFuturePeriodEnd = Number.isFinite(periodEndTime) && periodEndTime > Date.now();
   const nextBillingPrimaryLabel = isFreeAccess ? 'Free Access Granted' : periodEndLabel ?? 'Not available yet';
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
+  const cancelledWithAccessUntilPeriodEnd = isCancelling || (planStatus === 'cancelled' && hasFuturePeriodEnd);
   const hasStripeSub = Boolean(venue.stripe_subscription_id?.trim());
   const smsUsed = venue.sms_messages_sent_this_month ?? 0;
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
@@ -332,7 +337,13 @@ function PlanSection({
       applyBillingStatus(data);
       router.refresh();
       if (opts.showSuccess) {
-        if (data.plan_status === 'cancelling') {
+        const dataPeriodEnd = data.subscription_current_period_end
+          ? Date.parse(data.subscription_current_period_end)
+          : Number.NaN;
+        const dataHasAccessUntilPeriodEnd =
+          data.plan_status === 'cancelling' ||
+          (data.plan_status === 'cancelled' && Number.isFinite(dataPeriodEnd) && dataPeriodEnd > Date.now());
+        if (dataHasAccessUntilPeriodEnd) {
           const endLabel = formatSubscriptionDateLabel(data.subscription_current_period_end);
           setPlanSuccess(
             endLabel
@@ -612,7 +623,7 @@ function PlanSection({
           {planPillLabel}
         </Pill>
       </div>
-      {isCancelling && !isFreeAccess ? (
+      {cancelledWithAccessUntilPeriodEnd && !isFreeAccess ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p className="font-semibold">Your subscription has been cancelled.</p>
           <p className="mt-1 leading-relaxed">

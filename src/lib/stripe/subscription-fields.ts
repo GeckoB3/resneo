@@ -61,7 +61,14 @@ export function mapStripeSubscriptionToPlanStatus(
   if (st === 'trialing') return 'trialing';
   if (st === 'active') return 'active';
   if (st === 'past_due') return 'past_due';
-  if (st === 'canceled' || st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
+  if (st === 'canceled') {
+    const periodEnd = subscriptionPeriodEndIso(sub);
+    if (periodEnd && Date.parse(periodEnd) > Date.now()) {
+      return 'cancelling';
+    }
+    return 'cancelled';
+  }
+  if (st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
     return 'cancelled';
   }
   if (st === 'incomplete') return 'past_due';

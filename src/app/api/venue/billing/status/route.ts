@@ -4,6 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
 import {
   mapStripeSubscriptionToPlanStatus,
+  subscriptionCancelAtIso,
   subscriptionPeriodEndIso,
   subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
@@ -42,7 +43,7 @@ function tierFromPriceId(priceId: string | undefined): PlanTier | null {
 }
 
 function hasFuturePeriodEnd(sub: unknown): boolean {
-  const end = subscriptionPeriodEndIso(sub);
+  const end = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
   return Boolean(end && Date.parse(end) > Date.now());
 }
 
@@ -99,7 +100,7 @@ export async function GET() {
         stripeSubscriptionStatus = sub.status;
         planStatus = mapStripeSubscriptionToPlanStatus(sub);
         periodStart = subscriptionPeriodStartIso(sub);
-        periodEnd = subscriptionPeriodEndIso(sub);
+        periodEnd = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
 
         const mainItem = findMainPlanSubscriptionItem(sub);
         const priceId =

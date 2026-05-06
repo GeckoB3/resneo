@@ -5,9 +5,15 @@ import { stripe } from '@/lib/stripe';
 import { stripeSubscriptionOrCustomerHasPaymentMethod } from '@/lib/stripe/venue-customer-payment';
 import {
   mapStripeSubscriptionToPlanStatus,
+  subscriptionCancelAtIso,
   subscriptionPeriodEndIso,
   subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' } as const;
 
 /**
  * GET /api/venue/light-plan/status
@@ -18,7 +24,7 @@ export async function GET() {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff || !requireAdmin(staff)) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403, headers: NO_STORE_HEADERS });
     }
 
     const { data: venue, error } = await staff.db
@@ -30,12 +36,12 @@ export async function GET() {
       .maybeSingle();
 
     if (error || !venue) {
-      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
     const tier = String((venue as { pricing_tier?: string }).pricing_tier ?? '').toLowerCase();
     if (tier !== 'light') {
-      return NextResponse.json({ error: 'Not an Appointments Light venue' }, { status: 400 });
+      return NextResponse.json({ error: 'Not an Appointments Light venue' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
     const customerId = (venue as { stripe_customer_id?: string | null }).stripe_customer_id?.trim() ?? '';
@@ -58,7 +64,7 @@ export async function GET() {
         stripe_subscription_status = sub.status;
         planStatus = mapStripeSubscriptionToPlanStatus(sub);
         periodStart = subscriptionPeriodStartIso(sub);
-        periodEnd = subscriptionPeriodEndIso(sub);
+        periodEnd = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
         await staff.db
           .from('venues')
           .update({
@@ -73,17 +79,20 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
-      venue_id: staff.venue_id,
-      plan_status: planStatus,
-      stripe_subscription_id: subId || null,
-      has_default_payment_method,
-      stripe_subscription_status,
-      subscription_current_period_start: periodStart,
-      subscription_current_period_end: periodEnd,
-    });
+    return NextResponse.json(
+      {
+        venue_id: staff.venue_id,
+        plan_status: planStatus,
+        stripe_subscription_id: subId || null,
+        has_default_payment_method,
+        stripe_subscription_status,
+        subscription_current_period_start: periodStart,
+        subscription_current_period_end: periodEnd,
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     console.error('[light-plan/status] Error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

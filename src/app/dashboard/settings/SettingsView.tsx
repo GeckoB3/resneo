@@ -291,10 +291,14 @@ function PlanSection({
     ? Date.parse(venue.subscription_current_period_end)
     : Number.NaN;
   const hasFuturePeriodEnd = Number.isFinite(periodEndTime) && periodEndTime > Date.now();
-  const nextBillingPrimaryLabel = isFreeAccess ? 'Free Access Granted' : periodEndLabel ?? 'Not available yet';
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
   const cancelledWithAccessUntilPeriodEnd = isCancelling || (planStatus === 'cancelled' && hasFuturePeriodEnd);
+  const nextBillingPrimaryLabel = isFreeAccess
+    ? 'Free Access Granted'
+    : cancelledWithAccessUntilPeriodEnd
+      ? periodEndLabel ?? 'End of current billing period'
+      : periodEndLabel ?? 'Not available yet';
   const hasStripeSub = Boolean(venue.stripe_subscription_id?.trim());
   const smsUsed = venue.sms_messages_sent_this_month ?? 0;
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
@@ -669,10 +673,14 @@ function PlanSection({
           <p className="text-xs text-slate-600">{planPrice}</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Next billing</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            {cancelledWithAccessUntilPeriodEnd && !isFreeAccess ? 'Access until' : 'Next billing'}
+          </p>
           <p className="mt-1 text-sm font-semibold text-slate-900">{nextBillingPrimaryLabel}</p>
           {isFreeAccess ? (
             <p className="text-xs text-slate-600">No subscription charges. SMS is capped at your plan allowance.</p>
+          ) : cancelledWithAccessUntilPeriodEnd ? (
+            <p className="text-xs text-slate-600">No further subscription charge is scheduled for this plan.</p>
           ) : (
             <p className="text-xs text-slate-600">
               {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}

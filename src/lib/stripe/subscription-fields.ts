@@ -7,6 +7,7 @@
 interface SubscriptionFields {
   current_period_end?: number;
   current_period_start?: number;
+  cancel_at?: number | null;
   cancel_at_period_end?: boolean;
   status?: string;
   items?: {
@@ -48,6 +49,18 @@ export function subscriptionCancelAtPeriodEnd(sub: unknown): boolean {
   return Boolean(f?.cancel_at_period_end);
 }
 
+export function subscriptionCancelAtIso(sub: unknown): string | null {
+  const f = asFields(sub);
+  if (!f || typeof f.cancel_at !== 'number') return null;
+  return new Date(f.cancel_at * 1000).toISOString();
+}
+
+export function subscriptionHasFutureCancellation(sub: unknown): boolean {
+  if (subscriptionCancelAtPeriodEnd(sub)) return true;
+  const cancelAt = subscriptionCancelAtIso(sub);
+  return Boolean(cancelAt && Date.parse(cancelAt) > Date.now());
+}
+
 export function subscriptionStatus(sub: unknown): string | undefined {
   const f = asFields(sub);
   return typeof f?.status === 'string' ? f.status : undefined;
@@ -56,7 +69,7 @@ export function subscriptionStatus(sub: unknown): string | undefined {
 export function mapStripeSubscriptionToPlanStatus(
   sub: unknown,
 ): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' {
-  if (subscriptionCancelAtPeriodEnd(sub)) return 'cancelling';
+  if (subscriptionHasFutureCancellation(sub)) return 'cancelling';
   const st = subscriptionStatus(sub);
   if (st === 'trialing') return 'trialing';
   if (st === 'active') return 'active';

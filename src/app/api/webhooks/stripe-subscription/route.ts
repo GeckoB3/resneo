@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getBusinessConfig } from '@/lib/business-config';
 import {
   mapStripeSubscriptionToPlanStatus,
+  subscriptionCancelAtIso,
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
   subscriptionPeriodStartIso,
@@ -210,7 +211,7 @@ async function handleCheckoutCompleted(
         const ids = getPersistedSubscriptionItemIds(sub);
         mainSubscriptionItemId = ids.mainSubscriptionItemId;
         smsSubscriptionItemId = ids.smsSubscriptionItemId;
-        periodEndIso = subscriptionPeriodEndIso(sub);
+        periodEndIso = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
         periodStartIso = subscriptionPeriodStartIso(sub);
         newPlanStatus = mapStripeSubscriptionToPlanStatus(sub);
       } catch {
@@ -295,7 +296,7 @@ async function handleCheckoutCompleted(
       const ids = getPersistedSubscriptionItemIds(sub);
       mainSubscriptionItemId = ids.mainSubscriptionItemId;
       smsSubscriptionItemId = ids.smsSubscriptionItemId;
-      periodEndIso = subscriptionPeriodEndIso(sub);
+      periodEndIso = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
       periodStartIso = subscriptionPeriodStartIso(sub);
       cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
     } catch {
@@ -382,7 +383,7 @@ async function handleSubscriptionUpdated(
     stripe_subscription_item_id: ids.mainSubscriptionItemId,
     stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
     subscription_current_period_start: subscriptionPeriodStartIso(subscriptionRaw),
-    subscription_current_period_end: subscriptionPeriodEndIso(subscriptionRaw),
+    subscription_current_period_end: subscriptionPeriodEndIso(subscriptionRaw) ?? subscriptionCancelAtIso(subscriptionRaw),
   };
 
   const priceId = mainItem?.price && typeof mainItem.price === 'object'
@@ -462,7 +463,7 @@ async function handleSubscriptionDeleted(
     const existingPeriodEnd = (row as { subscription_current_period_end?: string | null })
       .subscription_current_period_end;
     const periodStartIso = subscriptionPeriodStartIso(subscription) ?? existingPeriodStart ?? null;
-    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? existingPeriodEnd ?? null;
+    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? subscriptionCancelAtIso(subscription) ?? existingPeriodEnd ?? null;
     const planStatus = mapStripeSubscriptionToPlanStatus(subscription);
 
     await supabase
@@ -485,7 +486,7 @@ async function handleSubscriptionDeleted(
    */
   if (!updatedAny) {
     const periodStartIso = subscriptionPeriodStartIso(subscription) ?? null;
-    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? null;
+    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? subscriptionCancelAtIso(subscription) ?? null;
     const planStatus = mapStripeSubscriptionToPlanStatus(subscription);
     await supabase
       .from('venues')

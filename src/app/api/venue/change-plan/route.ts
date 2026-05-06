@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { subscriptionPeriodEndIso, subscriptionPeriodStartIso, subscriptionStatus } from '@/lib/stripe/subscription-fields';
+import {
+  subscriptionCancelAtIso,
+  subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
+  subscriptionStatus,
+} from '@/lib/stripe/subscription-fields';
 import {
   buildCheckoutLineItems,
   buildLightPlanCheckoutLineItems,
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
         const sub = await stripe.subscriptions.update(venue.stripe_subscription_id as string, {
           cancel_at_period_end: true,
         });
-        const periodEndIso = subscriptionPeriodEndIso(sub);
+        const periodEndIso = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
         const periodStartIso = subscriptionPeriodStartIso(sub);
         await admin
           .from('venues')
@@ -95,7 +100,7 @@ export async function POST(request: Request) {
         const sub = await stripe.subscriptions.update(venue.stripe_subscription_id as string, {
           cancel_at_period_end: false,
         });
-        const periodEndIso = subscriptionPeriodEndIso(sub);
+        const periodEndIso = subscriptionPeriodEndIso(sub) ?? subscriptionCancelAtIso(sub);
         const periodStartIso = subscriptionPeriodStartIso(sub);
         const st = subscriptionStatus(sub);
         await admin

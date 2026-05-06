@@ -7,7 +7,7 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { GuestRecord } from '@/lib/guests';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 export interface InsertFreeClassSessionBookingParams {
@@ -190,7 +190,11 @@ export async function insertFreeClassSessionBooking(
     })
     .eq('id', bookingId);
 
-  const manageBookingLink = createShortManageLink(bookingId);
+  const manageBookingLink = await createOrGetBookingShortLink({
+    venueId,
+    bookingId,
+    purpose: 'manage',
+  });
 
   if (!skipGuestNotifications && (guest.email || guest.phone)) {
     after(async () => {

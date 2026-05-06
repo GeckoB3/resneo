@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
-import { createPaymentPageUrl, tryGetPaymentTokenSecret } from '@/lib/payment-token';
+import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
+import { tryGetPaymentTokenSecret } from '@/lib/payment-token';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
 
       const timeStr = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00';
       const depositAmount = b.deposit_amount_pence ? (b.deposit_amount_pence / 100).toFixed(2) : '5.00';
-      const paymentLink = createPaymentPageUrl(b.id, origin);
+      const paymentLink = await createOrGetPaymentShortLink(b.venue_id as string, b.id as string, origin);
 
       await sendCommunication({
         type: 'deposit_payment_reminder',

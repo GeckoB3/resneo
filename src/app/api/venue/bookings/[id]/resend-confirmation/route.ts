@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
 export async function POST(
@@ -45,7 +45,11 @@ export async function POST(
     })
     .eq('id', booking.id);
 
-  const manageBookingLink = createShortManageLink(booking.id);
+  const manageBookingLink = await createOrGetBookingShortLink({
+    venueId: staff.venue_id,
+    bookingId: booking.id,
+    purpose: 'manage',
+  });
 
   // Clear any existing dedup entries so the resend actually fires (email + SMS use separate message types)
   await admin

@@ -6,7 +6,7 @@ import { validateBookingStatusTransition } from '@/lib/table-management/lifecycl
 import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
 /**
@@ -158,7 +158,11 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
         if (!bRow) continue;
 
-        const manageBookingLink = createShortManageLink(bid);
+        const manageBookingLink = await createOrGetBookingShortLink({
+          venueId: booking.venue_id,
+          bookingId: bid,
+          purpose: 'manage',
+        });
         const bookingTime =
           typeof bRow.booking_time === 'string' ? bRow.booking_time.slice(0, 5) : bRow.booking_time;
         const bookingData = {

@@ -1310,8 +1310,12 @@ export async function PATCH(
         .single();
       if (guestRow && venueRow?.name) {
         const { sendBookingModificationNotification } = await import('@/lib/communications/send-templated');
-        const { createShortManageLink } = await import('@/lib/short-manage-link');
-        const manageLink = createShortManageLink(id);
+        const { createOrGetBookingShortLink } = await import('@/lib/booking-short-links');
+        const manageLink = await createOrGetBookingShortLink({
+          venueId: staff.venue_id,
+          bookingId: id,
+          purpose: 'manage',
+        });
         const bookingEmail: import('@/lib/emails/types').BookingEmailData = {
           id,
           guest_name: guestRow.name ?? 'Guest',

@@ -49,7 +49,7 @@ import {
   venueExposesBookingModel,
 } from '@/lib/booking/enabled-models';
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
@@ -462,7 +462,11 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', booking.id);
-      const manageBookingLink = createShortManageLink(booking.id);
+      const manageBookingLink = await createOrGetBookingShortLink({
+        venueId: venue_id,
+        bookingId: booking.id,
+        purpose: 'manage',
+      });
       if (guest.email || guest.phone) {
         after(async () => {
           try {
@@ -1173,7 +1177,11 @@ async function handleNonTableBooking(
       .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
       .eq('id', booking.id);
 
-    const manageBookingLink = createShortManageLink(booking.id);
+    const manageBookingLink = await createOrGetBookingShortLink({
+      venueId: venue_id,
+      bookingId: booking.id,
+      purpose: 'manage',
+    });
 
     if (guest.email || guest.phone) {
       after(async () => {

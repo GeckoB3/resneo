@@ -192,6 +192,22 @@ describe('renderCommunicationSms confirm_or_cancel_prompt', () => {
     expect(out?.body).not.toBe(longManageLink);
   });
 
+  it('uses compact /b/ short links in booking confirmation SMS when provided', () => {
+    const shortUrl = 'https://www.reserveni.com/b/aZ3kQ9';
+    const out = renderCommunicationSms({
+      lane: 'table',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        party_size: 2,
+        manage_booking_link: shortUrl,
+      }),
+      venue,
+    });
+    expect(out?.body).toContain('Test Venue: Booking confirmed for 2 guests');
+    expect(out?.body).toContain('Manage: https://www.reserveni.com/b/aZ3kQ9');
+    expect(out?.body).not.toContain('/m/v3.');
+  });
+
   it('keeps table confirm-or-cancel wording when the confirm link is long', () => {
     const longConfirmLink =
       'https://www.reserveni.com/c/v2.eyJib29raW5nSWQiOiJhYWFhYWFhYS1iYmJiLWNjY2MtZGRkZC1lZWVlZWVlZWVlZWUiLCJzaWciOiIxMjM0NTY3ODkwIn0';
@@ -207,6 +223,21 @@ describe('renderCommunicationSms confirm_or_cancel_prompt', () => {
     expect(out?.body).toContain('Test Venue: Please confirm or cancel your booking for 4 guests');
     expect(out?.body).toContain(longConfirmLink);
     expect(out?.body).not.toBe(longConfirmLink);
+  });
+
+  it('includes compact /b/ confirm links in confirm-or-cancel SMS', () => {
+    const shortConfirm = 'https://www.reserveni.com/b/qwerty';
+    const out = renderCommunicationSms({
+      lane: 'table',
+      messageKey: 'confirm_or_cancel_prompt',
+      booking: baseBooking({ party_size: 3 }),
+      venue,
+      confirmLink: shortConfirm,
+      cancelLink: shortConfirm,
+    });
+    expect(out?.body).toContain('Please confirm or cancel');
+    expect(out?.body).toContain('https://www.reserveni.com/b/qwerty');
+    expect(out?.body).not.toContain('/c/');
   });
 
   it('uses one confirm-or-cancel link for table bookings', () => {

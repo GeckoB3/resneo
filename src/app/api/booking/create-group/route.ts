@@ -28,7 +28,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
@@ -454,7 +454,11 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', primaryBookingId);
 
-      const manageBookingLink = createShortManageLink(primaryBookingId);
+      const manageBookingLink = await createOrGetBookingShortLink({
+        venueId: venue_id,
+        bookingId: primaryBookingId,
+        purpose: 'manage',
+      });
 
       const firstPerson = validatedPeople[0]!;
       after(async () => {

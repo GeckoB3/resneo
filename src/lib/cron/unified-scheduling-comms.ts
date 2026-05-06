@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingModel } from '@/types/booking-models';
-import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
@@ -143,8 +143,20 @@ async function runLaneReminder(opts: {
       }
 
       let booking = buildBookingData(row, opts.venue.booking_model);
-      booking.manage_booking_link = createShortManageLink(row.id);
-      booking.confirm_cancel_link = createShortConfirmLink(row.id);
+      const [manageLink, confirmLink] = await Promise.all([
+        createOrGetBookingShortLink({
+          venueId: row.venue_id,
+          bookingId: row.id,
+          purpose: 'manage',
+        }),
+        createOrGetBookingShortLink({
+          venueId: row.venue_id,
+          bookingId: row.id,
+          purpose: 'confirm',
+        }),
+      ]);
+      booking.manage_booking_link = manageLink;
+      booking.confirm_cancel_link = confirmLink;
       booking = await enrichBookingEmailForAppointment(opts.supabase, row.id, booking);
 
       let sentAny = false;
@@ -242,7 +254,11 @@ async function runLanePostVisit(opts: {
       }
 
       let booking = buildBookingData(row, opts.venue.booking_model);
-      booking.manage_booking_link = createShortManageLink(row.id);
+      booking.manage_booking_link = await createOrGetBookingShortLink({
+        venueId: row.venue_id,
+        bookingId: row.id,
+        purpose: 'manage',
+      });
       booking = await enrichBookingEmailForAppointment(opts.supabase, row.id, booking);
 
       const email = await sendPolicyMessage({

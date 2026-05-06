@@ -8,7 +8,7 @@ import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } fr
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { fulfillClassCreditPurchaseFromPaymentIntent } from '@/lib/class-commerce/fulfill-credit-purchase';
 import { fulfillCourseEnrollmentFromPaymentIntent } from '@/lib/class-commerce/fulfill-course-enrollment';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
@@ -167,7 +167,11 @@ export async function POST(request: NextRequest) {
             .maybeSingle();
           if (!b) continue;
 
-          const manageBookingLink = createShortManageLink(bid);
+          const manageBookingLink = await createOrGetBookingShortLink({
+            venueId: venueIdForAfter,
+            bookingId: bid,
+            purpose: 'manage',
+          });
           const recipientEmail = guest?.email ?? (b as { guest_email?: string | null }).guest_email ?? null;
           const bookingData = {
             id: bid,

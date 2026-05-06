@@ -10,10 +10,8 @@ import {
   parseExtendedBookingRules,
 } from "@/lib/booking/venue-booking-rules";
 import { verifyConfirmToken } from "@/lib/confirm-token";
-import {
-  createShortManageLink,
-  verifyBookingHmac,
-} from "@/lib/short-manage-link";
+import { createOrGetBookingShortLink } from "@/lib/booking-short-links";
+import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
   validateBookingStatusTransition,
   applyBookingLifecycleStatusEffects,
@@ -260,7 +258,11 @@ export async function GET(request: NextRequest) {
       guest_attendance_confirmed_at:
         (booking as { guest_attendance_confirmed_at?: string | null })
           .guest_attendance_confirmed_at ?? null,
-      manage_booking_url: createShortManageLink(booking.id),
+      manage_booking_url: await createOrGetBookingShortLink({
+        venueId: booking.venue_id,
+        bookingId: booking.id,
+        purpose: "manage",
+      }),
     });
   } catch (err) {
     console.error("GET /api/confirm failed:", err);

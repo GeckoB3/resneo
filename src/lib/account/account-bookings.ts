@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import type { BookingModel } from '@/types/booking-models';
 
 export interface AccountGuestSafeRow {
@@ -147,26 +147,33 @@ export async function loadAccountBookings(
 
   const venueMap = new Map((venues ?? []).map((v) => [v.id, v as AccountVenueRow]));
 
-  return (bookings ?? []).map((b) => ({
-    id: b.id as string,
-    venue_id: b.venue_id as string,
-    guest_id: b.guest_id as string,
-    booking_date: b.booking_date as string,
-    booking_time: b.booking_time as string,
-    booking_end_time: (b.booking_end_time as string | null | undefined) ?? null,
-    party_size: b.party_size as number,
-    status: b.status as string,
-    booking_model: (b.booking_model as BookingModel | null) ?? 'table_reservation',
-    deposit_status: (b.deposit_status as string | null | undefined) ?? null,
-    deposit_amount_pence: (b.deposit_amount_pence as number | null | undefined) ?? null,
-    special_requests: (b.special_requests as string | null | undefined) ?? null,
-    dietary_notes: (b.dietary_notes as string | null | undefined) ?? null,
-    occasion: (b.occasion as string | null | undefined) ?? null,
-    group_booking_id: (b as { group_booking_id?: string | null }).group_booking_id ?? null,
-    class_instance_id: (b as { class_instance_id?: string | null }).class_instance_id ?? null,
-    venue: venueMap.get(b.venue_id as string) ?? null,
-    manage_booking_link: createShortManageLink(b.id as string),
-  }));
+  const rows = bookings ?? [];
+  return Promise.all(
+    rows.map(async (b) => ({
+      id: b.id as string,
+      venue_id: b.venue_id as string,
+      guest_id: b.guest_id as string,
+      booking_date: b.booking_date as string,
+      booking_time: b.booking_time as string,
+      booking_end_time: (b.booking_end_time as string | null | undefined) ?? null,
+      party_size: b.party_size as number,
+      status: b.status as string,
+      booking_model: (b.booking_model as BookingModel | null) ?? 'table_reservation',
+      deposit_status: (b.deposit_status as string | null | undefined) ?? null,
+      deposit_amount_pence: (b.deposit_amount_pence as number | null | undefined) ?? null,
+      special_requests: (b.special_requests as string | null | undefined) ?? null,
+      dietary_notes: (b.dietary_notes as string | null | undefined) ?? null,
+      occasion: (b.occasion as string | null | undefined) ?? null,
+      group_booking_id: (b as { group_booking_id?: string | null }).group_booking_id ?? null,
+      class_instance_id: (b as { class_instance_id?: string | null }).class_instance_id ?? null,
+      venue: venueMap.get(b.venue_id as string) ?? null,
+      manage_booking_link: await createOrGetBookingShortLink({
+        venueId: b.venue_id as string,
+        bookingId: b.id as string,
+        purpose: 'manage',
+      }),
+    })),
+  );
 }
 
 export async function loadAccountBookingById(

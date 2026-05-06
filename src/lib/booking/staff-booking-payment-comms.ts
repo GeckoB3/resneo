@@ -3,8 +3,7 @@ import type { NextRequest } from 'next/server';
 import { after } from 'next/server';
 import { stripe } from '@/lib/stripe';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { createPaymentPageUrl } from '@/lib/payment-token';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink, createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { sendBookingConfirmationNotifications, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingModel } from '@/types/booking-models';
@@ -70,6 +69,10 @@ export async function applyStaffBookingPaymentAndComms(params: {
     logContext,
   } = params;
 
+  const publicBaseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+
   let payment_url: string | undefined;
   if (requiresDeposit && depositAmountPence > 0 && stripeConnectedAccountId) {
     try {
@@ -87,10 +90,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
         .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
         .eq('id', bookingId);
 
-      const baseUrl =
-        process.env.NEXT_PUBLIC_BASE_URL ||
-        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-      payment_url = createPaymentPageUrl(bookingId, baseUrl);
+      payment_url = await createOrGetPaymentShortLink(venueId, bookingId, publicBaseUrl);
     } catch (stripeErr) {
       console.error(`PaymentIntent create failed (${logContext}):`, stripeErr);
       throw new Error('payment_failed');
@@ -138,7 +138,12 @@ export async function applyStaffBookingPaymentAndComms(params: {
       .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
       .eq('id', bookingId);
 
-    const manageBookingLink = createShortManageLink(bookingId);
+    const manageBookingLink = await createOrGetBookingShortLink({
+      venueId,
+      bookingId,
+      purpose: 'manage',
+      publicOrigin: publicBaseUrl,
+    });
 
     if (guestEmail || guestPhone) {
       after(async () => {

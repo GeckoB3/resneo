@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
+import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -184,8 +184,20 @@ async function sendConfirmOrCancelPrompts(results: {
           }
 
           let booking = buildBookingData(bookingRow);
-          booking.manage_booking_link = createShortManageLink(bookingRow.id);
-          booking.confirm_cancel_link = createShortConfirmLink(bookingRow.id);
+          const [manageLink, confirmLink] = await Promise.all([
+            createOrGetBookingShortLink({
+              venueId: bookingRow.venue_id,
+              bookingId: bookingRow.id,
+              purpose: 'manage',
+            }),
+            createOrGetBookingShortLink({
+              venueId: bookingRow.venue_id,
+              bookingId: bookingRow.id,
+              purpose: 'confirm',
+            }),
+          ]);
+          booking.manage_booking_link = manageLink;
+          booking.confirm_cancel_link = confirmLink;
           booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
 
           let sentAny = false;
@@ -286,8 +298,20 @@ async function sendPreVisitReminders(results: {
           }
 
           let booking = buildBookingData(bookingRow);
-          booking.manage_booking_link = createShortManageLink(bookingRow.id);
-          booking.confirm_cancel_link = createShortConfirmLink(bookingRow.id);
+          const [manageLinkPv, confirmLinkPv] = await Promise.all([
+            createOrGetBookingShortLink({
+              venueId: bookingRow.venue_id,
+              bookingId: bookingRow.id,
+              purpose: 'manage',
+            }),
+            createOrGetBookingShortLink({
+              venueId: bookingRow.venue_id,
+              bookingId: bookingRow.id,
+              purpose: 'confirm',
+            }),
+          ]);
+          booking.manage_booking_link = manageLinkPv;
+          booking.confirm_cancel_link = confirmLinkPv;
           booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
 
           let sentAny = false;
@@ -386,7 +410,11 @@ async function sendPostVisitThankYous(results: {
           }
 
           let booking = buildBookingData(bookingRow);
-          booking.manage_booking_link = createShortManageLink(bookingRow.id);
+          booking.manage_booking_link = await createOrGetBookingShortLink({
+            venueId: bookingRow.venue_id,
+            bookingId: bookingRow.id,
+            purpose: 'manage',
+          });
           booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
 
           const email = await sendPolicyMessage({

@@ -15,6 +15,11 @@ import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' } as const;
+
 type AppointmentsTier = 'light' | 'plus' | 'appointments';
 
 const PRICE_TIER_ENV_KEYS: Array<{ envKey: string; tier: AppointmentsTier }> = [
@@ -40,7 +45,7 @@ export async function GET() {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff || !requireAdmin(staff)) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403, headers: NO_STORE_HEADERS });
     }
 
     const { data: venue, error } = await staff.db
@@ -52,12 +57,12 @@ export async function GET() {
       .maybeSingle();
 
     if (error || !venue) {
-      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
     const dbTier = String((venue as { pricing_tier?: string | null }).pricing_tier ?? '').toLowerCase();
     if (!isAppointmentPlanTier(dbTier)) {
-      return NextResponse.json({ error: 'Not an Appointments plan venue' }, { status: 400 });
+      return NextResponse.json({ error: 'Not an Appointments plan venue' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
     const subId = (venue as { stripe_subscription_id?: string | null }).stripe_subscription_id?.trim() ?? '';
@@ -107,18 +112,21 @@ export async function GET() {
       .update({ calendar_count: activeCalendarCount })
       .eq('id', staff.venue_id);
 
-    return NextResponse.json({
-      venue_id: staff.venue_id,
-      pricing_tier: pricingTier,
-      plan_status: planStatus,
-      stripe_subscription_id: subId || null,
-      stripe_subscription_status: stripeSubscriptionStatus,
-      subscription_current_period_start: periodStart,
-      subscription_current_period_end: periodEnd,
-      calendar_count: activeCalendarCount,
-    });
+    return NextResponse.json(
+      {
+        venue_id: staff.venue_id,
+        pricing_tier: pricingTier,
+        plan_status: planStatus,
+        stripe_subscription_id: subId || null,
+        stripe_subscription_status: stripeSubscriptionStatus,
+        subscription_current_period_start: periodStart,
+        subscription_current_period_end: periodEnd,
+        calendar_count: activeCalendarCount,
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     console.error('[appointments-plan/status] Error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

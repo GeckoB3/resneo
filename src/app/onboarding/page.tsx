@@ -1898,73 +1898,8 @@ export default function OnboardingPage() {
         setStep((s) => s + 1);
         return;
       }
-      if (rosterList.length === 0) {
-        setError('No calendars found. Go back and complete the Calendars step first.');
-        return;
-      }
       const validClasses = classes.filter((c) => c.name.trim());
       if (validClasses.length === 0) {
-        setError('Please add at least one class.');
-        return;
-      }
-      for (const c of validClasses) {
-        if (!c.instructor_id.trim()) {
-          setError('Select a calendar for each class.');
-          return;
-        }
-        const pricePence = poundsToMinor(c.price);
-        const req = c.payment_requirement;
-        if (req !== 'none' && pricePence <= 0) {
-          setError(
-            `Set a price per person for "${c.name.trim()}" when using deposit or full payment online.`,
-          );
-          return;
-        }
-        if (req === 'deposit') {
-          const dep = poundsToMinor(c.deposit_pounds);
-          if (dep <= 0) {
-            setError(`Enter a deposit amount for "${c.name.trim()}".`);
-            return;
-          }
-          if (pricePence > 0 && dep > pricePence) {
-            setError(`Deposit cannot exceed price per person for "${c.name.trim()}".`);
-            return;
-          }
-        }
-      }
-      setSaving(true);
-      try {
-        for (const c of validClasses) {
-          const typeRes = await fetch('/api/venue/classes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildClassTypePayloadFromDraft(c)),
-          });
-          const typeBody = (await typeRes.json()) as { data?: { id?: string }; error?: string };
-          if (!typeRes.ok) {
-            throw new Error(typeBody.error ?? 'Failed to create class type');
-          }
-          const classTypeId = typeBody.data?.id;
-          if (!classTypeId) throw new Error('Class type ID missing from response');
-        }
-
-        await saveProgress(step + 1);
-        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to save classes. Please try again.');
-        setSaving(false);
-        return;
-      }
-      setSaving(false);
-    }
-
-    if (currentStepKey === 'resources') {
-      if (step < maxCompletedStep && step !== revisitedStepIndex) {
-        setStep((s) => s + 1);
-        return;
-      }
-      const validResources = resources.filter((r) => r.name.trim());
-      if (isAppointmentsPlanVenue && validResources.length === 0) {
         setSaving(true);
         try {
           await saveProgress(step + 1);
@@ -1976,10 +1911,80 @@ export default function OnboardingPage() {
         }
         setSaving(false);
       } else {
-        if (validResources.length === 0) {
-          setError('Please add at least one resource.');
+        if (rosterList.length === 0) {
+          setError('No calendars found. Go back and complete the Calendars step first.');
           return;
         }
+        for (const c of validClasses) {
+          if (!c.instructor_id.trim()) {
+            setError('Select a calendar for each class.');
+            return;
+          }
+          const pricePence = poundsToMinor(c.price);
+          const req = c.payment_requirement;
+          if (req !== 'none' && pricePence <= 0) {
+            setError(
+              `Set a price per person for "${c.name.trim()}" when using deposit or full payment online.`,
+            );
+            return;
+          }
+          if (req === 'deposit') {
+            const dep = poundsToMinor(c.deposit_pounds);
+            if (dep <= 0) {
+              setError(`Enter a deposit amount for "${c.name.trim()}".`);
+              return;
+            }
+            if (pricePence > 0 && dep > pricePence) {
+              setError(`Deposit cannot exceed price per person for "${c.name.trim()}".`);
+              return;
+            }
+          }
+        }
+        setSaving(true);
+        try {
+          for (const c of validClasses) {
+            const typeRes = await fetch('/api/venue/classes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildClassTypePayloadFromDraft(c)),
+            });
+            const typeBody = (await typeRes.json()) as { data?: { id?: string }; error?: string };
+            if (!typeRes.ok) {
+              throw new Error(typeBody.error ?? 'Failed to create class type');
+            }
+            const classTypeId = typeBody.data?.id;
+            if (!classTypeId) throw new Error('Class type ID missing from response');
+          }
+
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to save classes. Please try again.');
+          setSaving(false);
+          return;
+        }
+        setSaving(false);
+      }
+    }
+
+    if (currentStepKey === 'resources') {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
+        setStep((s) => s + 1);
+        return;
+      }
+      const validResources = resources.filter((r) => r.name.trim());
+      if (validResources.length === 0) {
+        setSaving(true);
+        try {
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch {
+          setError('Failed to save progress. Please try again.');
+          setSaving(false);
+          return;
+        }
+        setSaving(false);
+      } else {
         if (rosterList.length === 0) {
           setError('No team calendars found. Go back and complete the Calendars step first.');
           return;

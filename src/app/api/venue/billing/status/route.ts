@@ -16,7 +16,12 @@ import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { stripeSubscriptionOrCustomerHasPaymentMethod } from '@/lib/stripe/venue-customer-payment';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 type PlanTier = 'appointments' | 'plus' | 'restaurant' | 'light';
+
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' } as const;
 
 const PRICE_TIER_ENV_KEYS: Array<{ envKey: string; tier: PlanTier }> = [
   { envKey: 'STRIPE_APPOINTMENTS_PRO_PRICE_ID', tier: 'appointments' },
@@ -50,7 +55,7 @@ export async function GET() {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff || !requireAdmin(staff)) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403, headers: NO_STORE_HEADERS });
     }
 
     const { data: venue, error } = await staff.db
@@ -62,7 +67,7 @@ export async function GET() {
       .maybeSingle();
 
     if (error || !venue) {
-      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
     const customerId = (venue as { stripe_customer_id?: string | null }).stripe_customer_id?.trim() ?? '';
@@ -125,45 +130,51 @@ export async function GET() {
 
         await updateVenueSmsMonthlyAllowance(staff.venue_id);
 
-        return NextResponse.json({
-          venue_id: staff.venue_id,
-          pricing_tier: pricingTier,
-          plan_status: planStatus,
-          stripe_subscription_id: planStatus === 'cancelled' ? null : sub.id,
-          stripe_subscription_status: stripeSubscriptionStatus,
-          subscription_current_period_start: periodStart,
-          subscription_current_period_end: periodEnd,
-          calendar_count: activeCalendarCount,
-          has_default_payment_method: customerId
-            ? await stripeSubscriptionOrCustomerHasPaymentMethod({
-                customerId,
-                subscriptionId: planStatus === 'cancelled' ? null : sub.id,
-              })
-            : false,
-        });
+        return NextResponse.json(
+          {
+            venue_id: staff.venue_id,
+            pricing_tier: pricingTier,
+            plan_status: planStatus,
+            stripe_subscription_id: planStatus === 'cancelled' ? null : sub.id,
+            stripe_subscription_status: stripeSubscriptionStatus,
+            subscription_current_period_start: periodStart,
+            subscription_current_period_end: periodEnd,
+            calendar_count: activeCalendarCount,
+            has_default_payment_method: customerId
+              ? await stripeSubscriptionOrCustomerHasPaymentMethod({
+                  customerId,
+                  subscriptionId: planStatus === 'cancelled' ? null : sub.id,
+                })
+              : false,
+          },
+          { headers: NO_STORE_HEADERS },
+        );
       } catch (e) {
         console.warn('[venue/billing/status] stripe.subscriptions.retrieve failed', { subId, e });
       }
     }
 
-    return NextResponse.json({
-      venue_id: staff.venue_id,
-      pricing_tier: pricingTier,
-      plan_status: planStatus,
-      stripe_subscription_id: subId || null,
-      stripe_subscription_status: stripeSubscriptionStatus,
-      subscription_current_period_start: periodStart,
-      subscription_current_period_end: periodEnd,
-      calendar_count: null,
-      has_default_payment_method: customerId
-        ? await stripeSubscriptionOrCustomerHasPaymentMethod({
-            customerId,
-            subscriptionId: subId || null,
-          })
-        : false,
-    });
+    return NextResponse.json(
+      {
+        venue_id: staff.venue_id,
+        pricing_tier: pricingTier,
+        plan_status: planStatus,
+        stripe_subscription_id: subId || null,
+        stripe_subscription_status: stripeSubscriptionStatus,
+        subscription_current_period_start: periodStart,
+        subscription_current_period_end: periodEnd,
+        calendar_count: null,
+        has_default_payment_method: customerId
+          ? await stripeSubscriptionOrCustomerHasPaymentMethod({
+              customerId,
+              subscriptionId: subId || null,
+            })
+          : false,
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     console.error('[venue/billing/status] Error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }

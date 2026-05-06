@@ -331,7 +331,10 @@ function PlanSection({
     setBillingSyncing(true);
     setActionError(null);
     try {
-      const res = await fetch('/api/venue/billing/status');
+      const res = await fetch('/api/venue/billing/status', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (!res.ok) return;
       const data = (await res.json()) as BillingStatusPayload;
       applyBillingStatus(data);
@@ -450,20 +453,37 @@ function PlanSection({
         }, ms),
       );
     };
-    const syncIfPortalMayHaveChangedBilling = () => {
-      if (!billingPortalRefreshPending.current) return;
+
+    /**
+     * Refresh from Stripe whenever the user comes back to the tab/window.
+     * This catches Customer Portal cancellations even if the user closes
+     * the portal tab without ever returning via our portal_return URL,
+     * and works regardless of whether webhook delivery has happened yet.
+     */
+    let lastSyncAt = 0;
+    const MIN_SYNC_INTERVAL_MS = 1500;
+    const refreshOnReturnToPage = () => {
       if (document.visibilityState === 'hidden') return;
-      if (billingPortalOpenedAt.current && Date.now() - billingPortalOpenedAt.current < 1500) return;
+      const now = Date.now();
+      const justReturnedFromPortal = billingPortalRefreshPending.current;
+      const portalOpenedRecently =
+        billingPortalOpenedAt.current && now - billingPortalOpenedAt.current < 1500;
+      if (portalOpenedRecently) return;
+      if (!justReturnedFromPortal && now - lastSyncAt < MIN_SYNC_INTERVAL_MS) return;
+      lastSyncAt = now;
+      const showSuccess = justReturnedFromPortal;
       billingPortalRefreshPending.current = false;
-      void fetchBillingStatus({ showSuccess: true });
-      schedulePortalSyncRetries();
+      void fetchBillingStatus({ showSuccess });
+      if (justReturnedFromPortal) {
+        schedulePortalSyncRetries();
+      }
     };
 
-    window.addEventListener('focus', syncIfPortalMayHaveChangedBilling);
-    document.addEventListener('visibilitychange', syncIfPortalMayHaveChangedBilling);
+    window.addEventListener('focus', refreshOnReturnToPage);
+    document.addEventListener('visibilitychange', refreshOnReturnToPage);
     return () => {
-      window.removeEventListener('focus', syncIfPortalMayHaveChangedBilling);
-      document.removeEventListener('visibilitychange', syncIfPortalMayHaveChangedBilling);
+      window.removeEventListener('focus', refreshOnReturnToPage);
+      document.removeEventListener('visibilitychange', refreshOnReturnToPage);
       clearPortalSyncRetries();
     };
   }, [fetchBillingStatus, isFreeAccess]);
@@ -1000,8 +1020,19 @@ function SettingsViewInner({
     [selectedTab, pathname, searchParams],
   );
 
+  /**
+   * Reset local venue state only when the underlying record genuinely changes
+   * (different venue id, or first-time load). Avoid replacing fresh client state
+   * on every parent re-render or `router.refresh()`, otherwise the Plan tab can
+   * silently revert from a freshly-synced billing snapshot to whatever the
+   * server-rendered HTML happened to contain.
+   */
   useEffect(() => {
-    setVenue(initialVenue);
+    setVenue((current) => {
+      if (!initialVenue) return null;
+      if (!current || current.id !== initialVenue.id) return initialVenue;
+      return current;
+    });
   }, [initialVenue]);
 
   useEffect(() => {
@@ -1019,7 +1050,10 @@ function SettingsViewInner({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch('/api/venue/appointments-plan/status');
+        const res = await fetch('/api/venue/appointments-plan/status', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as AppointmentsPlanStatusPayload;
         if (cancelled) return;

@@ -75,7 +75,7 @@ export default async function ReportsPage() {
                   {' SMS segments used this period'}
                 </p>
                 <p className="text-xs leading-relaxed text-slate-600">
-                  On Appointments Light there is no included SMS bundle. Each Twilio segment is billed at £
+                  On Appointments Light there is no included SMS bundle. Each SMS segment is billed at £
                   {smsUsage.billable_unit_gbp.toFixed(2)} through Stripe Billing Meters.
                 </p>
                 {smsUsage.messages_sent > 0 ? (

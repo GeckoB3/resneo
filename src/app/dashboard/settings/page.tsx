@@ -21,7 +21,11 @@ import { Suspense } from 'react';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { getSmsMessagesSentThisMonthForVenue, resolveSmsBillingPeriod } from '@/lib/sms-usage';
+import {
+  getSmsMessagesSentThisMonthForVenue,
+  reconcileSmsUsageFromLogsForVenue,
+  resolveSmsBillingPeriod,
+} from '@/lib/sms-usage';
 
 export default async function SettingsPage({
   searchParams,
@@ -194,6 +198,7 @@ export default async function SettingsPage({
     };
     const smsPeriod = resolveSmsBillingPeriod(venueForSms);
     smsCountUsesStripePeriod = Boolean(smsPeriod.periodStartIso && smsPeriod.periodEndIso);
+    await reconcileSmsUsageFromLogsForVenue(venueId);
     smsMessagesSentThisMonth = await getSmsMessagesSentThisMonthForVenue(venueId, venueForSms);
   }
   const sp = await searchParams;

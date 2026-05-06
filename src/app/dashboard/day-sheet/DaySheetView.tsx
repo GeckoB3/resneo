@@ -7,9 +7,11 @@ import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
 import {
   BOOKING_PRIMARY_ACTIONS,
+  BOOKING_REVERT_ACTIONS,
   canMarkNoShowForSlot,
   canTransitionBookingStatus,
   isDestructiveBookingStatus,
+  isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
@@ -22,6 +24,7 @@ import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import {
+  bookingModelShortLabel,
   bookingStatusDisplayLabel,
   inferBookingRowModel,
   isTableReservationBooking,
@@ -195,13 +198,6 @@ const POLL_INTERVAL_MS = 30_000;
 const AREA_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const PRIMARY_ACTIONS: Record<string, { label: string; target: BookingStatus }> = {
-  Pending:   BOOKING_PRIMARY_ACTIONS.Pending!,
-  Booked:    BOOKING_PRIMARY_ACTIONS.Booked!,
-  Confirmed: BOOKING_PRIMARY_ACTIONS.Confirmed!,
-  Seated:    BOOKING_PRIMARY_ACTIONS.Seated!,
-};
-
 const DEFAULT_STATUSES = new Set(['Pending', 'Booked', 'Confirmed', 'Seated']);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -228,6 +224,40 @@ function sourceBadge(source: string) {
   };
   const label = key === 'booking_page' ? 'online' : source;
   return <Pill variant={variantMap[key] ?? 'neutral'} size="sm">{label}</Pill>;
+}
+
+function bookingTypeFilterLabel(model: BookingModel): string {
+  switch (model) {
+    case 'table_reservation':
+      return 'Table';
+    case 'unified_scheduling':
+    case 'practitioner_appointment':
+      return 'Appointment';
+    case 'event_ticket':
+      return 'Event';
+    case 'resource_booking':
+      return 'Resource';
+    case 'class_session':
+      return 'Class';
+    default:
+      return bookingModelShortLabel(model);
+  }
+}
+
+function bookingTypePillVariant(model: BookingModel): PillVariant {
+  switch (model) {
+    case 'unified_scheduling':
+    case 'practitioner_appointment':
+      return 'brand';
+    case 'event_ticket':
+      return 'info';
+    case 'class_session':
+      return 'success';
+    case 'resource_booking':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
 }
 
 function depositBadge(status: string, amountPence: number | null) {
@@ -833,9 +863,36 @@ export function DaySheetView({
         addToast(`No-show can only be marked ${data.no_show_grace_minutes} minutes after the booking start time.`, 'error');
         return;
       }
-      if (nextStatus === 'Seated' && activeTables.length > 0) {
+      if (nextStatus === 'Seated' && activeTables.length > 0 && isTableReservationBooking(booking)) {
         setSeatWithTableBookingId(booking.id);
         setSeatSelectedTableIds([]);
+        return;
+      }
+      const tableStyle = isTableReservationBooking(booking);
+      const partyLabel = `${booking.party_size} ${
+        tableStyle ? `cover${booking.party_size === 1 ? '' : 's'}` : `person${booking.party_size === 1 ? '' : 's'}`
+      }`;
+      if (isRevertTransition(booking.status, nextStatus)) {
+        const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+        const confirmLabel =
+          booking.status === 'Seated' && (nextStatus === 'Booked' || nextStatus === 'Confirmed') && !tableStyle
+            ? 'Undo Start'
+            : revertAction?.label ?? `Revert to ${nextStatus}`;
+        setConfirmDialog({
+          title: confirmLabel,
+          message: `${booking.guest_name} (${partyLabel}) at ${booking.booking_time.slice(0, 5)} will be changed from ${booking.status} back to ${nextStatus}.`,
+          confirmLabel,
+          onConfirm: () => { void changeStatus(booking.id, nextStatus); },
+        });
+        return;
+      }
+      if (isDestructiveBookingStatus(nextStatus)) {
+        setConfirmDialog({
+          title: `Mark ${nextStatus}`,
+          message: `${booking.guest_name} (${partyLabel}) at ${booking.booking_time.slice(0, 5)} will be marked ${nextStatus}.`,
+          confirmLabel: `Mark ${nextStatus}`,
+          onConfirm: () => { void changeStatus(booking.id, nextStatus); },
+        });
         return;
       }
       void changeStatus(booking.id, nextStatus);
@@ -1270,11 +1327,15 @@ export function DaySheetView({
                     const hasAllergy = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests).some((t) => t.isAllergy) || hasAllergyKeywords([b.dietary_notes, b.special_requests].filter(Boolean).join(' '));
                     const isExpanded = expandedId === b.id;
                     const isTerminalStatus = isTerminal(b.status);
-                    const primaryAction = PRIMARY_ACTIONS[b.status];
+                    const primaryAction = BOOKING_PRIMARY_ACTIONS[b.status as BookingStatus];
                     const isReturning = b.visit_count > 0;
                     const bookingRow: DaySheetBookingRow = { ...b, booking_date: date };
                     const inferredModel = inferBookingRowModel(bookingRow);
                     const isTableBooking = inferredModel === 'table_reservation';
+                    const displayStatus = bookingStatusDisplayLabel(b.status, isTableBooking);
+                    const primaryLabel =
+                      primaryAction?.target === 'Seated' && !isTableBooking ? 'Start' : primaryAction?.label;
+                    const showUndoStart = b.status === 'Seated' && !isTableBooking && !isTerminalStatus;
                     const tableLabel = isTableBooking && b.table_assignments && b.table_assignments.length > 0
                       ? b.table_assignments.length === 1
                         ? b.table_assignments[0]!.name
@@ -1304,14 +1365,25 @@ export function DaySheetView({
                                 {b.guest_name}
                               </span>
                               <span className="shrink-0 font-semibold tabular-nums text-slate-700">{b.booking_time.slice(0, 5)}</span>
-                              <span className="shrink-0 text-slate-300">·</span>
-                              <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
-                                {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
-                              </span>
+                              {isTableBooking ? (
+                                <>
+                                  <span className="shrink-0 text-slate-300">·</span>
+                                  <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
+                                    {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
+                                  </span>
+                                </>
+                              ) : b.party_size > 1 ? (
+                                <>
+                                  <span className="shrink-0 text-slate-300">·</span>
+                                  <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
+                                    {b.party_size} people
+                                  </span>
+                                </>
+                              ) : null}
                               <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
                               <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
-                              <BookingStatusPill statusKey={b.status}>{bookingStatusDisplayLabel(b.status, true)}</BookingStatusPill>
-                              {b.area_name ? (
+                              <BookingStatusPill statusKey={b.status}>{displayStatus}</BookingStatusPill>
+                              {isTableBooking && b.area_name ? (
                                 <span className="hidden sm:inline-flex">
                                   <Pill variant="neutral" size="sm">{b.area_name}</Pill>
                                 </span>
@@ -1324,6 +1396,11 @@ export function DaySheetView({
                                 </Pill>
                               ) : null}
                               {showAttendanceConfirmedSupplementPill(b) ? <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill> : null}
+                              {!isTableBooking ? (
+                                <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
+                                  {bookingTypeFilterLabel(inferredModel)}
+                                </Pill>
+                              ) : null}
                               {b.dietary_notes || hasAllergy ? (
                                 <span className="hidden sm:inline-flex">
                                   <Pill variant="warning" size="sm" dot>Dietary</Pill>
@@ -1350,13 +1427,29 @@ export function DaySheetView({
                                 requestStatusChange(b, primaryAction.target);
                               }}
                               className="inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg bg-brand-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 active:bg-brand-800 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs print:hidden"
-                              aria-label={`${primaryAction.label} booking for ${b.guest_name}`}
+                              aria-label={`${primaryLabel ?? primaryAction.label} booking for ${b.guest_name}`}
                               aria-busy={actionLoading === b.id}
                             >
-                              {actionLoading === b.id ? '...' : primaryAction.label}
+                              {actionLoading === b.id ? '...' : (primaryLabel ?? primaryAction.label)}
                             </button>
                           )}
-                          {!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 && (
+                          {showUndoStart && (
+                            <button
+                              type="button"
+                              disabled={actionLoading === b.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                requestStatusChange(b, 'Booked');
+                              }}
+                              className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 shadow-sm transition-colors duration-150 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30 active:bg-amber-100/80 disabled:opacity-60 sm:px-2.5 sm:text-xs print:hidden"
+                              aria-label={`Undo start for ${b.guest_name}`}
+                              aria-busy={actionLoading === b.id}
+                            >
+                              <span className="sm:hidden">Undo</span>
+                              <span className="hidden sm:inline">Undo Start</span>
+                            </button>
+                          )}
+                          {isTableBooking && !tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 && (
                             <button
                               type="button"
                               disabled={actionLoading === b.id}
@@ -1425,7 +1518,7 @@ export function DaySheetView({
                               onSendMessage={(channel) => { void sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel); }}
                               onStatusAction={(status) => { requestStatusChange(b, status); }}
                               onDetailUpdated={() => handleDetailUpdated(b.id)}
-                              onRequestChangeTable={!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {
+                              onRequestChangeTable={isTableBooking && !tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {
                                 setChangeTableBookingId(b.id);
                                 setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
                               } : undefined}

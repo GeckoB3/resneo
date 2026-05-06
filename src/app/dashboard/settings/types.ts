@@ -48,7 +48,7 @@ export interface VenueSettings {
   enabled_models?: BookingModel[];
   /** Included SMS per billing month (unified scheduling / tier). */
   sms_monthly_allowance?: number | null;
-  /** Twilio segments used this billing period (from sms_usage), when loaded. */
+  /** SMS segments used this billing period (from sms_usage), when loaded. */
   sms_messages_sent_this_month?: number | null;
   /** Stripe subscription id when loaded (Plan tab actions). */
   stripe_subscription_id?: string | null;

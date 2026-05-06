@@ -30,7 +30,7 @@ export function AppointmentsDashboardStep({
 
   const cards: DashboardCard[] = [
     {
-      title: 'Practitioner calendar',
+      title: 'Appointment Calendar',
       description: 'Your day-to-day schedule view.',
       detail: hasTeamCalendars
         ? `A column per ${staffTerm.toLowerCase()}, room, or resource with bookings laid out by time. Drag to move, click to edit, and add bookings with a tap.`
@@ -73,9 +73,9 @@ export function AppointmentsDashboardStep({
     },
     {
       title: 'Resource timeline',
-      description: 'See every resource lane on a single timeline.',
+      description: 'Manage bookable facilities and their reservations.',
       detail: hasResources
-        ? 'Spot conflicts, move bookings between courts/rooms, and add quick walk-ins from the same screen.'
+        ? 'Create courts, rooms, or equipment guests can book in fixed slots; set weekly hours, intervals, and pricing. Upcoming bookings appear here and on the Appointment Calendar column each resource is shown on.'
         : 'Unlocks when you add the Resources booking model from Settings → Plan.',
       active: hasResources,
       badge: hasResources ? 'Resources' : 'Disabled',
@@ -94,13 +94,13 @@ export function AppointmentsDashboardStep({
         <p className="mb-1 font-medium text-slate-800">Your primary live view</p>
         <p className="text-slate-600">
           {hasAppointments
-            ? 'The Practitioner calendar is where most Appointments plans spend the day. It shows today’s bookings at a glance, and you can add, move, or edit bookings inline.'
+            ? 'The Appointment Calendar is where most Appointments plans spend the day. It shows today’s bookings at a glance, and you can add, move, or edit bookings inline.'
             : hasClasses
               ? 'The Class timetable is where you’ll spend most of your time. It shows every session with attendance, capacity, and quick actions.'
               : hasEvents
                 ? 'The Event manager is your home base. It shows upcoming events, ticket sales, and attendee lists.'
                 : hasResources
-                  ? 'The Resource timeline is your home base: every resource lane for the day is visible, with quick actions to add or move bookings.'
+                  ? 'The Resource timeline is your home base for facility booking: configure each resource, its weekly hours and slot rules, and review upcoming reservations.'
                   : 'Your dashboard adapts to the booking models you have enabled.'}
         </p>
       </div>
@@ -147,7 +147,7 @@ export function AppointmentsDashboardStep({
           </li>
           <li>
             Notifications (emails and optional SMS) are sent to guests automatically on booking, rescheduling,
-            and cancellation.
+            and cancellation. Adjust templates, timing, and policies anytime in Settings → Communications.
           </li>
         </ul>
       </div>

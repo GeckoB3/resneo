@@ -22,15 +22,16 @@ import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/s
 import { NumericInput } from '@/components/ui/NumericInput';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { OnboardingStaffInviteStep, type StaffInviteDraft } from '@/components/onboarding/OnboardingStaffInviteStep';
+import { OnboardingInlineAddCalendarControls } from '@/components/onboarding/OnboardingInlineAddCalendarControls';
 import {
   OnboardingAppointmentServiceList,
   appointmentServiceDraftFromBusinessDefault,
   appointmentServiceDraftsFromApiResponse,
   createEmptyAppointmentServiceDraft,
   serviceDraftToApiPayload,
+  validateAppointmentServiceDraftForSave,
   type AppointmentServiceFormDraft,
 } from '@/components/onboarding/OnboardingAppointmentServiceList';
-import { isServiceCustomScheduleEmpty } from '@/lib/service-custom-availability';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
@@ -49,7 +50,6 @@ import { TableSetupStep } from './steps/restaurant/TableSetupStep';
 import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isAppointmentPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
-import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { planDisplayName } from '@/lib/pricing-constants';
 import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
@@ -693,7 +693,8 @@ export default function OnboardingPage() {
   type InlineCalendarTarget =
     | { kind: 'event' }
     | { kind: 'class'; index: number }
-    | { kind: 'resource'; index: number };
+    | { kind: 'resource'; index: number }
+    | { kind: 'service' };
 
   const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
   const [inlineCalendarTarget, setInlineCalendarTarget] = useState<InlineCalendarTarget | null>(null);
@@ -785,7 +786,7 @@ export default function OnboardingPage() {
           }
           return next;
         });
-      } else {
+      } else if (target.kind === 'resource') {
         setResources((prev) => {
           const next = [...prev];
           const row = next[target.index];
@@ -798,6 +799,12 @@ export default function OnboardingPage() {
           }
           return next;
         });
+      } else {
+        setServices((prev) =>
+          prev.map((row) =>
+            row.practitioner_ids.includes(newId) ? row : { ...row, practitioner_ids: [...row.practitioner_ids, newId] },
+          ),
+        );
       }
       setNewCalendarName('');
       setShowAddCalendarModal(false);
@@ -976,11 +983,6 @@ export default function OnboardingPage() {
    * Used both to gate the invite form and to pre-validate on submit.
    */
   const staffPlanLimit: number = entitlement?.staff_limit ?? Infinity;
-
-  const showOnboardingInlineAddCalendar = useMemo(
-    () => canAddCalendar,
-    [canAddCalendar],
-  );
 
   useEffect(() => {
     if (entitlementLoaded && !canAddCalendar) {
@@ -1696,26 +1698,13 @@ export default function OnboardingPage() {
           return;
         }
         for (const s of validServices) {
-          if (needsRoster && s.practitioner_ids.length === 0) {
-            setError(`Select at least one ${terms.staff.toLowerCase()} for each service, or re-save your team step.`);
-            return;
-          }
-          if (s.duration_minutes < 5) {
-            setError('Each service must have a duration of at least 5 minutes.');
-            return;
-          }
-          if (s.payment_requirement === 'deposit' && poundsToMinor(s.deposit) <= 0) {
-            setError('Enter a valid deposit amount for each service that requires a deposit.');
-            return;
-          }
-          if (s.payment_requirement === 'full_payment' && poundsToMinor(s.price) <= 0) {
-            setError('Set a price for each service that charges the full amount online.');
-            return;
-          }
-          if (s.custom_availability_enabled && isServiceCustomScheduleEmpty(s.custom_working_hours)) {
-            setError(
-              `Add at least one custom schedule rule for “${s.name.trim() || 'this service'}”, or turn off custom availability.`,
-            );
+          const svcErr = validateAppointmentServiceDraftForSave(s, {
+            isAdmin: Boolean(venue?.is_admin),
+            needsRoster,
+            staffTerm: terms.staff,
+          });
+          if (svcErr) {
+            setError(svcErr);
             return;
           }
         }
@@ -1723,7 +1712,10 @@ export default function OnboardingPage() {
         try {
           for (let i = 0; i < validServices.length; i++) {
             const s = validServices[i];
-            const payload = { ...serviceDraftToApiPayload(s), sort_order: i };
+            const payload = {
+              ...serviceDraftToApiPayload(s, { isAdmin: Boolean(venue?.is_admin) }),
+              sort_order: i,
+            };
             if (s.serverId) {
               const res = await fetch('/api/venue/appointment-services', {
                 method: 'PATCH',
@@ -2791,6 +2783,16 @@ export default function OnboardingPage() {
                 hideStaffCustomization={isLightPlanVenue}
                 venueOpeningHours={isAppointmentsPlanVenue ? null : (openingHoursDraft as unknown as OpeningHours)}
                 calendarWorkingHoursById={calendarWorkingDraft}
+                inlineAddCalendar={
+                  venue.is_admin
+                    ? {
+                        entitlementLoaded,
+                        canAddCalendar,
+                        entitlement,
+                        onAddCalendar: () => openInlineAddCalendar({ kind: 'service' }),
+                      }
+                    : null
+                }
               />
             </div>
           )}
@@ -3139,30 +3141,19 @@ export default function OnboardingPage() {
                       </select>
                       {venue.is_admin && (
                         <div className="mt-2">
-                          {!entitlementLoaded ? (
-                            <p className="text-xs text-slate-500">Loading plan limits…</p>
-                          ) : showOnboardingInlineAddCalendar ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => openInlineAddCalendar({ kind: 'event' })}
-                                className="text-sm font-semibold text-brand-600 hover:text-brand-800"
-                              >
-                                + Add calendar
-                              </button>
-                              <p className="mt-1 text-xs text-slate-500">
+                          <OnboardingInlineAddCalendarControls
+                            entitlementLoaded={entitlementLoaded}
+                            canAddCalendar={canAddCalendar}
+                            entitlement={entitlement}
+                            onAddCalendar={() => openInlineAddCalendar({ kind: 'event' })}
+                            layout="event"
+                            helperWhenCanAdd={
+                              <>
                                 Create a new team calendar column here without leaving onboarding. It is selected for
                                 this event automatically.
-                              </p>
-                            </>
-                          ) : (
-                            <p className="mt-1 text-xs text-amber-950">
-                              <CalendarLimitMessage
-                                entitlement={entitlement}
-                                linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
-                              />
-                            </p>
-                          )}
+                              </>
+                            }
+                          />
                         </div>
                       )}
                     </div>
@@ -3549,20 +3540,16 @@ export default function OnboardingPage() {
                           </div>
                           {venue.is_admin && (
                             <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                              {!entitlementLoaded ? (
-                                <p className="text-xs text-slate-500">Loading plan limits…</p>
-                              ) : showOnboardingInlineAddCalendar ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => openInlineAddCalendar({ kind: 'class', index: i })}
-                                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
-                                  >
-                                    Add calendar
-                                  </button>
-                                  <p className="mt-2 text-xs text-slate-500">
-                                    Create a new team calendar column without leaving onboarding. It is selected for this
-                                    class type automatically. You can edit weekly hours anytime in{' '}
+                              <OnboardingInlineAddCalendarControls
+                                entitlementLoaded={entitlementLoaded}
+                                canAddCalendar={canAddCalendar}
+                                entitlement={entitlement}
+                                onAddCalendar={() => openInlineAddCalendar({ kind: 'class', index: i })}
+                                layout="panel"
+                                helperWhenCanAdd={
+                                  <>
+                                    Create a new team calendar column without leaving onboarding. It is selected for
+                                    this class type automatically. You can edit weekly hours anytime in{' '}
                                     <Link
                                       href="/dashboard/calendar-availability"
                                       className="font-medium text-brand-700 underline hover:text-brand-800"
@@ -3570,16 +3557,9 @@ export default function OnboardingPage() {
                                       Calendar availability
                                     </Link>
                                     .
-                                  </p>
-                                </>
-                              ) : (
-                                <p className="text-xs text-amber-950">
-                                  <CalendarLimitMessage
-                                    entitlement={entitlement}
-                                    linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
-                                  />
-                                </p>
-                              )}
+                                  </>
+                                }
+                              />
                             </div>
                           )}
                         </div>
@@ -3952,18 +3932,14 @@ export default function OnboardingPage() {
                     </p>
                     {venue.is_admin && (
                       <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                        {!entitlementLoaded ? (
-                          <p className="text-xs text-slate-500">Loading plan limits…</p>
-                        ) : showOnboardingInlineAddCalendar ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => openInlineAddCalendar({ kind: 'resource', index: i })}
-                              className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
-                            >
-                              Add calendar
-                            </button>
-                            <p className="mt-2 text-xs text-slate-500">
+                        <OnboardingInlineAddCalendarControls
+                          entitlementLoaded={entitlementLoaded}
+                          canAddCalendar={canAddCalendar}
+                          entitlement={entitlement}
+                          onAddCalendar={() => openInlineAddCalendar({ kind: 'resource', index: i })}
+                          layout="panel"
+                          helperWhenCanAdd={
+                            <>
                               Create a new team calendar column without leaving onboarding. It is selected for this
                               resource automatically. You can edit weekly hours anytime in{' '}
                               <Link
@@ -3973,16 +3949,9 @@ export default function OnboardingPage() {
                                 Calendar availability
                               </Link>
                               .
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-xs text-amber-950">
-                            <CalendarLimitMessage
-                              entitlement={entitlement}
-                              linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
-                            />
-                          </p>
-                        )}
+                            </>
+                          }
+                        />
                       </div>
                     )}
                   </div>

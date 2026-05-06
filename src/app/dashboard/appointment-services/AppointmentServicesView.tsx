@@ -15,25 +15,25 @@ import type {
   PractitionerService,
   ProcessingTimeBlock,
   ServiceCustomScheduleStored,
-  ServiceCustomScheduleV2,
   ServiceVariant,
   WorkingHours,
 } from '@/types/booking-models';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
-import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
-import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
-import { ServiceAvailabilityCalendar } from '@/components/scheduling/ServiceAvailabilityCalendar';
+import {
+  DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
+  DEFAULT_APPOINTMENT_SERVICE_VARIANT_ROW,
+  DEFAULT_STAFF_MAY_CUSTOMIZE,
+  type AppointmentServiceFormValues,
+} from '@/components/dashboard/appointment-services/appointment-service-form-values';
+import { AppointmentServiceFormFields } from '@/components/dashboard/appointment-services/AppointmentServiceFormFields';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { formatPricePenceForServiceCatalog } from '@/lib/booking/format-price-display';
-import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
-import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
-import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -71,30 +71,6 @@ interface Service {
   processing_time_blocks?: ProcessingTimeBlock[];
 }
 
-/** One editable row in the variants section of the service modal. Pence values come back as strings while editing. */
-interface VariantFormRow {
-  /** Existing row id (preserved when editing); empty for newly-added rows. */
-  id?: string;
-  name: string;
-  description: string;
-  duration_minutes: number;
-  buffer_minutes: number;
-  price: string;
-  deposit: string;
-  is_active: boolean;
-  processing_time_blocks: ProcessingTimeBlock[];
-}
-
-const DEFAULT_VARIANT_ROW: VariantFormRow = {
-  name: '',
-  description: '',
-  duration_minutes: 30,
-  buffer_minutes: 0,
-  price: '',
-  deposit: '',
-  is_active: true,
-  processing_time_blocks: [],
-};
 
 interface Practitioner {
   id: string;
@@ -117,73 +93,6 @@ interface PractitionerServiceLink {
   custom_colour?: string | null;
 }
 
-interface ServiceFormData {
-  name: string;
-  description: string;
-  duration_minutes: number;
-  buffer_minutes: number;
-  price: string;
-  deposit: string;
-  payment_requirement: ClassPaymentRequirement;
-  colour: string;
-  is_active: boolean;
-  practitioner_ids: string[];
-  staffMay: {
-    name: boolean;
-    description: boolean;
-    duration: boolean;
-    buffer: boolean;
-    price: boolean;
-    deposit: boolean;
-    colour: boolean;
-  };
-  max_advance_booking_days: number;
-  min_booking_notice_hours: number;
-  cancellation_notice_hours: number;
-  allow_same_day_booking: boolean;
-  custom_availability_enabled: boolean;
-  custom_working_hours: ServiceCustomScheduleV2;
-  /** Optional sub-options. When non-empty, customers must pick one before booking. */
-  variants: VariantFormRow[];
-  processing_time_blocks: ProcessingTimeBlock[];
-}
-
-const COLOUR_OPTIONS = [
-  '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-  '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
-];
-
-const DEFAULT_STAFF_MAY: ServiceFormData['staffMay'] = {
-  name: false,
-  description: false,
-  duration: false,
-  buffer: false,
-  price: false,
-  deposit: false,
-  colour: false,
-};
-
-const DEFAULT_FORM: ServiceFormData = {
-  name: '',
-  description: '',
-  duration_minutes: 30,
-  buffer_minutes: 0,
-  price: '',
-  deposit: '',
-  payment_requirement: 'none',
-  colour: '#3B82F6',
-  is_active: true,
-  practitioner_ids: [],
-  staffMay: { ...DEFAULT_STAFF_MAY },
-  max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
-  min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
-  cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
-  allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
-  custom_availability_enabled: false,
-  custom_working_hours: { version: 2, rules: [] },
-  variants: [],
-  processing_time_blocks: [],
-};
 
 function formatDuration(mins: number): string {
   if (mins < 60) return `${mins}min`;
@@ -230,7 +139,7 @@ export function AppointmentServicesView({
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<ServiceFormData>(DEFAULT_FORM);
+  const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   /** Admins editing variants: base duration/price fields are hidden; options carry those values. */
   const usesVariants = isAdmin && form.variants.length > 0;
   const [saving, setSaving] = useState(false);
@@ -417,7 +326,7 @@ export function AppointmentServicesView({
   }
 
   function openCreate() {
-    setForm({ ...DEFAULT_FORM, staffMay: { ...DEFAULT_STAFF_MAY }, variants: [] });
+    setForm({ ...DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES, staffMay: { ...DEFAULT_STAFF_MAY_CUSTOMIZE }, variants: [] });
     setEditingId(null);
     setError(null);
     setShowAddCalendarModal(false);
@@ -999,763 +908,127 @@ export function AppointmentServicesView({
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
             )}
 
-            {!isAdmin && (
-              <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                Link this service to at least one calendar you control. Only venue admins can change which fields other
-                staff may customise for their calendars.
-              </p>
-            )}
-
-            <div className="space-y-4">
-              {/* Name */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  placeholder="e.g. Consultation, Standard session"
-                />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  rows={2}
-                  placeholder="Brief description of the service"
-                />
-              </div>
-
-              {isAdmin && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">How will clients book this service?</p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      Pick one. Use multiple options when length, price, or the type of session changes what the client
-                      selects (before they pick a time).
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <label
-                      className={`flex cursor-pointer gap-3 rounded-xl border bg-white p-3 transition-colors ${
-                        !usesVariants
-                          ? 'border-brand-300 ring-1 ring-brand-200/60'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="service-booking-mode"
-                        className="mt-1 shrink-0"
-                        checked={!usesVariants}
-                        onChange={() => {
-                          if (form.variants.length === 0) return;
-                          if (
-                            !window.confirm(
-                              'Switch to one fixed offering? All bookable options you added will be removed from this service.',
-                            )
-                          ) {
-                            return;
-                          }
-                          setForm((f) => ({ ...f, variants: [] }));
-                        }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">One fixed offering</p>
-                        <p className="mt-0.5 text-xs text-slate-600">
-                          One duration, buffer, and price. What you set below applies to every booking.
-                        </p>
-                      </div>
-                    </label>
-                    <label
-                      className={`flex cursor-pointer gap-3 rounded-xl border bg-white p-3 transition-colors ${
-                        usesVariants
-                          ? 'border-brand-300 ring-1 ring-brand-200/60'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="service-booking-mode"
-                        className="mt-1 shrink-0"
-                        checked={usesVariants}
-                        onChange={() => {
-                          setForm((f) => {
-                            if (f.variants.length > 0) return f;
-                            return {
-                              ...f,
-                              variants: [
-                                {
-                                  ...DEFAULT_VARIANT_ROW,
-                                  duration_minutes: f.duration_minutes,
-                                  buffer_minutes: f.buffer_minutes,
-                                  price: f.price,
-                                  deposit: f.payment_requirement === 'deposit' ? f.deposit : '',
-                                },
-                              ],
-                            };
-                          });
-                        }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">Multiple bookable options</p>
-                        <p className="mt-0.5 text-xs text-slate-600">
-                          Clients choose an option first. Each option has its own duration, buffer, price, optional
-                          description, and optional deposit override.
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {usesVariants && (
-                <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3 ring-1 ring-slate-100/80">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">Bookable options</p>
-                      <p className="mt-0.5 max-w-xl text-xs text-slate-500">
-                        These values are what guests use when they book. Payment type is still chosen in{' '}
-                        <span className="font-medium text-slate-700">Online payment when booking</span> below — for
-                        deposits, set a default on the service; leave an option&apos;s deposit blank to use that
-                        default.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setForm((f) => {
-                          const last = f.variants[f.variants.length - 1];
-                          return {
-                            ...f,
-                            variants: [
-                              ...f.variants,
-                              {
-                                ...DEFAULT_VARIANT_ROW,
-                                duration_minutes: last?.duration_minutes ?? DEFAULT_VARIANT_ROW.duration_minutes,
-                                buffer_minutes: last?.buffer_minutes ?? 0,
-                              },
-                            ],
-                          };
-                        })
-                      }
-                      className="shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50"
-                    >
-                      Add option
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {form.variants.map((variant, idx) => (
-                      <div
-                        key={variant.id ?? `new-${idx}`}
-                        className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2.5"
-                      >
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="text"
-                            value={variant.name}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                variants: f.variants.map((row, i) =>
-                                  i === idx ? { ...row, name: e.target.value } : row,
-                                ),
-                              }))
-                            }
-                            placeholder="Option name (e.g. 60 minutes, Full head)"
-                            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setForm((f) => ({
-                                ...f,
-                                variants: f.variants.filter((_, i) => i !== idx),
-                              }))
-                            }
-                            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-red-700"
-                            aria-label={`Remove option ${variant.name || idx + 1}`}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div>
-                          <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                            Optional description (shown when they pick this option)
-                          </label>
-                          <textarea
-                            value={variant.description}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                variants: f.variants.map((row, i) =>
-                                  i === idx ? { ...row, description: e.target.value } : row,
-                                ),
-                              }))
-                            }
-                            placeholder="e.g. Includes toner — allow 15 extra minutes."
-                            rows={2}
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                          <div>
-                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                              Duration (mins) *
-                            </label>
-                            <NumericInput
-                              min={5}
-                              max={480}
-                              value={variant.duration_minutes}
-                              onChange={(v) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, duration_minutes: v } : row,
-                                  ),
-                                }))
-                              }
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                              Buffer (mins)
-                            </label>
-                            <NumericInput
-                              min={0}
-                              max={120}
-                              value={variant.buffer_minutes}
-                              onChange={(v) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, buffer_minutes: v } : row,
-                                  ),
-                                }))
-                              }
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                              Price ({sym})
-                            </label>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={variant.price}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, price: e.target.value } : row,
-                                  ),
-                                }))
-                              }
-                              placeholder="0.00"
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                              Deposit ({sym}) <span className="font-normal text-slate-400">optional</span>
-                            </label>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={variant.deposit}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  variants: f.variants.map((row, i) =>
-                                    i === idx ? { ...row, deposit: e.target.value } : row,
-                                  ),
-                                }))
-                              }
-                              placeholder={
-                                form.payment_requirement === 'deposit' ? 'Uses service default' : '—'
-                              }
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                            />
-                          </div>
-                        </div>
-                        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={variant.is_active}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                variants: f.variants.map((row, i) =>
-                                  i === idx ? { ...row, is_active: e.target.checked } : row,
-                                ),
-                              }))
-                            }
-                            className="h-3.5 w-3.5 rounded border-slate-300"
-                          />
-                          Offer this option to clients
-                        </label>
-                        {isAdmin ? (
-                          <ProcessingTimeTimelineEditor
-                            compact
-                            durationMinutes={variant.duration_minutes}
-                            bufferMinutes={variant.buffer_minutes}
-                            blocks={variant.processing_time_blocks}
-                            onChange={(blocks) =>
-                              setForm((f) => ({
-                                ...f,
-                                variants: f.variants.map((row, i) =>
-                                  i === idx ? { ...row, processing_time_blocks: blocks } : row,
-                                ),
-                              }))
-                            }
-                          />
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {!usesVariants && (
-                <>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
-                      <NumericInput
-                        value={form.duration_minutes}
-                        onChange={(v) => setForm({ ...form, duration_minutes: v })}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        min={5}
-                        max={480}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
-                      <NumericInput
-                        value={form.buffer_minutes}
-                        onChange={(v) => setForm({ ...form, buffer_minutes: v })}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        min={0}
-                        max={120}
-                      />
-                    </div>
-                  </div>
-
-                  {isAdmin ? (
-                    <ProcessingTimeTimelineEditor
-                      durationMinutes={form.duration_minutes}
-                      bufferMinutes={form.buffer_minutes}
-                      blocks={form.processing_time_blocks}
-                      onChange={(blocks) => setForm((f) => ({ ...f, processing_time_blocks: blocks }))}
-                    />
-                  ) : null}
-
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
-                    <div className="relative max-w-[200px]">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={form.price}
-                        onChange={(e) => setForm({ ...form, price: e.target.value })}
-                        className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {usesVariants ? (
-                <p className="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950/90">
-                  <span className="font-semibold">Payment &amp; booking rules below apply to every option.</span> For
-                  full online payment, each turned-on option must have a price. For deposits, the service default
-                  deposit fills in when an option&apos;s deposit is left blank.
-                </p>
-              ) : null}
-
-              {/* Online payment at booking */}
-              <SectionCard>
-                <SectionCard.Header title="Online payment when booking" />
-                <SectionCard.Body className="!pt-0 space-y-3">
-                <div className="space-y-2">
-                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="payment_requirement"
-                      className="mt-0.5"
-                      checked={form.payment_requirement === 'none'}
-                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'none' }))}
-                    />
-                    <span>No online payment (pay at venue or arrange separately)</span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="payment_requirement"
-                      className="mt-0.5"
-                      checked={form.payment_requirement === 'deposit'}
-                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
-                    />
-                    <span>Custom deposit (fixed amount online)</span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="payment_requirement"
-                      className="mt-0.5"
-                      checked={form.payment_requirement === 'full_payment'}
-                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'full_payment' }))}
-                    />
-                    <span>Pay full price online at booking</span>
-                  </label>
-                </div>
-                {form.payment_requirement === 'deposit' && (
-                  <div>
-                    <label className="mb-1 block text-sm text-slate-600">
-                      {usesVariants ? (
-                        <>
-                          Default deposit ({sym}){' '}
-                          <span className="font-normal text-slate-500">
-                            — used when an option leaves its deposit field blank
-                          </span>
-                        </>
-                      ) : (
-                        <>Deposit amount ({sym})</>
-                      )}
-                    </label>
-                    <div className="relative max-w-[200px]">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={form.deposit}
-                        onChange={(e) => setForm({ ...form, deposit: e.target.value })}
-                        className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        placeholder="5.00"
-                      />
-                    </div>
-                  </div>
-                )}
-                {form.payment_requirement === 'full_payment' && (
-                  <p className="text-xs text-slate-500">
-                    {usesVariants
-                      ? 'Each option offered to clients needs its own price — that is what they pay online at booking.'
-                      : 'The full service price (above) is charged when the guest completes booking online.'}
-                  </p>
-                )}
-                <StripePaymentWarning
-                  stripeConnected={stripeConnected}
-                  requiresOnlinePayment={
-                    form.payment_requirement === 'deposit' || form.payment_requirement === 'full_payment'
-                  }
-                />
-                </SectionCard.Body>
-              </SectionCard>
-
-              {/* Online guest booking rules */}
-              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
-                <p className="text-xs text-slate-500">
-                  Applies to online bookings for this service (advance window, notice, and deposit refund notice).
-                </p>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
-                    <NumericInput
-                      min={1}
-                      max={365}
-                      value={form.max_advance_booking_days}
-                      onChange={(v) => setForm({ ...form, max_advance_booking_days: v })}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm text-slate-700">Min booking notice (hours)</label>
-                    <NumericInput
-                      min={0}
-                      max={168}
-                      value={form.min_booking_notice_hours}
-                      onChange={(v) => setForm({ ...form, min_booking_notice_hours: v })}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="service-cancellation-notice-hours" className="mb-1 block text-sm text-slate-700">
-                      Cancellation notice (hours){' '}
-                      <HelpTooltip
-                        maxWidth={300}
-                        content="This sets when deposits and online payments are refundable until: guests who cancel at least this many hours before the start time get a full refund (subject to your payment settings)."
-                      />
-                    </label>
-                    <NumericInput
-                      id="service-cancellation-notice-hours"
-                      min={0}
-                      max={168}
-                      value={form.cancellation_notice_hours}
-                      onChange={(v) => setForm({ ...form, cancellation_notice_hours: v })}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="flex flex-col justify-end">
-                    <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={form.allow_same_day_booking}
-                        onChange={(e) =>
-                          setForm({ ...form, allow_same_day_booking: e.target.checked })
-                        }
-                        className="rounded border-slate-300"
-                      />
-                      Allow same-day bookings
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Colour */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>
-                <div className="flex flex-wrap gap-2">
-                  {COLOUR_OPTIONS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setForm({ ...form, colour: c })}
-                      className={`h-8 w-8 rounded-full border-2 transition-all ${
-                        form.colour === c ? 'border-slate-900 scale-110' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Active toggle */}
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, is_active: !form.is_active })}
-                  className={`relative h-6 w-11 rounded-full transition-colors ${
-                    form.is_active ? 'bg-brand-600' : 'bg-slate-300'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      form.is_active ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-                <span className="text-sm text-slate-700">Active (visible to clients)</span>
-              </div>
-
-              {/* Per-calendar overrides (Model B) — admin sets which fields staff may customise */}
-              {isAdmin && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
-                  <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
-                  <p className="text-xs text-slate-500">
-                    {usesVariants ? (
-                      <>
-                        Allow staff on a calendar to override these fields for their column only. For services with
-                        multiple options, duration, buffer, price, and deposit refer to each bookable option once a
-                        client has chosen it.
-                      </>
-                    ) : (
-                      <>
-                        Allow staff users assigned to an individual calendar to adjust the following values for their
-                        calendar only. Leave unticked and all calendars use the value set above.
-                      </>
-                    )}
-                  </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {(
-                      [
-                        ['name', 'Display name'],
-                        ['description', 'Description'],
-                        ['duration', 'Duration'],
-                        ['buffer', 'Buffer time'],
-                        ['price', 'Price'],
-                        ['deposit', 'Deposit'],
-                        ['colour', 'Colour'],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={form.staffMay[key]}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              staffMay: { ...prev.staffMay, [key]: e.target.checked },
-                            }))
-                          }
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Calendar allocation */}
-              {(calendarsForServiceForm.length > 0 ||
+            <AppointmentServiceFormFields
+              form={form}
+              setForm={setForm}
+              isAdmin={isAdmin}
+              stripeConnected={stripeConnected}
+              currencySymbol={sym}
+              fieldGroupSuffix={editingId ?? 'new-service'}
+              venueOpeningHours={venueOpeningHours}
+              venueOpeningExceptions={venueOpeningExceptions}
+              linkedCalendarsForPreview={linkedCalendarsForPreview}
+              calendarsSection={
+                calendarsForServiceForm.length > 0 ||
                 lingeringCalendarLinks.length > 0 ||
-                practitioners.length === 0) && (
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Calendars that offer this service
-                  </label>
-                  <p className="mb-2 text-xs text-slate-500">
-                    Tick the calendars that should offer this service.
-                  </p>
-                  {isAdmin && (
-                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                      {!entitlementLoaded ? (
-                        <p className="text-xs text-slate-500">Loading plan limits…</p>
-                      ) : canAddCalendar ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddCalendarModalError(null);
-                              setNewCalendarName('');
-                              setShowAddCalendarModal(true);
-                            }}
-                            className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
-                          >
-                            Add calendar
-                          </button>
-                          <Link
-                            href="/dashboard/calendar-availability?tab=calendars"
-                            className="text-sm text-slate-600 underline hover:text-slate-800"
-                          >
-                            Calendar availability
-                          </Link>
-                        </>
-                      ) : (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-                          <CalendarLimitMessage
-                            entitlement={calendarEntitlement}
-                            linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {practitioners.length === 0 && (
-                    <p className="text-sm text-slate-500">
-                      No calendars found for this venue. Add calendars in Availability → Team.
-                    </p>
-                  )}
-                  {practitioners.length > 0 && lingeringCalendarLinks.length > 0 && (
-                    <div className="mb-3 space-y-2">
-                      {lingeringCalendarLinks.map((id) => {
-                        const row = practitioners.find((pr) => pr.id === id);
-                        return (
-                          <div
-                            key={id}
-                            className="flex min-h-[2.5rem] flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2"
-                          >
-                            <span className="text-sm text-slate-800">
-                              <span className="font-medium">{row?.name ?? 'Unknown'}</span>
-                              <span className="ml-1.5 text-xs font-normal text-amber-900">
-                                (not available — calendar inactive or not eligible)
-                              </span>
-                            </span>
+                practitioners.length === 0 ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      Calendars that offer this service
+                    </label>
+                    <p className="mb-2 text-xs text-slate-500">Tick the calendars that should offer this service.</p>
+                    {isAdmin && (
+                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                        {!entitlementLoaded ? (
+                          <p className="text-xs text-slate-500">Loading plan limits…</p>
+                        ) : canAddCalendar ? (
+                          <>
                             <button
                               type="button"
-                              onClick={() => removeCalendarLink(id)}
-                              className="shrink-0 text-xs font-medium text-slate-600 underline hover:text-red-700"
+                              onClick={() => {
+                                setAddCalendarModalError(null);
+                                setNewCalendarName('');
+                                setShowAddCalendarModal(true);
+                              }}
+                              className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
                             >
-                              Remove link
+                              Add calendar
                             </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {practitioners.length > 0 &&
-                    (calendarsForServiceForm.length > 0 ? (
-                      <div className="space-y-2">
-                        {calendarsForServiceForm.map((p) => (
-                          <label
-                            key={p.id}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={form.practitioner_ids.includes(p.id)}
-                              onChange={() => toggleCalendarLink(p.id)}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            <Link
+                              href="/dashboard/calendar-availability?tab=calendars"
+                              className="text-sm text-slate-600 underline hover:text-slate-800"
+                            >
+                              Calendar availability
+                            </Link>
+                          </>
+                        ) : (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+                            <CalendarLimitMessage
+                              entitlement={calendarEntitlement}
+                              linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
                             />
-                            <span className="text-sm text-slate-700">{p.name}</span>
-                          </label>
-                        ))}
+                          </div>
+                        )}
                       </div>
-                    ) : lingeringCalendarLinks.length === 0 ? (
+                    )}
+                    {practitioners.length === 0 && (
                       <p className="text-sm text-slate-500">
-                        No active calendars to assign. Add or reactivate a calendar in Team first.
+                        No calendars found for this venue. Add calendars in Availability → Team.
                       </p>
-                    ) : null)}
-                </div>
-              )}
-
-              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-                <div>
-                  <p className="text-sm font-medium text-slate-800">When guests can book this service online</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Final availability is the overlap of venue opening hours, each linked calendar&apos;s
-                    hours, and this service&apos;s schedule (below). Staff blocks and one-off calendar
-                    changes also apply live.
-                  </p>
-                </div>
-                <ServiceAvailabilityCalendar
-                  venueOpeningHours={venueOpeningHours}
-                  venueOpeningExceptions={venueOpeningExceptions}
-                  linkedCalendars={linkedCalendarsForPreview}
-                  customAvailabilityEnabled={form.custom_availability_enabled}
-                  customWorkingHours={form.custom_working_hours}
-                  footnote="Based on venue hours (with exceptions), each linked calendar's recurring weekly hours, and this service's schedule. Staff blocks and one-off calendar changes are not previewed here."
-                />
-
-
-                {isAdmin ? (
-                  <div className="space-y-3 pt-1">
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">This service&apos;s schedule</p>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        Optional — only turn on if this service should be bookable for less time than
-                        its calendars are open (for example a brunch menu, or evening-only therapy).
-                      </p>
-                    </div>
-                    <ServiceCustomAvailabilityEditor
-                      value={form.custom_working_hours}
-                      onChange={(next) =>
-                        setForm((f) => ({ ...f, custom_working_hours: next }))
-                      }
-                      enabled={form.custom_availability_enabled}
-                      onEnabledChange={(next) =>
-                        setForm((f) => ({ ...f, custom_availability_enabled: next }))
-                      }
-                    />
+                    )}
+                    {practitioners.length > 0 && lingeringCalendarLinks.length > 0 && (
+                      <div className="mb-3 space-y-2">
+                        {lingeringCalendarLinks.map((id) => {
+                          const row = practitioners.find((pr) => pr.id === id);
+                          return (
+                            <div
+                              key={id}
+                              className="flex min-h-[2.5rem] flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2"
+                            >
+                              <span className="text-sm text-slate-800">
+                                <span className="font-medium">{row?.name ?? 'Unknown'}</span>
+                                <span className="ml-1.5 text-xs font-normal text-amber-900">
+                                  (not available — calendar inactive or not eligible)
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeCalendarLink(id)}
+                                className="shrink-0 text-xs font-medium text-slate-600 underline hover:text-red-700"
+                              >
+                                Remove link
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {practitioners.length > 0 &&
+                      (calendarsForServiceForm.length > 0 ? (
+                        <div className="space-y-2">
+                          {calendarsForServiceForm.map((p) => (
+                            <label
+                              key={p.id}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={form.practitioner_ids.includes(p.id)}
+                                onChange={() => toggleCalendarLink(p.id)}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-slate-700">{p.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : lingeringCalendarLinks.length === 0 ? (
+                        <p className="text-sm text-slate-500">
+                          No active calendars to assign. Add or reactivate a calendar in Team first.
+                        </p>
+                      ) : null)}
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-500">
-                    Only venue admins can change this service&apos;s schedule.
+                ) : null
+              }
+              hideStaffMaySection={false}
+              staffNotice={
+                !isAdmin ? (
+                  <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Link this service to at least one calendar you control. Only venue admins can change which fields
+                    other staff may customise for their calendars.
                   </p>
-                )}
-              </div>
-            </div>
+                ) : undefined
+              }
+            />
 
             <div className="mt-6 flex justify-end gap-3">
               <button

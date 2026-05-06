@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { SMS_LIGHT_GBP_PER_MESSAGE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
-import { resolveSmsBillingPeriod } from '@/lib/sms-usage';
+import { getSmsMessagesSentThisMonthForVenue, resolveSmsBillingPeriod } from '@/lib/sms-usage';
 
 export type SmsUsageBillingMode = 'light_metered' | 'bundle_allowance';
 
@@ -13,7 +13,7 @@ export interface SmsUsageDisplay {
   overage_amount_pence: number;
   /** Light: every SMS segment is metered; other tiers: segments beyond included allowance. */
   billing_mode: SmsUsageBillingMode;
-  /** GBP per billable Twilio segment for this venue (0.08 Light, 0.06 overage on other plans). */
+  /** GBP per billable SMS segment for this venue (0.08 Light, 0.06 overage on other plans). */
   billable_unit_gbp: number;
 }
 
@@ -61,7 +61,10 @@ export async function getSmsUsageDisplayForVenue(
     overage_rate_pence?: number;
   } | null;
 
-  const sent = u?.messages_sent ?? 0;
+  const sent = Math.max(
+    u?.messages_sent ?? 0,
+    await getSmsMessagesSentThisMonthForVenue(venueId, row),
+  );
   const tierLower = (row.pricing_tier ?? '').toLowerCase();
   if (tierLower === 'light') {
     const unit = typeof u?.overage_rate_pence === 'number' ? u.overage_rate_pence / 100 : SMS_LIGHT_GBP_PER_MESSAGE;

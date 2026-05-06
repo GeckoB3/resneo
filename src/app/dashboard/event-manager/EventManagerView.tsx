@@ -1644,49 +1644,51 @@ function EventCard({
         selected ? 'border-brand-300 ring-2 ring-brand-200' : 'border-slate-200'
       }`}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        className="w-full px-5 py-4 text-left"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 className="font-semibold text-slate-900">{event.name}</h3>
-            <p className="text-sm text-slate-500">
-              {event.event_date} &middot; {event.start_time.slice(0, 5)} – {event.end_time.slice(0, 5)}
-            </p>
-            {event.description && (
-              <p className="mt-1 text-sm text-slate-600 line-clamp-2">{event.description}</p>
-            )}
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2 text-right text-sm">
-            <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={onSelect}
+          className="min-w-0 flex-1 px-3 py-4 text-left sm:px-5"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-slate-900">{event.name}</h3>
+              <p className="text-sm text-slate-500">
+                {event.event_date} &middot; {event.start_time.slice(0, 5)} – {event.end_time.slice(0, 5)}
+              </p>
+              {event.description && (
+                <p className="mt-1 text-sm text-slate-600 line-clamp-2">{event.description}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-2 text-right text-sm">
               <Pill variant="neutral" size="sm" className="tabular-nums">
                 {event.capacity} cap
               </Pill>
-              {canEdit ? (
-                <DashboardEntityRowActions stopPropagation onEdit={onEdit} onDelete={onDelete} />
+              {!event.is_active ? (
+                <Pill variant="warning" size="sm">
+                  Inactive
+                </Pill>
               ) : null}
             </div>
-            {!event.is_active ? (
-              <Pill variant="warning" size="sm">
-                Inactive
-              </Pill>
-            ) : null}
           </div>
-        </div>
-        {event.ticket_types.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {event.ticket_types.map((tt) => (
-              <Pill key={tt.id} variant="brand" size="sm">
-                {tt.name}: {formatPrice(tt.price_pence)}
-                {tt.capacity ? ` (${tt.capacity} max)` : ''}
-              </Pill>
-            ))}
+          {event.ticket_types.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {event.ticket_types.map((tt) => (
+                <Pill key={tt.id} variant="brand" size="sm">
+                  {tt.name}: {formatPrice(tt.price_pence)}
+                  {tt.capacity ? ` (${tt.capacity} max)` : ''}
+                </Pill>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-xs text-slate-500">{selected ? 'Hide details' : 'View attendees & actions'}</p>
+        </button>
+        {canEdit ? (
+          <div className="flex shrink-0 flex-col items-end justify-start gap-2 border-l border-slate-100 px-3 py-4 sm:px-4">
+            <DashboardEntityRowActions onEdit={onEdit} onDelete={onDelete} />
           </div>
-        )}
-        <p className="mt-2 text-xs text-slate-500">{selected ? 'Hide details' : 'View attendees & actions'}</p>
-      </button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,16 +1,17 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import Link from 'next/link';
-import { CapacityRulesTab } from '@/app/dashboard/availability/CapacityRulesTab';
+import { ServiceSettingsWorkspace } from '@/app/dashboard/availability/ServiceSettingsWorkspace';
 import { useRestaurantOnboardingAvailability } from '@/hooks/use-restaurant-onboarding-availability';
+import { ServiceAreaPicker } from './ServiceAreaPicker';
 
 interface Props {
   onDone: () => Promise<void>;
 }
 
 export function CapacityStep({ onDone }: Props) {
-  const { selectedAreaId, services, loading } = useRestaurantOnboardingAvailability();
+  const { selectedAreaId, activeAreas, selectArea, services, setServices, loading } =
+    useRestaurantOnboardingAvailability();
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -26,46 +27,12 @@ export function CapacityStep({ onDone }: Props) {
     );
   }
 
-  if (services.length === 0) {
-    return (
-      <div>
-        <h2 className="mb-1 text-lg font-bold text-slate-900">How many guests at once?</h2>
-        <p className="mb-6 text-sm text-slate-500">
-          Capacity rules control how many guests and bookings you&apos;ll accept in each time slot.
-        </p>
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-6 text-center text-sm text-slate-600">
-          <p className="font-medium text-slate-700">No services yet</p>
-          <p className="mt-1">
-            Go back and add at least one dining service first; capacity is configured per service. You can
-            always come back here from{' '}
-            <Link href="/dashboard/availability?tab=capacity" className="font-medium text-brand-600 underline">
-              Availability → Capacity Rules
-            </Link>
-            .
-          </p>
-        </div>
-        <div className="mt-8 flex items-center justify-between">
-          <button type="button" onClick={() => void onDone()} className="text-sm text-slate-500 hover:text-slate-700">
-            Skip for now
-          </button>
-          <button
-            type="button"
-            onClick={() => void onDone()}
-            className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            Continue
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div className="min-w-0">
       <h2 className="mb-1 text-lg font-bold text-slate-900">How many guests at once?</h2>
       <p className="mb-3 text-sm text-slate-500">
-        Capacity rules cap how busy each time slot can get. Set a reasonable default per service, and you can
-        also add day or time-of-day overrides (e.g. a smaller kitchen capacity on Sunday).
+        Capacity rules are now managed inside each service. Pick or create a service below, then tune capacity,
+        dining duration, and booking rules in one place.
       </p>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
@@ -81,9 +48,20 @@ export function CapacityStep({ onDone }: Props) {
         </p>
       </div>
 
-      <CapacityRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+      <ServiceAreaPicker
+        activeAreas={activeAreas}
+        selectedAreaId={selectedAreaId}
+        onSelectArea={(id) => void selectArea(id)}
+      />
 
-      <div className="mt-8 flex items-center justify-between">
+      <ServiceSettingsWorkspace
+        services={services}
+        setServices={setServices}
+        selectedAreaId={selectedAreaId}
+        showToast={showToast}
+      />
+
+      <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button type="button" onClick={() => void onDone()} className="text-sm text-slate-500 hover:text-slate-700">
           Skip for now
         </button>

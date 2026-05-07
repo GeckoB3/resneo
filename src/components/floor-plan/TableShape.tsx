@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Group, Rect, Circle, Ellipse, Text, Line } from 'react-konva';
+import { Group, Rect, Circle, Ellipse, Text, Line, Arc } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import {
   getTableDimensions,
@@ -46,6 +46,10 @@ export interface BookingInfo {
   id: string;
   guest_name: string;
   party_size: number;
+  /** Live floor: booking status label (e.g. Seated). */
+  status?: string;
+  /** Live floor: HH:mm start. */
+  start_time?: string;
 }
 
 export interface TableShapeProps {
@@ -83,7 +87,7 @@ export interface TableShapeProps {
   onDragEnd?: (e: KonvaEventObject<DragEvent>) => void;
   onDragMove?: (e: KonvaEventObject<DragEvent>) => void;
   onClick?: (e: KonvaEventObject<MouseEvent>) => void;
-  onTap?: () => void;
+  onTap?: (e: KonvaEventObject<TouchEvent>) => void;
   /**
    * Called while dragging a resize handle on oval/circle tables.
    * axis: 'x' for horizontal (width), 'y' for vertical (height).
@@ -116,6 +120,13 @@ export interface TableShapeProps {
   /** Editor: drag a polygon vertex (table-local unrotated pixels) to reshape the custom table. */
   onPolygonVertexDrag?: (vertexIndex: number, localX: number, localY: number) => void;
   onPolygonVertexDragEnd?: () => void;
+  /**
+   * Live floor: progress through the booking window (0 = start, 100 = planned end). Values &gt; 100 = overdue.
+   * Renders a small corner ring; omit for empty tables.
+   */
+  turnProgressPct?: number | null;
+  /** Live floor: booking spans multiple tables (combination). */
+  comboTableCount?: number;
   children?: React.ReactNode;
 }
 
@@ -256,6 +267,8 @@ export default function TableShape({
   unifiedLabelFonts,
   onPolygonVertexDrag,
   onPolygonVertexDragEnd,
+  turnProgressPct = null,
+  comboTableCount = 0,
   children,
 }: TableShapeProps) {
   // --- Geometry ---
@@ -331,12 +344,25 @@ export default function TableShape({
   const topLabel = alwaysShowTableName || !isOccupied
     ? table.name
     : booking!.guest_name.slice(0, 12);
+  const shortStatus = booking?.status ? booking.status.replace(/-/g, ' ').slice(0, 10) : '';
+  const timeBit = booking?.start_time ? booking.start_time.slice(0, 5) : '';
   const bottomLabel = alwaysShowTableName
-    ? (isOccupied ? booking!.guest_name.slice(0, 12) : '')
+    ? isOccupied
+      ? [
+          truncateForWidth(booking!.guest_name, 12),
+          [timeBit, `${booking!.party_size}/${table.max_covers}`].filter(Boolean).join(' · '),
+          [shortStatus || null, comboTableCount > 1 ? 'Combo' : null].filter(Boolean).join(' · '),
+        ]
+          .filter((p): p is string => Boolean(p))
+          .join('\n')
+      : ''
     : isOccupied
       ? `${booking!.party_size} pax`
       : capacityText;
   const hasBottomLabel = bottomLabel.trim().length > 0;
+  const liveFloorLabelBoost = !compactLabels && !isEditorMode && alwaysShowTableName ? 1.24 : 1;
+  const liveFloorTableNameMin = !compactLabels && !isEditorMode && alwaysShowTableName ? 14 : 0;
+  const liveFloorInfoMin = !compactLabels && !isEditorMode && alwaysShowTableName && isOccupied ? 12 : 0;
 
   const HANDLE = 6;
   /** Screen-space targets: grow when zoomed out so corners stay easy to grab (desktop + touch). */
@@ -401,7 +427,8 @@ export default function TableShape({
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = nameFs + 1;
       const ch = hasBottomLabel ? capFs + 1 : 0;
-      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
+      const bottomLines = Math.max(1, bottomLabel.split('\n').length);
+      return { blockH: nh + (hasBottomLabel ? g + ch * bottomLines : 0), nameBox: nh, capBox: ch * bottomLines };
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
@@ -478,7 +505,7 @@ export default function TableShape({
       return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
     };
 
-    const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
+    const { blockH, capBox } = measureBlock(fn, fc, gap);
     const polygonBand =
       isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
         ? computeBestPolygonLabelBand({
@@ -499,10 +526,10 @@ export default function TableShape({
       polygonPixelPts: isPolygon ? polygonPixelPts : null,
     });
 
-    fontName = fn;
-    fontCap = fc;
-    nameLineH = nameBox;
-    capLineH = capBox;
+    fontName = Math.max(liveFloorTableNameMin, Math.round(fn * liveFloorLabelBoost));
+    fontCap = Math.max(liveFloorInfoMin, Math.round(fc * liveFloorLabelBoost));
+    nameLineH = compactLineBox(fontName, true);
+    capLineH = hasBottomLabel ? compactLineBox(fontCap, false) : capBox;
 
     innerW = computedInnerW;
     textX = -innerW / 2;
@@ -725,6 +752,38 @@ export default function TableShape({
       </Group>
       )}
 
+      {turnProgressPct != null && isOccupied ? (
+        <Group
+          x={w / 2 - 20}
+          y={topEdge + 20}
+          rotation={labelScreenRotationDeg}
+          listening={false}
+        >
+          <Circle
+            radius={17}
+            fill="#ffffff"
+            opacity={0.96}
+            shadowColor="rgba(15,23,42,0.22)"
+            shadowBlur={5}
+            shadowOffsetY={1}
+          />
+          <Arc
+            innerRadius={10}
+            outerRadius={15}
+            angle={360}
+            rotation={-90}
+            fill="#e2e8f0"
+          />
+          <Arc
+            innerRadius={10}
+            outerRadius={15}
+            angle={Math.min(360, Math.max(0, (turnProgressPct / 100) * 360))}
+            rotation={-90}
+            fill={turnProgressPct >= 100 ? '#dc2626' : turnProgressPct >= 70 ? '#d97706' : '#0d9488'}
+          />
+        </Group>
+      ) : null}
+
       {showTableNameBadge && (
         <Group y={topEdge - 22} rotation={labelScreenRotationDeg}>
           <Rect
@@ -827,6 +886,7 @@ export default function TableShape({
               align="center"
               verticalAlign="middle"
               wrap="none"
+              lineHeight={1.08}
               ellipsis={true}
               width={innerW}
               height={capLineH}

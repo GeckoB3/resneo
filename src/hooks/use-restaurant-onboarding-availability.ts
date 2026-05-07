@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { VenueServiceRow } from '@/app/dashboard/availability/ServicesTab';
+import type { VenueServiceRow } from '@/app/dashboard/availability/service-settings-types';
 import type { VenueArea } from '@/types/areas';
 
 const diningAreaStorageKey = (venueId: string) => `diningArea:${venueId}`;

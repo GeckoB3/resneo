@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Stage, Layer, Line, Rect, Text, Circle, Group } from 'react-konva';
+import { Stage, Layer, Line, Rect, Text, Circle, Group, Image as KonvaImage } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import {
@@ -16,29 +16,29 @@ import {
 } from '@/lib/floor-plan/fit-view';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
-import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 /**
  * Stat tile label colours from `DashboardStatCard` (Tailwind `text-blue-700` / `text-emerald-700`).
  * TableShape lightens the fill from these bases; strokes use the base hex directly.
  */
 const STAT_TILE_TEXT_BLUE_700 = '#1d4ed8';
-const STAT_TILE_TEXT_EMERALD_700 = '#047857';
+const AVAILABLE_TABLE_GRAY = '#64748b';
 
 const STATUS_COLORS: Record<string, string> = {
-  available: STAT_TILE_TEXT_EMERALD_700,
+  available: AVAILABLE_TABLE_GRAY,
   booked: STAT_TILE_TEXT_BLUE_700,
-  pending: STAT_TILE_TEXT_BLUE_700,
-  reserved: STAT_TILE_TEXT_BLUE_700,
-  seated: STAT_TILE_TEXT_BLUE_700,
-  held: STAT_TILE_TEXT_BLUE_700,
-  no_show: STAT_TILE_TEXT_BLUE_700,
-  starters: STAT_TILE_TEXT_BLUE_700,
-  mains: STAT_TILE_TEXT_BLUE_700,
-  dessert: STAT_TILE_TEXT_BLUE_700,
-  bill: STAT_TILE_TEXT_BLUE_700,
-  paid: STAT_TILE_TEXT_BLUE_700,
-  bussing: STAT_TILE_TEXT_BLUE_700,
+  pending: '#2563eb',
+  reserved: '#6366f1',
+  seated: '#0f766e',
+  held: '#57534e',
+  no_show: '#b91c1c',
+  late: '#c2410c',
+  starters: '#0369a1',
+  mains: '#0369a1',
+  dessert: '#0369a1',
+  bill: '#0369a1',
+  paid: '#047857',
+  bussing: '#78716c',
 };
 
 /** Valid drop target - amber reads on both emerald-tinted empty and blue-tinted occupied fills */
@@ -58,6 +58,18 @@ function blockedToHiddenSet(blocked?: BlockedSides): Set<string> {
 
 function clampScale(value: number): number {
   return Math.max(0.3, Math.min(3, value));
+}
+
+function clientXYFromKonvaEvt(e: KonvaEventObject<MouseEvent | TouchEvent>): { x: number; y: number } | null {
+  const ne = e.evt;
+  if ('clientX' in ne && typeof (ne as MouseEvent).clientX === 'number') {
+    const m = ne as MouseEvent;
+    return { x: m.clientX, y: m.clientY };
+  }
+  const te = ne as TouchEvent;
+  const t = te.changedTouches?.[0];
+  if (t) return { x: t.clientX, y: t.clientY };
+  return null;
 }
 
 function touchDistance(touches: TouchList): number {
@@ -98,8 +110,13 @@ interface TableWithState {
     id: string;
     guest_name: string;
     party_size: number;
+    status: string;
+    start_time: string;
+    estimated_end_time?: string | null;
   } | null;
+  /** 0–100 for bar; ring uses `turn_progress_pct` (may exceed 100 when overdue). */
   elapsed_pct: number;
+  turn_progress_pct: number;
 }
 
 export interface FloorDragEvent {
@@ -122,6 +139,12 @@ interface Props {
   onDragStart?: (bookingId: string, sourceTableIds: string[]) => void;
   onDragEnd?: (event: FloorDragEvent) => void;
   onDragCancel?: () => void;
+  /** Tap/click a booked table (not drag): open booking detail anchored to pointer. */
+  onBookingClick?: (bookingId: string, anchor: { x: number; y: number }) => void;
+  /** Right-click / long-press style menu for a booked table (client viewport coords). */
+  onBookedTableContextMenu?: (bookingId: string, tableId: string, clientX: number, clientY: number) => void;
+  /** Dimmed floor plan background (same asset as layout editor). */
+  floorBackgroundUrl?: string | null;
 }
 
 export default function LiveFloorCanvas({
@@ -137,6 +160,9 @@ export default function LiveFloorCanvas({
   onDragStart,
   onDragEnd,
   onDragCancel,
+  onBookingClick,
+  onBookedTableContextMenu,
+  floorBackgroundUrl,
 }: Props) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +186,7 @@ export default function LiveFloorCanvas({
     typeof window !== 'undefined' ? window.matchMedia('(pointer: coarse)').matches : false,
   );
   const [panMode, setPanMode] = useState(false);
+  const [floorBgImage, setFloorBgImage] = useState<HTMLImageElement | null>(null);
   const pinchGestureRef = useRef<{
     distance: number;
     center: { x: number; y: number };
@@ -201,6 +228,25 @@ export default function LiveFloorCanvas({
   const handleStageClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     if (e.target === e.target.getStage()) handleEmptyCanvasClick();
   }, [handleEmptyCanvasClick]);
+
+  useEffect(() => {
+    if (!floorBackgroundUrl) {
+      setFloorBgImage(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new window.Image();
+    img.onload = () => {
+      if (!cancelled) setFloorBgImage(img);
+    };
+    img.onerror = () => {
+      if (!cancelled) setFloorBgImage(null);
+    };
+    img.src = floorBackgroundUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [floorBackgroundUrl]);
 
   useEffect(() => {
     const mq = window.matchMedia('(pointer: coarse)');
@@ -321,7 +367,21 @@ export default function LiveFloorCanvas({
     }
   }, [positionedTables, combinedTableGroups, onDragStart, scale, stagePos]);
 
-  const handleTableMouseUp = useCallback((tableId: string) => {
+  const openBookingAtPointer = useCallback((tableId: string, bookingId: string, e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    e.cancelBubble = true;
+    if (isDraggingRef.current || panningRef.current) return;
+    const anchor = clientXYFromKonvaEvt(e);
+    if (!anchor) return;
+    setDraggingBookingId(null);
+    setDragPointer(null);
+    dragStartPosRef.current = null;
+    onSelect(tableId);
+    window.setTimeout(() => {
+      onBookingClick?.(bookingId, anchor);
+    }, 0);
+  }, [onBookingClick, onSelect]);
+
+  const handleTableMouseUp = useCallback((tableId: string, e?: KonvaEventObject<MouseEvent | TouchEvent>, bookingId?: string) => {
     if (isDraggingRef.current && draggingBookingId) {
       const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
       if (!sourceTableIds.includes(tableId) && validDropTargets?.has(tableId)) {
@@ -340,9 +400,14 @@ export default function LiveFloorCanvas({
       return;
     }
 
+    if (bookingId && e && !panningRef.current) {
+      openBookingAtPointer(tableId, bookingId, e);
+      return;
+    }
+
     dragStartPosRef.current = null;
     isDraggingRef.current = false;
-  }, [combinedTableGroups, draggingBookingId, validDropTargets, onDragEnd, onDragCancel]);
+  }, [combinedTableGroups, draggingBookingId, validDropTargets, onDragEnd, onDragCancel, openBookingAtPointer]);
 
   const handleStageMouseUp = useCallback(() => {
     if (isDraggingRef.current && draggingBookingId) {
@@ -496,48 +561,6 @@ export default function LiveFloorCanvas({
   const activeBookingId = draggingBookingId ?? reassignMode?.bookingId ?? null;
   const canvasPanEnabled = !isDragging && (!isCoarsePointer || panMode);
 
-  const unifiedLabelFonts = useMemo(() => {
-    const inputs = positionedTables.map((table) => {
-      const fb = getTableDimensions(table.max_covers, table.shape);
-      const { w: tw, h: th } = tableDimensionsPercentToPixels(
-        table.width ?? fb.width,
-        table.height ?? fb.height,
-        layoutPixelW,
-        layoutPixelH,
-        table.shape,
-      );
-      const dragOrReassign = draggingBookingId != null || reassignMode != null;
-      const isSource = activeBookingId
-        ? (combinedTableGroups?.get(activeBookingId)?.includes(table.id) ??
-          (table.booking?.id === activeBookingId))
-        : false;
-      const booking = dragOrReassign && isSource ? null : table.booking;
-      const isOccupied = booking != null;
-      const topLabel = table.name;
-      const bottomLabel = isOccupied ? booking!.guest_name.slice(0, 12) : '';
-      return {
-        w: tw,
-        h: th,
-        shape: table.shape,
-        topLabel,
-        bottomLabel,
-        compactLabels: false,
-        layoutScale: scale,
-        polygon_points: table.polygon_points ?? null,
-      };
-    });
-    return computeGlobalUnifiedLabelFonts(inputs);
-  }, [
-    positionedTables,
-    layoutPixelW,
-    layoutPixelH,
-    scale,
-    draggingBookingId,
-    reassignMode,
-    combinedTableGroups,
-    activeBookingId,
-  ]);
-
   return (
     <div
       ref={containerRef}
@@ -637,12 +660,23 @@ export default function LiveFloorCanvas({
               }, 0);
             }}
           >
+            {floorBgImage ? (
+              <KonvaImage
+                x={0}
+                y={0}
+                width={layoutPixelW}
+                height={layoutPixelH}
+                image={floorBgImage}
+                opacity={0.22}
+                listening={false}
+              />
+            ) : null}
             <Rect
               x={0}
               y={0}
               width={layoutPixelW}
               height={layoutPixelH}
-              fill="rgba(248,250,252,0.01)"
+              fill={floorBgImage ? 'rgba(248,250,252,0.92)' : 'rgba(248,250,252,0.01)'}
               onClick={handleEmptyCanvasClick}
               onTap={handleEmptyCanvasClick}
             />
@@ -690,7 +724,7 @@ export default function LiveFloorCanvas({
               const isInvalid = isDragging && !isSource && !validDropTargets?.has(table.id);
               const comboLabel = validDropComboLabels?.get(table.id);
 
-              let statusColor = STATUS_COLORS[table.service_status] ?? STAT_TILE_TEXT_EMERALD_700;
+              let statusColor = STATUS_COLORS[table.service_status] ?? AVAILABLE_TABLE_GRAY;
               let opacity = 1;
 
               if (isDragging) {
@@ -725,13 +759,20 @@ export default function LiveFloorCanvas({
                   statusColour={statusColor}
                   groupOpacity={opacity}
                   booking={isDragging && isSource ? null : table.booking}
+                  turnProgressPct={
+                    table.booking && !(isDragging && isSource) && table.booking.estimated_end_time
+                      ? table.turn_progress_pct
+                      : null
+                  }
+                  comboTableCount={
+                    table.booking ? (combinedTableGroups?.get(table.booking.id)?.length ?? 0) : 0
+                  }
                   canvasWidth={layoutPixelW}
                   canvasHeight={layoutPixelH}
                   layoutScale={scale}
-                  unifiedLabelFonts={unifiedLabelFonts}
                   seatAngles={table.seat_angles}
                   alwaysShowTableName
-                  onClick={() => {
+                  onClick={(e) => {
                     if (isDragging && isValidTarget) {
                       if (draggingBookingId) {
                         const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
@@ -747,9 +788,13 @@ export default function LiveFloorCanvas({
                       }
                       return;
                     }
+                    if (table.booking) {
+                      openBookingAtPointer(table.id, table.booking.id, e);
+                      return;
+                    }
                     if (!isDraggingRef.current) onSelect(table.id);
                   }}
-                  onTap={() => {
+                  onTap={(e) => {
                     if (isDragging && isValidTarget) {
                       if (draggingBookingId) {
                         const sourceTableIds = combinedTableGroups?.get(draggingBookingId) ?? [];
@@ -763,6 +808,10 @@ export default function LiveFloorCanvas({
                         isDraggingRef.current = false;
                         dragStartPosRef.current = null;
                       }
+                      return;
+                    }
+                    if (table.booking) {
+                      openBookingAtPointer(table.id, table.booking.id, e);
                       return;
                     }
                     onSelect(table.id);
@@ -820,10 +869,22 @@ export default function LiveFloorCanvas({
                       y={-h / 2}
                       width={w}
                       height={h}
-                      opacity={0}
+                      fill="rgba(15,23,42,0.01)"
                       onMouseDown={(e) => { e.cancelBubble = true; handleTableMouseDown(table.id, e); }}
                       onMouseMove={() => handleTableMouseMove(table.id)}
-                      onMouseUp={() => handleTableMouseUp(table.id)}
+                      onMouseUp={(e) => handleTableMouseUp(table.id, e, table.booking?.id)}
+                      onClick={(e) => {
+                        if (table.booking) openBookingAtPointer(table.id, table.booking.id, e);
+                      }}
+                      onTap={(e) => {
+                        if (table.booking) openBookingAtPointer(table.id, table.booking.id, e);
+                      }}
+                      onContextMenu={(e) => {
+                        e.evt.preventDefault();
+                        if (!table.booking || isDraggingRef.current) return;
+                        const a = clientXYFromKonvaEvt(e);
+                        if (a) onBookedTableContextMenu?.(table.booking.id, table.id, a.x, a.y);
+                      }}
                       onTouchStart={(e) => {
                         if (isCoarsePointer) return;
                         e.cancelBubble = true;
@@ -832,8 +893,8 @@ export default function LiveFloorCanvas({
                       onTouchMove={() => {
                         if (!isCoarsePointer) handleTableMouseMove(table.id);
                       }}
-                      onTouchEnd={() => {
-                        if (!isCoarsePointer) handleTableMouseUp(table.id);
+                      onTouchEnd={(e) => {
+                        handleTableMouseUp(table.id, e, table.booking?.id);
                       }}
                     />
                   )}

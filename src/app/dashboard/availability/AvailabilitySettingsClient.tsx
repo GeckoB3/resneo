@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ServicesTab } from './ServicesTab';
-import { CapacityRulesTab } from './CapacityRulesTab';
-import { DiningDurationTab } from './DiningDurationTab';
-import { BookingRulesTab } from './BookingRulesTab';
+import { ServiceSettingsWorkspace } from './ServiceSettingsWorkspace';
+import type { VenueServiceRow } from './service-settings-types';
 import { TableManagementSection } from '@/app/dashboard/settings/sections/TableManagementSection';
 import { FloorPlanEditorTabs, type FloorPlanEditorTabKey } from './FloorPlanEditorTabs';
 import { AvailabilityConfigSection } from '@/app/dashboard/settings/sections/AvailabilityConfigSection';
@@ -24,27 +22,11 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DashboardGridSkeleton, DashboardTabRowSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
-const BASE_TABS = [
-  { key: 'services' as const, label: 'Services' },
-  { key: 'capacity' as const, label: 'Capacity Rules' },
-  { key: 'duration' as const, label: 'Dining Duration' },
-  { key: 'rules' as const, label: 'Booking Rules' },
-];
+const BASE_TABS = [{ key: 'services' as const, label: 'Services' }];
 
 const TABLE_TAB = { key: 'table' as const, label: 'Table Management' };
 
 type TabKey = (typeof BASE_TABS)[number]['key'] | typeof TABLE_TAB.key;
-
-interface Service {
-  id: string;
-  name: string;
-  days_of_week: number[];
-  start_time: string;
-  end_time: string;
-  last_booking_time: string;
-  is_active: boolean;
-  sort_order: number;
-}
 
 function resolveInitialActiveTab(
   initialTab: TabKey | undefined,
@@ -52,9 +34,7 @@ function resolveInitialActiveTab(
 ): TabKey {
   if (!venue) return 'services';
   const showTable = isRestaurantTableProductTier(venue.pricing_tier);
-  if (initialTab === 'table' && !showTable) return 'services';
   if (initialTab === 'table' && showTable) return 'table';
-  if (initialTab && initialTab !== 'table') return initialTab;
   return 'services';
 }
 
@@ -86,14 +66,13 @@ export default function AvailabilitySettingsClient({
     }
     return resolved;
   });
-  const [services, setServices] = useState<Service[]>([]);
+  const [services, setServices] = useState<VenueServiceRow[]>([]);
   const [areas, setAreas] = useState<VenueArea[]>([]);
   /** False until `/api/venue/areas` has completed — avoids unscoped table/floor-plan fetches before `selectedAreaId` is set. */
   const [areasHydrated, setAreasHydrated] = useState(false);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [servicesHydrated, setServicesHydrated] = useState(false);
   const [servicesRefreshing, setServicesRefreshing] = useState(false);
-  const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => new Set([resolveInitialActiveTab(initialTab, initialVenue)]));
   const [toast, setToast] = useState<string | null>(null);
   const [addAreaOpen, setAddAreaOpen] = useState(false);
   const [addAreaSubmitting, setAddAreaSubmitting] = useState(false);
@@ -171,15 +150,6 @@ export default function AvailabilitySettingsClient({
       });
     }
   }, [activeTab, showTableTab, replaceAvailabilityUrl]);
-
-  useEffect(() => {
-    setVisitedTabs((current) => {
-      if (current.has(activeTab)) return current;
-      const next = new Set(current);
-      next.add(activeTab);
-      return next;
-    });
-  }, [activeTab]);
 
   const setActiveTab = useCallback(
     (key: TabKey) => {
@@ -419,6 +389,16 @@ export default function AvailabilitySettingsClient({
     }
   }, [venue?.id, selectedAreaId]);
 
+  /** Normalize legacy tab query params (capacity / duration / rules) to Services workspace. */
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'capacity' || tab === 'duration' || tab === 'rules') {
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', 'services');
+      });
+    }
+  }, [searchParams, replaceAvailabilityUrl]);
+
   if (!venue) {
     return (
       <PageFrame>
@@ -437,7 +417,7 @@ export default function AvailabilitySettingsClient({
             <Skeleton.Line className="h-3 w-full max-w-2xl" />
           </div>
           <Skeleton.Block className="h-11 w-40" />
-          <DashboardTabRowSkeleton tabCount={5} />
+          <DashboardTabRowSkeleton tabCount={2} />
           <Skeleton.Card>
             <div className="grid gap-4 sm:grid-cols-2">
               <Skeleton.Block className="h-24" />
@@ -467,14 +447,6 @@ export default function AvailabilitySettingsClient({
             </Link>
             .
           </>
-        }
-        actions={
-          <Link
-            href="/dashboard/onboarding"
-            className="shrink-0 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-800 shadow-sm hover:bg-brand-100"
-          >
-            Setup wizard
-          </Link>
         }
       />
 
@@ -627,34 +599,16 @@ export default function AvailabilitySettingsClient({
         </p>
       )}
 
-      {visitedTabs.has('services') && (
-        <div className={activeTab === 'services' ? undefined : 'hidden'}>
-          <ServicesTab
-            services={services}
-            setServices={setServices}
-            showToast={showToast}
-            areaId={selectedAreaId}
-          />
-        </div>
+      {activeTab === 'services' && (
+        <ServiceSettingsWorkspace
+          services={services}
+          setServices={setServices}
+          selectedAreaId={selectedAreaId}
+          showToast={showToast}
+        />
       )}
-      {visitedTabs.has('capacity') && (
-        <div className={activeTab === 'capacity' ? undefined : 'hidden'}>
-          <CapacityRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
-        </div>
-      )}
-      {visitedTabs.has('duration') && (
-        <div className={activeTab === 'duration' ? undefined : 'hidden'}>
-          <DiningDurationTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
-        </div>
-      )}
-      {visitedTabs.has('rules') && (
-        <div className={activeTab === 'rules' ? undefined : 'hidden'}>
-          <BookingRulesTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
-        </div>
-      )}
-      {visitedTabs.has('table') && showTableTab && (
-        <div className={activeTab === 'table' ? undefined : 'hidden'}>
-          <div className="space-y-6">
+      {activeTab === 'table' && showTableTab && (
+        <div className="space-y-6">
             <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
             {!areasHydrated ? (
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -682,7 +636,6 @@ export default function AvailabilitySettingsClient({
               <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
             )}
           </div>
-        </div>
       )}
 
       {toast && (

@@ -2218,13 +2218,18 @@ export default function OnboardingPage() {
     currentStepKey === 'classes' ||
     currentStepKey === 'resources';
 
-  const extraWideOnboardingStep = currentStepKey === 'r_table_setup';
+  const serviceSetupOnboardingStep =
+    currentStepKey === 'r_services' ||
+    currentStepKey === 'r_capacity' ||
+    currentStepKey === 'r_dining_duration' ||
+    currentStepKey === 'r_booking_rules';
+  const extraWideOnboardingStep = currentStepKey === 'r_table_setup' || serviceSetupOnboardingStep;
   const onboardingWidthClass = extraWideOnboardingStep
     ? 'max-w-7xl'
     : wideOnboardingStep
       ? 'max-w-3xl'
       : 'max-w-xl';
-  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-8';
+  const onboardingCardPaddingClass = extraWideOnboardingStep ? 'p-4 sm:p-6' : 'p-6 sm:p-8';
 
   return (
     <div className={`w-full ${onboardingWidthClass}`}>

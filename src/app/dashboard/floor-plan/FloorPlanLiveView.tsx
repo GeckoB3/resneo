@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useCallback, useMemo, useRef, type RefObject } from 'react';
 import dynamic from 'next/dynamic';
 import type { VenueTable, TableGridData, TableBlock, UndoAction } from '@/types/table-management';
@@ -13,7 +14,18 @@ import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWor
 import { DiningAreaPicker } from '@/components/dashboard/DiningAreaPicker';
 import { useToast } from '@/components/ui/Toast';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
-import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
+import {
+  BOOKING_REVERT_ACTIONS,
+  canMarkNoShowForSlot,
+  canTransitionBookingStatus,
+  isBookingStatus,
+  isDestructiveBookingStatus,
+  isRevertTransition,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
+import { BookingActionMenu, type BookingActionMenuBooking } from '@/components/table-management/BookingActionMenu';
+import { computePointAnchoredMenuStyle } from '@/lib/ui/clamped-floating-styles';
+import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
@@ -83,6 +95,8 @@ interface TableWithState extends VenueTable {
   service_status: TableOperationalStatus;
   booking: BookingOnTable | null;
   elapsed_pct: number;
+  /** Uncapped % through booking window (100 = end); &gt;100 overdue. */
+  turn_progress_pct: number;
 }
 
 function formatDateInput(d: Date): string {
@@ -103,6 +117,17 @@ function formatIsoTimeUk(iso: string): string {
 function minutesFromTime(value: string): number {
   const [h, m] = value.slice(0, 5).split(':').map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function timeToMinutesShort(t: string): number {
+  const [h, m] = t.slice(0, 5).split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function minutesToTimeShort(m: number): string {
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 }
 
 function bookingEndMinutes(booking: BookingOnTable, selectedDate: string, nowMinutes: number): number {
@@ -139,6 +164,7 @@ export function FloorPlanLiveView({
   enabledModels = [],
   diningAreaId = null,
   areaNav = null,
+  editLayoutHref,
 }: {
   isAdmin?: boolean;
   venueId: string;
@@ -152,6 +178,7 @@ export function FloorPlanLiveView({
   /** Admin link to layout editor in Dining Availability. */
   editLayoutHref?: string;
 }) {
+  const viewportBounds = useViewportBounds();
   const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
   const preferencesKey = floorPlanLivePreferencesKey(venueId);
@@ -212,6 +239,14 @@ export function FloorPlanLiveView({
     width: FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
     height: FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   });
+  const [floorPlanBackgroundUrl, setFloorPlanBackgroundUrl] = useState<string | null>(null);
+  const [detailBookingAnchor, setDetailBookingAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [floorBookingMenu, setFloorBookingMenu] = useState<{
+    booking: BookingActionMenuBooking;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [rescheduleDialog, setRescheduleDialog] = useState<{ bookingId: string; time: string } | null>(null);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedTime(selectedTime), 300);
@@ -273,6 +308,43 @@ export function FloorPlanLiveView({
   const pickerStartHour = startHourOverride ?? derivedStartHour;
   const pickerEndHour = endHourOverride ?? derivedEndHour;
 
+  /** Inclusive minute range for timeline scrubber (end hour matches calendar: exclusive upper bound). */
+  const timelineScrubBounds = useMemo(() => {
+    const minM = pickerStartHour * 60;
+    const maxM = Math.max(minM, pickerEndHour * 60 - 1);
+    return { minM, maxM };
+  }, [pickerStartHour, pickerEndHour]);
+
+  const timelineScrubMinutes = useMemo(() => {
+    const raw = minutesFromTime(selectedTime);
+    const { minM, maxM } = timelineScrubBounds;
+    return Math.min(Math.max(raw, minM), maxM);
+  }, [selectedTime, timelineScrubBounds]);
+
+  const jumpTimelineToCurrentTime = useCallback(() => {
+    const today = formatDateInput(new Date());
+    const now = new Date();
+    const rawM = now.getHours() * 60 + now.getMinutes();
+
+    if (selectedDate === today) {
+      const { minM, maxM } = timelineScrubBounds;
+      setSelectedTime(minutesToTimeShort(Math.min(Math.max(rawM, minM), maxM)));
+      return;
+    }
+
+    const { startHour, endHour } = getCalendarGridBounds(
+      today,
+      openingHours ?? undefined,
+      7,
+      21,
+      { timeZone: venueTimezone },
+    );
+    const minM = startHour * 60;
+    const maxM = Math.max(minM, endHour * 60 - 1);
+    setSelectedDate(today);
+    setSelectedTime(minutesToTimeShort(Math.min(Math.max(rawM, minM), maxM)));
+  }, [selectedDate, timelineScrubBounds, openingHours, venueTimezone]);
+
   const fetchData = useCallback(async () => {
     setViewportRefreshing(true);
     try {
@@ -310,6 +382,11 @@ export function FloorPlanLiveView({
         setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
         setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
         setCombinationThreshold(data.settings?.combination_threshold ?? 80);
+        setFloorPlanBackgroundUrl(
+          typeof data.settings?.floor_plan_background_url === 'string'
+            ? data.settings.floor_plan_background_url
+            : null,
+        );
         const layout = data.floor_plan_layout as { width?: number; height?: number } | undefined;
         if (
           layout &&
@@ -373,6 +450,81 @@ export function FloorPlanLiveView({
 
   const liveState = useVenueLiveSync({ venueId, date: selectedDate, onChange: fetchData });
 
+  useEffect(() => {
+    setSelectedTableId((id) => (id && tables.some((t) => t.id === id) ? id : null));
+  }, [tables]);
+
+  useEffect(() => {
+    setDetailBookingId((id) => (id && bookingMap.has(id) ? id : null));
+  }, [bookingMap]);
+
+  useEffect(() => {
+    if (!detailBookingId) setDetailBookingAnchor(null);
+  }, [detailBookingId]);
+
+  useEffect(() => {
+    if (!floorBookingMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFloorBookingMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [floorBookingMenu]);
+
+  const openBookingDrawer = useCallback((bookingId: string) => {
+    setDetailBookingId(bookingId);
+    setDetailBookingAnchor(null);
+  }, []);
+
+  const openBookingPopoverFromCanvas = useCallback((bookingId: string, anchor: { x: number; y: number }) => {
+    const coarse = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+    setSelectedTableId(null);
+    setFloorBookingMenu(null);
+    setDetailBookingId(bookingId);
+    setDetailBookingAnchor(coarse ? null : anchor);
+  }, []);
+
+  const toMenuBooking = useCallback(
+    (bookingId: string): BookingActionMenuBooking | null => {
+      const b = bookingMap.get(bookingId);
+      if (!b) return null;
+      const fromCombo = combinedTableGroups.get(bookingId);
+      const tableIds =
+        fromCombo && fromCombo.length > 0
+          ? fromCombo
+          : [...new Set((gridData?.cells ?? []).filter((c) => c.booking_id === bookingId).map((c) => c.table_id))];
+      const sampleCell = (gridData?.cells ?? []).find((c) => c.booking_id === bookingId && c.booking_details);
+      const endFromGrid = sampleCell?.booking_details?.end_time?.slice(0, 5);
+      const endTime =
+        endFromGrid ??
+        (b.estimated_end_time ? new Date(b.estimated_end_time).toISOString().slice(11, 16) : null);
+      const primaryTableId = tableIds[0] ?? sampleCell?.table_id ?? null;
+      return {
+        id: bookingId,
+        guest_name: b.guest_name,
+        party_size: b.party_size,
+        status: b.status,
+        start_time: b.start_time.slice(0, 5),
+        end_time: endTime,
+        table_id: primaryTableId,
+        table_ids: tableIds,
+      };
+    },
+    [bookingMap, combinedTableGroups, gridData],
+  );
+
+  const floorBookingMenuStyle = useMemo(() => {
+    if (!floorBookingMenu) return undefined;
+    return computePointAnchoredMenuStyle({
+      anchorX: floorBookingMenu.x,
+      anchorY: floorBookingMenu.y,
+      viewportWidth: viewportBounds.width,
+      viewportHeight: viewportBounds.height,
+      minWidth: Math.min(224, viewportBounds.width - 24),
+      maxWidth: Math.min(288, viewportBounds.width - 16),
+    });
+  }, [floorBookingMenu, viewportBounds.width, viewportBounds.height]);
+
   const floorBookingDetailSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
     if (!detailBookingId) return null;
     const b = bookingMap.get(detailBookingId);
@@ -405,6 +557,7 @@ export function FloorPlanLiveView({
   }, [detailBookingId, bookingMap, combinedTableGroups, gridData, tables, selectedDate]);
 
   const tablesWithState: TableWithState[] = useMemo(() => {
+    void clockTick;
     const now = Date.now();
     const dateTime = `${selectedDate}T${debouncedTime}:00.000Z`;
     const bookingsForStatus = Array.from(bookingMap.values()).map((booking) => ({
@@ -442,6 +595,7 @@ export function FloorPlanLiveView({
       }
 
       let elapsedPct = 0;
+      let turnProgressPct = 0;
       if (booking?.start_time && booking?.estimated_end_time) {
         const [y, mo, d] = selectedDate.split('-').map(Number);
         const [h, m] = booking.start_time.split(':').map(Number);
@@ -450,11 +604,13 @@ export function FloorPlanLiveView({
         const endMs = new Date(y!, mo! - 1, d!, Math.floor(effectiveEndMin / 60), effectiveEndMin % 60).getTime();
         const totalMs = endMs - startMs;
         if (totalMs > 0) {
-          elapsedPct = Math.min(100, Math.max(0, ((now - startMs) / totalMs) * 100));
+          const raw = ((now - startMs) / totalMs) * 100;
+          turnProgressPct = raw;
+          elapsedPct = Math.min(100, Math.max(0, raw));
         }
       }
 
-      return { ...t, service_status: tableStatus, booking, elapsed_pct: elapsedPct };
+      return { ...t, service_status: tableStatus, booking, elapsed_pct: elapsedPct, turn_progress_pct: turnProgressPct };
     });
   }, [tables, bookingMap, selectedDate, debouncedTime, gridData, blocks, clockTick]);
 
@@ -601,6 +757,120 @@ export function FloorPlanLiveView({
     await handleBookingStatusChange(bookingId, currentStatus, newStatus);
   }, [addToast, bookingMap, handleBookingStatusChange, selectedDate, noShowGraceMinutes]);
 
+  const floorMenuStatusChange = useCallback(
+    async (bookingId: string, currentStatus: string, newStatus: string) => {
+      setFloorBookingMenu(null);
+      if (!isBookingStatus(currentStatus) || !isBookingStatus(newStatus)) return;
+      await requestBookingStatusChange(bookingId, currentStatus, newStatus);
+    },
+    [requestBookingStatusChange],
+  );
+
+  const handleFloorResizeBooking = useCallback(
+    async (bookingId: string, newEndTimeHHmm: string) => {
+      const anchorCell = gridData?.cells.find((c) => c.booking_id === bookingId);
+      const startTime = anchorCell?.booking_details?.start_time?.slice(0, 5);
+      if (!startTime) return;
+      if (anchorCell?.booking_details?.status === 'Completed') return;
+      const startMinutes = timeToMinutesShort(startTime);
+      const requestedEnd = Math.max(startMinutes + 15, timeToMinutesShort(newEndTimeHHmm));
+      const bookingTableIds = Array.from(
+        new Set((gridData?.cells ?? []).filter((cell) => cell.booking_id === bookingId).map((cell) => cell.table_id)),
+      );
+      let nextBoundary: number | null = null;
+      for (const cell of gridData?.cells ?? []) {
+        if (!cell.booking_id || !cell.booking_details) continue;
+        if (cell.booking_id === bookingId) continue;
+        if (!bookingTableIds.includes(cell.table_id)) continue;
+        const otherStart = timeToMinutesShort(cell.booking_details.start_time.slice(0, 5));
+        if (otherStart > startMinutes && (nextBoundary === null || otherStart < nextBoundary)) {
+          nextBoundary = otherStart;
+        }
+      }
+      const clampedEnd = nextBoundary === null ? requestedEnd : Math.min(requestedEnd, nextBoundary);
+      const clampedEndTime = minutesToTimeShort(clampedEnd);
+      try {
+        const res = await fetch('/api/venue/tables/assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'change_time',
+            booking_id: bookingId,
+            new_time: startTime,
+            new_estimated_end_time: `${selectedDate}T${clampedEndTime}:00.000Z`,
+          }),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          addToast((payload as { error?: string }).error ?? 'Failed to resize booking', 'error');
+          return;
+        }
+        addToast('Booking duration updated', 'success');
+        await fetchData();
+      } catch (err) {
+        console.error('[FloorPlanLiveView] resize booking failed:', err);
+        addToast('Failed to resize booking', 'error');
+      }
+    },
+    [gridData, selectedDate, addToast, fetchData],
+  );
+
+  const handleFloorUnassign = useCallback(async (bookingId: string) => {
+    try {
+      const res = await fetch('/api/venue/tables/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unassign', booking_id: bookingId }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        addToast((payload as { error?: string }).error ?? 'Failed to unassign table', 'error');
+        return;
+      }
+      addToast('Table unassigned', 'success');
+      await fetchData();
+    } catch (err) {
+      console.error('[FloorPlanLiveView] unassign failed:', err);
+      addToast('Failed to unassign table', 'error');
+    }
+  }, [addToast, fetchData]);
+
+  const handleFloorTimeChange = useCallback(
+    async (bookingId: string, newTime: string) => {
+      const oldBlock = gridData?.cells.find((c) => c.booking_id === bookingId);
+      const oldStart = timeToMinutesShort(oldBlock?.booking_details?.start_time?.slice(0, 5) ?? newTime);
+      const oldEnd = oldBlock?.booking_details?.end_time
+        ? timeToMinutesShort(oldBlock.booking_details.end_time.slice(0, 5))
+        : oldStart + 90;
+      const durationMins = Math.max(15, oldEnd - oldStart);
+      const newEndMins = timeToMinutesShort(newTime) + durationMins;
+      const newEndTime = minutesToTimeShort(newEndMins);
+      try {
+        const res = await fetch('/api/venue/tables/assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'change_time',
+            booking_id: bookingId,
+            new_time: newTime,
+            new_estimated_end_time: `${selectedDate}T${newEndTime}:00.000Z`,
+          }),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          addToast((payload as { error?: string }).error ?? 'Failed to change time', 'error');
+          return;
+        }
+        addToast('Booking time updated', 'success');
+        await fetchData();
+      } catch (err) {
+        console.error('[FloorPlanLiveView] time change failed:', err);
+        addToast('Failed to change time', 'error');
+      }
+    },
+    [gridData, selectedDate, addToast, fetchData],
+  );
+
   // --- Reassignment/assignment ---
   const handleReassign = useCallback(async (bookingId: string, oldTableIds: string[], newTableIds: string[]) => {
     try {
@@ -727,6 +997,7 @@ export function FloorPlanLiveView({
 
   // Click-based reassign mode
   const handleTableSelect = useCallback((id: string | null) => {
+    setFloorBookingMenu(null);
     if (reassignMode && id) {
       const booking = bookingMap.get(reassignMode.bookingId);
       if (!booking || !gridData) return;
@@ -910,6 +1181,33 @@ export function FloorPlanLiveView({
         onWalkIn={() => setShowWalkInModal(true)}
         compact
         showControlsButton={false}
+        infoPanelExtra={(
+          <div className="border-t border-slate-100 pt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Floor key</p>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-600">
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" aria-hidden />Available</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-700" aria-hidden />Booked</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-teal-700" aria-hidden />Seated</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-stone-600" aria-hidden />Blocked</span>
+            </div>
+            <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Table progress</p>
+            <div className="mt-2 grid gap-1.5 text-[11px] text-slate-600">
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-teal-600" aria-hidden />Within booking window</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-amber-600" aria-hidden />Approaching end time</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-red-600" aria-hidden />Past expected end time</span>
+            </div>
+          </div>
+        )}
+        trailingActions={
+          isAdmin && editLayoutHref ? (
+            <Link
+              href={editLayoutHref}
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Edit layout
+            </Link>
+          ) : null
+        }
         timelineLabel={selectedTime}
         timelinePanel={(
           <div className="space-y-3">
@@ -917,13 +1215,59 @@ export function FloorPlanLiveView({
               <label htmlFor="floor-timeline-time" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Timeline time
               </label>
-              <input
-                id="floor-timeline-time"
-                type="time"
-                value={selectedTime}
-                onChange={(e) => setSelectedTime(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  id="floor-timeline-time"
+                  type="time"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <button
+                  type="button"
+                  onClick={jumpTimelineToCurrentTime}
+                  className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  title="Use the current clock time (and today if you are viewing another date)"
+                  aria-label="Set timeline to current time"
+                >
+                  Now
+                </button>
+              </div>
+              <div className="mt-3">
+                <label htmlFor="floor-timeline-scrub" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Scrub time
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="w-11 shrink-0 tabular-nums text-[11px] text-slate-500" title="Range start">
+                    {minutesToTimeShort(timelineScrubBounds.minM)}
+                  </span>
+                  <input
+                    id="floor-timeline-scrub"
+                    type="range"
+                    min={timelineScrubBounds.minM}
+                    max={timelineScrubBounds.maxM}
+                    step={1}
+                    value={timelineScrubMinutes}
+                    onChange={(e) => {
+                      const next = Number.parseInt(e.target.value, 10);
+                      if (Number.isNaN(next)) return;
+                      setSelectedTime(minutesToTimeShort(next));
+                    }}
+                    className="h-2 w-full min-w-0 flex-1 cursor-pointer accent-brand-600"
+                    aria-valuemin={timelineScrubBounds.minM}
+                    aria-valuemax={timelineScrubBounds.maxM}
+                    aria-valuenow={timelineScrubMinutes}
+                    aria-valuetext={minutesToTimeShort(timelineScrubMinutes)}
+                    aria-label="Adjust timeline time by dragging"
+                  />
+                  <span className="w-11 shrink-0 text-right tabular-nums text-[11px] text-slate-500" title="Last minute before range end hour">
+                    {minutesToTimeShort(timelineScrubBounds.maxM)}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Drag to move forward or back; range matches the calendar service window ({String(pickerStartHour).padStart(2, '0')}:00–{String(pickerEndHour).padStart(2, '0')}:00).
+                </p>
+              </div>
               <p className="mt-1.5 text-xs text-slate-500">
                 Table status, drag targets, and live covers use this service clock.
               </p>
@@ -1036,12 +1380,25 @@ export function FloorPlanLiveView({
             onDragStart={startDragValidation}
             onDragEnd={handleFloorDragEnd}
             onDragCancel={clearDragValidation}
+            onBookingClick={
+              reassignMode
+                ? undefined
+                : (bookingId, anchor) => {
+                    openBookingPopoverFromCanvas(bookingId, anchor);
+                  }
+            }
+            onBookedTableContextMenu={(bookingId, _tableId, x, y) => {
+              if (reassignMode) return;
+              const row = toMenuBooking(bookingId);
+              if (row) setFloorBookingMenu({ booking: row, x, y });
+            }}
+            floorBackgroundUrl={floorPlanBackgroundUrl}
           />
         </div>
       </div>
 
       {/* Table detail bottom sheet */}
-      {selectedTable && !detailBookingId && (
+      {selectedTable && !selectedTable.booking && !detailBookingId && (
         <div
           className={`fixed bottom-0 left-0 right-0 z-40 mx-auto max-w-lg overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white p-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-slate-900/15 sm:p-3 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100dvh-10rem)] lg:max-w-sm lg:rounded-2xl lg:border lg:p-4 ${
             tableDetailSheetExpanded
@@ -1109,35 +1466,12 @@ export function FloorPlanLiveView({
             </div>
           )}
 
-          {selectedTable.booking && (
-            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{selectedTable.booking.guest_name}</p>
-                  <p className="text-xs text-slate-600">Party of {selectedTable.booking.party_size} · {selectedTable.booking.start_time.slice(0, 5)}</p>
-                </div>
-                <button type="button" onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
-                  Full Details
-                </button>
-              </div>
-              {(combinedTableGroups.get(selectedTable.booking.id)?.length ?? 0) > 1 && (
-                <p className="mt-1.5 text-[10px] font-medium text-purple-700">
-                  Combined: {(combinedTableGroups.get(selectedTable.booking.id) ?? []).map((tid) => tablesWithState.find((t) => t.id === tid)?.name ?? tid).join(' + ')}
-                </p>
-              )}
-              {selectedTable.elapsed_pct > 0 && (
-                <div className="mt-2 h-1.5 rounded-full bg-blue-200">
-                  <div className={`h-1.5 rounded-full transition-all ${selectedTable.elapsed_pct > 90 ? 'bg-red-500' : selectedTable.elapsed_pct > 75 ? 'bg-amber-500' : 'bg-brand-500'}`} style={{ width: `${selectedTable.elapsed_pct}%` }} />
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Actions */}
           <div className="mt-3 flex flex-wrap gap-2">
             {selectedTable.service_status === 'available' && (
               <>
                 <button onClick={() => { setShowNewBookingForm(true); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">New Booking</button>
+                <button onClick={() => { setShowWalkInModal(true); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Walk-in</button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1152,23 +1486,6 @@ export function FloorPlanLiveView({
                 </button>
               </>
             )}
-            {(selectedTable.service_status === 'booked' || selectedTable.service_status === 'pending') && selectedTable.booking?.id && (
-              <>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Seated'); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">Seat Guest</button>
-                <button onClick={() => startReassignMode(selectedTable.booking!.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Move</button>
-                <button onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Details</button>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'No-Show'); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">No-Show</button>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Cancelled'); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">Cancel</button>
-              </>
-            )}
-            {selectedTable.service_status === 'seated' && selectedTable.booking?.id && (
-              <>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Completed'); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Complete</button>
-                <button onClick={() => startReassignMode(selectedTable.booking!.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Move</button>
-                <button onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Details</button>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Booked'); }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Unseat</button>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -1180,10 +1497,100 @@ export function FloorPlanLiveView({
           venueId={venueId}
           venueCurrency={currency}
           initialSnapshot={floorBookingDetailSnapshot}
-          onClose={() => setDetailBookingId(null)}
-          onUpdated={() => { fetchData(); }}
+          presentation={detailBookingAnchor ? 'popover' : 'drawer'}
+          anchor={detailBookingAnchor}
+          onStatusChange={async (bookingId, currentStatus, nextStatus) => {
+            await handleBookingStatusChange(bookingId, currentStatus, nextStatus);
+          }}
+          onClose={() => {
+            setDetailBookingId(null);
+            setDetailBookingAnchor(null);
+          }}
+          onUpdated={() => {
+            fetchData();
+          }}
         />
       )}
+
+      {floorBookingMenu && floorBookingMenuStyle ? (
+        <BookingActionMenu
+          booking={floorBookingMenu.booking}
+          menuStyle={floorBookingMenuStyle}
+          onDismiss={() => setFloorBookingMenu(null)}
+          onStatusChange={floorMenuStatusChange}
+          onResizeBooking={handleFloorResizeBooking}
+          onEditBooking={(id) => openBookingDrawer(id)}
+          onSendMessage={(id) => openBookingDrawer(id)}
+          onMoveBooking={(id) => {
+            setFloorBookingMenu(null);
+            startReassignMode(id);
+          }}
+          onRescheduleBooking={(id) => {
+            const start =
+              bookingMap.get(id)?.start_time?.slice(0, 5) ??
+              floorBookingMenu.booking.start_time.slice(0, 5) ??
+              '18:00';
+            setRescheduleDialog({ bookingId: id, time: start });
+          }}
+          onBlockAfterBooking={(tableId, endTime) => {
+            const name = tables.find((t) => t.id === tableId)?.name ?? 'Table';
+            setFloorBlockStartTime(endTime);
+            setFloorBlockDurationMins(60);
+            setFloorBlockReason('');
+            setFloorBlockModal({ tableId, tableName: name });
+          }}
+          onUnassign={handleFloorUnassign}
+        />
+      ) : null}
+
+      {rescheduleDialog ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/25 p-4 backdrop-blur-[2px] sm:items-center"
+          onClick={() => setRescheduleDialog(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-labelledby="floor-reschedule-title"
+            className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="floor-reschedule-title" className="text-base font-semibold text-slate-900">
+              Reschedule booking
+            </h3>
+            <label htmlFor="floor-reschedule-time" className="mt-3 block text-xs font-medium text-slate-700">
+              New start time
+            </label>
+            <input
+              id="floor-reschedule-time"
+              type="time"
+              value={rescheduleDialog.time}
+              onChange={(e) => setRescheduleDialog((prev) => (prev ? { ...prev, time: e.target.value } : null))}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRescheduleDialog(null)}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const { bookingId, time } = rescheduleDialog;
+                  setRescheduleDialog(null);
+                  void handleFloorTimeChange(bookingId, time);
+                }}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* New booking form */}
       {showNewBookingForm && (

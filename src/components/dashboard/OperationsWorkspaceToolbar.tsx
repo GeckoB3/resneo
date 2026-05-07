@@ -144,6 +144,8 @@ export interface OperationsWorkspaceToolbarProps {
   showBookingActions?: boolean;
   /** Override KPI chips while keeping the same compact toolbar shell. */
   summaryContent?: ReactNode;
+  /** Extra content shown below KPI chips in the Info panel. */
+  infoPanelExtra?: ReactNode;
   /** Extra actions after Walk-in (e.g. Edit layout link). */
   trailingActions?: ReactNode;
 }
@@ -180,6 +182,7 @@ export function OperationsWorkspaceToolbar({
   showDateNavigator = true,
   showBookingActions = true,
   summaryContent,
+  infoPanelExtra,
   trailingActions,
 }: OperationsWorkspaceToolbarProps) {
   const baseId = useId();
@@ -321,7 +324,10 @@ export function OperationsWorkspaceToolbar({
                   aria-label="View summary information"
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
                 >
-                  {summaryNode}
+                  <div className="space-y-3">
+                    {summaryNode}
+                    {infoPanelExtra}
+                  </div>
                 </ClampedFixedDropdown>
               </div>
             ) : (
@@ -634,7 +640,12 @@ export function OperationsWorkspaceToolbar({
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
-              {open === 'info' ? summaryNode : open === 'date' ? datePickerPanel : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
+              {open === 'info' ? (
+                <div className="space-y-3">
+                  {summaryNode}
+                  {infoPanelExtra}
+                </div>
+              ) : open === 'date' ? datePickerPanel : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
             </div>
           </div>
         </div>

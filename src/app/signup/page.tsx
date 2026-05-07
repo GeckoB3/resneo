@@ -12,7 +12,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Set when sign-up succeeded but Supabase did not return a session (email confirmation required). */
@@ -73,11 +72,6 @@ export default function SignupPage() {
       setError('Password must be at least 8 characters.');
       return;
     }
-    if (!acceptedTerms) {
-      setError('You must accept the terms and conditions.');
-      return;
-    }
-
     const origin =
       process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
       (typeof window !== 'undefined' ? window.location.origin : '');
@@ -212,32 +206,6 @@ export default function SignupPage() {
               className={inputClass}
             />
           </div>
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={acceptedTerms}
-              onChange={(e) => setAcceptedTerms(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            />
-            <span className="text-xs text-slate-500">
-              I agree to the ReserveNI{' '}
-              <a href="/terms/customer" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
-                customer terms
-              </a>
-              {', '}
-              <a href="/terms/data-processing" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
-                data processing terms
-              </a>
-              {', '}
-              <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
-                Website Terms of Use
-              </a>
-              {' and '}
-              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">
-                Privacy Policy
-              </a>.
-            </span>
-          </label>
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
           )}

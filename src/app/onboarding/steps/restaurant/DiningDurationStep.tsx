@@ -2,15 +2,17 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { DiningDurationTab } from '@/app/dashboard/availability/DiningDurationTab';
+import { ServiceSettingsWorkspace } from '@/app/dashboard/availability/ServiceSettingsWorkspace';
 import { useRestaurantOnboardingAvailability } from '@/hooks/use-restaurant-onboarding-availability';
+import { ServiceAreaPicker } from './ServiceAreaPicker';
 
 interface Props {
   onDone: () => Promise<void>;
 }
 
 export function DiningDurationStep({ onDone }: Props) {
-  const { selectedAreaId, services, loading } = useRestaurantOnboardingAvailability();
+  const { selectedAreaId, activeAreas, selectArea, services, setServices, loading } =
+    useRestaurantOnboardingAvailability();
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -26,46 +28,12 @@ export function DiningDurationStep({ onDone }: Props) {
     );
   }
 
-  if (services.length === 0) {
-    return (
-      <div>
-        <h2 className="mb-1 text-lg font-bold text-slate-900">How long does each party stay?</h2>
-        <p className="mb-6 text-sm text-slate-500">
-          Dining duration decides how long a table is held for each booking, and therefore how soon you can
-          seat the next guest.
-        </p>
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-6 text-center text-sm text-slate-600">
-          <p className="font-medium text-slate-700">No services yet</p>
-          <p className="mt-1">
-            Go back and add at least one dining service first. You can also configure this later from{' '}
-            <Link href="/dashboard/availability?tab=duration" className="font-medium text-brand-600 underline">
-              Availability → Dining Duration
-            </Link>
-            .
-          </p>
-        </div>
-        <div className="mt-8 flex items-center justify-between">
-          <button type="button" onClick={() => void onDone()} className="text-sm text-slate-500 hover:text-slate-700">
-            Skip for now
-          </button>
-          <button
-            type="button"
-            onClick={() => void onDone()}
-            className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            Continue
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div className="min-w-0">
       <h2 className="mb-1 text-lg font-bold text-slate-900">How long does each party stay?</h2>
       <p className="mb-3 text-sm text-slate-500">
-        Duration is set per party size, per service. Larger parties usually stay longer, and dinner typically
-        runs longer than lunch. These numbers affect when the next guest can be offered the same table.
+        Dining durations are managed inside each service. Larger parties usually stay longer, and dinner
+        typically runs longer than lunch. These numbers affect when the next guest can be offered the same table.
       </p>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
@@ -77,16 +45,27 @@ export function DiningDurationStep({ onDone }: Props) {
         </ul>
         <p className="mt-2 text-xs text-slate-500">
           Tip: you can add day-of-week overrides (e.g. give Sunday 30 extra minutes) later from{' '}
-          <Link href="/dashboard/availability?tab=duration" className="font-medium text-brand-600 underline">
-            Availability → Dining Duration
+          <Link href="/dashboard/availability?tab=services" className="font-medium text-brand-600 underline">
+            Availability → Services
           </Link>
           .
         </p>
       </div>
 
-      <DiningDurationTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
+      <ServiceAreaPicker
+        activeAreas={activeAreas}
+        selectedAreaId={selectedAreaId}
+        onSelectArea={(id) => void selectArea(id)}
+      />
 
-      <div className="mt-8 flex items-center justify-between">
+      <ServiceSettingsWorkspace
+        services={services}
+        setServices={setServices}
+        selectedAreaId={selectedAreaId}
+        showToast={showToast}
+      />
+
+      <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button type="button" onClick={() => void onDone()} className="text-sm text-slate-500 hover:text-slate-700">
           Skip for now
         </button>

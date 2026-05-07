@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { LegalAcceptanceCheckbox } from '@/components/signup/LegalAcceptanceCheckbox';
 import {
   APPOINTMENTS_LIGHT_PRICE,
   SMS_LIGHT_GBP_PER_MESSAGE,
@@ -12,12 +13,14 @@ import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-canc
 export default function AppointmentsLightIntroPage() {
   const router = useRouter();
   const smsPence = Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   useEffect(() => {
     sessionStorage.removeItem('signup_business_type');
   }, []);
 
   function handleContinue() {
+    if (!termsAccepted) return;
     sessionStorage.setItem('signup_plan', 'light');
     router.push('/signup');
   }
@@ -54,11 +57,14 @@ export default function AppointmentsLightIntroPage() {
         {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
       </p>
 
-      <div className="mt-8 flex justify-center">
+      <LegalAcceptanceCheckbox accepted={termsAccepted} onChange={setTermsAccepted} />
+
+      <div className="mt-4 flex justify-center">
         <button
           type="button"
           onClick={handleContinue}
-          className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+          disabled={!termsAccepted}
+          className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Continue
         </button>

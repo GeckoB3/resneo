@@ -63,6 +63,8 @@ const DEFAULTS: Record<VenueType, { capacity: CapacityDraft; durations: Array<{ 
 };
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const ONBOARDING_FIELD_CLASS =
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
 
 export function RestaurantSetupWizard() {
   const router = useRouter();
@@ -258,53 +260,61 @@ export function RestaurantSetupWizard() {
           {step === 1 && (
             <div>
               <h2 className="mb-1 text-lg font-bold text-slate-900">Your service periods</h2>
-              <p className="mb-6 text-sm text-slate-500">Define when guests can book (e.g. Lunch, Dinner, Brunch).</p>
+              <p className="mb-6 text-sm text-slate-500">
+                Services are the bookable periods guests recognise, like Lunch, Dinner, or Sunday Brunch.
+              </p>
               <div className="space-y-4">
                 {services.map((s, i) => (
-                  <div key={i} className={`rounded-xl border p-4 space-y-3 ${!s.name.trim() ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <input
-                        type="text"
-                        value={s.name}
-                        onChange={(e) => updateService(i, { name: e.target.value })}
-                        placeholder="Service name (required)"
-                        className={`text-sm font-medium border-0 bg-transparent p-0 focus:ring-0 ${s.name.trim() ? 'text-slate-900 placeholder:text-slate-300' : 'text-slate-900 placeholder:text-amber-400'}`}
-                      />
+                  <div key={i} className={`space-y-4 rounded-2xl border bg-white p-5 shadow-sm ${!s.name.trim() ? 'border-amber-300 ring-4 ring-amber-50' : 'border-slate-200'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <label className="mb-1 block text-sm font-semibold text-slate-900">Service name</label>
+                        <input
+                          type="text"
+                          value={s.name}
+                          onChange={(e) => updateService(i, { name: e.target.value })}
+                          placeholder="e.g. Lunch, Dinner, Sunday Brunch"
+                          className={ONBOARDING_FIELD_CLASS}
+                        />
+                      </div>
                       {services.length > 1 && (
-                        <button onClick={() => removeService(i)} className="text-xs text-slate-400 hover:text-red-500">Remove</button>
+                        <button onClick={() => removeService(i)} className="mt-7 rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">Remove</button>
                       )}
                     </div>
-                    <div className="flex gap-1">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold text-slate-600">Days this service runs</p>
+                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
                       {DAY_LABELS.map((label, d) => (
                         <button
                           key={d}
                           type="button"
                           onClick={() => toggleDay(i, d)}
-                          className={`rounded-lg px-2 py-1 text-[10px] font-medium ${
-                            s.days_of_week.includes(d) ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400'
+                          className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+                            s.days_of_week.includes(d) ? 'bg-brand-600 text-white shadow-sm shadow-brand-600/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                           }`}
                         >
                           {label}
                         </button>
                       ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid gap-3 sm:grid-cols-3">
                       <div>
-                        <label className="block text-[10px] font-medium text-slate-500">Start</label>
-                        <input type="time" value={s.start_time} onChange={(e) => updateService(i, { start_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">First booking</label>
+                        <input type="time" value={s.start_time} onChange={(e) => updateService(i, { start_time: e.target.value })} className={ONBOARDING_FIELD_CLASS} />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-medium text-slate-500">End</label>
-                        <input type="time" value={s.end_time} onChange={(e) => updateService(i, { end_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Service ends</label>
+                        <input type="time" value={s.end_time} onChange={(e) => updateService(i, { end_time: e.target.value })} className={ONBOARDING_FIELD_CLASS} />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-medium text-slate-500">Last booking</label>
-                        <input type="time" value={s.last_booking_time} onChange={(e) => updateService(i, { last_booking_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Last online booking</label>
+                        <input type="time" value={s.last_booking_time} onChange={(e) => updateService(i, { last_booking_time: e.target.value })} className={ONBOARDING_FIELD_CLASS} />
                       </div>
                     </div>
                   </div>
                 ))}
-                <button onClick={addService} className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600">
+                <button onClick={addService} className="w-full rounded-2xl border-2 border-dashed border-slate-200 bg-white py-4 text-sm font-semibold text-slate-500 hover:border-brand-300 hover:bg-brand-50/30 hover:text-brand-700">
                   + Add another service
                 </button>
               </div>
@@ -328,35 +338,41 @@ export function RestaurantSetupWizard() {
           {step === 2 && (
             <div>
               <h2 className="mb-1 text-lg font-bold text-slate-900">Capacity settings</h2>
-              <p className="mb-6 text-sm text-slate-500">These defaults apply to all services. You can fine-tune per-service later.</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    Max covers per slot <HelpTooltip content={helpContent.capacityRules.maxCoversPerSlot} />
+              <p className="mb-6 text-sm text-slate-500">
+                These defaults control how many guests can arrive at once. You can fine-tune per service later.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4">
+                  <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    Guests per arrival time <HelpTooltip content={helpContent.capacityRules.maxCoversPerSlot} />
                   </label>
-                  <NumericInput min={1} value={capacity.max_covers_per_slot} onChange={(v) => setCapacity({ ...capacity, max_covers_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <p className="mb-3 text-xs text-slate-600">Total covers you can comfortably seat at the same time.</p>
+                  <NumericInput min={1} value={capacity.max_covers_per_slot} onChange={(v) => setCapacity({ ...capacity, max_covers_per_slot: v })} className={ONBOARDING_FIELD_CLASS} />
                 </div>
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    Max bookings per slot <HelpTooltip content={helpContent.capacityRules.maxBookingsPerSlot} />
+                <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4">
+                  <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    Bookings per arrival time <HelpTooltip content={helpContent.capacityRules.maxBookingsPerSlot} />
                   </label>
-                  <NumericInput min={1} value={capacity.max_bookings_per_slot} onChange={(v) => setCapacity({ ...capacity, max_bookings_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <p className="mb-3 text-xs text-slate-600">Limits how many separate parties arrive together.</p>
+                  <NumericInput min={1} value={capacity.max_bookings_per_slot} onChange={(v) => setCapacity({ ...capacity, max_bookings_per_slot: v })} className={ONBOARDING_FIELD_CLASS} />
                 </div>
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    Slot interval <HelpTooltip content={helpContent.capacityRules.slotInterval} />
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    Offer times every <HelpTooltip content={helpContent.capacityRules.slotInterval} />
                   </label>
-                  <select value={capacity.slot_interval_minutes} onChange={(e) => setCapacity({ ...capacity, slot_interval_minutes: parseInt(e.target.value) })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <p className="mb-3 text-xs text-slate-500">Smaller intervals give guests more choice.</p>
+                  <select value={capacity.slot_interval_minutes} onChange={(e) => setCapacity({ ...capacity, slot_interval_minutes: parseInt(e.target.value) })} className={ONBOARDING_FIELD_CLASS}>
                     <option value={15}>Every 15 minutes</option>
                     <option value={30}>Every 30 minutes</option>
                     <option value={60}>Every hour</option>
                   </select>
                 </div>
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    Buffer time <HelpTooltip content={helpContent.capacityRules.bufferMinutes} />
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    Turnaround buffer <HelpTooltip content={helpContent.capacityRules.bufferMinutes} />
                   </label>
-                  <NumericInput min={0} max={60} value={capacity.buffer_minutes} onChange={(v) => setCapacity({ ...capacity, buffer_minutes: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <p className="mb-3 text-xs text-slate-500">Extra reset time after a table leaves.</p>
+                  <NumericInput min={0} max={60} value={capacity.buffer_minutes} onChange={(v) => setCapacity({ ...capacity, buffer_minutes: v })} className={ONBOARDING_FIELD_CLASS} />
                 </div>
               </div>
             </div>
@@ -366,17 +382,23 @@ export function RestaurantSetupWizard() {
           {step === 3 && (
             <div>
               <h2 className="mb-1 text-lg font-bold text-slate-900">Deposit settings</h2>
-              <p className="mb-6 text-sm text-slate-500">Require deposits for larger parties to reduce no-shows.</p>
-              <label className="mb-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4">
+              <p className="mb-6 text-sm text-slate-500">
+                Deposits help reduce no-shows for larger parties. You can change amounts and service-specific rules later.
+              </p>
+              <label className={`mb-4 flex cursor-pointer items-start gap-3 rounded-2xl border p-4 shadow-sm ${deposit.enabled ? 'border-brand-200 bg-brand-50/50' : 'border-slate-200 bg-white'}`}>
                 <input type="checkbox" checked={deposit.enabled} onChange={(e) => setDeposit({ ...deposit, enabled: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
-                <span className="text-sm font-medium text-slate-700">Require deposits for large parties</span>
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900">Require deposits for larger online bookings</span>
+                  <span className="mt-1 block text-xs text-slate-600">Guests will pay a per-person deposit once the party-size threshold is met.</span>
+                </span>
               </label>
               {deposit.enabled && (
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    Deposit required from party size <HelpTooltip content={helpContent.bookingRules.depositThreshold} />
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    Require from party size <HelpTooltip content={helpContent.bookingRules.depositThreshold} />
                   </label>
-                  <NumericInput min={1} value={deposit.deposit_from_party_size} onChange={(v) => setDeposit({ ...deposit, deposit_from_party_size: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <p className="mb-3 text-xs text-slate-500">For example, 6 means parties of 6 or more pay a deposit.</p>
+                  <NumericInput min={1} value={deposit.deposit_from_party_size} onChange={(v) => setDeposit({ ...deposit, deposit_from_party_size: v })} className={ONBOARDING_FIELD_CLASS} />
                 </div>
               )}
             </div>

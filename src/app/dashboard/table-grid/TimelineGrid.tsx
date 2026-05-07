@@ -19,9 +19,7 @@ import {
   MeasuringStrategy,
 } from '@dnd-kit/core';
 import {
-  BOOKING_STATUSES,
   BOOKING_PRIMARY_ACTIONS,
-  BOOKING_STATUS_TRANSITIONS,
   BOOKING_REVERT_ACTIONS,
   canTransitionBookingStatus,
   isBookingStatus,
@@ -29,6 +27,7 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import { BookingActionMenu } from '@/components/table-management/BookingActionMenu';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import { bookingStatusVisualForKey, BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
 import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
@@ -1608,142 +1607,28 @@ export function TimelineGrid({
       </DragOverlay>
 
       {contextMenu && bookingContextMenuStyle ? (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
-          <div
-            className="fixed z-50 rounded-2xl border border-slate-200/80 bg-white py-1 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
-            style={bookingContextMenuStyle}
-          >
-            <div className="border-b border-slate-100 px-3 py-2">
-              <p className="text-xs font-semibold text-slate-900">{contextMenu.booking.guest_name}</p>
-              <p className="text-[10px] text-slate-500">
-                Party of {contextMenu.booking.party_size} · {contextMenu.booking.start_time.slice(0, 5)}
-                {contextMenu.booking.table_ids.length > 1 && (
-                  <span className="ml-1 text-purple-600">· Combination</span>
-                )}
-              </p>
-            </div>
-            <div className="py-1">
-              <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</p>
-              {(BOOKING_STATUS_TRANSITIONS[contextMenu.booking.status as BookingStatus] ?? BOOKING_STATUSES).map((status) => {
-                const revert = isRevertTransition(contextMenu.booking.status, status);
-                const revertLabel = revert ? BOOKING_REVERT_ACTIONS[contextMenu.booking.status as BookingStatus]?.label : null;
-                return (
-                <button
-                  key={status}
-                  onClick={() => { void handleStatusChange(contextMenu.booking.id, contextMenu.booking.status, status); }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-40 ${revert ? 'font-semibold text-amber-800' : 'text-slate-700'}`}
-                  disabled={contextMenu.booking.status === status}
-                >
-                  <span className={`inline-block h-2 w-2 rounded-full ${bookingStatusVisualForKey(status).dot}`} />
-                  {revertLabel ?? status}
-                </button>
-                );
-              })}
-            </div>
-            <div className="border-t border-slate-100 py-1">
-              <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Duration</p>
-              <button
-                onClick={() => {
-                  const currentEnd = contextMenu.booking.end_time
-                    ? timeToMinutes(contextMenu.booking.end_time.slice(0, 5))
-                    : timeToMinutes(contextMenu.booking.start_time.slice(0, 5)) + 90;
-                  onResizeBooking(contextMenu.booking.id, minutesToTime(currentEnd + 15));
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-              >
-                Extend +15m
-              </button>
-              <button
-                onClick={() => {
-                  const start = timeToMinutes(contextMenu.booking.start_time.slice(0, 5));
-                  const currentEnd = contextMenu.booking.end_time
-                    ? timeToMinutes(contextMenu.booking.end_time.slice(0, 5))
-                    : start + 90;
-                  const nextEnd = Math.max(start + 15, currentEnd - 15);
-                  onResizeBooking(contextMenu.booking.id, minutesToTime(nextEnd));
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-              >
-                Shorten -15m
-              </button>
-            </div>
-            {contextMenu.booking.table_id && (
-              <div className="border-t border-slate-100 py-1">
-                <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Table</p>
-                <button
-                  onClick={() => {
-                    onEditBooking(contextMenu.booking.id);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Edit Booking
-                </button>
-                <button
-                  onClick={() => {
-                    onSendMessage(contextMenu.booking.id);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Send Message to Guest
-                </button>
-                <button
-                  onClick={() => {
-                    onMoveBooking(contextMenu.booking.id);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Move to Table
-                </button>
-                <button
-                  onClick={() => {
-                    onRescheduleBooking(contextMenu.booking.id);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Reschedule
-                </button>
-                {contextMenu.booking.status !== 'Cancelled' && (
-                  <button
-                    onClick={async () => {
-                      await handleStatusChange(contextMenu.booking.id, contextMenu.booking.status, 'Cancelled');
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                  >
-                    Cancel Booking
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    const endTime = contextMenu.booking.end_time
-                      ? contextMenu.booking.end_time.slice(0, 5)
-                      : contextMenu.booking.start_time.slice(0, 5);
-                    onBlockAfterBooking(contextMenu.booking.table_id!, endTime);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Block Table After Booking
-                </button>
-                <button
-                  onClick={() => handleUnassignFromMenu(contextMenu.booking.id)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  Unassign from table
-                </button>
-              </div>
-            )}
-          </div>
-        </>
+        <BookingActionMenu
+          booking={{
+            id: contextMenu.booking.id,
+            guest_name: contextMenu.booking.guest_name,
+            party_size: contextMenu.booking.party_size,
+            status: contextMenu.booking.status,
+            start_time: contextMenu.booking.start_time,
+            end_time: contextMenu.booking.end_time,
+            table_id: contextMenu.booking.table_id,
+            table_ids: contextMenu.booking.table_ids,
+          }}
+          menuStyle={bookingContextMenuStyle}
+          onDismiss={() => setContextMenu(null)}
+          onStatusChange={handleStatusChange}
+          onResizeBooking={onResizeBooking}
+          onEditBooking={onEditBooking}
+          onSendMessage={onSendMessage}
+          onMoveBooking={onMoveBooking}
+          onRescheduleBooking={onRescheduleBooking}
+          onBlockAfterBooking={onBlockAfterBooking}
+          onUnassign={handleUnassignFromMenu}
+        />
       ) : null}
       {confirmDialog && (
         <>

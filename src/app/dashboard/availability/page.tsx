@@ -15,14 +15,16 @@ import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/li
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
 
-const VALID_TABS = ['services', 'capacity', 'duration', 'rules', 'table'] as const;
+const VALID_TABS = ['services', 'table'] as const;
 type ValidTab = (typeof VALID_TABS)[number];
 
 const VALID_FLOOR_PLAN_TABS = ['layout', 'tables', 'combinations'] as const;
 type ValidFloorPlanTab = (typeof VALID_FLOOR_PLAN_TABS)[number];
 
+/** Legacy URLs (?tab=capacity|duration|rules) map to the consolidated Services workspace. */
 function resolveInitialTab(tab: string | undefined): ValidTab | undefined {
   if (!tab) return undefined;
+  if (tab === 'capacity' || tab === 'duration' || tab === 'rules') return 'services';
   return VALID_TABS.includes(tab as ValidTab) ? (tab as ValidTab) : undefined;
 }
 

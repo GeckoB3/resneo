@@ -2,15 +2,17 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { ServicesTab } from '@/app/dashboard/availability/ServicesTab';
+import { ServiceSettingsWorkspace } from '@/app/dashboard/availability/ServiceSettingsWorkspace';
 import { useRestaurantOnboardingAvailability } from '@/hooks/use-restaurant-onboarding-availability';
+import { ServiceAreaPicker } from './ServiceAreaPicker';
 
 interface Props {
   onDone: () => Promise<void>;
 }
 
 export function ServicesStep({ onDone }: Props) {
-  const { selectedAreaId, services, setServices, loading } = useRestaurantOnboardingAvailability();
+  const { selectedAreaId, activeAreas, selectArea, services, setServices, loading } =
+    useRestaurantOnboardingAvailability();
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -27,21 +29,21 @@ export function ServicesStep({ onDone }: Props) {
   }
 
   return (
-    <div>
+    <div className="min-w-0">
       <h2 className="mb-1 text-lg font-bold text-slate-900">Your dining services</h2>
       <p className="mb-3 text-sm text-slate-500">
         A <strong className="font-medium text-slate-700">service</strong> is a named sitting inside your
         opening hours (for example <em>Lunch</em>, <em>Dinner</em>, or <em>Sunday Brunch</em>). Guests book
-        into a service. Each service has its own capacity, duration, and rules.
+        into a service. Each service has its own capacity, duration, and booking rules.
       </p>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
         <p className="mb-2 font-medium text-slate-800">Quick tips</p>
         <ul className="list-inside list-disc space-y-1">
-          <li>Most restaurants start with just <strong className="font-medium">Lunch</strong> and <strong className="font-medium">Dinner</strong>. Add more any time.</li>
-          <li>Set which days of the week each service runs (e.g. no lunch on Monday).</li>
-          <li>Set the last bookable time before the service ends, so the kitchen isn&apos;t seated at close.</li>
-          <li>Edits save immediately. You can refine any of this later from{' '}
+          <li>Create a service once, then complete capacity, dining duration, and booking rules in the same editor.</li>
+          <li>Most restaurants start with <strong className="font-medium">Lunch</strong> and <strong className="font-medium">Dinner</strong>. Add brunch, pre-theatre, or private dining later.</li>
+          <li>New services get sensible defaults for capacity, duration bands, and booking rules, which you can tune below.</li>
+          <li>You can refine any of this later from{' '}
             <Link
               href="/dashboard/availability?tab=services"
               className="font-medium text-brand-600 underline hover:text-brand-700"
@@ -53,9 +55,20 @@ export function ServicesStep({ onDone }: Props) {
         </ul>
       </div>
 
-      <ServicesTab services={services} setServices={setServices} showToast={showToast} areaId={selectedAreaId} />
+      <ServiceAreaPicker
+        activeAreas={activeAreas}
+        selectedAreaId={selectedAreaId}
+        onSelectArea={(id) => void selectArea(id)}
+      />
 
-      <div className="mt-8 flex items-center justify-between">
+      <ServiceSettingsWorkspace
+        services={services}
+        setServices={setServices}
+        selectedAreaId={selectedAreaId}
+        showToast={showToast}
+      />
+
+      <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={() => void onDone()}

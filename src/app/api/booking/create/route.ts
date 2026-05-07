@@ -58,7 +58,7 @@ import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/v
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
-import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, require_account_login_for_bookings',
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
       )
       .eq('id', venue_id)
       .single();
@@ -186,10 +186,13 @@ export async function POST(request: NextRequest) {
     if (loginDenied) return loginDenied;
 
     if (
-      isOnlineBookingBlockedForLightPastDue(
-        (venue as { pricing_tier?: string | null }).pricing_tier,
-        (venue as { plan_status?: string | null }).plan_status,
-      )
+      isPublicOnlineBookingBlocked({
+        pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
+        plan_status: (venue as { plan_status?: string | null }).plan_status,
+        subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+          .subscription_current_period_end,
+        billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+      })
     ) {
       return NextResponse.json(
         { error: 'Online booking is temporarily unavailable for this venue.' },

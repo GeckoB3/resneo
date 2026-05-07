@@ -15,6 +15,7 @@ import {
 } from '@/lib/support-session-core';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { areVenueSubscriptionMutationsBlocked } from '@/lib/billing/subscription-entitlement';
 
 async function loadSupportSessionRow(request: NextRequest, userId: string) {
   const raw = request.cookies.get(SUPPORT_SESSION_COOKIE_NAME)?.value;
@@ -114,7 +115,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  /** Block mutating venue APIs when subscription is past due (billing routes exempt). */
+  /** Block mutating venue APIs when billing is past due or subscription access has ended (billing routes exempt). */
   const method = request.method.toUpperCase();
   const isVenueMutating =
     user &&
@@ -151,19 +152,30 @@ export async function middleware(request: NextRequest) {
       if (vid) {
         const { data: venueRow } = await supabase
           .from('venues')
-          .select('plan_status, billing_access_source')
+          .select('plan_status, billing_access_source, subscription_current_period_end')
           .eq('id', vid)
           .maybeSingle();
-        const billingSrc = (venueRow as { billing_access_source?: string | null } | null)?.billing_access_source;
-        const isSuperuserFree =
-          (billingSrc ?? '').toLowerCase().trim() === 'superuser_free';
-        const ps = (venueRow as { plan_status?: string | null } | null)?.plan_status;
-        if (ps === 'past_due' && !isSuperuserFree) {
+        const row = venueRow as {
+          plan_status?: string | null;
+          billing_access_source?: string | null;
+          subscription_current_period_end?: string | null;
+        } | null;
+        if (
+          row &&
+          areVenueSubscriptionMutationsBlocked({
+            plan_status: row.plan_status,
+            billing_access_source: row.billing_access_source,
+            subscription_current_period_end: row.subscription_current_period_end,
+          })
+        ) {
+          const ps = (row.plan_status ?? '').toLowerCase().trim();
+          const isPastDue = ps === 'past_due';
           return NextResponse.json(
             {
-              error:
-                'Billing is past due. Add or update your payment method under Settings → Plan to continue editing.',
-              code: 'VENUE_PAST_DUE',
+              error: isPastDue
+                ? 'Billing is past due. Add or update your payment method under Settings → Plan to continue editing.'
+                : 'Your subscription has ended. Resubscribe under Settings → Plan to continue editing.',
+              code: isPastDue ? 'VENUE_PAST_DUE' : 'VENUE_SUBSCRIPTION_EXPIRED',
             },
             { status: 403 },
           );

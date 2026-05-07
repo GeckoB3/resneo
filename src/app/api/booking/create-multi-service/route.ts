@@ -32,7 +32,7 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
-import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 
 const serviceEntrySchema = z.object({
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, require_account_login_for_bookings',
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
       )
       .eq('id', venue_id)
       .single();
@@ -136,10 +136,13 @@ export async function POST(request: NextRequest) {
     if (loginDenied) return loginDenied;
 
     if (
-      isOnlineBookingBlockedForLightPastDue(
-        (venue as { pricing_tier?: string | null }).pricing_tier,
-        (venue as { plan_status?: string | null }).plan_status,
-      )
+      isPublicOnlineBookingBlocked({
+        pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
+        plan_status: (venue as { plan_status?: string | null }).plan_status,
+        subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+          .subscription_current_period_end,
+        billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+      })
     ) {
       return NextResponse.json(
         { error: 'Online booking is temporarily unavailable for this venue.' },

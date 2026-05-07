@@ -25,6 +25,7 @@ import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSe
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
+import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import {
   APPOINTMENTS_LIGHT_PRICE,
   APPOINTMENTS_PLUS_PRICE,
@@ -255,10 +256,12 @@ function planPriceLabel(pricingTier: string): string {
 
 function PlanSection({
   venue,
+  isAdmin,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
 }: {
   venue: VenueSettings;
+  isAdmin: boolean;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
 }) {
@@ -266,7 +269,6 @@ function PlanSection({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [billingSyncing, setBillingSyncing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
   const [planPreviews, setPlanPreviews] = useState<Partial<Record<AppointmentsPlanTier, AppointmentsPlanPreviewPayload>>>({});
@@ -294,6 +296,11 @@ function PlanSection({
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
   const cancelledWithAccessUntilPeriodEnd = isCancelling || (planStatus === 'cancelled' && hasFuturePeriodEnd);
+  const subscriptionExpiredCancelled = isVenueSubscriptionExpiredCancelled({
+    plan_status: venue.plan_status,
+    subscription_current_period_end: venue.subscription_current_period_end,
+    billing_access_source: venue.billing_access_source,
+  });
   const nextBillingPrimaryLabel = isFreeAccess
     ? 'Free Access Granted'
     : cancelledWithAccessUntilPeriodEnd
@@ -332,7 +339,6 @@ function PlanSection({
 
   const fetchBillingStatus = useCallback(async (opts: { showSuccess?: boolean } = {}) => {
     if (isFreeAccess) return;
-    setBillingSyncing(true);
     setActionError(null);
     try {
       const res = await fetch('/api/venue/billing/status', {
@@ -365,8 +371,6 @@ function PlanSection({
       if (opts.showSuccess) {
         setActionError('Could not sync billing details from Stripe. Please refresh the page in a moment.');
       }
-    } finally {
-      setBillingSyncing(false);
     }
   }, [applyBillingStatus, isFreeAccess, router]);
 
@@ -432,7 +436,6 @@ function PlanSection({
 
   useEffect(() => {
     if (searchParams.get('portal_return') !== '1' || isFreeAccess) return;
-    setPlanSuccess('Syncing billing details from Stripe…');
     void fetchBillingStatus({ showSuccess: true });
 
     const next = new URLSearchParams(searchParams.toString());
@@ -515,7 +518,7 @@ function PlanSection({
     }
   }
 
-  async function handleAction(action: 'resume_subscription') {
+  async function handleAction(action: 'resume_subscription' | 'resubscribe') {
     setLoading(true);
     setActionError(null);
     setPlanSuccess(null);
@@ -633,12 +636,25 @@ function PlanSection({
           <span>{planSuccess}</span>
         </div>
       ) : null}
-      {billingSyncing ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2.5 text-sm text-sky-950">
-          <Pill variant="brand" size="sm" dot>
-            Syncing
-          </Pill>
-          <span>Checking Stripe for the latest billing status…</span>
+      {subscriptionExpiredCancelled && !isFreeAccess ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-semibold">Your subscription has ended</p>
+          <p className="mt-1 leading-relaxed">
+            Venue changes and public online booking are paused until you start a new subscription. Use Resubscribe to
+            pay again with Stripe Checkout.
+          </p>
+          {isAdmin ? (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleAction('resubscribe')}
+              className="mt-3 rounded-lg bg-amber-800 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-900 disabled:opacity-50"
+            >
+              Resubscribe
+            </button>
+          ) : (
+            <p className="mt-2 text-xs text-amber-900">Ask an administrator to resubscribe under Settings → Plan.</p>
+          )}
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
@@ -956,6 +972,7 @@ function SettingsViewInner({
   const isAppointmentsProduct = isAppointmentsProductVenue(venue?.pricing_tier ?? null);
   const [selectedTab, setSelectedTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
   const [completedWarmup, setCompletedWarmup] = useState<Set<SettingsWarmupKey>>(() => new Set());
+  const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
   const showRestaurantTableProfileSections =
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(
@@ -1050,6 +1067,10 @@ function SettingsViewInner({
   useEffect(() => {
     setSelectedTab(activeTabFromUrl);
   }, [activeTabFromUrl]);
+
+  useEffect(() => {
+    setCurrentTimeMs(Date.now());
+  }, []);
 
   /** Refresh Appointments plan row from Stripe after checkout (webhook may lag behind redirect). */
   useEffect(() => {
@@ -1151,6 +1172,16 @@ function SettingsViewInner({
         : planCheckoutReturn === 'card_updated'
           ? 'Payment method updated. Stripe will retry any open invoices shortly.'
           : 'We are confirming your subscription. The Plan tab will update shortly.';
+  const settingsPlanStatus = venue?.plan_status ?? 'active';
+  const settingsPeriodEndTime = venue?.subscription_current_period_end
+    ? Date.parse(venue.subscription_current_period_end)
+    : Number.NaN;
+  const settingsHasFuturePeriodEnd =
+    currentTimeMs !== null && Number.isFinite(settingsPeriodEndTime) && settingsPeriodEndTime > currentTimeMs;
+  const showSettingsCancellationBanner =
+    settingsPlanStatus === 'cancelling' ||
+    (settingsPlanStatus === 'cancelled' && settingsHasFuturePeriodEnd);
+  const settingsCancellationEndLabel = formatSubscriptionDateLabel(venue?.subscription_current_period_end);
 
   if (!venue) {
     return (
@@ -1192,6 +1223,26 @@ function SettingsViewInner({
             className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-100 sm:px-3 sm:py-2 sm:text-xs"
           >
             Dismiss
+          </button>
+        </div>
+      )}
+      {showSettingsCancellationBanner && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-950 shadow-sm shadow-slate-900/5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
+            <Pill variant="warning" size="sm" className="w-fit shrink-0">
+              {settingsPlanStatus === 'cancelling' ? 'Cancelling' : 'Cancelled'}
+            </Pill>
+            <p className="min-w-0 flex-1 leading-relaxed">
+              Your subscription has been cancelled. You keep full access
+              {settingsCancellationEndLabel ? ` until ${settingsCancellationEndLabel}` : ' until the end of the current billing period'}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => replaceWithTab('plan')}
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:px-3 sm:py-2 sm:text-xs"
+          >
+            Manage plan
           </button>
         </div>
       )}
@@ -1296,6 +1347,7 @@ function SettingsViewInner({
           <PlanSection
             key={`plan-${venue.id}-${venue.pricing_tier ?? ''}`}
             venue={venue}
+            isAdmin={isAdmin}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
           />

@@ -12,7 +12,7 @@ import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
-import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -56,7 +56,9 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from('venues')
-      .select('timezone, booking_rules, opening_hours, venue_opening_exceptions, pricing_tier, plan_status')
+      .select(
+        'timezone, booking_rules, opening_hours, venue_opening_exceptions, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
+      )
       .eq('id', venue_id)
       .single();
 
@@ -65,10 +67,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (
-      isOnlineBookingBlockedForLightPastDue(
-        (venue as { pricing_tier?: string | null }).pricing_tier,
-        (venue as { plan_status?: string | null }).plan_status,
-      )
+      isPublicOnlineBookingBlocked({
+        pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
+        plan_status: (venue as { plan_status?: string | null }).plan_status,
+        subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+          .subscription_current_period_end,
+        billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+      })
     ) {
       return NextResponse.json({ ok: false, error: 'Online booking is temporarily unavailable for this venue.' });
     }

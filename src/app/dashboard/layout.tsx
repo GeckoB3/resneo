@@ -20,6 +20,7 @@ import {
 import type { BookingModel } from '@/types/booking-models';
 import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 import { SupportSessionControls } from '@/components/dashboard/SupportSessionControls';
+import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -47,6 +48,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueId: string | undefined;
   let isAdmin = false;
   let planStatus: string = 'active';
+  let subscriptionExpiredCancelled = false;
   let onboardingCompleted = true;
   let venueTerminology: Record<string, unknown> | null = null;
   let venueBootstrap: DashboardVenueBootstrapValue | null = null;
@@ -84,7 +86,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, timezone, currency, opening_hours, public_booking_area_mode, no_show_grace_minutes',
+          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, timezone, currency, opening_hours, public_booking_area_mode, no_show_grace_minutes, billing_access_source, subscription_current_period_end',
         )
         .eq('id', venueId)
         .single();
@@ -105,6 +107,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         );
         enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
         planStatus = (venue.plan_status as string) ?? 'active';
+        subscriptionExpiredCancelled = isVenueSubscriptionExpiredCancelled({
+          plan_status: venue.plan_status as string | null,
+          subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+            .subscription_current_period_end,
+          billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+        });
         onboardingCompleted = (venue.onboarding_completed as boolean) ?? true;
         const rawTerms = (venue as { terminology?: unknown }).terminology;
         venueTerminology =
@@ -188,58 +196,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         ) : null}
-        {planStatus === 'cancelling' && (
+        {subscriptionExpiredCancelled && planStatus !== 'past_due' && (
           <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
             <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
                 <Pill variant="warning" size="sm" className="w-fit shrink-0">
-                  Cancelling
+                  Subscription ended
                 </Pill>
                 <p className="min-w-0 text-sm text-amber-950">
-                  Your subscription is set to end at the close of this billing period. You can keep full access until
-                  then, or resume billing below.
+                  Your subscription has ended. Editing and public online booking are paused until you resubscribe.
                 </p>
               </div>
               {isAdmin ? (
                 <a
                   href="/dashboard/settings?tab=plan"
                   className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
-                >
-                  Manage plan
-                </a>
-              ) : (
-                <a
-                  href="/dashboard/support"
-                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
-                >
-                  Contact admin
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-        {planStatus === 'cancelled' && (
-          <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
-                <Pill variant="warning" size="sm" className="w-fit shrink-0">
-                  Cancelled
-                </Pill>
-                <p className="min-w-0 text-sm text-amber-950">
-                  Your subscription has been cancelled. Resubscribe to continue using all features.
-                </p>
-              </div>
-              {isAdmin ? (
-                <a
-                  href="/dashboard/settings?tab=plan"
-                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
                 >
                   Resubscribe
                 </a>
               ) : (
                 <a
                   href="/dashboard/support"
-                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
                 >
                   Contact admin
                 </a>

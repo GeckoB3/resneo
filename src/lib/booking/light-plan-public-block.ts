@@ -1,25 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import {
+  isPublicOnlineBookingBlocked,
+  type VenueBillingFields,
+} from '@/lib/billing/subscription-entitlement';
+
+export type { VenueBillingFields } from '@/lib/billing/subscription-entitlement';
+export { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 
 /**
- * Appointments Light: when billing is past due, online booking must be disabled (matches `booking_paused` on public venue loads).
+ * For venue rows that include plan fields (and period end for accurate cancelled access).
+ * Returns a JSON 403 when public online booking must be blocked.
  */
-export function isOnlineBookingBlockedForLightPastDue(
-  pricingTier: string | null | undefined,
-  planStatus: string | null | undefined,
-): boolean {
-  return (pricingTier ?? '').toLowerCase() === 'light' && (planStatus ?? '').toLowerCase() === 'past_due';
-}
-
-/**
- * For authenticated reads of venue rows that already include `pricing_tier` and `plan_status`.
- * Returns a JSON 403 response when online booking must be blocked.
- */
-export function nextResponseIfPublicBookingBlockedFromVenueRow(row: {
-  pricing_tier?: string | null;
-  plan_status?: string | null;
-}): NextResponse | null {
-  if (isOnlineBookingBlockedForLightPastDue(row.pricing_tier, row.plan_status)) {
+export function nextResponseIfPublicBookingBlockedFromVenueRow(row: VenueBillingFields): NextResponse | null {
+  if (isPublicOnlineBookingBlocked(row)) {
     return NextResponse.json(
       { error: 'Online booking is temporarily unavailable for this venue.' },
       { status: 403 },
@@ -29,7 +23,8 @@ export function nextResponseIfPublicBookingBlockedFromVenueRow(row: {
 }
 
 /**
- * Load plan fields for `venueId` and return 403 when Light + past_due (public booking APIs).
+ * Load plan fields for `venueId` and return 403 when public booking is blocked
+ * (Light + past_due, or subscription ended / cancelled with no remaining paid period).
  */
 export async function nextResponseIfPublicBookingBlockedForVenue(
   admin: SupabaseClient,
@@ -37,7 +32,7 @@ export async function nextResponseIfPublicBookingBlockedForVenue(
 ): Promise<NextResponse | null> {
   const { data: row, error } = await admin
     .from('venues')
-    .select('pricing_tier, plan_status')
+    .select('pricing_tier, plan_status, subscription_current_period_end, billing_access_source')
     .eq('id', venueId)
     .maybeSingle();
 
@@ -50,6 +45,11 @@ export async function nextResponseIfPublicBookingBlockedForVenue(
   }
 
   return nextResponseIfPublicBookingBlockedFromVenueRow(
-    row as { pricing_tier?: string | null; plan_status?: string | null },
+    row as {
+      pricing_tier?: string | null;
+      plan_status?: string | null;
+      subscription_current_period_end?: string | null;
+      billing_access_source?: string | null;
+    },
   );
 }

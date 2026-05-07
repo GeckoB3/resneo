@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
-import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
 
 /**
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const { data: venue, error } = await supabase
       .from('venues')
       .select(
-        'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status',
+        'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
       )
       .eq('slug', slug.trim())
       .single();
@@ -61,9 +61,15 @@ export async function GET(request: NextRequest) {
       areas,
     };
 
-    const pricingTier = (venue as { pricing_tier?: string | null }).pricing_tier;
-    const planStatus = (venue as { plan_status?: string | null }).plan_status;
-    if (isOnlineBookingBlockedForLightPastDue(pricingTier, planStatus)) {
+    if (
+      isPublicOnlineBookingBlocked({
+        pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
+        plan_status: (venue as { plan_status?: string | null }).plan_status,
+        subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+          .subscription_current_period_end,
+        billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+      })
+    ) {
       payload.booking_paused = true;
     }
 

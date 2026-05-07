@@ -39,6 +39,15 @@ export function AppointmentsDashboardStep({
       badge: hasAppointments ? 'Your main view' : undefined,
     },
     {
+      title: 'Services',
+      description: 'Define and manage the bookable services guests can choose.',
+      detail: hasAppointments
+        ? 'Create services with duration, pricing, and optional variants; link them to the right calendars and staff; set deposits and guest-facing descriptions. This is the main place to keep your bookable menu up to date.'
+        : 'Unlocks when you add the Appointments booking model from Settings → Profile.',
+      active: hasAppointments,
+      badge: hasAppointments ? 'Bookable services' : 'Disabled',
+    },
+    {
       title: 'Bookings',
       description: 'Find, filter, and manage every booking in one place.',
       detail:
@@ -58,7 +67,7 @@ export function AppointmentsDashboardStep({
       description: 'Publish and manage recurring class sessions.',
       detail: hasClasses
         ? 'Create class types, generate the week’s sessions, manage attendance, and track capacity at a glance.'
-        : 'Unlocks when you add the Classes booking model from Settings → Plan.',
+        : 'Unlocks when you add the Classes booking model from Settings → Profile.',
       active: hasClasses,
       badge: hasClasses ? 'Classes' : 'Disabled',
     },
@@ -67,7 +76,7 @@ export function AppointmentsDashboardStep({
       description: 'Create and publish ticketed events.',
       detail: hasEvents
         ? 'Set up ticket types, manage capacity, see the attendee list, and publish events to your public Events tab.'
-        : 'Unlocks when you add the Events booking model from Settings → Plan.',
+        : 'Unlocks when you add the Events booking model from Settings → Profile.',
       active: hasEvents,
       badge: hasEvents ? 'Events' : 'Disabled',
     },
@@ -76,7 +85,7 @@ export function AppointmentsDashboardStep({
       description: 'Manage bookable facilities and their reservations.',
       detail: hasResources
         ? 'Create courts, rooms, or equipment guests can book in fixed slots; set weekly hours, intervals, and pricing. Upcoming bookings appear here and on the Appointment Calendar column each resource is shown on.'
-        : 'Unlocks when you add the Resources booking model from Settings → Plan.',
+        : 'Unlocks when you add the Resources booking model from Settings → Profile.',
       active: hasResources,
       badge: hasResources ? 'Resources' : 'Disabled',
     },
@@ -144,6 +153,10 @@ export function AppointmentsDashboardStep({
           <li>
             You can share your public booking page URL on your website, Instagram bio, or Google Business
             profile, so guests can book 24/7.
+          </li>
+          <li>
+            To put the booking flow directly on your own site, use the embeddable widget (iframe snippet) or a
+            printable QR code—both are under Settings → Profile (Booking widget & QR).
           </li>
           <li>
             Notifications (emails and optional SMS) are sent to guests automatically on booking, rescheduling,

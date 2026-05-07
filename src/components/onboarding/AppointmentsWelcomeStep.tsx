@@ -185,8 +185,8 @@ export function AppointmentsWelcomeStep({
           </div>
           <p className="mt-3 text-xs text-slate-600">
             {isLightPlan
-              ? 'You can change booking models later from Settings → Plan.'
-              : 'You can enable or disable booking models later from Settings. This flow makes sure the ones above are ready to use straight away.'}
+              ? 'You can change booking models later from Settings → Profile.'
+              : 'You can enable or disable booking models later from Settings → Profile. This flow makes sure the ones above are ready to use straight away.'}
           </p>
         </div>
       )}

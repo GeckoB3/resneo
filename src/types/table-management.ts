@@ -140,6 +140,8 @@ export interface TableGridCell {
     table_names?: string[];
     dietary_notes: string | null;
     occasion: string | null;
+    deposit_amount_pence?: number | null;
+    internal_notes?: string | null;
   } | null;
 }
 
@@ -158,6 +160,9 @@ export interface TableGridData {
     staff_attendance_confirmed_at?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
+    deposit_status?: string | null;
+    deposit_amount_pence?: number | null;
+    internal_notes?: string | null;
     actual_departed_time?: string | null;
   }[];
   summary: {

@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * Staff-only notes stored on the guest row — shown on every booking for this customer.
+ * Customer profile notes stored on the guest row — shown on every booking for this customer.
  */
 export function CustomerProfileNotesCard({
   guestId,
@@ -26,13 +26,30 @@ export function CustomerProfileNotesCard({
   const [draft, setDraft] = useState(value ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!editing) setDraft(value ?? '');
   }, [value, editing]);
 
+  useEffect(() => {
+    if (editing) textareaRef.current?.focus();
+  }, [editing]);
+
   const normalized = value ?? '';
   const canEdit = !disabled;
+  const hasValue = normalized.trim().length > 0;
+  const isDirty = draft !== normalized;
+
+  const inputClass = [
+    'w-full rounded-lg border bg-white text-slate-800 transition-shadow',
+    'px-2.5 py-1.5 text-xs',
+    'placeholder:text-slate-400',
+    'focus:outline-none focus:ring-2',
+    saveError
+      ? 'border-red-300 focus:border-red-400 focus:ring-red-100'
+      : 'border-slate-300 focus:border-brand-400 focus:ring-brand-100',
+  ].join(' ');
 
   const save = useCallback(async () => {
     if (!guestId || guestId === '__prefetch__') return;
@@ -73,74 +90,137 @@ export function CustomerProfileNotesCard({
   const rootClass = embedded
     ? embeddedFlush
       ? ''
-      : 'mt-3 border-t border-slate-100 pt-3'
-    : 'rounded-xl border border-sky-200 bg-sky-50/80 p-3';
+      : 'mt-2 border-t border-slate-100 pt-2'
+    : 'rounded-xl border border-slate-200 bg-white p-3';
+
+  const cancelEditing = () => {
+    setDraft(value ?? '');
+    setEditing(false);
+    setSaveError(null);
+  };
 
   return (
     <div className={rootClass}>
-      <div className={`mb-1.5 flex items-start justify-between gap-2 ${embedded ? 'px-0.5' : ''}`}>
-        <p className="pr-2 text-[11px] font-semibold leading-snug text-sky-800">Customer info - only visible to staff.</p>
-        {canEdit && !editing && (
+      <div className={`group/field ${embedded ? 'px-0.5' : ''}`}>
+        <div className="mb-1 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Customer info</p>
+          {canEdit && !editing && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing(true);
+              }}
+              className="invisible inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 group-hover/field:visible"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z"
+                />
+              </svg>
+              Edit
+            </button>
+          )}
+        </div>
+
+        {editing && canEdit ? (
+          <div>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setSaveError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') cancelEditing();
+              }}
+              rows={2}
+              disabled={saving}
+              placeholder="e.g. Allergies, accessibility, VIP or payment preferences"
+              className={inputClass}
+            />
+
+            {saveError && (
+              <p className="mt-1 flex items-center gap-1 text-[11px] text-red-600">
+                <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                  />
+                </svg>
+                {saveError}
+              </p>
+            )}
+
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={saving || !isDirty}
+                onClick={() => void save()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4Z" />
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                    Save
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={cancelEditing}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              {isDirty && !saving && <span className="ml-auto text-[10px] text-slate-400">Unsaved changes</span>}
+            </div>
+          </div>
+        ) : (
           <button
             type="button"
-            onClick={() => setEditing(true)}
-            className="shrink-0 rounded-md px-2 py-1 text-[10px] font-medium text-sky-800 hover:bg-sky-100"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canEdit) setEditing(true);
+            }}
+            disabled={!canEdit}
+            title={`Click to ${hasValue ? 'edit' : 'add'} customer info`}
+            className={[
+              'w-full rounded-lg border text-left transition-colors',
+              'px-2.5 py-1.5 text-xs',
+              hasValue
+                ? 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50/40'
+                : 'border-dashed border-slate-200 bg-slate-50/60 text-slate-400 italic hover:border-brand-300 hover:bg-brand-50/40',
+            ].join(' ')}
           >
-            Edit
+            {hasValue ? (
+              <span className="whitespace-pre-wrap break-words leading-snug">{normalized}</span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <svg className="h-3.5 w-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Add customer info…
+              </span>
+            )}
           </button>
         )}
       </div>
-
-      {saveError && <p className="mb-2 text-[11px] text-red-700">{saveError}</p>}
-
-      {editing && canEdit ? (
-        <div className={`space-y-2 ${embedded ? 'px-0.5' : ''}`}>
-          <textarea
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setSaveError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setDraft(value ?? '');
-                setEditing(false);
-                setSaveError(null);
-              }
-            }}
-            rows={4}
-            disabled={saving}
-            placeholder="Allergies, accessibility, VIP preferences, payment notes…"
-            className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
-          />
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void save()}
-              className="rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => {
-                setDraft(value ?? '');
-                setEditing(false);
-                setSaveError(null);
-              }}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <p className={`whitespace-pre-wrap text-sm text-slate-800 ${embedded ? 'px-0.5' : ''}`}>
-          {normalized.trim() ? normalized : '—'}
-        </p>
-      )}
     </div>
   );
 }

@@ -207,6 +207,14 @@ export function ExpandedBookingContent({
   const previousVisitDate = detail?.guest?.last_visit_date ?? null;
   const tableNames = (detail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
   const depositAmtStr = booking.deposit_amount_pence ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}` : null;
+  const guestProfileAndNotesCount = [
+    ...(detail?.guest?.tags ?? []),
+    detail?.guest?.customer_profile_notes,
+    booking.dietary_notes,
+    booking.occasion,
+    detail?.special_requests,
+    detail?.internal_notes,
+  ].filter(Boolean).length;
   const confirmationSentAt = detail?.communications.find(
     (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
   )?.created_at;
@@ -513,13 +521,11 @@ export function ExpandedBookingContent({
       {detail?.guest?.id ? (
         <details className={bookingExpandAccordionDetailsClass}>
           <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Guest profile</span>
+            <span>Guest profile and notes</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-              {(detail.guest.tags ?? []).length > 0
-                ? `${detail.guest.tags!.length} tag${detail.guest.tags!.length === 1 ? '' : 's'}`
-                : detail.guest.customer_profile_notes
-                  ? 'Customer info'
-                  : 'Tags and notes'}
+              {guestProfileAndNotesCount > 0
+                ? `${guestProfileAndNotesCount} item${guestProfileAndNotesCount === 1 ? '' : 's'}`
+                : 'Profile and booking notes'}
             </span>
             <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
@@ -587,6 +593,29 @@ export function ExpandedBookingContent({
               disabled={detailLoading}
               onSaved={onDetailUpdated}
             />
+            <div className="border-t border-slate-100 pt-2">
+              <div className="mb-2">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Booking notes</p>
+              </div>
+              {booking.occasion ? (
+                <div className="mb-2">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
+                  <div className="rounded-lg border border-violet-100 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold leading-snug text-violet-900">
+                    {booking.occasion}
+                  </div>
+                </div>
+              ) : null}
+              <BookingNotesEditablePanel
+                bookingId={booking.id}
+                dietaryNotes={booking.dietary_notes}
+                guestRequests={detail.special_requests}
+                staffNotes={detail.internal_notes}
+                onSaved={onDetailUpdated}
+                notesVariant={notesVariant}
+                compact
+                embedded
+              />
+            </div>
           </div>
         </details>
       ) : null}
@@ -701,11 +730,12 @@ export function ExpandedBookingContent({
         </div>
       </details>
 
+      {!detail?.guest?.id ? (
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
           <span>Notes and preferences</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-            {[booking.dietary_notes, detail?.special_requests, detail?.internal_notes].filter(Boolean).length || 'None'}
+            {[booking.dietary_notes, booking.occasion, detail?.special_requests, detail?.internal_notes].filter(Boolean).length || 'None'}
           </span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
@@ -719,9 +749,16 @@ export function ExpandedBookingContent({
             staffNotes={detail?.internal_notes}
             onSaved={onDetailUpdated}
             notesVariant={notesVariant}
+            compact
           />
+          {booking.occasion ? (
+            <p className="mt-2 rounded-lg border border-violet-100 bg-violet-50 px-2 py-1.5 text-xs font-semibold text-violet-800">
+              Occasion: {booking.occasion}
+            </p>
+          ) : null}
         </div>
       </details>
+      ) : null}
 
       {/* CDE context */}
       {detail?.cde_context && (

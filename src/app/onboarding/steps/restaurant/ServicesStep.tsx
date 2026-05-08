@@ -30,29 +30,38 @@ export function ServicesStep({ onDone }: Props) {
 
   return (
     <div className="min-w-0">
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Your dining services</h2>
+      <h2 className="mb-1 text-lg font-bold text-slate-900">Dining services & booking rules</h2>
       <p className="mb-3 text-sm text-slate-500">
-        A <strong className="font-medium text-slate-700">service</strong> is a named sitting inside your
-        opening hours (for example <em>Lunch</em>, <em>Dinner</em>, or <em>Sunday Brunch</em>). Guests book
-        into a service. Each service has its own capacity, duration, and booking rules.
+        Configure named sittings (for example <em>Lunch</em> and <em>Dinner</em>), then set{' '}
+        <strong className="font-medium text-slate-700">capacity</strong>,{' '}
+        <strong className="font-medium text-slate-700">how long parties stay</strong>, and{' '}
+        <strong className="font-medium text-slate-700">booking and deposit rules</strong> for each service in the
+        editor below — the same layout as Availability → Services in your dashboard.
       </p>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-        <p className="mb-2 font-medium text-slate-800">Quick tips</p>
+        <p className="mb-2 font-medium text-slate-800">What you&apos;re setting here</p>
         <ul className="list-inside list-disc space-y-1">
-          <li>Create a service once, then complete capacity, dining duration, and booking rules in the same editor.</li>
-          <li>Most restaurants start with <strong className="font-medium">Lunch</strong> and <strong className="font-medium">Dinner</strong>. Add brunch, pre-theatre, or private dining later.</li>
-          <li>New services get sensible defaults for capacity, duration bands, and booking rules, which you can tune below.</li>
-          <li>You can refine any of this later from{' '}
-            <Link
-              href="/dashboard/availability?tab=services"
-              className="font-medium text-brand-600 underline hover:text-brand-700"
-            >
-              Availability → Services
-            </Link>
-            .
+          <li>
+            <strong className="font-medium text-slate-700">Capacity</strong>: max covers and bookings per time slot,
+            slot interval — think kitchen pace and host-stand flow.
+          </li>
+          <li>
+            <strong className="font-medium text-slate-700">Duration</strong>: seated time by party size (longer tables
+            usually stay longer).
+          </li>
+          <li>
+            <strong className="font-medium text-slate-700">Booking rules</strong>: advance booking window, party-size
+            limits online, deposits, cancellation notice.
           </li>
         </ul>
+        <p className="mt-3 text-xs text-slate-500">
+          New rows get sensible defaults — tune them below. Fine-tune anytime from{' '}
+          <Link href="/dashboard/availability?tab=services" className="font-medium text-brand-600 underline hover:text-brand-700">
+            Availability → Services
+          </Link>
+          .
+        </p>
       </div>
 
       <ServiceAreaPicker

@@ -30,6 +30,7 @@ import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { FloorDragEvent } from './LiveFloorCanvas';
+import { collectTableDayBookings } from '@/lib/floor-plan/table-day-timeline';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -44,6 +45,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
+import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -89,6 +91,8 @@ interface BookingOnTable {
   dietary_notes: string | null;
   occasion: string | null;
   deposit_status?: string | null;
+  deposit_amount_pence?: number | null;
+  internal_notes?: string | null;
 }
 
 interface TableWithState extends VenueTable {
@@ -131,7 +135,10 @@ function minutesToTimeShort(m: number): string {
 }
 
 function bookingEndMinutes(booking: BookingOnTable, selectedDate: string, nowMinutes: number): number {
-  const startMin = minutesFromTime(booking.start_time);
+  const startHHmm = booking.start_time.includes('T')
+    ? new Date(booking.start_time).toISOString().slice(11, 16)
+    : booking.start_time.slice(0, 5);
+  const startMin = minutesFromTime(startHHmm);
   let endMin = booking.estimated_end_time
     ? minutesFromTime(new Date(booking.estimated_end_time).toISOString().slice(11, 16))
     : startMin + 90;
@@ -223,6 +230,16 @@ export function FloorPlanLiveView({
   const [floorBlockDurationMins, setFloorBlockDurationMins] = useState<number>(60);
   const [floorBlockReason, setFloorBlockReason] = useState('');
   const [floorBlockSaving, setFloorBlockSaving] = useState(false);
+
+  /** Unassigned bookings sheet + tap-a-table assign flow */
+  const [unassignedSheetOpen, setUnassignedSheetOpen] = useState(false);
+  const [pendingAssignBookingId, setPendingAssignBookingId] = useState<string | null>(null);
+  /** Host search / quick filters — highlights matching tables on the canvas */
+  const [floorSearchQuery, setFloorSearchQuery] = useState('');
+  const [filterDietaryOnly, setFilterDietaryOnly] = useState(false);
+  const [filterOccasionOnly, setFilterOccasionOnly] = useState(false);
+  const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
+  const [filterPartySizeMin, setFilterPartySizeMin] = useState('');
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
@@ -416,13 +433,31 @@ export function FloorPlanLiveView({
               estimated_end_time: cell.booking_details.end_time ? `${selectedDate}T${cell.booking_details.end_time}:00.000Z` : null,
               status: cell.booking_details.status,
               deposit_status: cell.booking_details.deposit_status ?? null,
+              deposit_amount_pence: cell.booking_details.deposit_amount_pence ?? null,
               dietary_notes: cell.booking_details.dietary_notes,
               occasion: cell.booking_details.occasion,
+              internal_notes: cell.booking_details.internal_notes ?? null,
             });
           }
           const existing = groups.get(cell.booking_id) ?? [];
           if (!existing.includes(cell.table_id)) existing.push(cell.table_id);
           groups.set(cell.booking_id, existing);
+        }
+        for (const ub of grid.unassigned_bookings ?? []) {
+          if (map.has(ub.id)) continue;
+          map.set(ub.id, {
+            id: ub.id,
+            guest_name: ub.guest_name,
+            party_size: ub.party_size,
+            start_time: ub.start_time,
+            estimated_end_time: ub.end_time ? `${selectedDate}T${ub.end_time.slice(0, 5)}:00.000Z` : null,
+            status: ub.status,
+            deposit_status: ub.deposit_status ?? null,
+            deposit_amount_pence: ub.deposit_amount_pence ?? null,
+            dietary_notes: ub.dietary_notes,
+            occasion: ub.occasion,
+            internal_notes: ub.internal_notes ?? null,
+          });
         }
         setBookingMap(map);
         const multiGroups = new Map<string, string[]>();
@@ -586,7 +621,10 @@ export function FloorPlanLiveView({
           .map((bookingId) => bookingMap.get(bookingId) ?? null)
           .find((candidate): candidate is BookingOnTable => {
             if (!candidate) return false;
-            const startMin = minutesFromTime(candidate.start_time);
+            const startHHmm = candidate.start_time.includes('T')
+              ? new Date(candidate.start_time).toISOString().slice(11, 16)
+              : candidate.start_time.slice(0, 5);
+            const startMin = minutesFromTime(startHHmm);
             const endMin = bookingEndMinutes(candidate, selectedDate, currentMin);
             return currentMin >= startMin && currentMin < endMin;
           }) ?? null;
@@ -597,9 +635,12 @@ export function FloorPlanLiveView({
       let elapsedPct = 0;
       let turnProgressPct = 0;
       if (booking?.start_time && booking?.estimated_end_time) {
+        const startHHmm = booking.start_time.includes('T')
+          ? new Date(booking.start_time).toISOString().slice(11, 16)
+          : booking.start_time.slice(0, 5);
+        const [sh, sm] = startHHmm.split(':').map(Number);
         const [y, mo, d] = selectedDate.split('-').map(Number);
-        const [h, m] = booking.start_time.split(':').map(Number);
-        const startMs = new Date(y!, mo! - 1, d!, h!, m!).getTime();
+        const startMs = new Date(y!, mo! - 1, d!, sh!, sm!).getTime();
         const effectiveEndMin = bookingEndMinutes(booking, selectedDate, currentMin);
         const endMs = new Date(y!, mo! - 1, d!, Math.floor(effectiveEndMin / 60), effectiveEndMin % 60).getTime();
         const totalMs = endMs - startMs;
@@ -610,7 +651,13 @@ export function FloorPlanLiveView({
         }
       }
 
-      return { ...t, service_status: tableStatus, booking, elapsed_pct: elapsedPct, turn_progress_pct: turnProgressPct };
+      return {
+        ...t,
+        service_status: tableStatus,
+        booking,
+        elapsed_pct: elapsedPct,
+        turn_progress_pct: turnProgressPct,
+      };
     });
   }, [tables, bookingMap, selectedDate, debouncedTime, gridData, blocks, clockTick]);
 
@@ -689,6 +736,197 @@ export function FloorPlanLiveView({
     };
     return { ...base, covers_in_use_now: liveCovers, next_bookings_slot };
   }, [gridData, tablesWithState, combinedTableGroups, debouncedTime, tables]);
+
+  const runningLongTableCount = useMemo(
+    () => tablesWithState.filter((t) => t.booking && t.turn_progress_pct > 100).length,
+    [tablesWithState],
+  );
+
+  const activeBookingStatusSet = useMemo(
+    () => new Set<string>(BOOKING_ACTIVE_STATUSES as readonly string[]),
+    [],
+  );
+
+  const tableGridHref = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('date', selectedDate);
+    if (diningAreaId) p.set('area', diningAreaId);
+    return `/dashboard/table-grid?${p.toString()}`;
+  }, [selectedDate, diningAreaId]);
+
+  const highlightFloorTableIds = useMemo(() => {
+    const q = floorSearchQuery.trim().toLowerCase();
+    const partyN = filterPartySizeMin.trim() === '' ? null : Number.parseInt(filterPartySizeMin, 10);
+    const hasSearch = q.length > 0;
+    const hasParty = partyN != null && Number.isFinite(partyN) && partyN > 0;
+    if (!hasSearch && !filterDietaryOnly && !filterOccasionOnly && !filterOverdueOnly && !hasParty) {
+      return new Set<string>();
+    }
+
+    const guestNameMatchOnTable = (tableId: string): boolean => {
+      if (!gridData?.cells?.length || !q) return false;
+      for (const c of gridData.cells) {
+        if (c.table_id !== tableId || !c.booking_details?.guest_name || !c.booking_id) continue;
+        if (!activeBookingStatusSet.has(c.booking_details.status)) continue;
+        if (c.booking_details.guest_name.toLowerCase().includes(q)) return true;
+      }
+      return false;
+    };
+
+    const ids = new Set<string>();
+    for (const t of tablesWithState) {
+      let ok = true;
+      if (hasSearch) {
+        const nameMatch = t.name.toLowerCase().includes(q);
+        const guestCur = t.booking ? t.booking.guest_name.toLowerCase().includes(q) : false;
+        const guestAny = guestNameMatchOnTable(t.id);
+        if (!nameMatch && !guestCur && !guestAny) ok = false;
+      }
+      if (ok && filterDietaryOnly) {
+        if (!t.booking?.dietary_notes?.trim()) ok = false;
+      }
+      if (ok && filterOccasionOnly) {
+        if (!t.booking?.occasion?.trim()) ok = false;
+      }
+      if (ok && filterOverdueOnly) {
+        if (!t.booking || t.turn_progress_pct <= 100) ok = false;
+      }
+      if (ok && hasParty && partyN != null) {
+        if (t.max_covers < partyN || t.service_status !== 'available' || t.booking) ok = false;
+      }
+      if (ok) ids.add(t.id);
+    }
+    return ids;
+  }, [
+    tablesWithState,
+    gridData,
+    floorSearchQuery,
+    filterDietaryOnly,
+    filterOccasionOnly,
+    filterOverdueOnly,
+    filterPartySizeMin,
+    activeBookingStatusSet,
+  ]);
+
+  const floorSearchActive = Boolean(
+    floorSearchQuery.trim() ||
+      filterDietaryOnly ||
+      filterOccasionOnly ||
+      filterOverdueOnly ||
+      filterPartySizeMin.trim(),
+  );
+
+  const jumpTimelineToNextBookings = useCallback(() => {
+    const slot = summaryData.next_bookings_slot;
+    if (!slot?.time) return;
+    const { minM, maxM } = timelineScrubBounds;
+    const raw = minutesFromTime(slot.time);
+    setSelectedTime(minutesToTimeShort(Math.min(Math.max(raw, minM), maxM)));
+  }, [summaryData.next_bookings_slot, timelineScrubBounds]);
+
+  const onCoversChipClick = useCallback(() => {
+    addToast('Live covers follow the timeline clock — open the clock button to adjust service time.', 'info');
+  }, [addToast]);
+
+  /** HH:mm for move-validation (cells use wall-clock strings; DB may return ISO). */
+  const bookingStartHHmm = useCallback((startTime: string): string => {
+    const s = startTime.trim();
+    if (s.includes('T')) {
+      try {
+        return new Date(s).toISOString().slice(11, 16);
+      } catch {
+        return s.slice(0, 5);
+      }
+    }
+    return s.slice(0, 5);
+  }, []);
+
+  const bookingEndHHmm = useCallback((booking: BookingOnTable): string => {
+    if (booking.estimated_end_time) {
+      try {
+        return new Date(booking.estimated_end_time).toISOString().slice(11, 16);
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }, []);
+
+  const getAssignCandidates = useCallback(
+    (bookingId: string) => {
+      const booking = bookingMap.get(bookingId);
+      if (!booking || !gridData) return [] as { id: string; name: string; combo?: string }[];
+      const context: BookingMoveContext = {
+        id: bookingId,
+        party_size: booking.party_size,
+        start_time: bookingStartHHmm(booking.start_time),
+        end_time: bookingEndHHmm(booking),
+      };
+      const tableInfos = gridData.tables.map((t) => ({
+        id: t.id,
+        name: t.name,
+        max_covers: t.max_covers,
+        position_x: t.position_x,
+        position_y: t.position_y,
+        width: t.width,
+        height: t.height,
+        rotation: t.rotation,
+      }));
+      const result = computeValidMoveTargets(context, tableInfos, gridData.cells, allCombinations);
+      const ordered: { id: string; name: string; combo?: string }[] = [];
+      const seen = new Set<string>();
+      for (const id of result.validTableIds) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        ordered.push({
+          id,
+          name: tables.find((t) => t.id === id)?.name ?? id,
+          combo: result.comboLabels.get(id),
+        });
+        if (ordered.length >= 14) break;
+      }
+      return ordered;
+    },
+    [bookingMap, gridData, allCombinations, tables, bookingStartHHmm, bookingEndHHmm],
+  );
+
+  const canvasTapMoveMode = useMemo(() => {
+    if (reassignMode) return { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName };
+    if (!pendingAssignBookingId) return null;
+    const name = bookingMap.get(pendingAssignBookingId)?.guest_name ?? 'Guest';
+    return { bookingId: pendingAssignBookingId, guestName: name };
+  }, [reassignMode, pendingAssignBookingId, bookingMap]);
+
+  const resolveAssignTargetTableIds = useCallback(
+    (bookingId: string, targetTableId: string): string[] | null => {
+      const booking = bookingMap.get(bookingId);
+      if (!booking || !gridData) return null;
+      const startHHmm = booking.start_time.includes('T')
+        ? new Date(booking.start_time).toISOString().slice(11, 16)
+        : booking.start_time.slice(0, 5);
+      const endHHmm = booking.estimated_end_time
+        ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+        : '';
+      const context: BookingMoveContext = {
+        id: bookingId,
+        party_size: booking.party_size,
+        start_time: startHHmm,
+        end_time: endHHmm,
+      };
+      const tableInfos = gridData.tables.map((t) => ({
+        id: t.id,
+        name: t.name,
+        max_covers: t.max_covers,
+        position_x: t.position_x,
+        position_y: t.position_y,
+        width: t.width,
+        height: t.height,
+        rotation: t.rotation,
+      }));
+      return resolveDropTarget(targetTableId, context, tableInfos, gridData.cells, allCombinations);
+    },
+    [bookingMap, gridData, allCombinations],
+  );
 
   // --- Status change handlers ---
   const handleBookingStatusChange = useCallback(async (bookingId: string, currentStatus: BookingStatus, newStatus: BookingStatus) => {
@@ -890,7 +1128,11 @@ export function FloorPlanLiveView({
         fetchData();
       } else {
         const data = await res.json().catch(() => ({}));
-        addToast(data.error ?? 'Failed to reassign table', 'error');
+        if (res.status === 409) {
+          addToast(data.error ?? 'Table conflict — refresh and try again.', 'error');
+        } else {
+          addToast(data.error ?? 'Failed to reassign table', 'error');
+        }
       }
     } catch (err) {
       console.error('Reassign failed:', err);
@@ -910,7 +1152,11 @@ export function FloorPlanLiveView({
         fetchData();
       } else {
         const data = await res.json().catch(() => ({}));
-        addToast(data.error ?? 'Failed to assign table', 'error');
+        if (res.status === 409) {
+          addToast(data.error ?? 'Table conflict — another booking may have taken this slot. Refresh and try again.', 'error');
+        } else {
+          addToast(data.error ?? 'Failed to assign table', 'error');
+        }
       }
     } catch (err) {
       console.error('Assign failed:', err);
@@ -943,14 +1189,19 @@ export function FloorPlanLiveView({
   const startDragValidation = useCallback((bookingId: string, sourceTableIds: string[]) => {
     const booking = bookingMap.get(bookingId);
     if (!booking || !gridData) return;
+    setPendingAssignBookingId((prev) => (prev && prev !== bookingId ? null : prev));
     setDragSourceTableIds(sourceTableIds);
+    const startHHmm = booking.start_time.includes('T')
+      ? new Date(booking.start_time).toISOString().slice(11, 16)
+      : booking.start_time.slice(0, 5);
+    const endHHmm = booking.estimated_end_time
+      ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+      : '';
     const context: BookingMoveContext = {
       id: bookingId,
       party_size: booking.party_size,
-      start_time: booking.start_time,
-      end_time: booking.estimated_end_time
-        ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
-        : '',
+      start_time: startHHmm,
+      end_time: endHHmm,
     };
     const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
     const result = computeValidMoveTargets(context, tableInfos, gridData.cells, allCombinations);
@@ -964,19 +1215,28 @@ export function FloorPlanLiveView({
     setDragSourceTableIds([]);
   }, []);
 
+  const cancelPendingTableAssign = useCallback(() => {
+    setPendingAssignBookingId(null);
+    clearDragValidation();
+  }, [clearDragValidation]);
+
   const handleFloorDragEnd = useCallback((event: FloorDragEvent) => {
     const booking = bookingMap.get(event.bookingId);
     if (!booking || !gridData) {
       clearDragValidation();
       return;
     }
+    const startHHmm = booking.start_time.includes('T')
+      ? new Date(booking.start_time).toISOString().slice(11, 16)
+      : booking.start_time.slice(0, 5);
+    const endHHmm = booking.estimated_end_time
+      ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+      : '';
     const context: BookingMoveContext = {
       id: event.bookingId,
       party_size: booking.party_size,
-      start_time: booking.start_time,
-      end_time: booking.estimated_end_time
-        ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
-        : '',
+      start_time: startHHmm,
+      end_time: endHHmm,
     };
     const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
     const targetTableIds = resolveDropTarget(event.targetTableId, context, tableInfos, gridData.cells, allCombinations);
@@ -996,32 +1256,102 @@ export function FloorPlanLiveView({
   }, [bookingMap, gridData, allCombinations, clearDragValidation, addToast, handleReassign, handleAssign, dragSourceTableIds]);
 
   // Click-based reassign mode
-  const handleTableSelect = useCallback((id: string | null) => {
-    setFloorBookingMenu(null);
-    if (reassignMode && id) {
-      const booking = bookingMap.get(reassignMode.bookingId);
-      if (!booking || !gridData) return;
-      const context: BookingMoveContext = {
-        id: reassignMode.bookingId,
-        party_size: booking.party_size,
-        start_time: booking.start_time,
-        end_time: booking.estimated_end_time
+  const handleTableSelect = useCallback(
+    (id: string | null) => {
+      setFloorBookingMenu(null);
+      if (pendingAssignBookingId && id) {
+        const row = tablesWithState.find((t) => t.id === id);
+        if (!row) return;
+        if (row.booking || row.service_status !== 'available') {
+          addToast('Choose an empty table that is available at the timeline time.', 'error');
+          return;
+        }
+        const booking = bookingMap.get(pendingAssignBookingId);
+        if (!booking || !gridData) return;
+        const startHHmm = booking.start_time.includes('T')
+          ? new Date(booking.start_time).toISOString().slice(11, 16)
+          : booking.start_time.slice(0, 5);
+        const endHHmm = booking.estimated_end_time
           ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
-          : '',
-      };
-      const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
-      const targetTableIds = resolveDropTarget(id, context, tableInfos, gridData.cells, allCombinations);
-      if (!targetTableIds) {
-        addToast('Cannot move booking to that table', 'error');
+          : '';
+        const context: BookingMoveContext = {
+          id: pendingAssignBookingId,
+          party_size: booking.party_size,
+          start_time: startHHmm,
+          end_time: endHHmm,
+        };
+        const tableInfos = gridData.tables.map((t) => ({
+          id: t.id,
+          name: t.name,
+          max_covers: t.max_covers,
+          position_x: t.position_x,
+          position_y: t.position_y,
+          width: t.width,
+          height: t.height,
+          rotation: t.rotation,
+        }));
+        const targetTableIds = resolveDropTarget(id, context, tableInfos, gridData.cells, allCombinations);
+        if (!targetTableIds) {
+          addToast('Cannot assign booking to that table', 'error');
+          return;
+        }
+        void handleAssign(pendingAssignBookingId, targetTableIds);
+        setPendingAssignBookingId(null);
+        clearDragValidation();
+        setUnassignedSheetOpen(false);
+        setSelectedTableId(null);
         return;
       }
-      void handleReassign(reassignMode.bookingId, reassignMode.oldTableIds, targetTableIds);
-      setReassignMode(null);
-      clearDragValidation();
-      return;
-    }
-    setSelectedTableId(id);
-  }, [reassignMode, bookingMap, gridData, allCombinations, addToast, handleReassign, clearDragValidation]);
+      if (reassignMode && id) {
+        const booking = bookingMap.get(reassignMode.bookingId);
+        if (!booking || !gridData) return;
+        const startHHmm = booking.start_time.includes('T')
+          ? new Date(booking.start_time).toISOString().slice(11, 16)
+          : booking.start_time.slice(0, 5);
+        const endHHmm = booking.estimated_end_time
+          ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+          : '';
+        const context: BookingMoveContext = {
+          id: reassignMode.bookingId,
+          party_size: booking.party_size,
+          start_time: startHHmm,
+          end_time: endHHmm,
+        };
+        const tableInfos = gridData.tables.map((t) => ({
+          id: t.id,
+          name: t.name,
+          max_covers: t.max_covers,
+          position_x: t.position_x,
+          position_y: t.position_y,
+          width: t.width,
+          height: t.height,
+          rotation: t.rotation,
+        }));
+        const targetTableIds = resolveDropTarget(id, context, tableInfos, gridData.cells, allCombinations);
+        if (!targetTableIds) {
+          addToast('Cannot move booking to that table', 'error');
+          return;
+        }
+        void handleReassign(reassignMode.bookingId, reassignMode.oldTableIds, targetTableIds);
+        setReassignMode(null);
+        clearDragValidation();
+        return;
+      }
+      setSelectedTableId(id);
+    },
+    [
+      pendingAssignBookingId,
+      tablesWithState,
+      handleAssign,
+      addToast,
+      reassignMode,
+      bookingMap,
+      gridData,
+      allCombinations,
+      handleReassign,
+      clearDragValidation,
+    ],
+  );
 
   const startReassignMode = useCallback((bookingId: string) => {
     const booking = bookingMap.get(bookingId);
@@ -1038,6 +1368,11 @@ export function FloorPlanLiveView({
     if (!selectedTableId) return null;
     return tablesWithState.find((t) => t.id === selectedTableId) ?? null;
   }, [selectedTableId, tablesWithState]);
+
+  const selectedTableDayBookings = useMemo(
+    () => (selectedTableId ? collectTableDayBookings(gridData, selectedTableId) : []),
+    [gridData, selectedTableId],
+  );
 
   /** Blocks that cover the current timeline position for the selected table */
   const blocksAtScrubberForSelected = useMemo(() => {
@@ -1181,32 +1516,147 @@ export function FloorPlanLiveView({
         onWalkIn={() => setShowWalkInModal(true)}
         compact
         showControlsButton={false}
-        infoPanelExtra={(
-          <div className="border-t border-slate-100 pt-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Floor key</p>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-600">
-              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" aria-hidden />Available</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-700" aria-hidden />Booked</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-teal-700" aria-hidden />Seated</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-stone-600" aria-hidden />Blocked</span>
+        onCoversChipClick={onCoversChipClick}
+        onUnassignedChipClick={() => setUnassignedSheetOpen(true)}
+        onNextChipClick={jumpTimelineToNextBookings}
+        searchActive={floorSearchActive}
+        searchAriaLabel="Search and filter tables on the floor plan"
+        searchPanel={(
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="floor-host-search" className="mb-1 block text-xs font-semibold text-slate-700">
+                Guest or table
+              </label>
+              <input
+                id="floor-host-search"
+                type="search"
+                value={floorSearchQuery}
+                onChange={(e) => setFloorSearchQuery(e.target.value)}
+                placeholder="Name, table…"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
             </div>
-            <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Table progress</p>
-            <div className="mt-2 grid gap-1.5 text-[11px] text-slate-600">
-              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-teal-600" aria-hidden />Within booking window</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-amber-600" aria-hidden />Approaching end time</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-red-600" aria-hidden />Past expected end time</span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={filterDietaryOnly}
+                  onChange={(e) => setFilterDietaryOnly(e.target.checked)}
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Dietary notes
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={filterOccasionOnly}
+                  onChange={(e) => setFilterOccasionOnly(e.target.checked)}
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Occasion set
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={filterOverdueOnly}
+                  onChange={(e) => setFilterOverdueOnly(e.target.checked)}
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Past expected end
+              </label>
+              <div>
+                <label htmlFor="floor-party-min" className="mb-1 block text-xs font-semibold text-slate-700">
+                  Empty tables ≥ party
+                </label>
+                <input
+                  id="floor-party-min"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={filterPartySizeMin}
+                  onChange={(e) => setFilterPartySizeMin(e.target.value)}
+                  placeholder="e.g. 6"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="text-xs font-semibold text-brand-700 hover:underline"
+              onClick={() => {
+                setFloorSearchQuery('');
+                setFilterDietaryOnly(false);
+                setFilterOccasionOnly(false);
+                setFilterOverdueOnly(false);
+                setFilterPartySizeMin('');
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+        infoPanelExtra={(
+          <div className="space-y-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Service pulse</p>
+              <p className="mt-2 text-[11px] leading-snug text-slate-700">
+                <span className="font-semibold tabular-nums text-slate-900">{runningLongTableCount}</span>{' '}
+                <span className="text-slate-600">
+                  {runningLongTableCount === 1 ? 'table' : 'tables'} running long (past expected end for the timeline
+                  time).
+                </span>
+              </p>
+              <p className="mt-2 text-[10px] leading-snug text-slate-500">
+                The first chip shows live covers when available, otherwise booked covers against capacity; the others
+                show tables in use, unassigned bookings, and the next arrival window or combos in use.
+              </p>
+            </div>
+            <div className="border-t border-slate-100 pt-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Floor key</p>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-600">
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" aria-hidden />Available</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-700" aria-hidden />Booked</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-teal-700" aria-hidden />Seated</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-600" aria-hidden />Blocked</span>
+              </div>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Table progress</p>
+              <div className="mt-2 grid gap-1.5 text-[11px] text-slate-600">
+                <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-teal-600" aria-hidden />Within booking window</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-amber-600" aria-hidden />Approaching end time</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[3px] border-red-600" aria-hidden />Past expected end time</span>
+              </div>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Table badges</p>
+              <div className="mt-2 grid gap-1.5 text-[11px] text-slate-600">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-red-600 ring-1 ring-white" aria-hidden />Dietary note on the booking
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-green-600 ring-1 ring-white" aria-hidden />Other important info only (occasion, deposit pending, or staff note)
+                </span>
+              </div>
+              <p className="mt-2 text-[10px] leading-snug text-slate-500">
+                One dot per table. Red takes priority when a dietary note is present alongside other signals.
+              </p>
             </div>
           </div>
         )}
         trailingActions={
-          isAdmin && editLayoutHref ? (
+          <div className="flex flex-wrap items-center gap-1">
             <Link
-              href={editLayoutHref}
+              href={tableGridHref}
               className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
-              Edit layout
+              Table grid
             </Link>
-          ) : null
+            {isAdmin && editLayoutHref ? (
+              <Link
+                href={editLayoutHref}
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                Edit layout
+              </Link>
+            ) : null}
+          </div>
         }
         timelineLabel={selectedTime}
         timelinePanel={(
@@ -1234,9 +1684,6 @@ export function FloorPlanLiveView({
                 </button>
               </div>
               <div className="mt-3">
-                <label htmlFor="floor-timeline-scrub" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Scrub time
-                </label>
                 <div className="flex items-center gap-2">
                   <span className="w-11 shrink-0 tabular-nums text-[11px] text-slate-500" title="Range start">
                     {minutesToTimeShort(timelineScrubBounds.minM)}
@@ -1366,6 +1813,16 @@ export function FloorPlanLiveView({
             <button type="button" onClick={() => { setReassignMode(null); clearDragValidation(); }} className="shrink-0 font-semibold text-amber-700 underline">Cancel</button>
           </div>
         )}
+        {!reassignMode && pendingAssignBookingId && (
+          <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 text-[11px] text-brand-950 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
+            <span>
+              Tap a highlighted table to assign <strong>{bookingMap.get(pendingAssignBookingId)?.guest_name ?? 'Guest'}</strong>
+            </span>
+            <button type="button" onClick={cancelPendingTableAssign} className="shrink-0 font-semibold text-brand-800 underline">
+              Cancel
+            </button>
+          </div>
+        )}
         <div className="absolute inset-0">
           <LiveFloorCanvas
             tables={tablesWithState}
@@ -1375,20 +1832,21 @@ export function FloorPlanLiveView({
             combinedTableGroups={combinedTableGroups}
             validDropTargets={validDropTargets}
             validDropComboLabels={validDropComboLabels}
-            reassignMode={reassignMode ? { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName } : null}
+            reassignMode={canvasTapMoveMode}
+            highlightTableIds={highlightFloorTableIds}
             onSelect={handleTableSelect}
             onDragStart={startDragValidation}
             onDragEnd={handleFloorDragEnd}
             onDragCancel={clearDragValidation}
             onBookingClick={
-              reassignMode
+              reassignMode || pendingAssignBookingId
                 ? undefined
                 : (bookingId, anchor) => {
                     openBookingPopoverFromCanvas(bookingId, anchor);
                   }
             }
             onBookedTableContextMenu={(bookingId, _tableId, x, y) => {
-              if (reassignMode) return;
+              if (reassignMode || pendingAssignBookingId) return;
               const row = toMenuBooking(bookingId);
               if (row) setFloorBookingMenu({ booking: row, x, y });
             }}
@@ -1396,6 +1854,116 @@ export function FloorPlanLiveView({
           />
         </div>
       </div>
+
+      {/* Unassigned bookings — compact host-stand panel */}
+      {unassignedSheetOpen && gridData ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-2 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="floor-unassigned-title"
+          onClick={() => setUnassignedSheetOpen(false)}
+        >
+          <div
+            className="max-h-[min(85dvh,640px)] w-full max-w-lg overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <h2 id="floor-unassigned-title" className="text-sm font-semibold text-slate-900">
+                Unassigned bookings
+              </h2>
+              <button
+                type="button"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+                onClick={() => setUnassignedSheetOpen(false)}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="max-h-[min(70dvh,520px)] overflow-y-auto px-4 py-3">
+              {gridData.unassigned_bookings.length === 0 ? (
+                <p className="text-sm text-slate-600">No unassigned bookings for this day.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {gridData.unassigned_bookings.map((b) => {
+                    const candidates = getAssignCandidates(b.id);
+                    return (
+                      <li key={b.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{b.guest_name}</p>
+                          <p className="text-xs text-slate-500">
+                            {b.party_size} ·{' '}
+                            {typeof b.start_time === 'string' && b.start_time.includes('T')
+                              ? new Date(b.start_time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+                              : String(b.start_time ?? '').slice(0, 5)}
+                          </p>
+                        </div>
+                        {(b.dietary_notes?.trim() || b.occasion?.trim()) ? (
+                          <p className="mt-1 text-xs text-amber-900">
+                            {b.dietary_notes?.trim() ? <>Dietary: {b.dietary_notes}</> : null}
+                            {b.dietary_notes?.trim() && b.occasion?.trim() ? ' · ' : null}
+                            {b.occasion?.trim() ? <>Occasion: {b.occasion}</> : null}
+                          </p>
+                        ) : null}
+                        {candidates.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {candidates.map((c) => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-800 shadow-sm hover:bg-brand-50"
+                                title={c.combo ? `Uses combo: ${c.combo}` : undefined}
+                                onClick={() => {
+                                  const ids = resolveAssignTargetTableIds(b.id, c.id);
+                                  if (!ids?.length) {
+                                    addToast('Cannot assign to that table', 'error');
+                                    return;
+                                  }
+                                  void handleAssign(b.id, ids);
+                                  setUnassignedSheetOpen(false);
+                                }}
+                              >
+                                {c.name}
+                                {c.combo ? <span className="ml-0.5 text-[10px] font-normal text-slate-500">+</span> : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-xs text-slate-500">No single-table match at this service time — use pick on floor for combinations.</p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+                            onClick={() => {
+                              setUnassignedSheetOpen(false);
+                              setPendingAssignBookingId(b.id);
+                              startDragValidation(b.id, []);
+                            }}
+                          >
+                            Pick table on floor…
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            onClick={() => {
+                              setUnassignedSheetOpen(false);
+                              openBookingDrawer(b.id);
+                            }}
+                          >
+                            Open booking
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Table detail bottom sheet */}
       {selectedTable && !selectedTable.booking && !detailBookingId && (
@@ -1410,7 +1978,12 @@ export function FloorPlanLiveView({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-slate-900 sm:text-base">{selectedTable.name}</h3>
-              <p className="text-[11px] text-slate-500 sm:text-xs">{selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}</p>
+              <p className="text-[11px] text-slate-500 sm:text-xs">
+                {selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}
+                {selectedTable.server_section?.trim() ? (
+                  <span className="text-slate-600"> · Section: {selectedTable.server_section}</span>
+                ) : null}
+              </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button
@@ -1466,6 +2039,22 @@ export function FloorPlanLiveView({
             </div>
           )}
 
+          {selectedTableDayBookings.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Today on this table</p>
+              <ul className={`mt-2 space-y-1.5 overflow-y-auto text-xs text-slate-800 ${tableDetailSheetExpanded ? 'max-h-52' : 'max-h-28'}`}>
+                {selectedTableDayBookings.map((row) => (
+                  <li key={row.booking_id} className="flex flex-wrap justify-between gap-1 border-b border-slate-200/80 pb-1 last:border-0">
+                    <span className="font-medium">{row.guest_name}</span>
+                    <span className="text-slate-500">
+                      {row.start_time}–{row.end_time} · {row.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {/* Actions */}
           <div className="mt-3 flex flex-wrap gap-2">
             {selectedTable.service_status === 'available' && (
@@ -1483,6 +2072,16 @@ export function FloorPlanLiveView({
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Block table…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnassignedSheetOpen(true);
+                    addToast('Pick a guest, then a table chip or “Pick on floor”.', 'info');
+                  }}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Unassigned list
                 </button>
               </>
             )}

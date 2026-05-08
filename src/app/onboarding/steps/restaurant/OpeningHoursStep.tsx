@@ -5,17 +5,17 @@ import Link from 'next/link';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
 
+/** Starter hours when venue has none saved yet: Mon–Sat 12:00–22:00, Sunday closed. */
 function restaurantFallbackHours(): OpeningHoursSettings {
-  const defaults = defaultOpeningHoursSettings();
   return {
+    ...defaultOpeningHoursSettings(),
     '0': { closed: true },
-    '1': { periods: [{ open: '12:00', close: '23:00' }] },
-    '2': { periods: [{ open: '12:00', close: '23:00' }] },
-    '3': { periods: [{ open: '12:00', close: '23:00' }] },
-    '4': { periods: [{ open: '12:00', close: '23:00' }] },
-    '5': { periods: [{ open: '12:00', close: '23:00' }] },
-    '6': { periods: [{ open: '12:00', close: '23:00' }] },
-    ...defaults,
+    '1': { periods: [{ open: '12:00', close: '22:00' }] },
+    '2': { periods: [{ open: '12:00', close: '22:00' }] },
+    '3': { periods: [{ open: '12:00', close: '22:00' }] },
+    '4': { periods: [{ open: '12:00', close: '22:00' }] },
+    '5': { periods: [{ open: '12:00', close: '22:00' }] },
+    '6': { periods: [{ open: '12:00', close: '22:00' }] },
   };
 }
 

@@ -14,7 +14,7 @@ const PREVIEW_CARDS: PreviewCard[] = [
   {
     title: 'Opening hours',
     summary: 'The outer window when guests can book at all.',
-    example: 'Tue–Sat, 12:00–23:00.',
+    example: 'Mon–Sat, 12:00–22:00.',
   },
   {
     title: 'Table management mode',
@@ -22,24 +22,9 @@ const PREVIEW_CARDS: PreviewCard[] = [
     example: 'Simple is great to start. You can switch any time.',
   },
   {
-    title: 'Dining services',
-    summary: 'Named sittings inside your opening hours.',
-    example: 'Lunch 12:00–15:00, Dinner 17:30–22:00.',
-  },
-  {
-    title: 'Capacity',
-    summary: 'How many covers and bookings you can take per slot.',
-    example: '30 covers / 10 bookings every 15 minutes.',
-  },
-  {
-    title: 'Dining duration',
-    summary: 'How long each party sits, by party size.',
-    example: 'A 2-top stays 90 min; a 6-top stays 120 min.',
-  },
-  {
-    title: 'Booking rules',
-    summary: 'Advance notice, party size limits, deposits, cancellation.',
-    example: 'Min 1 hour notice. Deposit from 6 guests.',
+    title: 'Services, capacity & rules',
+    summary: 'Named sittings plus per-service capacity, durations, and booking & deposit rules.',
+    example: 'Lunch & dinner with slot limits, party-size bands, advance notice, optional deposits.',
   },
   {
     title: 'Your dashboard',
@@ -99,23 +84,13 @@ export function WelcomeStep({ onContinue }: Props) {
         ))}
       </ol>
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-        <p className="mb-1 font-medium text-slate-800">New to booking software?</p>
-        <p>
-          No problem. Each step explains what the setting does, why it matters, and shows an example. When in
-          doubt, just use the defaults and click Continue.
-        </p>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onContinue}
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          Let&apos;s get started
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={onContinue}
+        className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+      >
+        Continue
+      </button>
     </div>
   );
 }

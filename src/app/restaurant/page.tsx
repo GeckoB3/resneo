@@ -1,248 +1,240 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import {
   RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
   RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD,
 } from "@/lib/booking-funds-copy";
+import { SMS_INCLUDED_RESTAURANT } from "@/lib/billing/sms-allowance";
+import { RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 
 export const metadata: Metadata = {
-  title: "ReserveNI for Appointments | Online Booking for Northern Ireland Businesses",
+  title: "ReserveNI for Restaurants | Table Booking & Deposit Protection for NI",
   description:
-    "Stop losing bookings. Let clients book online 24/7, collect deposits to cut no-shows, and automate every reminder. ReserveNI is the all-in-one booking platform built for Northern Ireland.",
+    "Fill more covers with 24/7 online booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan. ReserveNI for restaurants in Northern Ireland.",
   openGraph: {
-    title: "ReserveNI for Appointments",
+    title: "ReserveNI for Restaurants",
     description:
-      "Let clients book online 24/7, cut no-shows with deposits, and automate every reminder. Built for Northern Ireland businesses.",
+      "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan. Built for Northern Ireland.",
     type: "website",
   },
 };
 
+const SIGNUP_RESTAURANT = "/signup/plan?plan=restaurant";
+
 const problems = [
   {
-    title: "Missed calls become missed revenue",
+    title: "The phone rings when you are in the weeds",
     description:
-      "When someone calls and no one answers, they rarely wait. They book with the next business that lets them lock in a slot instantly.",
+      "During service, every unanswered call is a party that books somewhere else. Voicemail is not a booking system.",
     icon: PhoneOffIcon,
   },
   {
-    title: "No-shows leave empty gaps",
+    title: "No-shows and late drops kill the room",
     description:
-      "A cancelled or missed slot is pure lost income. Manual reminder chasing takes time and still does not stop all no-shows.",
+      "Empty tables at peak time are lost margin you cannot recover. Chasing deposits by hand is awkward and slow.",
     icon: GhostIcon,
   },
   {
-    title: "Manual diaries create mistakes",
+    title: "Front door and back office tell different stories",
     description:
-      "Paper notes, DMs, and messages across apps create confusion. One clash can cost trust, time, and repeat business.",
+      "When the diary, the floor, and WhatsApp do not match, you double-book, disappoint guests, and burn team trust.",
     icon: CalendarAlertIcon,
   },
   {
-    title: "Late-night intent goes cold",
+    title: "Guests decide at night; you are closed",
     description:
-      "People decide to book at night and between meetings. If they cannot secure a time there and then, intent fades fast.",
+      "Birthday dinners and weekend tables get planned after hours. If they cannot lock a time instantly, momentum fades.",
     icon: MoonIcon,
   },
   {
-    title: "Deposits are hard to chase manually",
+    title: "Allergies and occasions live in scribbles",
     description:
-      "Collecting deposits by bank transfer or message follow-up is messy. Delays and no payment confirmations create risk before every booking.",
-    icon: InboxIcon,
+      "Critical guest details buried in notebooks or texts are a liability. Your team deserves them at a glance.",
+    icon: ClipboardAlertIcon,
   },
   {
-    title: "Your online presence should feel premium",
+    title: "Your food is premium; booking should feel premium",
     description:
-      "Your service can be world-class, but a clunky booking journey sends the wrong signal. First impressions start before clients arrive.",
+      "The booking journey is part of hospitality. Friction upfront sets the tone long before dessert.",
     icon: SparklesIcon,
   },
 ];
 
 const ownerBenefits = [
   {
-    title: "Capture bookings while you are closed",
+    title: "Reservations that never clock off",
     description:
-      "Open your diary 24/7 so clients can book when intent is highest, even when your team is offline.",
+      "Guests book confirmed tables while you prep, plate, or close. Availability and turn times stay yours to govern.",
     icon: MoonIcon,
   },
   {
-    title: "Win back 10+ hours a week",
+    title: "See the shift before the doors open",
     description:
-      "Clients book themselves online, 24/7. No phone tag, no back-and-forth, no evenings spent replying to DMs.",
-    icon: ClockIcon,
+      "Day sheet for service, table timeline and floor plan for the room—a single operational picture.",
+    icon: LayoutGridIcon,
   },
   {
-    title: "Protect your income with deposits",
-    description: `Require a deposit on any booking. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
+    title: "Cover your risk with deposits",
+    description: `Require a deposit or pre-payment where it suits you. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
     icon: ShieldPoundIcon,
   },
   {
-    title: "Cut no-shows automatically",
+    title: "Fewer ghosts, fuller rooms",
     description:
-      "Confirmations, reminders, and confirm-or-cancel messages go out on autopilot by email and SMS. Clients show up, or cancel in time for you to refill the slot.",
+      "Automated confirmations, reminders, and confirm-or-cancel flows help guests show—or free the table early enough to refill.",
     icon: BellIcon,
   },
   {
-    title: "Every client, every detail",
+    title: "Guest intelligence that survives the crush",
     description:
-      "Visit history, preferences, allergies, notes and spend, all in one place. Recognise regulars. Personalise every visit.",
+      "Dietaries, allergens, celebrations, VIP notes—not lost between shifts. Carry context from booking to greeting.",
     icon: UserCardIcon,
   },
   {
-    title: "Look professional everywhere clients find you",
+    title: "Reporting that respects the margins",
     description:
-      "A polished booking page, branded confirmations, and a QR code on your counter. Clients feel confident. Confidence books again.",
+      "Covers, revenue signals, busiest services—see what drives the till without drowning in spreadsheets.",
     icon: TrendUpIcon,
   },
   {
-    title: "Fair, honest pricing",
+    title: `Fair pricing from £${RESTAURANT_PRICE}/month`,
     description:
-      `One flat subscription. No commission on bookings. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Most plans include a monthly SMS allowance; when you go beyond it, you pay as you go at a clear, published rate. ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
+      `One subscription. No commission on bookings. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} The Restaurant plan includes ${SMS_INCLUDED_RESTAURANT} SMS per month (extra at ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each when you exceed it). ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
     icon: TagIcon,
   },
 ];
 
 const clientBenefits = [
-  "Book in 60 seconds from any phone, no app, no sign-up.",
-  "Instant confirmation in their inbox.",
-  "Automatic SMS and email reminders so they don't forget.",
-  "One-tap reschedule or cancel if plans change.",
-  "Clear cancellation and deposit terms up front.",
-  "Feels like booking with a premium brand.",
+  "Reserve a table in under a minute on any phone—no app, no account wall.",
+  "Instant confirmation email with what matters: time, covers, cancellation terms.",
+  "SMS and email reminders so the booking does not get lost between life and diary.",
+  "One-tap confirm or reschedule when plans shift—fewer awkward phone calls.",
+  "Deposit and policy spelled out clearly before payment—no surprises at the door.",
 ];
 
 const howItWorks = [
   {
     step: "1",
-    title: "Set up in minutes",
+    title: "Shape your venue",
     description:
-      "Add your services, your hours, your staff, and your prices. We're here if you need any help along the way.",
+      "Services, openings, seating, deposit rules—set the guardrails once. Bring your menus and policies; ReserveNI adapts.",
   },
   {
     step: "2",
-    title: "Share your booking link",
+    title: "Put booking everywhere guests look",
     description:
-      "Put it in your Instagram bio, on your website, on a flyer, or print a QR code for your counter and window.",
+      "Your link, QR on menus and windows, website embed—incoming reservations land in one live diary.",
   },
   {
     step: "3",
-    title: "Watch the diary fill itself",
+    title: "Run service with certainty",
     description:
-      "New bookings appear instantly. Reminders go out automatically. You focus on the work. ReserveNI runs the rest.",
+      "Front-of-house stays in sync from day sheet to floor plan while automation handles the confirmations.",
   },
 ];
 
-const useCases = [
-  { name: "Barbers", icon: "✂" },
-  { name: "Hair salons", icon: "💇" },
-  { name: "Beauty therapists", icon: "💅" },
-  { name: "Nail technicians", icon: "💎" },
-  { name: "Tattoo artists", icon: "🖊" },
-  { name: "Aesthetics clinics", icon: "✨" },
-  { name: "Physiotherapists", icon: "🧘" },
-  { name: "Personal trainers", icon: "🏋" },
-  { name: "Yoga & pilates studios", icon: "🧘‍♀" },
-  { name: "Dog groomers", icon: "🐕" },
-  { name: "Driving instructors", icon: "🚗" },
-  { name: "Photography studios", icon: "📷" },
-  { name: "Escape rooms", icon: "🗝" },
-  { name: "Tennis & padel courts", icon: "🎾" },
-  { name: "Golf tee times", icon: "⛳" },
-  { name: "Private tutors", icon: "📚" },
+const venueTypes = [
+  { name: "Independent restaurants", icon: "🍽️" },
+  { name: "Neighbourhood bistros", icon: "🥂" },
+  { name: "Cafés & brunch rooms", icon: "☕" },
+  { name: "Gastropubs", icon: "🍺" },
+  { name: "Hotel dining", icon: "🏨" },
+  { name: "Wine bars & small plates", icon: "🍷" },
+  { name: "Steakhouses & grills", icon: "🥩" },
+  { name: "Casual counters & deli seats", icon: "🧀" },
+  { name: "Private dining studios", icon: "🕯️" },
+  { name: "Chef's tables & tasting menus", icon: "👨‍🍳" },
 ];
 
 const features = [
   {
-    title: "Embed on your website",
-    description: "Drop the ReserveNI widget into your existing site in 30 seconds. Your branding, your colours.",
+    title: "Day sheet tuned for reservations",
+    description:
+      "Chronological arrivals and covers visible at arms-length—the view you want clipped to the host stand.",
   },
   {
-    title: "Online booking page",
-    description: "A beautiful booking page on your own link. Works on every phone, every browser.",
+    title: "Table grid & live floor plan",
+    description:
+      "Plan the room visually, reconcile status fast, reduce walk-in clashes with seated guests.",
   },
   {
-    title: "QR codes for flyers & counter",
-    description: "Print a QR code so walk-ins can book a follow-up before they leave.",
+    title: "Allergies & dietaries surfaced",
+    description:
+      "Flags that stand out before service—not buried in inbox threads or sticky notes.",
   },
   {
-    title: "Deposits & full pre-payment",
-    description: "Charge per-booking or per-head. Funds go direct to your Stripe account, no middleman.",
+    title: "Online booking page + widget embed",
+    description:
+      "Branded journeys on ReserveNI-hosted pages or tucked into your own site without redirect fatigue.",
   },
   {
-    title: "Automated reminders",
-    description: "Email and SMS reminders timed exactly how you want them. Fewer no-shows, less chasing.",
+    title: "Deposits and pre-payments via Stripe Connect",
+    description:
+      "Charge per-booking or per-head; payouts route to your connected account—ReserveNI never holds booking money.",
   },
   {
-    title: "Two-way SMS confirmations",
-    description: "Clients can confirm or cancel by replying to a text. Frees up your slot if they can't make it.",
+    title: "Confirm-or-cancel by SMS",
+    description:
+      "Guests respond to reminders; declines release tables back into play before it is too late.",
   },
   {
-    title: "Staff calendars",
-    description: "One calendar per team member. Staff see their day, you see the whole business.",
+    title: "Guest profiles & visits",
+    description:
+      "Notes, spends, milestones—welcome regulars properly even when staffing changes.",
   },
   {
-    title: "Classes, events & resources",
-    description: "Not just 1-to-1. Run group classes, sell event tickets, book meeting rooms or equipment.",
+    title: "Classes or events still available",
+    description:
+      "Need workshops, tastings, chef collabs or buyouts alongside standard service? Appointment-style sessions stay on tap.",
   },
   {
-    title: "Client records & notes",
-    description: "Every visit, every note, every preference. The kind of memory that turns customers into regulars.",
+    title: "UK/EU-aligned hosting",
+    description:
+      "Engineered around sensible data stewardship with row-level safeguards so rival venues never see yours.",
   },
   {
-    title: "Reporting",
-    description: "See revenue, bookings, utilisation and busiest hours at a glance.",
-  },
-  {
-    title: "GDPR-ready & secure",
-    description: "Data hosted in the UK/EU. Row-level security. Only you see your clients.",
-  },
-  {
-    title: "Local human support",
-    description: "Talk to a real person in Northern Ireland, not a chatbot, not an offshore call centre.",
+    title: "Northern Ireland support humans",
+    description:
+      "Real people locally when you hit a snag setting up payouts, timings, or comms—not an endless FAQ maze.",
   },
 ];
 
 const faqs = [
   {
-    q: "Is there a discount for new customers?",
-    a: "Yes. New customers can use the code RESERVE50 at checkout to get 50% off any plan for the first 6 months. Just enter the code when you sign up and the discount will apply automatically.",
+    q: "Is there a discount for founding restaurants?",
+    a: "Yes. Use RESERVE50 at checkout for 50% off eligible plans—including Restaurant—for six months during our founding partner window. Limited availability.",
   },
   {
-    q: "Do I need a website already?",
-    a: "No. ReserveNI gives you a beautiful booking page on your own link (like reserveni.com/book/your-business). Share it on Instagram, Facebook, your Google listing or a flyer, and you're ready to take bookings without a website. If you do have a website, you can embed the widget there too.",
+    q: "We already pay for another booking stack. Why switch?",
+    a: "ReserveNI is built for independent Northern Ireland operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack—without per-cover commission.",
   },
   {
-    q: "Can I add ReserveNI to my existing website?",
-    a: "Yes. Add the booking widget to your current website in around 30 seconds. Clients can book without leaving your site, and every booking flows straight into your ReserveNI diary.",
+    q: "How do deposits work for restaurants?",
+    a: `Connect Stripe in minutes. When a guest pays, ${RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON} You define policy, amounts, and when charges apply.`,
   },
   {
-    q: "How do deposits actually work?",
-    a: `You connect your own Stripe account in a few clicks. When a client pays a deposit, ${RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON} You control the amount and your cancellation policy. If a client no-shows, the deposit is yours.`,
+    q: "Can we still take walk-ins and phone bookings?",
+    a: "Absolutely. Add walk-ins and phone reservations manually in seconds so every guest—however they arrive—lives in the same operational record.",
   },
   {
-    q: "How do SMS costs work?",
-    a: "Appointments Light has no included SMS and messages are pay as you go at 8p each. Appointments Plus and Pro include a monthly SMS allowance, then additional messages are 6p each.",
+    q: "What about SMS volumes?",
+    a: `The Restaurant plan includes ${SMS_INCLUDED_RESTAURANT} SMS per month. Additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each when you go beyond the allowance.`,
   },
   {
-    q: "How long does setup take?",
-    a: "Most businesses are taking real bookings within 30 minutes. Add your services, your hours, your staff, and your booking policies, and you're live. If you need any help getting set up, just get in touch; we're happy to help.",
+    q: "Do you cover cafés and pubs with food?",
+    a: "Yes. If you take timed reservations, covers, or mixed service models, ReserveNI flexes to match—single venue today, built for the founders we know best.",
   },
   {
-    q: "What happens when I'm closed and someone wants to book?",
-    a: "Your available hours and lead-time rules control what clients can book. They can book any open slot 24/7, and you'll see it in your dashboard the moment they do. No more midnight DMs, no more missed opportunities.",
-  },
-  {
-    q: "What if my clients aren't online-savvy?",
-    a: "The booking page is designed to be tap-tap-done on any phone, with no app, no login, and no password. Most clients who 'hate online forms' book their first appointment in under a minute. You can still add manual bookings for anyone who prefers to call.",
-  },
-  {
-    q: "Can I still take phone bookings?",
-    a: "Absolutely. Add phone bookings manually in seconds, and keep all clients in one diary with full history. ReserveNI supports your existing relationships while moving more bookings online.",
+    q: "How fast can we go live?",
+    a: "Many teams book their first real table the same day: connect payments, add services, define availability, share the link. We will hold your hand if you want a guided pass.",
   },
 ];
 
-export default function AppointmentsPlanPage() {
+export default function RestaurantPlanPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <Nav />
@@ -255,7 +247,7 @@ export default function AppointmentsPlanPage() {
       <ClientBenefitsSection />
       <StatsBand />
       <HowItWorksSection />
-      <UseCasesSection />
+      <VenueTypesSection />
       <FeaturesSection />
       <FaqSection />
       <ClosingCta />
@@ -279,10 +271,10 @@ function Nav() {
             Talk to us
           </a>
           <Link
-            href="/#pricing"
+            href={SIGNUP_RESTAURANT}
             className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
           >
-            Get Started Now
+            Start Restaurant plan
           </Link>
         </div>
       </div>
@@ -293,13 +285,12 @@ function Nav() {
 function Hero() {
   return (
     <section className="relative overflow-hidden">
-      {/* Layered backgrounds for depth */}
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-emerald-50" />
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-amber-50" />
       <div
         className="absolute inset-0 opacity-60"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 15% 20%, rgba(78,107,120,0.12) 0%, transparent 45%), radial-gradient(circle at 85% 80%, rgba(5,150,105,0.10) 0%, transparent 50%)",
+            "radial-gradient(circle at 18% 18%, rgba(78,107,120,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(180,83,9,0.10) 0%, transparent 50%)",
         }}
       />
       <div
@@ -314,34 +305,34 @@ function Hero() {
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Built in Northern Ireland, for Northern Ireland
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Built for Northern Ireland hospitality teams
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Stop losing bookings.
+            Every cover counts.
             <br />
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-emerald-600 bg-clip-text text-transparent">
-              Start growing your business.
+            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-amber-600 bg-clip-text text-transparent">
+              Protect the room—and the revenue.
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            Every empty slot is money you will not get back. ReserveNI takes bookings 24/7, collects a
-            deposit when clients book, and sends the reminders that make them show up. Fewer no-shows.
-            More revenue where it belongs.
+            Guests book premium experiences at odd hours; no-shows tax your busiest services. ReserveNI turns online demand
+            into seated guests with deposits that stick, reminders that reply, and a live toolkit your floor staff actually
+            uses.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/#pricing"
+              href={SIGNUP_RESTAURANT}
               className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
             >
-              Get Started Now
+              Start Restaurant plan
               <ArrowRightIcon />
             </Link>
             <a
               href="#how"
               className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
             >
-              See how bookings work
+              See launch steps
             </a>
           </div>
 
@@ -362,19 +353,15 @@ function Hero() {
           <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
             <span className="inline-flex items-center gap-2">
               <TickIcon />
-              Take bookings 24/7
+              Table-ready operations view
             </span>
             <span className="inline-flex items-center gap-2">
               <TickIcon />
-              Deposits protect your income
+              Deposit-backed reservations
             </span>
             <span className="inline-flex items-center gap-2">
               <TickIcon />
-              Confirm-or-cancel reduces no-shows
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <TickIcon />
-              Website embed included
+              Automated confirm / remind / SMS reply
             </span>
             <span className="inline-flex basis-full max-w-2xl items-start gap-2">
               <TickIcon />
@@ -383,25 +370,21 @@ function Hero() {
           </div>
         </div>
 
-        {/* Hero visual: stylised booking confirmation */}
         <div className="relative lg:col-span-2">
-          <HeroVisual />
+          <HeroRestaurantVisual />
         </div>
       </div>
     </section>
   );
 }
 
-function HeroVisual() {
+function HeroRestaurantVisual() {
   return (
     <div className="relative mx-auto w-full max-w-sm">
-      {/* Glow */}
-      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-emerald-200/60 blur-2xl" />
+      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-amber-200/50 blur-2xl" />
 
-      {/* Phone mock */}
       <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
         <div className="relative overflow-hidden rounded-[1.85rem] bg-white">
-          {/* Status bar */}
           <div className="flex items-center justify-between px-5 pt-3 text-[10px] font-semibold text-slate-600">
             <span>9:41</span>
             <span className="flex items-center gap-1">
@@ -411,29 +394,29 @@ function HeroVisual() {
             </span>
           </div>
 
-          {/* Booking card */}
           <div className="px-5 pb-6 pt-4">
             <div className="flex items-center gap-2 text-[11px] font-medium text-brand-700">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-              Booking confirmed
+              Table reservation confirmed
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">
-              Men&apos;s cut &amp; beard trim
-            </h3>
-            <p className="mt-0.5 text-xs text-slate-500">with Aaron at Grove Street Barber</p>
+            <h3 className="mt-2 text-lg font-bold text-slate-900">Saturday dinner · Bistro Quay</h3>
+            <p className="mt-0.5 text-xs text-slate-500">Emma O&apos;Neill · Anniversary</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <InfoTile label="Date" value="Thu 25 Apr" />
-              <InfoTile label="Time" value="3:30 PM" />
-              <InfoTile label="Duration" value="45 min" />
-              <InfoTile label="Deposit" value="£5 paid" accent />
+              <InfoTile label="Guests" value="Cover 4" />
+              <InfoTile label="Area" value="Window · Table 12" accent />
+              <InfoTile label="Time" value="7:45 PM" />
+              <InfoTile label="Deposit" value="£40 paid" />
+            </div>
+
+            <div className="mt-4 rounded-xl border border-rose-100 bg-rose-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-600">Kitchen note</p>
+              <p className="mt-1 text-xs text-rose-800">Severe nut allergy — communicated to brigade.</p>
             </div>
 
             <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                Reminder scheduled
-              </p>
-              <p className="mt-1 text-xs text-slate-700">SMS + email, 24 hours before</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reminder queued</p>
+              <p className="mt-1 text-xs text-slate-700">SMS confirm-or-cancel · 24 hours prior</p>
             </div>
 
             <div className="mt-5 flex gap-2">
@@ -444,28 +427,26 @@ function HeroVisual() {
         </div>
       </div>
 
-      {/* Floating receipt card, positioned above the phone so it doesn't obscure the booking details */}
       <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
             <TickIcon />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-slate-900">Deposit received</p>
-            <p className="text-[10px] text-slate-500">£5.00 to your Stripe</p>
+            <p className="text-[11px] font-semibold text-slate-900">Deposit settled</p>
+            <p className="text-[10px] text-slate-500">£40.00 to your Stripe</p>
           </div>
         </div>
       </div>
 
-      {/* Floating reminder card, positioned below the phone so it doesn't obscure the booking details */}
       <div className="absolute -bottom-6 -right-4 hidden rotate-[4deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <BellIcon />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-slate-900">Reminder sent</p>
-            <p className="text-[10px] text-slate-500">Sarah, Thu 3:30 PM</p>
+            <p className="text-[11px] font-semibold text-slate-900">Reminder armed</p>
+            <p className="text-[10px] text-slate-500">Emma · Sat 7:45 PM</p>
           </div>
         </div>
       </div>
@@ -481,9 +462,7 @@ function InfoTile({ label, value, accent = false }: { label: string; value: stri
       }`}
     >
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`mt-1 text-sm font-bold ${accent ? "text-emerald-700" : "text-slate-900"}`}>
-        {value}
-      </p>
+      <p className={`mt-1 text-sm font-bold ${accent ? "text-emerald-700" : "text-slate-900"}`}>{value}</p>
     </div>
   );
 }
@@ -493,19 +472,15 @@ function ProblemSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            If this sounds familiar
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Sound familiar?</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Your office is closed.
+            Hospitality never stops.
             <br className="hidden sm:block" />
-            <span className="text-slate-500">Your customers aren&apos;t.</span>
+            <span className="text-slate-500">Busy service still needs perfect information.</span>
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            People want to book at 10pm, on a Sunday, or in the five minutes between meetings. If they
-            can&apos;t lock in a time in that moment, the booking and the revenue go to whoever is
-            open online. ReserveNI turns after-hours interest into real slots, without you manning the
-            phone.
+            You are choreographing heat, timing, and guest emotion in real time. ReserveNI keeps booking, money, and guest
+            context off your mental load so the team can focus on the room.
           </p>
         </div>
 
@@ -535,34 +510,31 @@ function SolutionIntro() {
         className="absolute inset-0 opacity-30"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 25% 30%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(5,150,105,0.35) 0%, transparent 50%)",
+            "radial-gradient(circle at 28% 32%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(180,83,9,0.28) 0%, transparent 50%)",
         }}
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
-          Meet ReserveNI
+          ReserveNI for Restaurants
         </span>
-        <h2 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-          One platform. Every booking. Zero chaos.
-        </h2>
+        <h2 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">One backbone for bookings, money and service.</h2>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
-          ReserveNI replaces the paper diary, the missed calls, the WhatsApp booking threads, the
-          spreadsheet of clients, and the evenings spent sending reminders. It&apos;s the booking
-          system you&apos;d build yourself, if you had six months and a software team.
+          Replace voicemail roulette, frantic texts, rogue spreadsheets and siloed notebooks with a cohesive platform—from
+          the moment a guest books online until they walk through your door—with operational clarity for every cover.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Link
-            href="/#pricing"
+            href={SIGNUP_RESTAURANT}
             className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
           >
-            Get Started Now
+            Begin setup
             <ArrowRightIcon />
           </Link>
           <a
             href="#contact"
             className="inline-flex h-12 items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
           >
-            Book a 15-min demo
+            Talk through your room
           </a>
         </div>
       </div>
@@ -575,15 +547,13 @@ function OwnerBenefitsSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            For the business owner
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">For operators & chefs</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            No-shows cost real money. ReserveNI helps you keep it.
+            Confidence on the books—and on the pass.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Deposits, reminders, and confirm-or-cancel messages work together to protect your diary and
-            reduce empty gaps. The result is steadier days and stronger revenue.
+            Technology should remove anxiety, not add taps. Built-in automation handles repetitive guest comms while you steer
+            the experience that keeps reviews glowing.
           </p>
         </div>
 
@@ -611,44 +581,37 @@ function ProductPreview() {
     <section className="relative overflow-hidden bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            Your dashboard
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Ops cockpit</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Your business, beautifully organised.
+            Service intelligence the whole team trusts.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
-            One screen for today&apos;s diary, tomorrow&apos;s prep, and this month&apos;s numbers. On
-            your laptop at home, or your phone at the counter.
+            One stack for arrivals, pacing, allergens, deposits, messaging—readable on a mounted iPad behind the podium or on
+            a phone in your pocket walking the floor.
           </p>
         </div>
 
         <div className="relative mt-16">
-          {/* Decorative glow */}
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-emerald-200/40 blur-3xl" />
-
-          <DashboardMock />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-amber-200/40 blur-3xl" />
+          <RestaurantDashboardMock />
         </div>
       </div>
     </section>
   );
 }
 
-function DashboardMock() {
-  const slots = [
-    { time: "9:00", name: "James M.", service: "Skin fade", color: "bg-brand-600" },
-    { time: "9:45", name: "Conor B.", service: "Cut & beard", color: "bg-brand-500" },
-    { time: "10:30", name: "Open slot", service: "Available to book", color: "bg-slate-200", empty: true },
-    { time: "11:15", name: "Daniel K.", service: "Hot towel shave", color: "bg-emerald-600" },
-    { time: "12:00", name: "Lunch", service: "", color: "bg-amber-200/70", empty: true },
-    { time: "13:00", name: "Sarah L.", service: "Consultation", color: "bg-brand-600" },
-    { time: "13:45", name: "Open slot", service: "Available to book", color: "bg-slate-200", empty: true },
-    { time: "14:30", name: "Mark D.", service: "Cut", color: "bg-brand-500" },
+function RestaurantDashboardMock() {
+  const bookings = [
+    { time: "17:45", covers: "2", name: "K. Hughes", tb: "T4 · Counter", allergy: "", dep: true },
+    { time: "18:30", covers: "4", name: "O'Neill anniversary", tb: "T12 · Front", allergy: "Nuts", dep: true },
+    { time: "19:00", covers: "6", name: "Tech NI dinner", tb: "PDR", allergy: "", dep: true },
+    { time: "19:15", covers: "2", name: "Walk-in hold", tb: "", allergy: "", dep: false, hold: true },
+    { time: "20:00", covers: "3", name: "M. Byrne", tb: "T7", allergy: "GF note", dep: true },
+    { time: "20:45", covers: "2", name: "Open", tb: "Release buffer", allergy: "", dep: false, empty: true },
   ];
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10">
-      {/* Window chrome */}
       <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
@@ -658,91 +621,87 @@ function DashboardMock() {
         </div>
       </div>
 
-      <div className="grid gap-0 lg:grid-cols-[220px_1fr_280px]">
-        {/* Sidebar */}
+      <div className="grid gap-0 lg:grid-cols-[210px_1fr_268px]">
         <aside className="hidden border-r border-slate-100 bg-slate-50/60 p-4 lg:block">
           <div className="flex items-center gap-2 px-2 pb-4">
             <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800" />
-            <span className="text-sm font-bold text-slate-900">Grove Street</span>
+            <span className="text-sm font-bold text-slate-900">Bistro Quay</span>
           </div>
           <nav className="space-y-1 text-sm">
-            <SidebarItem label="Today" active />
+            <SidebarItem label="Day sheet" active />
             <SidebarItem label="Calendar" />
-            <SidebarItem label="Clients" />
-            <SidebarItem label="Services" />
-            <SidebarItem label="Messages" />
-            <SidebarItem label="Reporting" />
+            <SidebarItem label="Floor plan live" />
+            <SidebarItem label="Table grid" />
+            <SidebarItem label="Guests" />
+            <SidebarItem label="Reports" />
             <SidebarItem label="Settings" />
           </nav>
         </aside>
 
-        {/* Main */}
         <div className="p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Thursday 25 April
-              </p>
-              <h3 className="mt-0.5 text-xl font-bold text-slate-900">Today&apos;s diary</h3>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saturday service</p>
+              <h3 className="mt-0.5 text-xl font-bold text-slate-900">Evening arrivals</h3>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                6 booked
+                Covers 148
+              </span>
+              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
+                94% prepaid
               </span>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                2 open
+                12 still open
               </span>
             </div>
           </div>
 
           <div className="mt-5 space-y-2">
-            {slots.map((s, i) => (
+            {bookings.map((b, i) => (
               <div
                 key={i}
-                className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${
-                  s.empty
-                    ? "border-dashed border-slate-200 bg-slate-50/60"
-                    : "border-slate-100 bg-white hover:border-brand-200"
+                className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
+                  b.empty
+                    ? "border-dashed border-slate-200 bg-slate-50/70"
+                    : b.hold
+                      ? "border-amber-200 bg-amber-50/70"
+                      : "border-slate-100 bg-white hover:border-brand-200"
                 }`}
               >
-                <span className={`h-10 w-1.5 rounded-full ${s.color}`} />
-                <span className="w-14 text-xs font-bold text-slate-900">{s.time}</span>
-                <div className="flex-1">
-                  <p
-                    className={`text-sm font-semibold ${
-                      s.empty ? "text-slate-400" : "text-slate-900"
-                    }`}
-                  >
-                    {s.name}
-                  </p>
-                  <p className="text-xs text-slate-500">{s.service}</p>
+                <span className="w-12 text-xs font-bold text-slate-900">{b.time}</span>
+                <span className="w-10 text-center text-xs font-semibold text-slate-700">{b.covers}c</span>
+                <div className="min-w-[120px] flex-1">
+                  <p className={`text-sm font-semibold ${b.empty ? "text-slate-400" : "text-slate-900"}`}>{b.name}</p>
+                  {b.tb ? <p className="text-xs text-slate-500">{b.tb}</p> : null}
                 </div>
-                {!s.empty && (
-                  <span className="hidden rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 sm:inline">
-                    Deposit paid
+                {!b.empty && b.allergy ? (
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
+                    {b.allergy}
                   </span>
-                )}
+                ) : null}
+                {!b.empty && !b.hold && b.dep ? (
+                  <span className="hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 sm:inline">
+                    Deposit
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Right panel */}
         <aside className="border-t border-slate-100 bg-slate-50/50 p-5 lg:border-l lg:border-t-0 lg:p-6">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">This week</h4>
-          <div className="mt-3 grid grid-cols-3 gap-3 lg:grid-cols-1">
-            <StatCard label="Bookings" value="47" trend="+18%" />
-            <StatCard label="Revenue" value="£1,284" trend="+22%" />
-            <StatCard label="No-shows" value="0.9%" trend="−63%" good />
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tonight</h4>
+          <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
+            <StatCard label="Reservations" value="58" trend="+17 vs last Sat" />
+            <StatCard label="No-show risk" value="Low" trend="deposit + SMS" />
+            <StatCard label="Prep spend" value="£3.9k" trend="card + cash est." />
           </div>
-
-          <h4 className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Messages sent today
-          </h4>
+          <h4 className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">Outbound comms</h4>
           <div className="mt-3 space-y-2">
-            <MessageRow type="SMS" text="Reminder: Mark, 2:30 PM" />
-            <MessageRow type="Email" text="Thank you: James M." />
-            <MessageRow type="SMS" text="Confirm or cancel: Daniel" />
+            <MessageRow type="SMS" text="Confirm: Byrne party, 20:00" />
+            <MessageRow type="Email" text="Menu preview · O'Neill" />
+            <MessageRow type="SMS" text="Waitlist reopen · 19:15" />
           </div>
         </aside>
       </div>
@@ -767,20 +726,16 @@ function StatCard({
   label,
   value,
   trend,
-  good = false,
 }: {
   label: string;
   value: string;
   trend: string;
-  good?: boolean;
 }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-white p-3">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-extrabold text-slate-900">{value}</p>
-      <p className={`text-[11px] font-semibold ${good ? "text-emerald-600" : "text-emerald-600"}`}>
-        {trend}
-      </p>
+      <p className="text-[11px] font-semibold text-emerald-600">{trend}</p>
     </div>
   );
 }
@@ -802,15 +757,13 @@ function ClientBenefitsSection() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid gap-12 lg:grid-cols-2 lg:items-center lg:gap-16">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-              For your clients
-            </span>
+            <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">For your guests</span>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-              An experience that makes them come back.
+              Booking that feels like the first course.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
-              The way a client books shapes how they feel about your business before they even walk in.
-              ReserveNI gives them a fast, confident experience. No phone tag, no forms, no friction.
+              Modern diners expect concierge-level certainty: instant confirmations, humane reminders, respectful deposit
+              language. ReserveNI makes your digital handshake as warm as your welcome at the door.
             </p>
             <ul className="mt-8 space-y-3">
               {clientBenefits.map((c) => (
@@ -823,54 +776,57 @@ function ClientBenefitsSection() {
               ))}
             </ul>
           </div>
-
-          {/* Booking flow visual */}
-          <BookingFlowVisual />
+          <RestaurantBookingFlowVisual />
         </div>
       </div>
     </section>
   );
 }
 
-function BookingFlowVisual() {
+function RestaurantBookingFlowVisual() {
   return (
     <div className="relative">
-      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-emerald-100 via-brand-50 to-white blur-2xl" />
-
+      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-amber-100 via-brand-50 to-white blur-2xl" />
       <div className="relative grid gap-3 sm:grid-cols-3">
-        <MiniCard step="1" title="Pick a service">
-          <div className="mt-2 space-y-1.5">
-            <Row text="Men's cut" price="£18" active />
-            <Row text="Cut & beard" price="£26" />
-            <Row text="Hot towel shave" price="£22" />
-          </div>
-        </MiniCard>
-        <MiniCard step="2" title="Pick a time">
-          <div className="mt-2 grid grid-cols-3 gap-1.5">
-            {["10:00", "10:30", "11:00", "11:30", "12:00", "12:30"].map((t, i) => (
+        <MiniCard step="1" title="Pick sitting">
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            {(
+              [
+                ["Lunch", false],
+                ["Early", false],
+                ["Peak", true],
+                ["Late", false],
+              ] as const
+            ).map(([label, on]) => (
               <span
-                key={t}
+                key={label}
                 className={`rounded-md px-1.5 py-1 text-center text-[10px] font-semibold ${
-                  i === 3 ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"
+                  on ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"
                 }`}
               >
-                {t}
+                {label}
               </span>
             ))}
           </div>
         </MiniCard>
-        <MiniCard step="3" title="Confirm & pay">
+        <MiniCard step="2" title="Party & table">
+          <div className="mt-2 space-y-1.5">
+            <Row text="Guests" meta="Cover 4" />
+            <Row text="Zone" meta="Restaurant" active />
+            <Row text="Preference" meta="Quiet corner" />
+          </div>
+        </MiniCard>
+        <MiniCard step="3" title="Deposit & confirm">
           <div className="mt-2 space-y-1.5">
             <div className="flex justify-between text-[11px]">
-              <span className="text-slate-500">Total</span>
-              <span className="font-semibold text-slate-900">£26</span>
+              <span className="text-slate-500">Held deposit</span>
+              <span className="font-semibold text-slate-900">£40</span>
             </div>
-            <div className="flex justify-between text-[11px]">
-              <span className="text-slate-500">Deposit</span>
-              <span className="font-semibold text-slate-900">£5</span>
+            <div className="rounded-md bg-slate-50 px-2 py-1 text-[10px] leading-snug text-slate-600">
+              Policy shown before paying—cancellation window clear as glass.
             </div>
             <div className="mt-2 rounded-md bg-brand-600 py-1.5 text-center text-[11px] font-bold text-white">
-              Pay deposit
+              Secure reservation
             </div>
           </div>
         </MiniCard>
@@ -879,15 +835,7 @@ function BookingFlowVisual() {
   );
 }
 
-function MiniCard({
-  step,
-  title,
-  children,
-}: {
-  step: string;
-  title: string;
-  children: React.ReactNode;
-}) {
+function MiniCard({ step, title, children }: { step: string; title: string; children: ReactNode }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2">
@@ -901,7 +849,15 @@ function MiniCard({
   );
 }
 
-function Row({ text, price, active = false }: { text: string; price: string; active?: boolean }) {
+function Row({
+  text,
+  meta,
+  active = false,
+}: {
+  text: string;
+  meta: string;
+  active?: boolean;
+}) {
   return (
     <div
       className={`flex items-center justify-between rounded-md px-2 py-1.5 text-[11px] ${
@@ -909,7 +865,7 @@ function Row({ text, price, active = false }: { text: string; price: string; act
       }`}
     >
       <span className={active ? "font-semibold text-brand-800" : "text-slate-700"}>{text}</span>
-      <span className={active ? "font-bold text-brand-800" : "text-slate-500"}>{price}</span>
+      <span className={active ? "font-bold text-brand-800" : "text-slate-500"}>{meta}</span>
     </div>
   );
 }
@@ -918,12 +874,13 @@ function StatsBand() {
   return (
     <section className="bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 py-16 text-white">
       <div className="mx-auto grid max-w-6xl gap-8 px-6 text-center sm:grid-cols-3">
-        <Stat value="24/7" label="online booking captures demand while you are closed" />
-        <Stat value="-80%" label="fewer no-shows when you take a deposit*" />
-        <Stat value="10+ hrs" label="saved weekly with automated reminders and confirmations" />
+        <Stat value={`£${RESTAURANT_PRICE}`} label="Restaurant plan anchors serious venues without per-cover rake" />
+        <Stat value="-80%" label="typical no-show drop once deposits bite alongside reminders*" />
+        <Stat value="+10hrs" label="weekly headspace reclaimed when comms automate themselves*" />
       </div>
       <p className="mx-auto mt-6 max-w-3xl px-6 text-center text-xs text-white/60">
-        *Typical reduction reported by service businesses that introduce per-booking deposits.
+        *Benchmarks reflective of NI independents layering SMS + Stripe-backed holds; your mileage tracks party mix and
+        policy.
       </p>
     </section>
   );
@@ -943,20 +900,18 @@ function HowItWorksSection() {
     <section id="how" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            How it works
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Rollout playbook</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Up and running before your next coffee.
+            Taste-test today. Full service tonight.
           </h2>
         </div>
 
         <div className="mt-16 grid gap-8 md:grid-cols-3">
           {howItWorks.map((s, i) => (
             <div key={s.step} className="relative">
-              {i < howItWorks.length - 1 && (
+              {i < howItWorks.length - 1 ? (
                 <div className="absolute left-14 top-7 hidden h-0.5 w-full bg-gradient-to-r from-brand-200 to-transparent md:block" />
-              )}
+              ) : null}
               <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 text-xl font-extrabold text-white shadow-lg shadow-brand-600/25">
                 {s.step}
               </div>
@@ -983,37 +938,35 @@ function BookingChannelsSection() {
       />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            Be easy to book, everywhere
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Omnichannel demand</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            One booking system your clients can reach from any channel.
+            Guests book wherever they discover you—one live diary absorbs it all.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Website, social links, and QR codes all feed the same live diary. No double entry, no missed
-            messages, and no lost bookings between channels.
+            Instagram stories, QR on menus, concierge links inside hotel confirmation emails—all route into ReserveNI without
+            copy-pasting details into a rogue spreadsheet tonight at midnight.
           </p>
         </div>
 
         <div className="mt-16 grid gap-6 lg:grid-cols-3">
           <ChannelCard
-            label="Embed on your website"
-            title="Add booking to your existing website"
-            description="Drop the ReserveNI widget into your existing website in 30 seconds. Clients book without ever leaving your site, with your branding all the way through."
-            visual={<EmbedVisual />}
+            label="Embed"
+            title="Keep traffic on your own site"
+            description="ReserveNI disappears into your branded pages—fast load, cohesive story, bookings still sync centrally."
+            visual={<EmbedRestaurantVisual />}
             featured
           />
           <ChannelCard
-            label="Your own booking site"
-            title="reserveni.com/book/your-business"
-            description="A stunning, mobile-first booking site dedicated to your business. No website required. Use it as your main online home, or alongside your existing one."
-            visual={<YourSiteVisual />}
+            label="Hosted booking page"
+            title="Dedicated link for guests-on-the-move"
+            description="Premium mobile UX with your story, imagery, openings, dietary reassurance—perfect when SEO or social clicks convert."
+            visual={<RestaurantMiniSite />}
           />
           <ChannelCard
-            label="Share your link anywhere"
-            title="One link for everything you do."
-            description="Paste your booking link into your Instagram bio, send it in a WhatsApp reply, print it on a business card, or turn it into a QR code for your counter and flyers."
-            visual={<ShareLinkVisual />}
+            label="Share anywhere"
+            title="QR menus, concierge notes, influencer bios"
+            description="Paste one URL or print QR codes tuned to brunch vs dinner—all roads lead back to sane availability."
+            visual={<RestaurantShareVisual />}
           />
         </div>
       </div>
@@ -1031,7 +984,7 @@ function ChannelCard({
   label: string;
   title: string;
   description: string;
-  visual: React.ReactNode;
+  visual: ReactNode;
   featured?: boolean;
 }) {
   return (
@@ -1044,9 +997,7 @@ function ChannelCard({
         {visual}
       </div>
       <div className="mt-6">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-brand-600">
-          {label}
-        </span>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-brand-600">{label}</span>
         <h3 className="mt-2 text-lg font-semibold text-slate-900">{title}</h3>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{description}</p>
       </div>
@@ -1054,7 +1005,7 @@ function ChannelCard({
   );
 }
 
-function YourSiteVisual() {
+function RestaurantMiniSite() {
   return (
     <div className="relative flex w-full max-w-[200px] flex-col items-center">
       <div className="flex h-4 w-full items-center gap-1 rounded-t-md border border-b-0 border-slate-200 bg-slate-50 px-1.5">
@@ -1062,23 +1013,21 @@ function YourSiteVisual() {
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <div className="ml-1 flex h-2.5 flex-1 items-center justify-center rounded bg-white px-1 text-[7px] font-semibold text-slate-500">
-          reserveni.com/book/you
+          reserveni.com/book/bistro-quay
         </div>
       </div>
       <div className="w-full rounded-b-md border border-slate-200 bg-white p-2.5">
-        <div className="h-2 w-16 rounded bg-slate-200" />
-        <div className="mt-1 h-1.5 w-24 rounded bg-slate-100" />
+        <div className="h-2 w-20 rounded bg-slate-200" />
+        <div className="mt-1 h-1.5 w-28 rounded bg-slate-100" />
         <div className="mt-3 grid grid-cols-3 gap-1">
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <span
               key={i}
               className={`h-4 rounded text-center text-[7px] font-bold ${
-                i === 2
-                  ? "bg-brand-600 text-white"
-                  : "bg-slate-100 text-transparent"
+                i === 4 ? "bg-brand-600 text-white" : "bg-slate-100 text-transparent"
               }`}
             >
-              11:00
+              19:30
             </span>
           ))}
         </div>
@@ -1088,30 +1037,32 @@ function YourSiteVisual() {
   );
 }
 
-function EmbedVisual() {
+function EmbedRestaurantVisual() {
   return (
     <div className="relative w-full max-w-[220px] rounded-md border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-        <span className="ml-1 text-[7px] font-semibold text-slate-500">yourbusiness.co.uk</span>
+        <span className="ml-1 text-[7px] font-semibold text-slate-500">bistro-quay.co.uk</span>
       </div>
       <div className="p-2.5">
-        <div className="h-2 w-20 rounded bg-slate-800" />
-        <div className="mt-1 h-1.5 w-28 rounded bg-slate-200" />
+        <div className="h-2 w-28 rounded bg-slate-800" />
+        <div className="mt-1 h-1.5 w-32 rounded bg-slate-200" />
         <div className="relative mt-2 rounded-md border-2 border-dashed border-brand-300 bg-brand-50/40 p-2">
           <span className="absolute -top-1.5 left-2 rounded bg-brand-600 px-1 py-0.5 text-[6px] font-bold uppercase tracking-wider text-white">
-            Booking widget
+            Reservations
           </span>
-          <div className="mt-1 grid grid-cols-3 gap-1">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div className="mt-2 grid grid-cols-4 gap-1">
+            {[0, 1, 2, 3].map((i) => (
               <span
                 key={i}
-                className={`h-3.5 rounded ${
-                  i === 1 ? "bg-brand-600" : "bg-white ring-1 ring-slate-200"
+                className={`h-3.5 rounded text-[7px] font-bold leading-[14px] ${
+                  i === 2 ? "bg-brand-600 text-white" : "bg-white ring-1 ring-slate-200"
                 }`}
-              />
+              >
+                {i === 0 ? "" : "\u00A0"}
+              </span>
             ))}
           </div>
           <div className="mt-1.5 h-3 rounded bg-brand-600" />
@@ -1121,90 +1072,71 @@ function EmbedVisual() {
   );
 }
 
-function ShareLinkVisual() {
+function RestaurantShareVisual() {
   return (
     <div className="flex w-full max-w-[220px] flex-col items-center gap-2">
       <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 shadow-sm">
-        <svg
-          className="h-3.5 w-3.5 flex-shrink-0 text-brand-600"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={2}
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
-          />
-        </svg>
-        <span className="truncate text-[9px] font-semibold text-slate-800">
-          reserveni.com/book/you
-        </span>
-        <span className="ml-auto rounded bg-brand-600 px-1.5 py-0.5 text-[7px] font-bold text-white">
-          Copy
-        </span>
+        <LinkChainIcon />
+        <span className="truncate text-[9px] font-semibold text-slate-800">Book · tonight</span>
+        <span className="ml-auto rounded bg-brand-600 px-1.5 py-0.5 text-[7px] font-bold text-white">Share</span>
       </div>
       <div className="grid w-full grid-cols-3 gap-1.5">
-        <ChannelChip label="Instagram bio" />
-        <ChannelChip label="WhatsApp" />
-        <ChannelChip label="QR code" svg={<QrMiniIcon />} />
-        <ChannelChip label="Facebook" />
-        <ChannelChip label="Google" />
-        <ChannelChip label="Flyers" />
+        {["Stories", "Menu QR", "Google", "Concierge", "Newsletter", "Walk-in flyer"].map((l) => (
+          <ChannelChip key={l} label={l} />
+        ))}
       </div>
     </div>
   );
 }
 
-function ChannelChip({ label, svg }: { label: string; svg?: React.ReactNode }) {
+function ChannelChip({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center gap-1 rounded-md border border-slate-100 bg-slate-50 px-1 py-1.5">
-      {svg ?? <span className="h-3 w-3 rounded-sm bg-brand-200" />}
+      <span className="h-3 w-3 rounded-sm bg-brand-200" />
       <span className="text-[7px] font-semibold text-slate-600">{label}</span>
     </div>
   );
 }
 
-function QrMiniIcon() {
+function LinkChainIcon() {
   return (
-    <svg className="h-3 w-3 text-brand-700" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M3 3h7v7H3V3Zm2 2v3h3V5H5Zm9-2h7v7h-7V3Zm2 2v3h3V5h-3ZM3 14h7v7H3v-7Zm2 2v3h3v-3H5Zm9-2h3v3h-3v-3Zm4 0h3v3h-3v-3Zm-4 4h3v3h-3v-3Zm4 0h3v3h-3v-3Z" />
+    <svg className="h-3.5 w-3.5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+      />
     </svg>
   );
 }
 
-function UseCasesSection() {
+function VenueTypesSection() {
   return (
     <section className="bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            Built for
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Who we obsess over</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            If it&apos;s bookable, we handle it.
+            Independent rooms with something to prove.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            One-to-ones, group classes, multi-day courses, resources, shared equipment. ReserveNI
-            flexes to fit the way your business actually works.
+            From coastal tasting menus to Belfast brunch institutions—ReserveNI aligns with NI operators who obsess over vibe,
+            pacing, plates, people.
           </p>
         </div>
 
         <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {useCases.map((u) => (
+          {venueTypes.map((u) => (
             <div
               key={u.name}
               className="group flex items-center gap-3 rounded-xl border border-slate-100 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-lg">
-                {u.icon}
-              </span>
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-lg">{u.icon}</span>
               <span className="text-sm font-semibold text-slate-800">{u.name}</span>
             </div>
           ))}
           <div className="flex items-center justify-center rounded-xl border border-dashed border-brand-200 bg-brand-50/60 p-4 text-sm font-semibold text-brand-700">
-            + anything else you book
+            Tell us yours
           </div>
         </div>
       </div>
@@ -1217,11 +1149,9 @@ function FeaturesSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            What&apos;s inside
-          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Under the hood</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Everything you need. Nothing you don&apos;t.
+            Restaurant-grade tooling without enterprise theatre.
           </h2>
         </div>
 
@@ -1248,20 +1178,13 @@ function FaqSection() {
     <section className="bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            Questions?
-          </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Everything you want to know.
-          </h2>
+          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Still curious?</span>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Answers before dessert.</h2>
         </div>
 
         <div className="mt-12 space-y-3">
           {faqs.map((f) => (
-            <details
-              key={f.q}
-              className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md"
-            >
+            <details key={f.q} className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-slate-900">
                 {f.q}
                 <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-transform group-open:rotate-45 group-open:bg-brand-100 group-open:text-brand-700">
@@ -1286,17 +1209,17 @@ function ClosingCta() {
             className="absolute inset-0 opacity-30"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 20% 30%, rgba(78,107,120,0.8) 0%, transparent 40%), radial-gradient(circle at 85% 70%, rgba(5,150,105,0.5) 0%, transparent 45%)",
+                "radial-gradient(circle at 22% 32%, rgba(78,107,120,0.82) 0%, transparent 40%), radial-gradient(circle at 86% 70%, rgba(180,83,9,0.45) 0%, transparent 45%)",
             }}
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
             <div className="min-w-0">
               <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
-                Ready to take your diary back?
+                Ready to reshape how your room fills up?
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
-                Set up in under 30 minutes. We&apos;re here to help if you need any more information or
-                assistance signing up; just send us a note and we&apos;ll get back to you.
+                Speak with NI operators who obsess over plating and pacing—tell us where your pain sits and we&apos;ll sketch
+                a launch path that respects service, not spreadsheets.
               </p>
 
               <div className="mt-6 flex w-full max-w-full flex-col gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur sm:flex-row sm:items-start">
@@ -1314,26 +1237,30 @@ function ClosingCta() {
               </div>
 
               <div className="mt-6 grid max-w-xl grid-cols-1 gap-3 text-xs text-white/85 sm:grid-cols-2">
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Set up in under 30 minutes</div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Same-week go-live commonplace</div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 leading-snug">
-                  No commission or booking fees on ReserveNI.
+                  No commissions on bookings.
                   <span className="mt-1 block text-white/75">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</span>
                 </div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">
                   {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
                 </div>
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">
-                  Local NI support
-                </div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">Local NI onboarding</div>
               </div>
 
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <Link
-                  href="/#pricing"
+                  href={SIGNUP_RESTAURANT}
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
                 >
-                  Get Started Now
+                  Start Restaurant plan
                   <ArrowRightIcon />
+                </Link>
+                <Link
+                  href="/#pricing"
+                  className="inline-flex h-12 items-center justify-center rounded-xl border border-white/25 bg-transparent px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+                >
+                  Compare all plans
                 </Link>
                 <a
                   href="mailto:hello@reserveni.com"
@@ -1345,22 +1272,20 @@ function ClosingCta() {
 
               <div className="mt-10 grid grid-cols-2 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
                 <div>
-                  <p className="text-2xl font-bold text-white">0%</p>
-                  <p className="text-xs">ReserveNI commission on bookings</p>
-                  <p className="mt-1 text-[10px] leading-snug text-white/60">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</p>
+                  <p className="text-2xl font-bold text-white">Floor-first</p>
+                  <p className="text-xs">Day sheet, grid, floor plan—front & back aligned.</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-white">Local</p>
-                  <p className="text-xs">data, local support</p>
+                  <p className="text-2xl font-bold text-white">{SMS_INCLUDED_RESTAURANT}</p>
+                  <p className="text-xs text-white/85">included SMS/month on Restaurant plan*</p>
+                  <p className="mt-1 text-[10px] text-white/60">*Beyond allowance → {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each.</p>
                 </div>
               </div>
             </div>
 
             <div className="min-w-0 w-full max-w-full rounded-2xl bg-white p-5 text-slate-900 shadow-xl sm:p-8">
-              <h3 className="text-lg font-bold">Or, tell us about your business.</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                We&apos;ll get back to you within one working day.
-              </p>
+              <h3 className="text-lg font-bold">Brief us on your venue.</h3>
+              <p className="mt-1 text-sm text-slate-500">We reply within one working day.</p>
               <div className="mt-5 w-full min-w-0">
                 <ContactForm className="mx-0 w-full max-w-none" />
               </div>
@@ -1383,8 +1308,8 @@ function Footer() {
           <Link href="/" className="transition-colors hover:text-slate-900">
             Home
           </Link>
-          <Link href="/restaurant" className="transition-colors hover:text-slate-900">
-            Restaurant plan
+          <Link href="/appointments-plan" className="transition-colors hover:text-slate-900">
+            Appointments plan
           </Link>
           <Link href="/signup" className="transition-colors hover:text-slate-900">
             Sign up
@@ -1407,10 +1332,6 @@ function Footer() {
   );
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Icons
- * ──────────────────────────────────────────────────────────────────────────── */
-
 function TickIcon({ small = false }: { small?: boolean }) {
   return (
     <svg
@@ -1427,13 +1348,7 @@ function TickIcon({ small = false }: { small?: boolean }) {
 
 function ArrowRightIcon() {
   return (
-    <svg
-      className="ml-2 h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2.5}
-      stroke="currentColor"
-    >
+    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
     </svg>
   );
@@ -1441,13 +1356,7 @@ function ArrowRightIcon() {
 
 function PlusIcon() {
   return (
-    <svg
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2.5}
-      stroke="currentColor"
-    >
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
     </svg>
   );
@@ -1455,13 +1364,7 @@ function PlusIcon() {
 
 function LockIcon() {
   return (
-    <svg
-      className="h-3 w-3"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-    >
+    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1521,13 +1424,13 @@ function MoonIcon() {
   );
 }
 
-function InboxIcon() {
+function ClipboardAlertIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z"
+        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
       />
     </svg>
   );
@@ -1545,10 +1448,14 @@ function SparklesIcon() {
   );
 }
 
-function ClockIcon() {
+function LayoutGridIcon() {
   return (
     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 6A2.25 2.25 0 0 1 15.75 3.75H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25A2.25 2.25 0 0 1 10.5 15.75v2.25A2.25 2.25 0 0 1 8.25 20.25H6a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"
+      />
     </svg>
   );
 }
@@ -1603,7 +1510,13 @@ function TrendUpIcon() {
 
 function TagIcon({ small = false }: { small?: boolean }) {
   return (
-    <svg className={small ? "h-4 w-4" : "h-6 w-6"} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <svg
+      className={small ? "h-4 w-4" : "h-6 w-6"}
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+    >
       <path
         strokeLinecap="round"
         strokeLinejoin="round"

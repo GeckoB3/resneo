@@ -498,6 +498,13 @@ export function TableGridView({
   const [areasLoaded, setAreasLoaded] = useState(bookingModel !== 'table_reservation');
 
   const [date, setDate] = useState(rememberedPreferences.date ?? formatDateInput(new Date()));
+
+  useEffect(() => {
+    const fromUrl = searchParams.get('date');
+    if (fromUrl && ISO_DATE_RE.test(fromUrl)) {
+      setDate((prev) => (prev === fromUrl ? prev : fromUrl));
+    }
+  }, [searchParams]);
   const [serviceId, setServiceId] = useState<string | null>(rememberedPreferences.serviceId ?? null);
   const [services, setServices] = useState<Array<{ id: string; name: string; start_time: string; end_time: string }>>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);

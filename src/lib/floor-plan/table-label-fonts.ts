@@ -203,6 +203,7 @@ function compactLineBox(fs: number, bold: boolean): number {
 export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLabelFitResult {
   const { w, h, shape, topLabel, bottomLabel, compactLabels, layoutScale, polygon_points } = input;
   const hasBottomLabel = bottomLabel.trim().length > 0;
+  const bottomLines = hasBottomLabel ? Math.max(1, bottomLabel.split('\n').length) : 0;
   const isCircular = shape === 'circle';
   const isOval = shape === 'oval';
   const isPolygon = shape === 'polygon';
@@ -225,6 +226,12 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
   const widthNeed = (txt: string, fs: number, bold: boolean) =>
     txt.length * (bold ? fs * 0.56 : fs * 0.52);
 
+  const maxLineWidthNeed = (txt: string, fs: number, bold: boolean) => {
+    if (!txt) return 0;
+    const widths = txt.split('\n').map((line) => widthNeed(line, fs, bold));
+    return widths.length > 0 ? Math.max(...widths) : 0;
+  };
+
   if (compactLabels) {
     const insetXLocal = clamp(w * 0.03, 1, 6);
     const innerH = Math.max(0, bottomEdge - topEdge);
@@ -236,7 +243,9 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = nameFs + 1;
       const ch = hasBottomLabel ? capFs + 1 : 0;
-      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
+      const lineGap = bottomLines > 1 ? bottomLines - 1 : 0;
+      const capBlock = hasBottomLabel ? ch * bottomLines + lineGap : 0;
+      return { blockH: nh + (hasBottomLabel ? g + capBlock : 0), nameBox: nh, capBox: capBlock };
     };
 
     let { blockH } = measureBlock(fn, fc, gap);
@@ -255,7 +264,7 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
       const fitsHeight = blockH <= innerH;
       const fitsWidth =
         widthNeed(topLabel, fn, true) <= computedInnerW &&
-        widthNeed(bottomLabel, fc, false) <= computedInnerW;
+        maxLineWidthNeed(bottomLabel, fc, false) <= computedInnerW;
       if (fitsHeight && fitsWidth) break;
 
       if (gap > 0) gap -= 1;
@@ -296,10 +305,13 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
   let gap = 2;
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
-    const nh = compactLineBox(nameFs, true);
-      const ch = hasBottomLabel ? compactLineBox(capFs, false) : 0;
+      const nh = compactLineBox(nameFs, true);
+      const lineH = hasBottomLabel ? compactLineBox(capFs, false) : 0;
+      const betweenSub =
+        hasBottomLabel && bottomLines > 1 ? (bottomLines - 1) * Math.max(1, Math.round(capFs * 0.12)) : 0;
+      const ch = hasBottomLabel ? lineH * bottomLines + betweenSub : 0;
       return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
-  };
+    };
 
   let { blockH } = measureBlock(fn, fc, gap);
   let computedInnerW = computeInnerLabelWidthRounded({
@@ -317,7 +329,7 @@ export function computeFittedTableLabelFonts(input: TableLabelFitInput): TableLa
     const fitsHeight = blockH <= innerH;
     const fitsWidth =
       widthNeed(topLabel, fn, true) <= computedInnerW &&
-      widthNeed(bottomLabel, fc, false) <= computedInnerW;
+      maxLineWidthNeed(bottomLabel, fc, false) <= computedInnerW;
     if (fitsHeight && fitsWidth) break;
 
     if (gap > 0) gap -= 1;

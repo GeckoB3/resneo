@@ -9,10 +9,11 @@ interface EditableFieldProps {
   fieldKey: string;
   placeholder?: string;
   multiline?: boolean;
+  compact?: boolean;
   onSaved: () => void;
 }
 
-function EditableField({ label, value, bookingId, fieldKey, placeholder, multiline, onSaved }: EditableFieldProps) {
+function EditableField({ label, value, bookingId, fieldKey, placeholder, multiline, compact = false, onSaved }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -64,7 +65,8 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
   const isDirty = draft !== value;
 
   const inputClass = [
-    'w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 transition-shadow',
+    'w-full rounded-lg border bg-white text-slate-800 transition-shadow',
+    compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
     'placeholder:text-slate-400',
     'focus:outline-none focus:ring-2',
     saveError
@@ -74,7 +76,7 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
 
   return (
     <div className="group/field">
-      <div className="mb-1.5 flex items-center justify-between">
+      <div className={`${compact ? 'mb-1' : 'mb-1.5'} flex items-center justify-between`}>
         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
         {!editing && (
           <button
@@ -106,7 +108,7 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
               onKeyDown={(e) => {
                 if (e.key === 'Escape') cancel();
               }}
-              rows={3}
+              rows={compact ? 2 : 3}
               className={inputClass}
               placeholder={placeholder}
             />
@@ -139,7 +141,7 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
             </p>
           )}
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className={`${compact ? 'mt-1.5' : 'mt-2'} flex items-center gap-2`}>
             <button
               type="button"
               onClick={() => {
@@ -185,14 +187,15 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
           }}
           title={`Click to ${hasValue ? 'edit' : 'add'} ${label.toLowerCase()}`}
           className={[
-            'w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors',
+            'w-full rounded-lg border text-left transition-colors',
+            compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
             hasValue
               ? 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50/40'
               : 'border-dashed border-slate-200 bg-slate-50/60 text-slate-400 italic hover:border-brand-300 hover:bg-brand-50/40',
           ].join(' ')}
         >
           {hasValue ? (
-            <span className="whitespace-pre-wrap break-words leading-relaxed">{value}</span>
+            <span className={`whitespace-pre-wrap break-words ${compact ? 'leading-snug' : 'leading-relaxed'}`}>{value}</span>
           ) : (
             <span className="flex items-center gap-2">
               <svg className="h-3.5 w-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -220,6 +223,10 @@ export interface BookingNotesEditablePanelProps {
   disabled?: boolean;
   /** Which note fields to show. `cde` maps guest-facing copy to `special_requests` (booking notes from the guest flow). */
   notesVariant?: BookingNotesVariant;
+  /** Slimmer layout for embedding inside another card. */
+  compact?: boolean;
+  /** Removes the panel frame so parent sections can own the visual grouping. */
+  embedded?: boolean;
 }
 
 export function BookingNotesEditablePanel({
@@ -230,12 +237,17 @@ export function BookingNotesEditablePanel({
   onSaved,
   disabled = false,
   notesVariant = 'table',
+  compact = false,
+  embedded = false,
 }: BookingNotesEditablePanelProps) {
   const isCde = notesVariant === 'cde';
+  const rootClass = embedded
+    ? `space-y-2.5 ${disabled ? 'pointer-events-none opacity-50' : ''}`
+    : `rounded-xl border border-slate-200 bg-white p-3.5 ${compact ? 'space-y-2.5' : 'space-y-4'} ${disabled ? 'pointer-events-none opacity-50' : ''}`;
 
   return (
     <div
-      className={`rounded-xl border border-slate-200 bg-white p-3.5 space-y-4 ${disabled ? 'pointer-events-none opacity-50' : ''}`}
+      className={rootClass}
       aria-busy={disabled || undefined}
     >
       {!isCde && (
@@ -246,6 +258,7 @@ export function BookingNotesEditablePanel({
             bookingId={bookingId}
             fieldKey="dietary_notes"
             placeholder="e.g. Gluten free, nut allergy"
+            compact={compact}
             onSaved={onSaved}
           />
           <div className="border-t border-slate-100" />
@@ -274,16 +287,18 @@ export function BookingNotesEditablePanel({
             : 'e.g. Accessibility, timing, or seating preferences'
         }
         multiline={isCde}
+        compact={compact}
         onSaved={onSaved}
       />
       <div className="border-t border-slate-100" />
       <EditableField
-        label="Staff Notes"
+        label="Staff Notes for this booking"
         value={staffNotes ?? ''}
         bookingId={bookingId}
         fieldKey="internal_notes"
         placeholder={isCde ? 'Internal notes (not visible to the guest)' : 'Internal notes (not visible to guest)'}
         multiline
+        compact={compact}
         onSaved={onSaved}
       />
     </div>

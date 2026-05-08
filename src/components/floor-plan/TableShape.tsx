@@ -15,6 +15,7 @@ import {
   computeFittedTableLabelFonts,
   type TableLabelFitResult,
 } from '@/lib/floor-plan/table-label-fonts';
+import type { FloorBookingBadges } from '@/lib/floor-plan/floor-plan-attention';
 
 /** ~30% larger chair markers (seat rects) around the table vs prior defaults. */
 const SEAT_MARKER_SCALE = 1.3;
@@ -22,6 +23,26 @@ const SEAT_MARKER_SCALE = 1.3;
 const SEAT_RECT_WL_SCALE = 1.4;
 const SEAT_DOT_RADIUS = 9 * SEAT_MARKER_SCALE;
 const SEAT_DOT_OFFSET = 14 * SEAT_MARKER_SCALE;
+
+/** Matches `table-label-fonts` width heuristic so per-line fonts fit the chord width. */
+function estimateLineWidthPx(text: string, fontSize: number, bold: boolean): number {
+  if (!text) return 0;
+  return text.length * (bold ? fontSize * 0.56 : fontSize * 0.52);
+}
+
+/** Largest integer font size in [minFs, maxFs] whose estimated width fits `innerW`. */
+function largestFontFittingLine(text: string, innerW: number, maxFs: number, minFs: number, bold: boolean): number {
+  const lo = Math.round(Math.min(minFs, maxFs));
+  const hi = Math.round(Math.max(minFs, maxFs));
+  let best = lo;
+  for (let fs = hi; fs >= lo; fs--) {
+    if (estimateLineWidthPx(text, fs, bold) <= innerW) {
+      best = fs;
+      break;
+    }
+  }
+  return best;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,6 +148,10 @@ export interface TableShapeProps {
   turnProgressPct?: number | null;
   /** Live floor: booking spans multiple tables (combination). */
   comboTableCount?: number;
+  /** Live floor: single attention dot — red dietary, green other important info (see floor key). */
+  floorBadges?: FloorBookingBadges | null;
+  /** Live floor: search or filter matched this table — amber ring. */
+  searchHighlight?: boolean;
   children?: React.ReactNode;
 }
 
@@ -269,6 +294,8 @@ export default function TableShape({
   onPolygonVertexDragEnd,
   turnProgressPct = null,
   comboTableCount = 0,
+  floorBadges = null,
+  searchHighlight = false,
   children,
 }: TableShapeProps) {
   // --- Geometry ---
@@ -344,22 +371,24 @@ export default function TableShape({
   const topLabel = alwaysShowTableName || !isOccupied
     ? table.name
     : booking!.guest_name.slice(0, 12);
-  const shortStatus = booking?.status ? booking.status.replace(/-/g, ' ').slice(0, 10) : '';
   const timeBit = booking?.start_time ? booking.start_time.slice(0, 5) : '';
+  /** Live floor with table name on top: guest, covers, time each get their own line (avoids single-line crop). */
   const bottomLabel = alwaysShowTableName
     ? isOccupied
-      ? [
-          truncateForWidth(booking!.guest_name, 12),
-          [timeBit, `${booking!.party_size}/${table.max_covers}`].filter(Boolean).join(' · '),
-          [shortStatus || null, comboTableCount > 1 ? 'Combo' : null].filter(Boolean).join(' · '),
-        ]
-          .filter((p): p is string => Boolean(p))
-          .join('\n')
+      ? (() => {
+          const coversLine =
+            comboTableCount > 1
+              ? `${booking!.party_size} / ${table.max_covers} covers · Combo`
+              : `${booking!.party_size} / ${table.max_covers} covers`;
+          const timeLine = timeBit || '—';
+          return [booking!.guest_name, coversLine, timeLine].join('\n');
+        })()
       : ''
     : isOccupied
       ? `${booking!.party_size} pax`
       : capacityText;
   const hasBottomLabel = bottomLabel.trim().length > 0;
+  const bottomLineCount = hasBottomLabel ? Math.max(1, bottomLabel.split('\n').length) : 0;
   const liveFloorLabelBoost = !compactLabels && !isEditorMode && alwaysShowTableName ? 1.24 : 1;
   const liveFloorTableNameMin = !compactLabels && !isEditorMode && alwaysShowTableName ? 14 : 0;
   const liveFloorInfoMin = !compactLabels && !isEditorMode && alwaysShowTableName && isOccupied ? 12 : 0;
@@ -405,6 +434,14 @@ export default function TableShape({
   let compactTextStrokeW: number;
 
   let capLineH = 0;
+  /** Live floor: three separate bottom `Text` rows, each with its own font size (guest / covers / time). */
+  let bottomLineLayouts: Array<{
+    text: string;
+    fontSize: number;
+    lineH: number;
+    bold: boolean;
+    yRel: number;
+  }> | null = null;
 
   if (compactLabels) {
     const insetXLocal = clamp(w * 0.03, 1, 6);
@@ -424,11 +461,16 @@ export default function TableShape({
     const fc = fit.fontCap;
     const gap = fit.gap;
 
-    const measureBlock = (nameFs: number, capFs: number, g: number) => {
+    const measureBlock = (nameFs: number, capFs: number, gapBetween: number) => {
       const nh = nameFs + 1;
       const ch = hasBottomLabel ? capFs + 1 : 0;
-      const bottomLines = Math.max(1, bottomLabel.split('\n').length);
-      return { blockH: nh + (hasBottomLabel ? g + ch * bottomLines : 0), nameBox: nh, capBox: ch * bottomLines };
+      const lines = bottomLineCount;
+      const lineGap = lines > 1 ? lines - 1 : 0;
+      return {
+        blockH: nh + (hasBottomLabel ? gapBetween + ch * lines + lineGap : 0),
+        nameBox: nh,
+        capBox: ch * lines + lineGap,
+      };
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
@@ -463,7 +505,10 @@ export default function TableShape({
     const nm = Math.max(3, Math.floor(innerW / (fontName * 0.5)));
     const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.5)));
     displayName = truncateForWidth(topLabel, nm);
-    displayCap = truncateForWidth(bottomLabel, cm);
+    displayCap = bottomLabel
+      .split('\n')
+      .map((line) => truncateForWidth(line, cm))
+      .join('\n');
 
     /* Keep polygon labels centered in the largest contiguous interior band. */
     const startY = polygonBand ? polygonBand.centerY - blockH / 2 : -blockH / 2;
@@ -477,8 +522,8 @@ export default function TableShape({
     compactTextStrokeW = 0;
   } else {
     /* Edit + live floor: same centred block as compact picker, larger type & tighter leading. */
-    const insetY = clamp(minDim * 0.032, 2, 6);
-    const insetXLocal = clamp(w * 0.032, 2, 7);
+    const insetY = clamp(minDim * 0.032, 2, 7);
+    const insetXLocal = clamp(w * 0.034, 2, 8);
     const innerTop = topEdge + insetY;
     const innerBottom = bottomEdge - insetY;
     const innerH = Math.max(0, innerBottom - innerTop);
@@ -498,46 +543,126 @@ export default function TableShape({
     const fn = fit.fontName;
     const fc = fit.fontCap;
     const gap = fit.gap;
+    const isLiveFloorTriple =
+      !isEditorMode && alwaysShowTableName && isOccupied && bottomLineCount === 3;
+    /** Slightly more air between table name and guest block on the live three-line layout. */
+    const nameToDetailGap = isLiveFloorTriple ? Math.max(gap, 4) : gap;
 
-    const measureBlock = (nameFs: number, capFs: number, g: number) => {
+    const measureBlock = (nameFs: number, capFs: number, gapBetween: number) => {
       const nh = compactLineBox(nameFs, true);
-      const ch = hasBottomLabel ? compactLineBox(capFs, false) : 0;
-      return { blockH: nh + (hasBottomLabel ? g + ch : 0), nameBox: nh, capBox: ch };
+      const lineH = hasBottomLabel ? compactLineBox(capFs, false) : 0;
+      const lines = bottomLineCount;
+      const betweenSub = lines > 1 ? (lines - 1) * Math.max(1, Math.round(capFs * 0.12)) : 0;
+      const ch = hasBottomLabel ? lineH * lines + betweenSub : 0;
+      return { blockH: nh + (hasBottomLabel ? gapBetween + ch : 0), nameBox: nh, capBox: ch };
     };
 
-    const { blockH, capBox } = measureBlock(fn, fc, gap);
-    const polygonBand =
+    let blockH = measureBlock(fn, fc, gap).blockH;
+    const polygonBandFor = (bh: number) =>
       isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
         ? computeBestPolygonLabelBand({
             polygonPixelPts,
-            labelHalfHeight: blockH / 2,
+            labelHalfHeight: bh / 2,
             insetXLocal,
-            curveInsetFactor: 0.97,
+            curveInsetFactor: 0.96,
           })
         : null;
-    const computedInnerW = computeInnerLabelWidthRounded({
+    let polygonBand = polygonBandFor(blockH);
+    let computedInnerW = computeInnerLabelWidthRounded({
       w,
       h,
       insetXLocal,
       isCircular,
       isOval,
       labelHalfHeight: blockH / 2,
-      curveInsetFactor: 0.97,
+      curveInsetFactor: 0.96,
       polygonPixelPts: isPolygon ? polygonPixelPts : null,
     });
 
     fontName = Math.max(liveFloorTableNameMin, Math.round(fn * liveFloorLabelBoost));
     fontCap = Math.max(liveFloorInfoMin, Math.round(fc * liveFloorLabelBoost));
     nameLineH = compactLineBox(fontName, true);
-    capLineH = hasBottomLabel ? compactLineBox(fontCap, false) : capBox;
 
     innerW = computedInnerW;
     textX = -innerW / 2;
 
     const nm = Math.max(3, Math.floor(innerW / (fontName * 0.52)));
-    const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.52)));
-    displayName = truncateForWidth(topLabel, nm);
-    displayCap = truncateForWidth(bottomLabel, cm);
+
+    if (isLiveFloorTriple) {
+      const lines = bottomLabel.split('\n');
+      const minFs = Math.max(6, liveFloorInfoMin);
+      const availBottom = Math.max(0, innerH - nameLineH - nameToDetailGap);
+      const lineBold = (i: number) => i === 0;
+
+      const fitLineFs = (ln: string, i: number) =>
+        largestFontFittingLine(ln, innerW, lineBold(i) ? fontName : fontCap, minFs, lineBold(i));
+
+      const interGap = (fonts: number[]) =>
+        fonts.length > 1 ? (fonts.length - 1) * Math.max(1, Math.round(Math.min(...fonts) * 0.12)) : 0;
+
+      let fonts = lines.map((ln, i) => fitLineFs(ln, i));
+
+      const totalBottomHeight = (f: number[]) =>
+        f.reduce((sum, fs, i) => sum + compactLineBox(fs, lineBold(i)), 0) + interGap(f);
+
+      while (totalBottomHeight(fonts) > availBottom && fonts.some((fs) => fs > minFs)) {
+        fonts = fonts.map((fs) => Math.max(minFs, fs - 1));
+      }
+
+      capLineH = totalBottomHeight(fonts);
+      blockH = nameLineH + nameToDetailGap + capLineH;
+      polygonBand = polygonBandFor(blockH);
+      computedInnerW = computeInnerLabelWidthRounded({
+        w,
+        h,
+        insetXLocal,
+        isCircular,
+        isOval,
+        labelHalfHeight: blockH / 2,
+        curveInsetFactor: 0.96,
+        polygonPixelPts: isPolygon ? polygonPixelPts : null,
+      });
+      innerW = computedInnerW;
+      textX = -innerW / 2;
+
+      fonts = lines.map((ln, i) => fitLineFs(ln, i));
+      while (totalBottomHeight(fonts) > availBottom && fonts.some((fs) => fs > minFs)) {
+        fonts = fonts.map((fs) => Math.max(minFs, fs - 1));
+      }
+      capLineH = totalBottomHeight(fonts);
+      blockH = nameLineH + nameToDetailGap + capLineH;
+      polygonBand = polygonBandFor(blockH);
+
+      const singleStep = fonts.length > 1 ? Math.max(1, Math.round(Math.min(...fonts) * 0.12)) : 0;
+      let yAcc = 0;
+      bottomLineLayouts = lines.map((text, i) => {
+        const fontSize = fonts[i]!;
+        const bold = lineBold(i);
+        const lineH = compactLineBox(fontSize, bold);
+        const yRel = yAcc;
+        yAcc += lineH + (i < lines.length - 1 ? singleStep : 0);
+        return { text, fontSize, lineH, bold, yRel };
+      });
+      displayName = truncateForWidth(topLabel, nm);
+      displayCap = '';
+    } else {
+      if (hasBottomLabel) {
+        const lineH = compactLineBox(fontCap, false);
+        const lines = bottomLineCount;
+        const betweenSub = lines > 1 ? (lines - 1) * Math.max(1, Math.round(fontCap * 0.12)) : 0;
+        capLineH = lineH * lines + betweenSub;
+      } else {
+        capLineH = 0;
+      }
+      blockH = nameLineH + gap + capLineH;
+
+      const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.52)));
+      displayName = truncateForWidth(topLabel, nm);
+      displayCap = bottomLabel
+        .split('\n')
+        .map((line) => truncateForWidth(line, cm))
+        .join('\n');
+    }
 
     const blockStart = polygonBand
       ? clamp(
@@ -552,7 +677,9 @@ export default function TableShape({
           return clamp(rawStart, innerTop, Math.max(innerTop, innerBottom - blockH));
         })();
     nameY = blockStart;
-    capY = hasBottomLabel ? blockStart + nameLineH + gap : blockStart + nameLineH;
+    capY = hasBottomLabel
+      ? blockStart + nameLineH + (bottomLineLayouts != null ? nameToDetailGap : gap)
+      : blockStart + nameLineH;
     labelBlockCenterY = blockStart + blockH / 2;
 
     nameFill = isOccupied ? '#1e293b' : '#334155';
@@ -563,6 +690,16 @@ export default function TableShape({
 
   /** Keeps name/capacity horizontal on screen while the table Group still rotates the shape. */
   const labelScreenRotationDeg = -(table.rotation ?? 0);
+
+  /**
+   * Bottom-corner HUDs on live floor: dietary / occasion / deposit (left) and turn ring (right).
+   * Same nominal diameter (`2 * cornerHudRadius`) and corner inset for symmetric layout.
+   */
+  const cornerHudRadius = clamp(Math.round(minDim * 0.095), 11, 18);
+  const cornerHudInset = clamp(Math.round(minDim * 0.032), 5, 10);
+  const turnRingOuter = cornerHudRadius;
+  const turnRingInner = Math.max(5, Math.round(turnRingOuter * 0.59));
+  const turnArcOuter = Math.max(turnRingInner + 3, turnRingOuter - 1);
 
   return (
     <Group
@@ -626,6 +763,49 @@ export default function TableShape({
           shadowOffsetY={1}
         />
       )}
+
+      {/* Search / filter highlight ring */}
+      {searchHighlight && !isEditorMode ? (
+        isCircular ? (
+          <Circle
+            radius={Math.min(w, h) / 2 + 5}
+            stroke="#d97706"
+            strokeWidth={3}
+            dash={[6, 4]}
+            listening={false}
+          />
+        ) : isOval ? (
+          <Ellipse
+            radiusX={w / 2 + 5}
+            radiusY={h / 2 + 5}
+            stroke="#d97706"
+            strokeWidth={3}
+            dash={[6, 4]}
+            listening={false}
+          />
+        ) : isPolygon && polygonFlatPts && polygonFlatPts.length >= 6 ? (
+          <Line
+            points={polygonFlatPts}
+            closed
+            stroke="#d97706"
+            strokeWidth={3}
+            dash={[6, 4]}
+            listening={false}
+          />
+        ) : (
+          <Rect
+            x={-w / 2 - 5}
+            y={-h / 2 - 5}
+            width={w + 10}
+            height={h + 10}
+            cornerRadius={10}
+            stroke="#d97706"
+            strokeWidth={3}
+            dash={[6, 4]}
+            listening={false}
+          />
+        )
+      ) : null}
 
       {/* ---- Seat dots (subdued in compact picker so centred labels stay legible) ---- */}
       {showSeats && (
@@ -752,38 +932,6 @@ export default function TableShape({
       </Group>
       )}
 
-      {turnProgressPct != null && isOccupied ? (
-        <Group
-          x={w / 2 - 20}
-          y={topEdge + 20}
-          rotation={labelScreenRotationDeg}
-          listening={false}
-        >
-          <Circle
-            radius={17}
-            fill="#ffffff"
-            opacity={0.96}
-            shadowColor="rgba(15,23,42,0.22)"
-            shadowBlur={5}
-            shadowOffsetY={1}
-          />
-          <Arc
-            innerRadius={10}
-            outerRadius={15}
-            angle={360}
-            rotation={-90}
-            fill="#e2e8f0"
-          />
-          <Arc
-            innerRadius={10}
-            outerRadius={15}
-            angle={Math.min(360, Math.max(0, (turnProgressPct / 100) * 360))}
-            rotation={-90}
-            fill={turnProgressPct >= 100 ? '#dc2626' : turnProgressPct >= 70 ? '#d97706' : '#0d9488'}
-          />
-        </Group>
-      ) : null}
-
       {showTableNameBadge && (
         <Group y={topEdge - 22} rotation={labelScreenRotationDeg}>
           <Rect
@@ -851,7 +999,7 @@ export default function TableShape({
                   x: -w / 2,
                   y: topEdge,
                   width: w,
-                  height: bottomEdge - topEdge,
+                  height: Math.max(8, bottomEdge - topEdge),
                 },
               })}
       >
@@ -875,28 +1023,101 @@ export default function TableShape({
             listening={false}
           />
           {hasBottomLabel ? (
-            <Text
-              text={displayCap}
-              fontSize={fontCap}
-              fontFamily="Inter, system-ui, sans-serif"
-              fontStyle="normal"
-              fill={capFill}
-              stroke={compactTextStroke}
-              strokeWidth={compactTextStrokeW}
-              align="center"
-              verticalAlign="middle"
-              wrap="none"
-              lineHeight={1.08}
-              ellipsis={true}
-              width={innerW}
-              height={capLineH}
-              x={textX}
-              y={capY - labelBlockCenterY}
-              listening={false}
-            />
+            bottomLineLayouts != null ? (
+              bottomLineLayouts.map((row, i) => (
+                <Text
+                  key={`booking-line-${i}`}
+                  text={row.text}
+                  fontSize={row.fontSize}
+                  fontFamily="Inter, system-ui, sans-serif"
+                  fontStyle={row.bold ? 'bold' : 'normal'}
+                  fill={row.bold ? nameFill : capFill}
+                  stroke={compactTextStroke}
+                  strokeWidth={compactTextStrokeW}
+                  align="center"
+                  verticalAlign="middle"
+                  wrap="none"
+                  ellipsis={false}
+                  width={innerW}
+                  height={row.lineH}
+                  x={textX}
+                  y={capY - labelBlockCenterY + row.yRel}
+                  listening={false}
+                />
+              ))
+            ) : (
+              <Text
+                text={displayCap}
+                fontSize={fontCap}
+                fontFamily="Inter, system-ui, sans-serif"
+                fontStyle="normal"
+                fill={capFill}
+                stroke={compactTextStroke}
+                strokeWidth={compactTextStrokeW}
+                align="center"
+                verticalAlign={bottomLineCount > 1 ? 'top' : 'middle'}
+                wrap="none"
+                lineHeight={bottomLineCount > 1 ? compactLineBox(fontCap, false) / fontCap : 1.08}
+                ellipsis={bottomLineCount <= 1}
+                width={innerW}
+                height={capLineH}
+                x={textX}
+                y={capY - labelBlockCenterY}
+                listening={false}
+              />
+            )
           ) : null}
         </Group>
       </Group>
+
+      {/* Bottom-corner HUDs: attention dots (left) + turn ring (right); same radius & inset as turn disk. */}
+      {floorBadges && !isEditorMode ? (
+        <Group
+          x={-w / 2 + cornerHudInset + cornerHudRadius}
+          y={bottomEdge - cornerHudInset - cornerHudRadius}
+          rotation={labelScreenRotationDeg}
+          listening={false}
+        >
+          <Circle
+            radius={cornerHudRadius}
+            fill={floorBadges.dot === 'dietary' ? '#dc2626' : '#22c55e'}
+            stroke="#ffffff"
+            strokeWidth={2}
+          />
+        </Group>
+      ) : null}
+
+      {turnProgressPct != null && isOccupied ? (
+        <Group
+          x={w / 2 - cornerHudRadius - cornerHudInset}
+          y={bottomEdge - cornerHudRadius - cornerHudInset}
+          rotation={labelScreenRotationDeg}
+          listening={false}
+        >
+          <Circle
+            radius={turnRingOuter}
+            fill="#ffffff"
+            opacity={0.96}
+            shadowColor="rgba(15,23,42,0.22)"
+            shadowBlur={5}
+            shadowOffsetY={1}
+          />
+          <Arc
+            innerRadius={turnRingInner}
+            outerRadius={turnArcOuter}
+            angle={360}
+            rotation={-90}
+            fill="#e2e8f0"
+          />
+          <Arc
+            innerRadius={turnRingInner}
+            outerRadius={turnArcOuter}
+            angle={Math.min(360, Math.max(0, (turnProgressPct / 100) * 360))}
+            rotation={-90}
+            fill={turnProgressPct >= 100 ? '#dc2626' : turnProgressPct >= 70 ? '#d97706' : '#0d9488'}
+          />
+        </Group>
+      ) : null}
 
       {/* ---- Corner resize handles for rectangle / square / polygon ---- */}
       {isSelected && isEditorMode && !isCircular && !isOval &&

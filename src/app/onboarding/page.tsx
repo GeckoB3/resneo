@@ -42,9 +42,6 @@ import { AppointmentsDashboardStep } from '@/components/onboarding/AppointmentsD
 import { WelcomeStep as RestaurantWelcomeStep } from './steps/restaurant/WelcomeStep';
 import { OpeningHoursStep } from './steps/restaurant/OpeningHoursStep';
 import { ServicesStep } from './steps/restaurant/ServicesStep';
-import { CapacityStep } from './steps/restaurant/CapacityStep';
-import { DiningDurationStep } from './steps/restaurant/DiningDurationStep';
-import { BookingRulesStep } from './steps/restaurant/BookingRulesStep';
 import { TableModeStep } from './steps/restaurant/TableModeStep';
 import { TableSetupStep } from './steps/restaurant/TableSetupStep';
 import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
@@ -575,6 +572,77 @@ function migrateOnboardingStepToCurrentLayout(
   return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
 }
 
+/** Restaurant plan onboarding (current layout: one step for services + capacity + duration + rules). */
+function buildRestaurantOnboardingSteps(tableManagementEnabled: boolean): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'r_welcome', label: 'Welcome' },
+    { key: 'r_opening_hours', label: 'Opening Hours' },
+    { key: 'r_table_mode', label: 'Table Management' },
+    { key: 'r_services', label: 'Services & booking rules' },
+  ];
+  if (tableManagementEnabled) {
+    steps.push({ key: 'r_table_setup', label: 'Table Setup' });
+  }
+  steps.push(
+    { key: 'r_dashboard', label: 'Your Dashboard' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+    { key: 'preview', label: 'Preview & Go Live' },
+  );
+  return steps;
+}
+
+/** Previous restaurant flow: four separate screens for the same service editor. */
+function buildLegacyRestaurantOnboardingSteps(tableManagementEnabled: boolean): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'r_welcome', label: 'Welcome' },
+    { key: 'r_opening_hours', label: 'Opening Hours' },
+    { key: 'r_table_mode', label: 'Table Management' },
+    { key: 'r_services', label: 'Dining Services' },
+    { key: 'r_capacity', label: 'Capacity' },
+    { key: 'r_dining_duration', label: 'Dining Duration' },
+    { key: 'r_booking_rules', label: 'Booking Rules' },
+  ];
+  if (tableManagementEnabled) {
+    steps.push({ key: 'r_table_setup', label: 'Table Setup' });
+  }
+  steps.push(
+    { key: 'r_dashboard', label: 'Your Dashboard' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+    { key: 'preview', label: 'Preview & Go Live' },
+  );
+  return steps;
+}
+
+/**
+ * Maps stored step index when the restaurant onboarding flow drops duplicate service-setup screens.
+ * If the user had already reached the last redundant step, resume on the next substantive step.
+ */
+function migrateRestaurantOnboardingStepToCurrentLayout(
+  storedIndex: number,
+  legacySteps: OnboardingStepDef[],
+  currentSteps: OnboardingStepDef[],
+): number {
+  const legacyKey = legacySteps[storedIndex]?.key;
+  if (!legacyKey) {
+    return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
+  }
+  if (legacyKey === 'r_booking_rules') {
+    const svcIdx = currentSteps.findIndex((s) => s.key === 'r_services');
+    if (svcIdx >= 0 && svcIdx + 1 < currentSteps.length) {
+      return svcIdx + 1;
+    }
+    return svcIdx >= 0 ? svcIdx : 0;
+  }
+  const mergedHead = ['r_services', 'r_capacity', 'r_dining_duration'];
+  if (mergedHead.includes(legacyKey)) {
+    const idx = currentSteps.findIndex((s) => s.key === 'r_services');
+    if (idx >= 0) return idx;
+  }
+  return migrateOnboardingStepToCurrentLayout(storedIndex, legacySteps, currentSteps);
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [venue, setVenue] = useState<VenueOnboarding | null>(null);
@@ -858,6 +926,33 @@ export default function OnboardingPage() {
 
         let initialStep = v.onboarding_step;
         let initialMaxStep = v.onboarding_step;
+        let restaurantTableMgmt = false;
+
+        if (v.booking_model === 'table_reservation') {
+          try {
+            const tsRes = await fetch('/api/venue/tables/settings');
+            if (tsRes.ok) {
+              const tsBody = (await tsRes.json()) as { settings?: { table_management_enabled?: boolean } };
+              restaurantTableMgmt = Boolean(tsBody.settings?.table_management_enabled);
+            }
+          } catch {
+            /* non-blocking */
+          }
+          setTableManagementEnabled(restaurantTableMgmt);
+          const currentR = buildRestaurantOnboardingSteps(restaurantTableMgmt);
+          const legacyR = buildLegacyRestaurantOnboardingSteps(restaurantTableMgmt);
+          const migratedR = migrateRestaurantOnboardingStepToCurrentLayout(v.onboarding_step, legacyR, currentR);
+          if (migratedR !== v.onboarding_step) {
+            initialStep = migratedR;
+            initialMaxStep = migratedR;
+            void fetch('/api/venue/onboarding', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ onboarding_step: migratedR }),
+            });
+          }
+        }
+
         if (isAppointmentPlanTier(v.pricing_tier)) {
           const active = (v.active_booking_models ?? []).filter(isAppointmentPlanModel) as AppointmentPlanModel[];
           if (active.length > 0) {
@@ -1013,23 +1108,7 @@ export default function OnboardingPage() {
     }
 
     if (venue.booking_model === 'table_reservation') {
-      const steps: Array<{ key: string; label: string }> = [
-        { key: 'profile', label: 'Business Profile' },
-        { key: 'r_welcome', label: 'Welcome' },
-        { key: 'r_opening_hours', label: 'Opening Hours' },
-        { key: 'r_table_mode', label: 'Table Management' },
-        { key: 'r_services', label: 'Dining Services' },
-        { key: 'r_capacity', label: 'Capacity' },
-        { key: 'r_dining_duration', label: 'Dining Duration' },
-        { key: 'r_booking_rules', label: 'Booking Rules' },
-      ];
-      if (tableManagementEnabled) {
-        steps.push({ key: 'r_table_setup', label: 'Table Setup' });
-      }
-      steps.push({ key: 'r_dashboard', label: 'Your Dashboard' });
-      steps.push({ key: 'stripe_onboarding', label: 'Payments (Stripe)' });
-      steps.push({ key: 'preview', label: 'Preview & Go Live' });
-      return steps;
+      return buildRestaurantOnboardingSteps(tableManagementEnabled);
     }
 
     const steps: Array<{ key: string; label: string }> = [
@@ -2121,9 +2200,6 @@ export default function OnboardingPage() {
       currentStepKey === 'r_welcome' ||
       currentStepKey === 'r_opening_hours' ||
       currentStepKey === 'r_services' ||
-      currentStepKey === 'r_capacity' ||
-      currentStepKey === 'r_dining_duration' ||
-      currentStepKey === 'r_booking_rules' ||
       currentStepKey === 'r_table_mode' ||
       currentStepKey === 'r_table_setup' ||
       currentStepKey === 'r_dashboard'
@@ -2197,8 +2273,12 @@ export default function OnboardingPage() {
   const stripeConnected = Boolean(venue.stripe_connected_account_id);
 
   const RESTAURANT_SELF_MANAGED_STEPS = new Set([
-    'r_welcome', 'r_opening_hours', 'r_services', 'r_capacity', 'r_dining_duration',
-    'r_booking_rules', 'r_table_mode', 'r_table_setup', 'r_dashboard',
+    'r_welcome',
+    'r_opening_hours',
+    'r_services',
+    'r_table_mode',
+    'r_table_setup',
+    'r_dashboard',
   ]);
 
   const wideOnboardingStep =
@@ -2208,8 +2288,6 @@ export default function OnboardingPage() {
     currentStepKey === 'stripe_onboarding' ||
     currentStepKey === 'r_welcome' ||
     currentStepKey === 'r_services' ||
-    currentStepKey === 'r_capacity' ||
-    currentStepKey === 'r_booking_rules' ||
     currentStepKey === 'r_table_mode' ||
     currentStepKey === 'r_dashboard' ||
     (currentStepKey === 'hours' &&
@@ -2218,11 +2296,7 @@ export default function OnboardingPage() {
     currentStepKey === 'classes' ||
     currentStepKey === 'resources';
 
-  const serviceSetupOnboardingStep =
-    currentStepKey === 'r_services' ||
-    currentStepKey === 'r_capacity' ||
-    currentStepKey === 'r_dining_duration' ||
-    currentStepKey === 'r_booking_rules';
+  const serviceSetupOnboardingStep = currentStepKey === 'r_services';
   const extraWideOnboardingStep = currentStepKey === 'r_table_setup' || serviceSetupOnboardingStep;
   const onboardingWidthClass = extraWideOnboardingStep
     ? 'max-w-7xl'
@@ -2504,18 +2578,6 @@ export default function OnboardingPage() {
 
         {currentStepKey === 'r_services' && (
           <ServicesStep onDone={advanceRestaurantStep} />
-        )}
-
-        {currentStepKey === 'r_capacity' && (
-          <CapacityStep onDone={advanceRestaurantStep} />
-        )}
-
-        {currentStepKey === 'r_dining_duration' && (
-          <DiningDurationStep onDone={advanceRestaurantStep} />
-        )}
-
-        {currentStepKey === 'r_booking_rules' && (
-          <BookingRulesStep onDone={advanceRestaurantStep} />
         )}
 
         {currentStepKey === 'r_table_mode' && (

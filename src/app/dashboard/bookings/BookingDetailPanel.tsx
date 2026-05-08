@@ -1252,6 +1252,37 @@ export function BookingDetailPanel({
                       }}
                     />
                   ) : null}
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <div className="mb-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                        Notes and preferences
+                      </p>
+                    </div>
+                    {d.occasion ? (
+                      <div className="mb-2">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
+                        <div className="rounded-lg border border-violet-100 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold leading-snug text-violet-900">
+                          {d.occasion}
+                        </div>
+                      </div>
+                    ) : null}
+                    <BookingNotesEditablePanel
+                      bookingId={bookingId}
+                      dietaryNotes={d.dietary_notes}
+                      guestRequests={d.special_requests}
+                      staffNotes={d.internal_notes}
+                      disabled={!isHydrated}
+                      notesVariant={notesVariant}
+                      compact
+                      embedded
+                      onSaved={() => {
+                        void (async () => {
+                          await load();
+                          onUpdated();
+                        })();
+                      }}
+                    />
+                  </div>
                 </div>
               </SectionCard.Body>
             </SectionCard>
@@ -1550,31 +1581,6 @@ export function BookingDetailPanel({
           {d.status === 'Cancelled' && d.deposit_amount_pence != null && d.deposit_amount_pence > 0 && (
             <DepositRefundBanner depositStatus={d.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={d.cancellation_deadline} />
           )}
-
-          {d.occasion && (
-            <div className="flex items-center gap-2 rounded-xl border border-violet-100 bg-violet-50/40 px-3.5 py-2.5">
-              <svg className="h-4 w-4 shrink-0 text-violet-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.056 4.024.166C17.155 8.51 18 9.473 18 10.608v2.513M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 8.25H6a2.25 2.25 0 0 1-2.25-2.25V15a2.25 2.25 0 0 1 2.25-2.25h12A2.25 2.25 0 0 1 21.25 15v1.5A2.25 2.25 0 0 1 18 18.75Z" /></svg>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-violet-400">Occasion</p>
-                <p className="text-sm font-semibold text-violet-900">{d.occasion}</p>
-              </div>
-            </div>
-          )}
-
-          <BookingNotesEditablePanel
-            bookingId={bookingId}
-            dietaryNotes={d.dietary_notes}
-            guestRequests={d.special_requests}
-            staffNotes={d.internal_notes}
-            disabled={!isHydrated}
-            notesVariant={notesVariant}
-            onSaved={() => {
-              void (async () => {
-                await load();
-                onUpdated();
-              })();
-            }}
-          />
 
           {d.status === 'Cancelled' && (
             <SectionCard className="border-red-100 bg-red-50/20">

@@ -16,6 +16,7 @@ import {
 } from '@/lib/floor-plan/fit-view';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
+import { computeFloorBookingBadges } from '@/lib/floor-plan/floor-plan-attention';
 
 /**
  * Stat tile label colours from `DashboardStatCard` (Tailwind `text-blue-700` / `text-emerald-700`).
@@ -30,7 +31,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending: '#2563eb',
   reserved: '#6366f1',
   seated: '#0f766e',
-  held: '#57534e',
+  held: '#d97706',
   no_show: '#b91c1c',
   late: '#c2410c',
   starters: '#0369a1',
@@ -113,10 +114,16 @@ interface TableWithState {
     status: string;
     start_time: string;
     estimated_end_time?: string | null;
+    dietary_notes?: string | null;
+    occasion?: string | null;
+    deposit_status?: string | null;
+    deposit_amount_pence?: number | null;
+    internal_notes?: string | null;
   } | null;
   /** 0–100 for bar; ring uses `turn_progress_pct` (may exceed 100 when overdue). */
   elapsed_pct: number;
   turn_progress_pct: number;
+  server_section?: string | null;
 }
 
 export interface FloorDragEvent {
@@ -145,6 +152,8 @@ interface Props {
   onBookedTableContextMenu?: (bookingId: string, tableId: string, clientX: number, clientY: number) => void;
   /** Dimmed floor plan background (same asset as layout editor). */
   floorBackgroundUrl?: string | null;
+  /** Tables matched by host search / filters — amber outline. */
+  highlightTableIds?: Set<string> | null;
 }
 
 export default function LiveFloorCanvas({
@@ -163,6 +172,7 @@ export default function LiveFloorCanvas({
   onBookingClick,
   onBookedTableContextMenu,
   floorBackgroundUrl,
+  highlightTableIds,
 }: Props) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -723,6 +733,18 @@ export default function LiveFloorCanvas({
               const isValidTarget = isDragging && validDropTargets?.has(table.id) && !isSource;
               const isInvalid = isDragging && !isSource && !validDropTargets?.has(table.id);
               const comboLabel = validDropComboLabels?.get(table.id);
+              const searchHighlight = Boolean(highlightTableIds?.has(table.id));
+              const floorBadges = computeFloorBookingBadges(
+                table.booking
+                  ? {
+                      dietary_notes: table.booking.dietary_notes,
+                      occasion: table.booking.occasion,
+                      deposit_status: table.booking.deposit_status,
+                      deposit_amount_pence: table.booking.deposit_amount_pence,
+                      internal_notes: table.booking.internal_notes,
+                    }
+                  : null,
+              );
 
               let statusColor = STATUS_COLORS[table.service_status] ?? AVAILABLE_TABLE_GRAY;
               let opacity = 1;
@@ -759,6 +781,8 @@ export default function LiveFloorCanvas({
                   statusColour={statusColor}
                   groupOpacity={opacity}
                   booking={isDragging && isSource ? null : table.booking}
+                  floorBadges={floorBadges}
+                  searchHighlight={searchHighlight && !isDragging}
                   turnProgressPct={
                     table.booking && !(isDragging && isSource) && table.booking.estimated_end_time
                       ? table.turn_progress_pct

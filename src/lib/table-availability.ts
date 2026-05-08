@@ -30,11 +30,13 @@ interface BookingWithTime {
   party_size: number;
   status: string;
   deposit_status?: string | null;
+  deposit_amount_pence?: number | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   guest_name: string;
   dietary_notes: string | null;
   occasion: string | null;
+  internal_notes?: string | null;
   actual_departed_time?: string | null;
   table_ids: string[];
 }
@@ -334,7 +336,7 @@ export async function getTableAvailabilityGrid(
   let bookingsQuery = supabase
     .from('bookings')
     .select(
-      'id, booking_time, estimated_end_time, party_size, status, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, actual_departed_time, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+      'id, booking_time, estimated_end_time, party_size, status, deposit_status, deposit_amount_pence, guest_attendance_confirmed_at, staff_attendance_confirmed_at, actual_departed_time, dietary_notes, occasion, internal_notes, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
     )
     .eq('venue_id', venueId)
     .eq('booking_date', date)
@@ -367,11 +369,13 @@ export async function getTableAvailabilityGrid(
     party_size: number;
     status: string;
     deposit_status?: string | null;
+    deposit_amount_pence?: number | null;
     guest_attendance_confirmed_at?: string | null;
     staff_attendance_confirmed_at?: string | null;
     actual_departed_time?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
+    internal_notes?: string | null;
     experience_event_id?: string | null;
     class_instance_id?: string | null;
     resource_id?: string | null;
@@ -418,11 +422,13 @@ export async function getTableAvailabilityGrid(
       party_size: b.party_size,
       status: b.status,
       deposit_status: b.deposit_status ?? null,
+      deposit_amount_pence: b.deposit_amount_pence ?? null,
       guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
       staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
       guest_name: guestName,
       dietary_notes: b.dietary_notes,
       occasion: b.occasion,
+      internal_notes: b.internal_notes ?? null,
       actual_departed_time: b.actual_departed_time ?? null,
       table_ids: bookingToTables.get(b.id) ?? [],
     };
@@ -501,7 +507,8 @@ export async function getTableAvailabilityGrid(
               guest_name: matchedBooking.guest_name,
               party_size: matchedBooking.party_size,
               status: matchedBooking.status,
-              deposit_status: (matchedBooking as BookingWithTime & { deposit_status?: string | null }).deposit_status ?? null,
+              deposit_status: matchedBooking.deposit_status ?? null,
+              deposit_amount_pence: matchedBooking.deposit_amount_pence ?? null,
               guest_attendance_confirmed_at: matchedBooking.guest_attendance_confirmed_at ?? null,
               staff_attendance_confirmed_at: matchedBooking.staff_attendance_confirmed_at ?? null,
               start_time: matchedBooking.booking_time,
@@ -511,6 +518,7 @@ export async function getTableAvailabilityGrid(
               table_names: matchedBooking.table_ids.map((tableId) => tableNameById.get(tableId) ?? tableId),
               dietary_notes: matchedBooking.dietary_notes,
               occasion: matchedBooking.occasion,
+              internal_notes: matchedBooking.internal_notes ?? null,
             }
           : null,
       });
@@ -542,10 +550,13 @@ export async function getTableAvailabilityGrid(
         start_time: b.booking_time,
         end_time: minutesToTime(range.endMin),
         status: b.status,
+        deposit_status: b.deposit_status ?? null,
+        deposit_amount_pence: b.deposit_amount_pence ?? null,
         guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
         staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
         dietary_notes: b.dietary_notes,
         occasion: b.occasion,
+        internal_notes: b.internal_notes ?? null,
         actual_departed_time: b.actual_departed_time ?? null,
       };
     });

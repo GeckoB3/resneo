@@ -31,7 +31,17 @@ function formatDateHeading(isoDate: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function KpiChips({ summary }: { summary: ViewToolbarSummary }) {
+function KpiChips({
+  summary,
+  onCoversChipClick,
+  onUnassignedChipClick,
+  onNextChipClick,
+}: {
+  summary: ViewToolbarSummary;
+  onCoversChipClick?: () => void;
+  onUnassignedChipClick?: () => void;
+  onNextChipClick?: () => void;
+}) {
   const useLiveCovers = typeof summary.covers_in_use_now === 'number';
   const coversShown = useLiveCovers ? summary.covers_in_use_now! : summary.total_covers_booked;
   const coversPct =
@@ -43,34 +53,73 @@ function KpiChips({ summary }: { summary: ViewToolbarSummary }) {
 
   const chip =
     'inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800';
+  const chipButton =
+    `${chip} cursor-pointer text-left transition hover:border-slate-300 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1`;
   const label = 'text-slate-500 font-normal';
 
   return (
     <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Shift summary">
-      <span className={chip} title={useLiveCovers ? 'Covers seated or in use at timeline' : 'Covers booked'}>
-        <span className={label}>{useLiveCovers ? 'Live' : 'Booked'}</span>
-        <span className="tabular-nums">
-          {coversShown}/{summary.total_covers_capacity}
+      {onCoversChipClick ? (
+        <button type="button" className={chipButton} onClick={onCoversChipClick} title="Open timeline — covers follow the service clock">
+          <span className={label}>{useLiveCovers ? 'Live' : 'Booked'}</span>
+          <span className="tabular-nums">
+            {coversShown}/{summary.total_covers_capacity}
+          </span>
+          {summary.total_covers_capacity > 0 ? (
+            <span className="text-slate-400">({coversPct}%)</span>
+          ) : null}
+        </button>
+      ) : (
+        <span className={chip} title={useLiveCovers ? 'Covers seated or in use at timeline' : 'Covers booked'}>
+          <span className={label}>{useLiveCovers ? 'Live' : 'Booked'}</span>
+          <span className="tabular-nums">
+            {coversShown}/{summary.total_covers_capacity}
+          </span>
+          {summary.total_covers_capacity > 0 ? (
+            <span className="text-slate-400">({coversPct}%)</span>
+          ) : null}
         </span>
-        {summary.total_covers_capacity > 0 ? (
-          <span className="text-slate-400">({coversPct}%)</span>
-        ) : null}
-      </span>
+      )}
       <span className={chip}>
         <span className={label}>Tables</span>
         <span className="tabular-nums">
           {summary.tables_in_use}/{summary.tables_total}
         </span>
       </span>
-      <span className={chip}>
-        <span className={label}>Unassigned</span>
-        <span className="tabular-nums">{summary.unassigned_count}</span>
-      </span>
-      {nextBookings !== null ? (
-        <span className={chip} title={`${nextBookings.guestsLine}; ${nextBookings.bookingsLine}`}>
-          <span className={label}>Next</span>
-          <span className="tabular-nums">{nextBookings.primaryValue}</span>
+      {onUnassignedChipClick ? (
+        <button
+          type="button"
+          className={chipButton}
+          onClick={onUnassignedChipClick}
+          disabled={summary.unassigned_count === 0}
+          title={summary.unassigned_count === 0 ? 'No unassigned bookings' : 'View unassigned bookings'}
+        >
+          <span className={label}>Unassigned</span>
+          <span className="tabular-nums">{summary.unassigned_count}</span>
+        </button>
+      ) : (
+        <span className={chip}>
+          <span className={label}>Unassigned</span>
+          <span className="tabular-nums">{summary.unassigned_count}</span>
         </span>
+      )}
+      {nextBookings !== null ? (
+        onNextChipClick && summary.next_bookings_slot != null ? (
+          <button
+            type="button"
+            className={chipButton}
+            onClick={onNextChipClick}
+            title={`${nextBookings.guestsLine}; ${nextBookings.bookingsLine}. Jump timeline to this arrival.`}
+          >
+            <span className={label}>Next</span>
+            <span className="tabular-nums">{nextBookings.primaryValue}</span>
+          </button>
+        ) : (
+          <span className={chip} title={`${nextBookings.guestsLine}; ${nextBookings.bookingsLine}`}>
+            <span className={label}>Next</span>
+            <span className="tabular-nums">{nextBookings.primaryValue}</span>
+          </span>
+        )
       ) : (
         <span className={chip}>
           <span className={label}>Combos</span>
@@ -144,6 +193,10 @@ export interface OperationsWorkspaceToolbarProps {
   showBookingActions?: boolean;
   /** Override KPI chips while keeping the same compact toolbar shell. */
   summaryContent?: ReactNode;
+  /** When set with default KPI chips, makes Live/Booked, Unassigned, and Next chips actionable. */
+  onCoversChipClick?: () => void;
+  onUnassignedChipClick?: () => void;
+  onNextChipClick?: () => void;
   /** Extra content shown below KPI chips in the Info panel. */
   infoPanelExtra?: ReactNode;
   /** Extra actions after Walk-in (e.g. Edit layout link). */
@@ -182,6 +235,9 @@ export function OperationsWorkspaceToolbar({
   showDateNavigator = true,
   showBookingActions = true,
   summaryContent,
+  onCoversChipClick,
+  onUnassignedChipClick,
+  onNextChipClick,
   infoPanelExtra,
   trailingActions,
 }: OperationsWorkspaceToolbarProps) {
@@ -212,7 +268,18 @@ export function OperationsWorkspaceToolbar({
 
   const close = useCallback(() => setOpen('none'), []);
   const infoPanelId = `${baseId}-info-panel`;
-  const summaryNode = summaryContent ?? <KpiChips summary={summary} />;
+  const summaryNode =
+    summaryContent ??
+    (onCoversChipClick || onUnassignedChipClick || onNextChipClick ? (
+      <KpiChips
+        summary={summary}
+        onCoversChipClick={onCoversChipClick}
+        onUnassignedChipClick={onUnassignedChipClick}
+        onNextChipClick={onNextChipClick}
+      />
+    ) : (
+      <KpiChips summary={summary} />
+    ));
 
   useEffect(() => {
     if (open === 'none' || inlineInfoOpen || inlineDateOpen || inlineControlsOpen || inlineSearchOpen || inlineTimelineOpen) return;
@@ -437,16 +504,16 @@ export function OperationsWorkspaceToolbar({
                   type="button"
                   onClick={() => setOpen((p) => (p === 'timeline' ? 'none' : 'timeline'))}
                   className={compact
-                    ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
+                    ? 'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
                     : 'inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm'}
-                  aria-label="Timeline controls"
+                  aria-label={timelineLabel ? `Timeline controls, currently set to ${timelineLabel}` : 'Timeline controls'}
                   aria-expanded={open === 'timeline'}
                   aria-controls={timelinePanelId}
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3.5 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                   </svg>
-                  {!compact && timelineLabel ? <span className="tabular-nums">{timelineLabel}</span> : null}
+                  {timelineLabel ? <span className="tabular-nums">{timelineLabel}</span> : null}
                 </button>
                 <ClampedFixedDropdown
                   open={inlineTimelineOpen}

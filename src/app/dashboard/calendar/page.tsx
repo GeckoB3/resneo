@@ -11,6 +11,7 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
+import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
@@ -33,9 +34,15 @@ export default async function CalendarPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('currency, booking_model, enabled_models, active_booking_models, pricing_tier')
+    .select('currency, booking_model, enabled_models, active_booking_models, pricing_tier, timezone')
     .eq('id', staff.venue_id)
     .single();
+  const rawVenueTimezone = (venue as { timezone?: string | null } | null | undefined)?.timezone;
+  const venueTimezone =
+    typeof rawVenueTimezone === 'string' && rawVenueTimezone.trim() !== ''
+      ? rawVenueTimezone.trim()
+      : 'Europe/London';
+  const calendarTodayIso = formatIsoDateInTimeZone(new Date(), venueTimezone);
   const currency = (venue?.currency as string) ?? 'GBP';
   const activeModels = resolveActiveBookingModels({
     pricingTier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier,
@@ -75,6 +82,7 @@ export default async function CalendarPage() {
             linkedPractitionerIds={linkedPractitionerIds}
             bookingModel={bookingModel}
             enabledModels={enabledModels}
+            calendarTodayIso={calendarTodayIso}
           />
         </div>
       </div>

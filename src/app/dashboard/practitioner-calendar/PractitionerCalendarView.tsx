@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +11,7 @@ import {
   type CSSProperties,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
@@ -78,6 +80,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 import {
   customerOccupyMinutes,
@@ -761,7 +764,7 @@ function BookingBlockInfoStack({
   const subtitleParts = [resourceName, showService && serviceName].filter(Boolean) as string[];
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : null;
   return (
-    <div className="mt-0.5 flex min-w-0 flex-col gap-1">
+    <div className="mt-0.5 flex w-fit max-w-full min-w-0 flex-col gap-1">
       {subtitle ? (
         <p
           className="min-w-0 truncate text-[10px] font-medium leading-snug text-slate-600/90"
@@ -784,17 +787,19 @@ function BookingBlockInfoStack({
   );
 }
 
-/** Resize strip (`h-6`); right-column actions sit BOOKING_RESIZE_HANDLE_GAP_ABOVE_PX above its top edge. */
-const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 24;
-const BOOKING_RESIZE_HANDLE_GAP_ABOVE_PX = 4;
-const BOOKING_RESERVE_ABOVE_RESIZE_PX =
-  BOOKING_RESIZE_HANDLE_HEIGHT_PX + BOOKING_RESIZE_HANDLE_GAP_ABOVE_PX;
+/** Bottom strip for duration resize; content above ends flush at the top edge of this strip (no extra gap). */
+const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
+const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX;
 
-/** Right-column py-1 (4px + 4px) + gap-0.5 between buttons (2px each). */
-const BOOKING_RIGHT_COL_PAD_Y = 8;
+/** Left strip for drag-to-reschedule; ~25% narrower than former w-6 / w-3. */
+const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
+const BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX = 9;
+
+/** Right-column top padding only (pt-1.5); bottom is flush above the resize strip. Gap-0.5 between buttons (2px each). */
+const BOOKING_RIGHT_COL_PAD_Y = 6;
 const BOOKING_RIGHT_GAP_PX = 2;
 
-/** Counts must mirror `CalendarBookingRightColumnActions` render order. */
+/** Counts must mirror `collectBookingRightColumnActionNodes` render order. */
 function countBookingRightColumnActions(b: Booking, graceMinutes: number): number {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return 0;
 
@@ -819,42 +824,191 @@ function countBookingRightColumnActions(b: Booking, graceMinutes: number): numbe
   return n;
 }
 
-function bookingRightColumnCompactStyle(
+/** Per-row height when actions would be cramped in a single column; allow multi-column grid when it improves row height. */
+const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
+
+/** Match Tailwind `w-[6.5rem]` action column unit for width budgeting (never squeeze guest name below this strip). */
+const BOOKING_ACTION_COL_WIDTH_REM = 6.5;
+const ROOT_FONT_PX = 16;
+/** Minimum width reserved for the guest name column alongside multi-column actions (measured on guest+actions row). */
+const MIN_GUEST_CONTACT_STRIP_PX = 112;
+const BOOKING_CARD_ROW_PAD_RESERVE_PX = 8;
+
+function bookingActionsStripMinWidthPx(columns: number): number {
+  if (columns <= 1) return BOOKING_ACTION_COL_WIDTH_REM * ROOT_FONT_PX;
+  return (
+    columns * BOOKING_ACTION_COL_WIDTH_REM * ROOT_FONT_PX +
+    (columns - 1) * BOOKING_RIGHT_GAP_PX
+  );
+}
+
+/** How many action columns fit without crowding the contact column (`shellRowWidthPx` = guest+actions row only). */
+function maxActionColumnsForGuestRow(shellRowWidthPx: number | null | undefined): number {
+  if (shellRowWidthPx == null || shellRowWidthPx <= 0) return 1;
+  const budget = shellRowWidthPx - BOOKING_CARD_ROW_PAD_RESERVE_PX - MIN_GUEST_CONTACT_STRIP_PX;
+  if (budget >= bookingActionsStripMinWidthPx(3)) return 3;
+  if (budget >= bookingActionsStripMinWidthPx(2)) return 2;
+  return 1;
+}
+
+/** Fill order: rightmost grid column top→bottom, then the column to its left, etc. */
+function assignRightFirstGridPositions(
+  buttonCount: number,
+  columnCount: number,
+): { col: number; row: number }[] {
+  const rows = Math.ceil(buttonCount / columnCount);
+  const positions: { col: number; row: number }[] = [];
+  let idx = 0;
+  for (let c = columnCount - 1; c >= 0 && idx < buttonCount; c--) {
+    for (let r = 0; r < rows && idx < buttonCount; r++) {
+      positions[idx] = { col: c, row: r };
+      idx++;
+    }
+  }
+  return positions;
+}
+
+function perActionRowHeightPx(
   blockHeightPx: number,
   actionCount: number,
-): { compact: boolean; fontSizePx: number; baseClass: string } {
+  columns: number,
+): number {
+  const pad = BOOKING_RIGHT_COL_PAD_Y;
+  const gap = BOOKING_RIGHT_GAP_PX;
+  const rows = Math.ceil(actionCount / columns);
+  const gapTotal = Math.max(0, rows - 1) * gap;
+  const available = blockHeightPx - pad - gapTotal;
+  return available / Math.max(1, rows);
+}
+
+interface BookingRightColumnLayoutResult {
+  compact: boolean;
+  columnCount: 1 | 2 | 3;
+  fontSizePx: number;
+  baseClass: string;
+}
+
+function bookingRightColumnLayout(
+  blockHeightPx: number,
+  actionCount: number,
+  options: {
+    narrow: boolean;
+    allowMultiColumn: boolean;
+    shellRowWidthPx: number | null | undefined;
+  },
+): BookingRightColumnLayoutResult {
+  const emptyBase =
+    'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]';
+
   if (actionCount <= 0) {
+    return { compact: false, columnCount: 1, fontSizePx: 10, baseClass: emptyBase };
+  }
+
+  const maxCols =
+    options.allowMultiColumn && !options.narrow
+      ? maxActionColumnsForGuestRow(options.shellRowWidthPx)
+      : 1;
+
+  const perSingle = perActionRowHeightPx(blockHeightPx, actionCount, 1);
+  const crampedSingle = perSingle < BOOKING_ACTION_ROW_COMFORT_MIN_PX;
+
+  let chosenCols: 1 | 2 | 3 = 1;
+  let chosenPerRow = perSingle;
+
+  if (
+    crampedSingle &&
+    options.allowMultiColumn &&
+    !options.narrow &&
+    actionCount >= 2 &&
+    maxCols >= 2
+  ) {
+    let bestCols: 1 | 2 | 3 = 1;
+    let bestPerRow = perSingle;
+
+    for (const c of [3, 2] as const) {
+      if (c > maxCols) continue;
+      const pr = perActionRowHeightPx(blockHeightPx, actionCount, c);
+      if (pr <= perSingle) continue;
+      if (pr > bestPerRow || (Math.abs(pr - bestPerRow) < 0.01 && c < bestCols)) {
+        bestPerRow = pr;
+        bestCols = c;
+      }
+    }
+    chosenCols = bestCols;
+    chosenPerRow = bestPerRow;
+  }
+
+  const compact = chosenPerRow < BOOKING_ACTION_ROW_COMFORT_MIN_PX;
+  const fontSizePx = Math.round(Math.max(7, Math.min(10, chosenPerRow * 0.38)));
+
+  if (chosenCols === 1) {
+    if (!compact) {
+      return {
+        compact: false,
+        columnCount: 1,
+        fontSizePx: 10,
+        baseClass:
+          'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+      };
+    }
     return {
-      compact: false,
-      fontSizePx: 10,
+      compact: true,
+      columnCount: 1,
+      fontSizePx,
       baseClass:
-      'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+        'flex min-h-0 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1.5 py-0.5 text-center [overflow-wrap:anywhere]',
     };
   }
-  const gapTotal = actionCount > 1 ? (actionCount - 1) * BOOKING_RIGHT_GAP_PX : 0;
-  const available = blockHeightPx - BOOKING_RIGHT_COL_PAD_Y - gapTotal;
-  const perButton = available / actionCount;
-  const comfortableMinPx = 30;
-  const compact = perButton < comfortableMinPx;
-  const fontSizePx = Math.round(Math.max(7, Math.min(10, perButton * 0.38)));
+
   if (!compact) {
     return {
       compact: false,
+      columnCount: chosenCols,
       fontSizePx: 10,
       baseClass:
-        'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+        'inline-flex h-full min-h-0 w-full shrink items-center justify-center whitespace-normal break-words px-1.5 py-1 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
     };
   }
   return {
     compact: true,
+    columnCount: chosenCols,
     fontSizePx,
     baseClass:
-      'flex min-h-0 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1.5 py-0.5 text-center [overflow-wrap:anywhere]',
+      'flex h-full min-h-0 w-full min-w-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1 py-0.5 text-center [overflow-wrap:anywhere]',
   };
 }
 
-/** Single flattened stack: attendance first, then status (same rules as before). */
-function CalendarBookingRightColumnActions({
+/** Measures guest+actions row width so multi-column actions never steal space needed for the contact name. */
+function BookingGuestActionsRowMeasured({
+  className,
+  style,
+  children,
+}: {
+  className?: string;
+  style?: CSSProperties;
+  children: (shellRowWidthPx: number | null) => ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.getBoundingClientRect().width));
+    ro.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={className} style={style}>
+      {children(width)}
+    </div>
+  );
+}
+
+/** Attendance / status action buttons in display order; used for single column or explicit grid placement. */
+function collectBookingRightColumnActionNodes({
   b,
   busy,
   graceMinutes,
@@ -876,8 +1030,8 @@ function CalendarBookingRightColumnActions({
   fontSizePx: number;
   compact: boolean;
   narrow?: boolean;
-}) {
-  if (b.status === 'Cancelled' || b.status === 'No-Show') return null;
+}): ReactElement[] {
+  if (b.status === 'Cancelled' || b.status === 'No-Show') return [];
 
   const arrived = Boolean(b.client_arrived_at);
   const canNoShow =
@@ -891,133 +1045,157 @@ function CalendarBookingRightColumnActions({
     ? ({ fontSize: `${fontSizePx}px`, lineHeight: 1.15 } as const)
     : undefined;
 
-  return (
-    <>
-      {showAttendanceConfirm && (
+  const out: ReactElement[] = [];
+
+  if (showAttendanceConfirm) {
+    out.push(
+      <button
+        key="attendance-confirm"
+        type="button"
+        disabled={busy}
+        style={textStyle}
+        onClick={() => onStaffAttendance(b.id, true)}
+        className={`${baseClass} rounded-lg font-semibold shadow-sm transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+        title="Confirm booking attendance"
+      >
+        {narrow ? 'Confirm' : 'Confirm Booking'}
+      </button>,
+    );
+  }
+  if (showAttendanceCancel) {
+    out.push(
+      <button
+        key="attendance-cancel"
+        type="button"
+        disabled={busy}
+        style={textStyle}
+        onClick={() => onStaffAttendance(b.id, false)}
+        className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
+        title="Cancel staff attendance confirmation"
+      >
+        {narrow ? 'Undo confirm' : 'Cancel confirmation'}
+      </button>,
+    );
+  }
+  if (b.status === 'Completed') {
+    out.push(
+      <button
+        key="reopen"
+        type="button"
+        disabled={busy}
+        style={textStyle}
+        onClick={() => onStatus(b.id, 'Seated')}
+        className={`${baseClass} rounded-lg bg-amber-50 font-medium text-amber-900 shadow-sm ring-1 ring-amber-200/80 transition hover:bg-amber-100 disabled:opacity-50`}
+      >
+        Reopen
+      </button>,
+    );
+  }
+  if (b.status !== 'Completed') {
+    if (b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') {
+      if (!arrived) {
+        out.push(
+          <button
+            key="arrived"
+            type="button"
+            disabled={busy}
+            style={textStyle}
+            onClick={() => onArrived(b.id, true)}
+            className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
+          >
+            Arrived
+          </button>,
+        );
+      } else {
+        out.push(
+          <button
+            key="arrived-clear"
+            type="button"
+            disabled={busy}
+            style={textStyle}
+            onClick={() => onArrived(b.id, false)}
+            className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
+          >
+            Clear
+          </button>,
+        );
+      }
+    }
+    if (b.status === 'Pending') {
+      out.push(
         <button
+          key="confirm-book"
           type="button"
           disabled={busy}
           style={textStyle}
-          onClick={() => onStaffAttendance(b.id, true)}
-          className={`${baseClass} rounded-lg font-semibold shadow-sm transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
-          title="Confirm booking attendance"
+          onClick={() => onStatus(b.id, 'Booked')}
+          className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
         >
-          {narrow ? 'Confirm' : 'Confirm Booking'}
-        </button>
-      )}
-      {showAttendanceCancel && (
+          Confirm
+        </button>,
+      );
+    }
+    if (b.status === 'Booked' || b.status === 'Confirmed') {
+      out.push(
         <button
-          type="button"
-          disabled={busy}
-          style={textStyle}
-          onClick={() => onStaffAttendance(b.id, false)}
-          className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
-          title="Cancel staff attendance confirmation"
-        >
-          {narrow ? 'Undo confirm' : 'Cancel confirmation'}
-        </button>
-      )}
-      {b.status === 'Completed' && (
-        <button
+          key="start"
           type="button"
           disabled={busy}
           style={textStyle}
           onClick={() => onStatus(b.id, 'Seated')}
-        className={`${baseClass} rounded-lg bg-amber-50 font-medium text-amber-900 shadow-sm ring-1 ring-amber-200/80 transition hover:bg-amber-100 disabled:opacity-50`}
+          className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
         >
-          Reopen
-        </button>
-      )}
-      {b.status !== 'Completed' && (
-        <>
-          {(b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') && (
-            <>
-              {!arrived ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  style={textStyle}
-                  onClick={() => onArrived(b.id, true)}
-                  className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
-                >
-                  Arrived
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  style={textStyle}
-                  onClick={() => onArrived(b.id, false)}
-                  className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
-                >
-                  Clear
-                </button>
-              )}
-            </>
-          )}
-          {b.status === 'Pending' && (
-            <button
-              type="button"
-              disabled={busy}
-              style={textStyle}
-              onClick={() => onStatus(b.id, 'Booked')}
-              className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
-            >
-              Confirm
-            </button>
-          )}
-          {(b.status === 'Booked' || b.status === 'Confirmed') && (
-            <button
-              type="button"
-              disabled={busy}
-              style={textStyle}
-              onClick={() => onStatus(b.id, 'Seated')}
-              className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
-            >
-              Start
-            </button>
-          )}
-          {b.status === 'Seated' && (
-            <>
-              <button
-                type="button"
-                disabled={busy}
-                style={textStyle}
-                onClick={() => onStatus(b.id, 'Booked')}
-                className={`${baseClass} rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
-                title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
-              >
-                {narrow ? 'Undo' : 'Undo start'}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                style={textStyle}
-                onClick={() => onStatus(b.id, 'Completed')}
-                className={`${baseClass} rounded-lg bg-[#22C55E] font-semibold text-white shadow-sm shadow-emerald-900/20 transition hover:bg-[#16A34A] disabled:opacity-50`}
-              >
-                Complete
-              </button>
-            </>
-          )}
-          {(b.status === 'Booked' || b.status === 'Confirmed') && canNoShow && (
-            <button
-              type="button"
-              disabled={busy}
-              style={textStyle}
-              onClick={() => onStatus(b.id, 'No-Show')}
-              className={`${baseClass} rounded-lg text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50`}
-            >
-              No show
-            </button>
-          )}
-        </>
-      )}
-    </>
-  );
+          Start
+        </button>,
+      );
+    }
+    if (b.status === 'Seated') {
+      out.push(
+        <button
+          key="undo-start"
+          type="button"
+          disabled={busy}
+          style={textStyle}
+          onClick={() => onStatus(b.id, 'Booked')}
+          className={`${baseClass} rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
+          title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
+        >
+          {narrow ? 'Undo' : 'Undo start'}
+        </button>,
+      );
+      out.push(
+        <button
+          key="complete"
+          type="button"
+          disabled={busy}
+          style={textStyle}
+          onClick={() => onStatus(b.id, 'Completed')}
+          className={`${baseClass} rounded-lg bg-[#22C55E] font-semibold text-white shadow-sm shadow-emerald-900/20 transition hover:bg-[#16A34A] disabled:opacity-50`}
+        >
+          Complete
+        </button>,
+      );
+    }
+    if ((b.status === 'Booked' || b.status === 'Confirmed') && canNoShow) {
+      out.push(
+        <button
+          key="no-show"
+          type="button"
+          disabled={busy}
+          style={textStyle}
+          onClick={() => onStatus(b.id, 'No-Show')}
+          className={`${baseClass} rounded-lg text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50`}
+        >
+          No show
+        </button>,
+      );
+    }
+  }
+
+  return out;
 }
 
-/** Right edge: fixed width; actions share vertical space when the block is shorter than natural stack. */
+/** Right edge: fixed width (wider when multi-column actions); actions share vertical space when the block is short. */
 function CalendarBookingRightColumn({
   b,
   busy,
@@ -1027,6 +1205,8 @@ function CalendarBookingRightColumn({
   onArrived,
   onStaffAttendance,
   narrow = false,
+  allowMultiColumnActions = false,
+  shellRowWidthPx,
 }: {
   b: Booking;
   busy: boolean;
@@ -1036,18 +1216,53 @@ function CalendarBookingRightColumn({
   onArrived: (id: string, arrived: boolean) => void;
   onStaffAttendance: (id: string, confirmed: boolean) => void;
   narrow?: boolean;
+  /** Full-width lane only: horizontal room to widen the actions strip when helpful. */
+  allowMultiColumnActions?: boolean;
+  /** Width of guest+actions row; constrains action columns so the contact name is not cropped. */
+  shellRowWidthPx?: number | null;
 }) {
   const actionCount = countBookingRightColumnActions(b, graceMinutes);
-  const buttonStyle = bookingRightColumnCompactStyle(blockHeightPx, actionCount);
-  const compact = narrow || buttonStyle.compact;
-  const fontSizePx = narrow ? Math.min(9, buttonStyle.fontSizePx) : buttonStyle.fontSizePx;
+  const layout = bookingRightColumnLayout(blockHeightPx, actionCount, {
+    narrow,
+    allowMultiColumn: allowMultiColumnActions,
+    shellRowWidthPx,
+  });
+  const compact = narrow || layout.compact;
+  const fontSizePx = narrow ? Math.min(9, layout.fontSizePx) : layout.fontSizePx;
   const baseClass = narrow
     ? 'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-0.5 text-center text-[9px] leading-tight [overflow-wrap:anywhere]'
-    : buttonStyle.baseClass;
+    : layout.baseClass;
+
   const widthClass = narrow
-    ? 'mb-2 w-full min-w-0 max-w-none px-1 pb-0.5'
-    : 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] py-1.5 pl-1.5 pr-1';
+    ? 'mb-2 w-full min-w-0 max-w-none px-1 pb-0'
+    : layout.columnCount === 3
+      ? 'min-w-[17rem] w-[19.5rem] max-w-[55%] shrink-0 pt-1.5 pb-0 pl-1.5 pr-1'
+      : layout.columnCount === 2
+        ? 'min-w-[11rem] w-[13rem] max-w-[50%] shrink-0 pt-1.5 pb-0 pl-1.5 pr-1'
+        : 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] pt-1.5 pb-0 pl-1.5 pr-1';
+
   const heightClass = narrow ? 'h-auto' : 'h-full';
+
+  const justifyActions =
+    layout.columnCount > 1 || (!layout.compact && !narrow) ? 'justify-end' : '';
+
+  const actionNodes = collectBookingRightColumnActionNodes({
+    b,
+    busy,
+    graceMinutes,
+    onStatus,
+    onArrived,
+    onStaffAttendance,
+    baseClass,
+    fontSizePx,
+    compact,
+    narrow,
+  });
+
+  const useGrid = !narrow && layout.columnCount > 1 && actionNodes.length > 0;
+  const positions = useGrid
+    ? assignRightFirstGridPositions(actionNodes.length, layout.columnCount)
+    : null;
 
   return (
     <div
@@ -1055,20 +1270,35 @@ function CalendarBookingRightColumn({
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className={`flex min-h-0 w-full flex-1 flex-col gap-0.5 ${compact ? '' : 'justify-end'}`}
+        className={`flex min-h-0 w-full flex-1 flex-col gap-0.5 ${justifyActions}`}
       >
-        <CalendarBookingRightColumnActions
-          b={b}
-          busy={busy}
-          graceMinutes={graceMinutes}
-          onStatus={onStatus}
-          onArrived={onArrived}
-          onStaffAttendance={onStaffAttendance}
-          baseClass={baseClass}
-          fontSizePx={fontSizePx}
-          compact={compact}
-          narrow={narrow}
-        />
+        {useGrid && positions ? (
+          <div
+            className="grid w-full gap-x-0.5 gap-y-0.5"
+            style={{
+              gridTemplateColumns: `repeat(${layout.columnCount}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${Math.ceil(actionNodes.length / layout.columnCount)}, minmax(0, 1fr))`,
+            }}
+          >
+            {actionNodes.map((node, i) => {
+              const pos = positions[i];
+              return (
+                <div
+                  key={node.key ?? `action-${i}`}
+                  className="min-h-0 min-w-0"
+                  style={{
+                    gridColumn: pos.col + 1,
+                    gridRow: pos.row + 1,
+                  }}
+                >
+                  {node}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <>{actionNodes}</>
+        )}
       </div>
     </div>
   );
@@ -1308,6 +1538,7 @@ export function PractitionerCalendarView({
   linkedPractitionerIds,
   bookingModel = 'unified_scheduling',
   enabledModels = [],
+  calendarTodayIso,
 }: {
   venueId: string;
   currency?: string;
@@ -1318,6 +1549,11 @@ export function PractitionerCalendarView({
   bookingModel?: BookingModel;
   /** Secondary models; used to show Events / Classes lanes on the day grid. */
   enabledModels?: BookingModel[];
+  /**
+   * yyyy-mm-dd for “today” in the venue timezone, computed on the server.
+   * Keeps the toolbar date label and initial navigation state aligned across SSR and hydration.
+   */
+  calendarTodayIso?: string;
 }) {
   const { addToast } = useToast();
   const myCalendarIds = useMemo(
@@ -1325,30 +1561,15 @@ export function PractitionerCalendarView({
     [linkedPractitionerIds],
   );
   const preferencesKey = practitionerCalendarPreferencesKey(venueId);
-  const rememberedPreferences = useMemo(
-    () => readSessionPreference<PractitionerCalendarPreferences>(
-      preferencesKey,
-      {},
-      isPractitionerCalendarPreferences,
-    ),
-    [preferencesKey],
-  );
-  const [viewMode, setViewMode] = useState<ViewMode>(rememberedPreferences.viewMode ?? 'day');
-  const [date, setDate] = useState(() => {
-    if (rememberedPreferences.date) return rememberedPreferences.date;
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  });
-  const [weekStart, setWeekStart] = useState(() => {
-    if (rememberedPreferences.weekStart) return rememberedPreferences.weekStart;
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  });
-  const [monthAnchor, setMonthAnchor] = useState(() => {
-    if (rememberedPreferences.monthAnchor) return rememberedPreferences.monthAnchor;
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  });
+
+  /** Stable default calendar date: venue-local when provided; UTC calendar date avoids SSR/client TZ mismatch. */
+  const initialIsoDate =
+    calendarTodayIso ?? formatIsoDateInTimeZone(new Date(), 'UTC');
+
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const [date, setDate] = useState(initialIsoDate);
+  const [weekStart, setWeekStart] = useState(initialIsoDate);
+  const [monthAnchor, setMonthAnchor] = useState(initialIsoDate);
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
@@ -1370,11 +1591,9 @@ export function PractitionerCalendarView({
     block: ScheduleBlockDTO;
   } | null>(null);
   const [visibleCalendarIdsState, setVisibleCalendarIdsState] = useState<string[] | null>(() =>
-    rememberedPreferences.visibleCalendarIdsState !== undefined
-      ? rememberedPreferences.visibleCalendarIdsState
-      : defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
+    defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
   );
-  const [filterStatus, setFilterStatus] = useState<string>(rememberedPreferences.filterStatus ?? 'all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
@@ -1576,8 +1795,30 @@ export function PractitionerCalendarView({
     },
     [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
   );
-  const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
-  const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+
+  /** Session preferences are applied after mount so the first paint matches SSR HTML. */
+  const [calendarPrefsHydrated, setCalendarPrefsHydrated] = useState(false);
+
+  useEffect(() => {
+    const remembered = readSessionPreference<PractitionerCalendarPreferences>(
+      preferencesKey,
+      {},
+      isPractitionerCalendarPreferences,
+    );
+    if (remembered.viewMode) setViewMode(remembered.viewMode);
+    if (remembered.date) setDate(remembered.date);
+    if (remembered.weekStart) setWeekStart(remembered.weekStart);
+    if (remembered.monthAnchor) setMonthAnchor(remembered.monthAnchor);
+    if (remembered.visibleCalendarIdsState !== undefined) {
+      setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
+    }
+    if (remembered.filterStatus) setFilterStatus(remembered.filterStatus);
+    if (remembered.startHourOverride !== undefined) setStartHourOverride(remembered.startHourOverride);
+    if (remembered.endHourOverride !== undefined) setEndHourOverride(remembered.endHourOverride);
+    setCalendarPrefsHydrated(true);
+  }, [preferencesKey]);
   const startHour = startHourOverride ?? derivedStartHour;
   const endHour = endHourOverride ?? derivedEndHour;
   const TOTAL_SLOTS = (() => {
@@ -1586,6 +1827,7 @@ export function PractitionerCalendarView({
   })();
 
   useEffect(() => {
+    if (!calendarPrefsHydrated) return;
     writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, {
       viewMode,
       date,
@@ -1597,6 +1839,7 @@ export function PractitionerCalendarView({
       endHourOverride,
     });
   }, [
+    calendarPrefsHydrated,
     preferencesKey,
     viewMode,
     date,
@@ -2702,6 +2945,7 @@ export function PractitionerCalendarView({
           onNavigateDay={navigateDay}
           onDateChange={navigateDayDirect}
           date={date}
+          todayIso={initialIsoDate}
           weekStart={weekStart}
           monthAnchor={monthAnchor}
           startHour={startHour}
@@ -3307,7 +3551,17 @@ export function PractitionerCalendarView({
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       type="button"
-                                      className={`relative z-[2] ${isOverlapLane ? 'w-3 text-[0]' : 'w-6 text-[10px]'} shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing`}
+                                      className={`relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing ${
+                                        isOverlapLane ? 'text-[0]' : 'text-[10px]'
+                                      }`}
+                                      style={{
+                                        width: isOverlapLane
+                                          ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                          : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                        minWidth: isOverlapLane
+                                          ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                          : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                      }}
                                       aria-label="Drag to reschedule"
                                       {...handle.listeners}
                                       {...handle.attributes}
@@ -3315,7 +3569,7 @@ export function PractitionerCalendarView({
                                       ⋮⋮
                                     </button>
                                   ) : null}
-                                    <div
+                                    <BookingGuestActionsRowMeasured
                                       className={`relative z-[1] flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
                                         isOverlapLane ? 'flex-col' : 'flex-row'
                                       }`}
@@ -3323,65 +3577,71 @@ export function PractitionerCalendarView({
                                         canDrag ? { paddingBottom: BOOKING_RESERVE_ABOVE_RESIZE_PX } : undefined
                                       }
                                     >
-                                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
-                                        className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                                          blockH < 56 ? 'py-1.5' : 'py-2'
-                                        }`}
-                                        aria-label={`Open booking details for ${b.guest_name}`}
-                                      >
-                                        <div className="flex min-w-0 shrink-0 flex-col gap-0.5">
-                                          <div className="flex min-w-0 items-center justify-between gap-2">
-                                            <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
-                                              {b.guest_name}
-                                            </span>
-                                            <div className="flex shrink-0 items-center gap-1">
-                                              {arrived &&
-                                              b.status !== 'Seated' &&
-                                              ['Pending', 'Booked', 'Confirmed'].includes(b.status) ? (
-                                                <span
-                                                  className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                  aria-hidden
-                                                  title="Waiting"
+                                      {(shellRowWidthPx) => (
+                                        <>
+                                          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                              className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                                                blockH < 56 ? 'py-1.5' : 'py-2'
+                                              }`}
+                                              aria-label={`Open booking details for ${b.guest_name}`}
+                                            >
+                                              <div className="flex min-w-0 shrink-0 flex-col items-start gap-0.5">
+                                                <div className="flex min-w-0 w-full items-center justify-between gap-2">
+                                                  <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
+                                                    {b.guest_name}
+                                                  </span>
+                                                  <div className="flex shrink-0 items-center gap-1">
+                                                    {arrived &&
+                                                    b.status !== 'Seated' &&
+                                                    ['Pending', 'Booked', 'Confirmed'].includes(b.status) ? (
+                                                      <span
+                                                        className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
+                                                        aria-hidden
+                                                        title="Waiting"
+                                                      />
+                                                    ) : null}
+                                                  </div>
+                                                </div>
+                                                <BookingBlockInfoStack
+                                                  resourceName={showSubtitle ? resName : null}
+                                                  serviceName={showSubtitle ? svc?.name : null}
+                                                  start={b.booking_time.slice(0, 5)}
+                                                  end={displayEndHm}
+                                                  statusBadge={<CalendarBookingStatusBadge b={b} />}
+                                                  showService={isOverlapLane || blockH >= 70}
                                                 />
+                                              </div>
+                                              {showPillsRow ? (
+                                                <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
+                                                  <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
+                                                    <BookingBlockPills b={b} />
+                                                  </div>
+                                                </div>
                                               ) : null}
-                                            </div>
+                                              <div className="min-h-0 min-w-0 flex-1" aria-hidden />
+                                            </button>
                                           </div>
-                                          <BookingBlockInfoStack
-                                            resourceName={showSubtitle ? resName : null}
-                                            serviceName={showSubtitle ? svc?.name : null}
-                                            start={b.booking_time.slice(0, 5)}
-                                            end={displayEndHm}
-                                            statusBadge={<CalendarBookingStatusBadge b={b} />}
-                                            showService={isOverlapLane || blockH >= 70}
+                                          <CalendarBookingRightColumn
+                                            b={b}
+                                            busy={qBusy}
+                                            blockHeightPx={Math.max(
+                                              0,
+                                              height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
+                                            )}
+                                            graceMinutes={noShowGraceMinutes}
+                                            onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                            onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                            onStaffAttendance={patchStaffAttendance}
+                                            narrow={isOverlapLane}
+                                            allowMultiColumnActions={layout.laneCount === 1 && !isOverlapLane}
+                                            shellRowWidthPx={shellRowWidthPx}
                                           />
-                                        </div>
-                                        {showPillsRow ? (
-                                          <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
-                                            <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
-                                              <BookingBlockPills b={b} />
-                                            </div>
-                                          </div>
-                                        ) : null}
-                                        <div className="min-h-0 min-w-0 flex-1" aria-hidden />
-                                      </button>
-                                    </div>
-                                    <CalendarBookingRightColumn
-                                      b={b}
-                                      busy={qBusy}
-                                      blockHeightPx={Math.max(
-                                        0,
-                                        height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
+                                        </>
                                       )}
-                                      graceMinutes={noShowGraceMinutes}
-                                      onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                      onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                      onStaffAttendance={patchStaffAttendance}
-                                      narrow={isOverlapLane}
-                                    />
-                                  </div>
+                                    </BookingGuestActionsRowMeasured>
                                   {canDrag ? (
                                     <>
                                       {resizePreviewEnd?.bookingId === b.id ? (
@@ -3397,7 +3657,8 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className="absolute bottom-0 left-0 right-0 z-30 h-6 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        className="absolute bottom-0 left-0 right-0 z-30 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                         onPointerDown={beginAppointmentResize(b)}
                                       />
                                     </>
@@ -3447,87 +3708,93 @@ export function PractitionerCalendarView({
                                 style={bookingBlockCardStyle(palette)}
                                 title={serviceTitle || undefined}
                               >
-                                <div
+                                <BookingGuestActionsRowMeasured
                                   className={`flex min-h-0 min-w-0 flex-1 items-stretch ${
                                     isOverlapLane ? 'flex-col overflow-hidden' : 'flex-row'
                                   }`}
                                 >
-                                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                                    {items.map((b, segIdx) => {
-                                      const dur = getBookingDuration(b);
-                                      const sid = serviceIdForBooking(b);
-                                      const svc = sid ? serviceMap.get(sid) : null;
-                                      const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
-                                      const showSegMeta = isOverlapLane || segmentApproxPx >= 40;
-                                      const showSegPills = segmentApproxPx >= 38;
-                                      const showSegService = segmentApproxPx >= 52;
-                                      return (
-                                        <div
-                                          key={b.id}
-                                          className="relative flex min-h-0 flex-col overflow-hidden"
-                                          style={{ flex: dur, backgroundColor: palette.bg }}
-                                        >
-                                          <BookingProcessingStrip b={b} serviceMap={serviceMap} wallPaintMinutes={dur} />
-                                          <button
-                                            type="button"
-                                            onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
-                                            className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
-                                            aria-label={`Open booking details for ${b.guest_name}`}
-                                          >
-                                            <div className="flex min-w-0 shrink-0 flex-col gap-0.5 overflow-hidden">
-                                              <div className="flex min-w-0 items-center justify-between gap-2">
-                                                <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
-                                                  {segIdx === 0 ? b.guest_name : '\u00a0'}
-                                                </span>
-                                                {segIdx === 0 ? (
-                                                  <div className="flex shrink-0 items-center gap-1">
-                                                    {arrived &&
-                                                    first.status !== 'Seated' &&
-                                                    ['Pending', 'Booked', 'Confirmed'].includes(first.status) ? (
-                                                      <span
-                                                        className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                        aria-hidden
-                                                        title="Waiting"
-                                                      />
+                                  {(shellRowWidthPx) => (
+                                    <>
+                                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                        {items.map((b, segIdx) => {
+                                          const dur = getBookingDuration(b);
+                                          const sid = serviceIdForBooking(b);
+                                          const svc = sid ? serviceMap.get(sid) : null;
+                                          const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
+                                          const showSegMeta = isOverlapLane || segmentApproxPx >= 40;
+                                          const showSegPills = segmentApproxPx >= 38;
+                                          const showSegService = segmentApproxPx >= 52;
+                                          return (
+                                            <div
+                                              key={b.id}
+                                              className="relative flex min-h-0 flex-col overflow-hidden"
+                                              style={{ flex: dur, backgroundColor: palette.bg }}
+                                            >
+                                              <BookingProcessingStrip b={b} serviceMap={serviceMap} wallPaintMinutes={dur} />
+                                              <button
+                                                type="button"
+                                                onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                                className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+                                                aria-label={`Open booking details for ${b.guest_name}`}
+                                              >
+                                                <div className="flex min-w-0 shrink-0 flex-col items-start gap-0.5 overflow-hidden">
+                                                  <div className="flex min-w-0 w-full items-center justify-between gap-2">
+                                                    <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
+                                                      {segIdx === 0 ? b.guest_name : '\u00a0'}
+                                                    </span>
+                                                    {segIdx === 0 ? (
+                                                      <div className="flex shrink-0 items-center gap-1">
+                                                        {arrived &&
+                                                        first.status !== 'Seated' &&
+                                                        ['Pending', 'Booked', 'Confirmed'].includes(first.status) ? (
+                                                          <span
+                                                            className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
+                                                            aria-hidden
+                                                            title="Waiting"
+                                                          />
+                                                        ) : null}
+                                                      </div>
                                                     ) : null}
                                                   </div>
-                                                ) : null}
-                                              </div>
-                                              {showSegMeta ? (
-                                                <BookingBlockInfoStack
-                                                  resourceName={null}
-                                                  serviceName={svc?.name}
-                                                  start={b.booking_time.slice(0, 5)}
-                                                  end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
-                                                  statusBadge={segIdx === 0 ? <CalendarBookingStatusBadge b={first} /> : undefined}
-                                                  showService={isOverlapLane || showSegService}
-                                                />
-                                              ) : null}
-                                            </div>
-                                            {!isOverlapLane && showSegPills ? (
-                                              <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1">
-                                                <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
-                                                  <BookingBlockPills b={b} />
+                                                  {showSegMeta ? (
+                                                    <BookingBlockInfoStack
+                                                      resourceName={null}
+                                                      serviceName={svc?.name}
+                                                      start={b.booking_time.slice(0, 5)}
+                                                      end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
+                                                      statusBadge={segIdx === 0 ? <CalendarBookingStatusBadge b={first} /> : undefined}
+                                                      showService={isOverlapLane || showSegService}
+                                                    />
+                                                  ) : null}
                                                 </div>
-                                              </div>
-                                            ) : null}
-                                            <div className="min-h-0 min-w-0 flex-1" aria-hidden />
-                                          </button>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <CalendarBookingRightColumn
-                                    b={first}
-                                    busy={qBusy}
-                                    blockHeightPx={height}
-                                    graceMinutes={noShowGraceMinutes}
-                                    onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                    onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                    onStaffAttendance={patchStaffAttendance}
-                                    narrow={isOverlapLane}
-                                  />
-                                </div>
+                                                {!isOverlapLane && showSegPills ? (
+                                                  <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1">
+                                                    <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
+                                                      <BookingBlockPills b={b} />
+                                                    </div>
+                                                  </div>
+                                                ) : null}
+                                                <div className="min-h-0 min-w-0 flex-1" aria-hidden />
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <CalendarBookingRightColumn
+                                        b={first}
+                                        busy={qBusy}
+                                        blockHeightPx={height}
+                                        graceMinutes={noShowGraceMinutes}
+                                        onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                        onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                        onStaffAttendance={patchStaffAttendance}
+                                        narrow={isOverlapLane}
+                                        allowMultiColumnActions={layout.laneCount === 1 && !isOverlapLane}
+                                        shellRowWidthPx={shellRowWidthPx}
+                                      />
+                                    </>
+                                  )}
+                                </BookingGuestActionsRowMeasured>
                               </div>
                             )}
                           </DraggableBookingShell>

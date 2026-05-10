@@ -25,6 +25,8 @@ export interface PractitionerCalendarToolbarProps {
   controlsPanel: ReactNode;
   controlsLabel?: string;
   summaryContent: ReactNode;
+  /** yyyy-mm-dd for “today” — must match SSR (venue-local from server) to avoid hydration mismatches. */
+  todayIso?: string;
 }
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -88,6 +90,7 @@ export function PractitionerCalendarToolbar({
   controlsPanel,
   controlsLabel = 'Filter',
   summaryContent,
+  todayIso,
 }: PractitionerCalendarToolbarProps) {
   const periodLabel = formatCalendarPeriodLabel(viewMode, date, weekStart, monthAnchor);
   const viewModePanelId = useId();
@@ -240,6 +243,7 @@ export function PractitionerCalendarToolbar({
       summary={toolbarSummary}
       summaryContent={summaryContent}
       date={date}
+      todayIso={todayIso}
       dateLabel={periodLabel}
       onDateChange={onDateChange}
       onPreviousDate={() => onNavigateDay(-1)}

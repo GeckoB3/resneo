@@ -152,6 +152,8 @@ export interface OperationsWorkspaceToolbarProps {
   title: string;
   summary: ViewToolbarSummary;
   date: string;
+  /** yyyy-mm-dd for “today”; when set, avoids local `new Date()` mismatch between SSR and the browser. */
+  todayIso?: string;
   onDateChange: (date: string) => void;
   onPreviousDate?: () => void;
   onNextDate?: () => void;
@@ -209,6 +211,7 @@ export function OperationsWorkspaceToolbar({
   title,
   summary,
   date,
+  todayIso: todayIsoProp,
   onDateChange,
   onPreviousDate,
   onNextDate,
@@ -258,7 +261,7 @@ export function OperationsWorkspaceToolbar({
   const timelineTriggerRef = useRef<HTMLButtonElement>(null);
   const controlsTriggerRef = useRef<HTMLButtonElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const todayIso = formatDateInput(new Date());
+  const todayIso = todayIsoProp ?? formatDateInput(new Date());
   const isToday = date === todayIso;
   const inlineInfoOpen = compact && open === 'info';
   const inlineDateOpen = compact && open === 'date';

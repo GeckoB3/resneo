@@ -51,9 +51,15 @@ function timeToMinutes(t: string): number {
 }
 
 function minutesToTime(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
+  const wallMinutes = m % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const min = wallMinutes % 60;
   return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+}
+
+function timelineMinutesForWallTime(time: string, startMinutes: number): number {
+  const minutes = timeToMinutes(time.slice(0, 5));
+  return minutes < startMinutes ? minutes + 24 * 60 : minutes;
 }
 
 function timelineGridLineClass(minutes: number, palette: 'slate' | 'emerald' = 'slate'): string {
@@ -406,7 +412,14 @@ export function TimelineGrid({
   }, []);
 
   const startMin = useMemo(() => serviceStartTime ? timeToMinutes(serviceStartTime) : 9 * 60, [serviceStartTime]);
-  const endMin = useMemo(() => serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60, [serviceEndTime]);
+  const endMin = useMemo(() => {
+    if (!serviceEndTime) return 23 * 60;
+    let minutes = timeToMinutes(serviceEndTime);
+    if (minutes <= startMin) {
+      minutes += 24 * 60;
+    }
+    return minutes;
+  }, [serviceEndTime, startMin]);
   const slotInterval = slotIntervalMinutes ?? 15;
   const isToday = useMemo(() => currentDate === formatLocalDateInput(new Date()), [currentDate]);
 
@@ -424,10 +437,10 @@ export function TimelineGrid({
   }, [startMin, endMin, slotInterval]);
   const hourMarkers = useMemo(() => {
     return timeSlots
-      .filter((time) => timeToMinutes(time) % 60 === 0)
+      .filter((time) => timelineMinutesForWallTime(time, startMin) % 60 === 0)
       .map((time) => ({
         time,
-        leftPx: ((timeToMinutes(time) - startMin) / slotInterval) * SLOT_WIDTH,
+        leftPx: ((timelineMinutesForWallTime(time, startMin) - startMin) / slotInterval) * SLOT_WIDTH,
       }));
   }, [SLOT_WIDTH, slotInterval, startMin, timeSlots]);
 
@@ -448,7 +461,7 @@ export function TimelineGrid({
       if (!cell.booking_id || !cell.booking_details || seenBookings.has(cell.booking_id)) continue;
       seenBookings.add(cell.booking_id);
 
-      const bStart = timeToMinutes(cell.booking_details.start_time);
+      const bStart = timelineMinutesForWallTime(cell.booking_details.start_time, startMin);
       const scheduledEnd = endMinutesAfterStart(cell.booking_details.start_time, cell.booking_details.end_time);
       const bEnd = effectiveBookingEndMinutes(
         cell.booking_details.status,
@@ -508,7 +521,7 @@ export function TimelineGrid({
       if (seenBookings.has(b.id)) continue;
       seenBookings.add(b.id);
 
-      const bStart = timeToMinutes(b.start_time);
+      const bStart = timelineMinutesForWallTime(b.start_time, startMin);
       const scheduledEnd = endMinutesAfterStart(b.start_time, b.end_time);
       const bEnd = effectiveBookingEndMinutes(
         b.status,
@@ -875,8 +888,8 @@ export function TimelineGrid({
   }, [cancelQueuedDragPreview, onDragValidation]);
 
   const getBlockDurationMinutes = useCallback((block: BookingBlock) => {
-    const start = timeToMinutes(block.start_time);
-    const end = block.end_time ? timeToMinutes(block.end_time) : start + 90;
+    const start = timeToMinutes(block.start_time.slice(0, 5));
+    const end = block.end_time ? endMinutesAfterStart(block.start_time, block.end_time) : start + 90;
     return Math.max(15, end - start);
   }, []);
 
@@ -888,7 +901,7 @@ export function TimelineGrid({
 
   const isInvalidTimeTarget = useCallback((tableId: string, time: string, block: BookingBlock): boolean => {
     const duration = getBlockDurationMinutes(block);
-    const candidateStart = timeToMinutes(time);
+      const candidateStart = timelineMinutesForWallTime(time, startMin);
     const candidateEnd = candidateStart + duration;
 
     const targetCell = cellMap.get(`${tableId}__${time}`);
@@ -899,9 +912,9 @@ export function TimelineGrid({
       if (cell.booking_id === block.id) continue;
       if (cell.table_id !== tableId) continue;
 
-      const existingStart = timeToMinutes(cell.booking_details.start_time);
+      const existingStart = timelineMinutesForWallTime(cell.booking_details.start_time, startMin);
       const existingEnd = cell.booking_details.end_time
-        ? timeToMinutes(cell.booking_details.end_time)
+        ? endMinutesAfterStart(cell.booking_details.start_time, cell.booking_details.end_time)
         : existingStart + 90;
       if (candidateStart < existingEnd && candidateEnd > existingStart) {
         return true;
@@ -909,7 +922,7 @@ export function TimelineGrid({
     }
 
     return false;
-  }, [cells, cellMap, getBlockDurationMinutes]);
+  }, [cells, cellMap, getBlockDurationMinutes, startMin]);
 
   const resolveTargetTableIds = useCallback((targetTableId: string, block: BookingBlock): string[] | null => {
     const context = {
@@ -974,7 +987,7 @@ export function TimelineGrid({
         return Boolean(snappedCell?.is_blocked) || isInvalidTimeTarget(previewTableId, snappedTime, block);
       });
       queueDragDropPreview({ kind: 'time', time: snappedTime, invalid });
-      const start = timeToMinutes(snappedTime);
+      const start = timelineMinutesForWallTime(snappedTime, startMin);
       setTimeDragTarget({
         tableIds: previewTableIds,
         startMin: start,
@@ -1007,7 +1020,7 @@ export function TimelineGrid({
 
     queueDragDropPreview(null);
     setTimeDragTarget(null);
-  }, [cellMap, getBlockDurationMinutes, isInvalidTimeTarget, queueDragDropPreview, resolveTargetTableIds, snappedTimeFromDragDelta, tables]);
+  }, [cellMap, getBlockDurationMinutes, isInvalidTimeTarget, queueDragDropPreview, resolveTargetTableIds, snappedTimeFromDragDelta, startMin, tables]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setContextMenu(null);
@@ -1410,7 +1423,7 @@ export function TimelineGrid({
                         activeDrag.table_id === table.id &&
                         isInvalidTimeTarget(table.id, time, activeDrag)
                       );
-                      const cellStartMin = timeToMinutes(time);
+                      const cellStartMin = timelineMinutesForWallTime(time, startMin);
                       const dropPreview = timeDragTarget;
                       const isTimeDropPreview =
                         dropPreview !== null &&
@@ -1494,7 +1507,7 @@ export function TimelineGrid({
                   style={{ width: gridWidth, height: UNASSIGNED_HEADER_HEIGHT }}
                 >
                   {timeSlots.map((time) => {
-                    const cellStartMin = timeToMinutes(time);
+                    const cellStartMin = timelineMinutesForWallTime(time, startMin);
                     const gridLineClass = timelineGridLineClass(cellStartMin, 'emerald');
                     const timeBlockBandClass = timelineTimeBlockBandClass(cellStartMin, startMin, slotInterval, 'emerald');
                     return (
@@ -1509,7 +1522,7 @@ export function TimelineGrid({
                 {unassignedBlocks.map((block) => (
                   <div key={block.id} className="relative flex shrink-0 bg-emerald-50/30" style={{ width: gridWidth, height: ROW_HEIGHT }}>
                     {timeSlots.map((time) => {
-                      const cellStartMin = timeToMinutes(time);
+                      const cellStartMin = timelineMinutesForWallTime(time, startMin);
                       const dropPreview = timeDragTarget;
                       const isTimeDropPreview =
                         dropPreview !== null &&
@@ -1863,7 +1876,7 @@ function DraggableBlock({
 
     const pointerId = e.pointerId;
     const start = timeToMinutes(block.start_time.slice(0, 5));
-    const currentEnd = block.end_time ? timeToMinutes(block.end_time.slice(0, 5)) : start + 90;
+    const currentEnd = block.end_time ? endMinutesAfterStart(block.start_time, block.end_time) : start + 90;
     const minEnd = start + slotMinutes;
 
     resizingRef.current = true;

@@ -32,11 +32,10 @@ export function ServicesStep({ onDone }: Props) {
     <div className="min-w-0">
       <h2 className="mb-1 text-lg font-bold text-slate-900">Dining services & booking rules</h2>
       <p className="mb-3 text-sm text-slate-500">
-        Configure named sittings (for example <em>Lunch</em> and <em>Dinner</em>), then set{' '}
+        Configure named sittings (for example <em>Lunch</em> and <em>Dinner</em>), then work through{' '}
         <strong className="font-medium text-slate-700">capacity</strong>,{' '}
         <strong className="font-medium text-slate-700">how long parties stay</strong>, and{' '}
-        <strong className="font-medium text-slate-700">booking and deposit rules</strong> for each service in the
-        editor below — the same layout as Availability → Services in your dashboard.
+        <strong className="font-medium text-slate-700">booking and deposit rules</strong> in one continuous form — changes save automatically as you go. Same editor as Availability → Services in your dashboard.
       </p>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
@@ -56,7 +55,7 @@ export function ServicesStep({ onDone }: Props) {
           </li>
         </ul>
         <p className="mt-3 text-xs text-slate-500">
-          New rows get sensible defaults — tune them below. Fine-tune anytime from{' '}
+          New services get sensible defaults — adjust inline; everything saves as you edit. Fine-tune anytime from{' '}
           <Link href="/dashboard/availability?tab=services" className="font-medium text-brand-600 underline hover:text-brand-700">
             Availability → Services
           </Link>

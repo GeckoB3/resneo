@@ -1,7 +1,7 @@
 /**
  * One-off: create test table bookings for a venue (staff lookup by email).
  *
- * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY
  * pointing at the target project (e.g. production).
  *
  * Safety: set ALLOW_LIVE_SEED=1 to run (avoids accidental execution).

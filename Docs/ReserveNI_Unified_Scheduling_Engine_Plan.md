@@ -1805,8 +1805,8 @@ After ALL prompts are complete, run this final verification:
 ```
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
-SUPABASE_SERVICE_ROLE_KEY=xxx
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=xxx
+SUPABASE_SECRET_KEY=xxx
 
 # Stripe (deposits - existing)
 STRIPE_SECRET_KEY=sk_xxx

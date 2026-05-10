@@ -56,6 +56,21 @@ function timeToMinutes(t: string): number {
   return (h ?? 0) * 60 + (m ?? 0);
 }
 
+function endMinutesAfterStart(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutes(start.slice(0, 5));
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(end.slice(0, 5));
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
+}
+
+function timelineMinutesForWallTime(time: string, startMinutes: number): number {
+  const minutes = timeToMinutes(time.slice(0, 5));
+  return minutes < startMinutes ? minutes + 24 * 60 : minutes;
+}
+
 function isTableFree(
   tableId: string,
   bookingId: string,
@@ -66,15 +81,13 @@ function isTableFree(
   for (const cell of cells) {
     if (cell.table_id !== tableId) continue;
     if (cell.is_blocked) {
-      const cTime = timeToMinutes(cell.time);
+      const cTime = timelineMinutesForWallTime(cell.time, blockStart);
       if (blockStart <= cTime && cTime < blockEnd) return false;
     }
     if (!cell.booking_id || !cell.booking_details) continue;
     if (cell.booking_id === bookingId) continue;
-    const cStart = timeToMinutes(cell.booking_details.start_time);
-    const cEnd = cell.booking_details.end_time
-      ? timeToMinutes(cell.booking_details.end_time)
-      : cStart + 90;
+    const cStart = timelineMinutesForWallTime(cell.booking_details.start_time, blockStart);
+    const cEnd = cStart + (endMinutesAfterStart(cell.booking_details.start_time, cell.booking_details.end_time) - timeToMinutes(cell.booking_details.start_time));
     if (blockStart < cEnd && blockEnd > cStart) return false;
   }
   return true;
@@ -117,7 +130,7 @@ export function computeValidMoveTargets(
   const comboLabels = new Map<string, string>();
 
   const blockStart = timeToMinutes(context.start_time);
-  const blockEnd = context.end_time ? timeToMinutes(context.end_time) : blockStart + 90;
+  const blockEnd = endMinutesAfterStart(context.start_time, context.end_time);
 
   const tableMap = new Map<string, CombinationTable>(
     tables.map((t) => [t.id, toComboTable(t)]),

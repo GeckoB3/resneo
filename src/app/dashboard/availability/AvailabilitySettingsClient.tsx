@@ -22,11 +22,21 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DashboardGridSkeleton, DashboardTabRowSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
-const BASE_TABS = [{ key: 'services' as const, label: 'Services' }];
+const SERVICES_TAB = { key: 'services' as const, label: 'Services' };
+const TABLE_MANAGEMENT_TAB = { key: 'table' as const, label: 'Table Management' };
+const LAYOUT_TAB = { key: 'layout' as const, label: 'Layout' };
+const TABLES_TAB = { key: 'tables' as const, label: 'Tables' };
+const COMBINATIONS_TAB = { key: 'combinations' as const, label: 'Combinations' };
 
-const TABLE_TAB = { key: 'table' as const, label: 'Table Management' };
+/** Top-level availability tabs (floor keys overlap `FloorPlanEditorTabKey`). */
+type TabKey =
+  | typeof SERVICES_TAB.key
+  | typeof TABLE_MANAGEMENT_TAB.key
+  | FloorPlanEditorTabKey;
 
-type TabKey = (typeof BASE_TABS)[number]['key'] | typeof TABLE_TAB.key;
+function isFloorPlanTabKey(key: TabKey): key is FloorPlanEditorTabKey {
+  return key === 'layout' || key === 'tables' || key === 'combinations';
+}
 
 function resolveInitialActiveTab(
   initialTab: TabKey | undefined,
@@ -34,38 +44,30 @@ function resolveInitialActiveTab(
 ): TabKey {
   if (!venue) return 'services';
   const showTable = isRestaurantTableProductTier(venue.pricing_tier);
-  if (initialTab === 'table' && showTable) return 'table';
-  return 'services';
+  if (!showTable) return 'services';
+  if (!initialTab) return 'services';
+  if (!venue.table_management_enabled && (initialTab === 'layout' || initialTab === 'combinations')) {
+    return 'tables';
+  }
+  return initialTab;
 }
-
-const VALID_FLOOR_PLAN_TABS: FloorPlanEditorTabKey[] = ['layout', 'tables', 'combinations'];
 
 interface Props {
   initialVenue: VenueSettings | null;
   hasServiceConfig: boolean;
-  initialTab?: TabKey;
-  initialFloorPlanTab?: FloorPlanEditorTabKey;
+  initialTab: TabKey;
 }
 
 export default function AvailabilitySettingsClient({
   initialVenue,
   hasServiceConfig,
   initialTab,
-  initialFloorPlanTab,
 }: Props) {
   const searchParams = useSearchParams();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const [activeTab, setActiveTabState] = useState<TabKey>(() =>
     resolveInitialActiveTab(initialTab, initialVenue),
   );
-  const [floorPlanTab, setFloorPlanTabState] = useState<FloorPlanEditorTabKey>(() => {
-    const resolved =
-      initialFloorPlanTab && VALID_FLOOR_PLAN_TABS.includes(initialFloorPlanTab) ? initialFloorPlanTab : 'layout';
-    if (initialVenue && !initialVenue.table_management_enabled && resolved !== 'tables') {
-      return 'tables';
-    }
-    return resolved;
-  });
   const [services, setServices] = useState<VenueServiceRow[]>([]);
   const [areas, setAreas] = useState<VenueArea[]>([]);
   /** False until `/api/venue/areas` has completed — avoids unscoped table/floor-plan fetches before `selectedAreaId` is set. */
@@ -104,14 +106,8 @@ export default function AvailabilitySettingsClient({
   }, [initialVenue]);
 
   useEffect(() => {
-    if (initialFloorPlanTab && VALID_FLOOR_PLAN_TABS.includes(initialFloorPlanTab)) {
-      const next =
-        venue && !venue.table_management_enabled && initialFloorPlanTab !== 'tables'
-          ? 'tables'
-          : initialFloorPlanTab;
-      setFloorPlanTabState(next);
-    }
-  }, [initialFloorPlanTab, venue]);
+    setActiveTabState(resolveInitialActiveTab(initialTab, initialVenue));
+  }, [initialTab, initialVenue]);
 
   const showTableTab = Boolean(venue && isRestaurantTableProductTier(venue.pricing_tier));
 
@@ -137,12 +133,17 @@ export default function AvailabilitySettingsClient({
   }, [areas, selectedAreaId]);
 
   const visibleTabs = useMemo(() => {
-    if (showTableTab) return [...BASE_TABS, TABLE_TAB];
-    return [...BASE_TABS];
-  }, [showTableTab]);
+    if (!showTableTab) return [SERVICES_TAB];
+    const advanced = Boolean(venue?.table_management_enabled);
+    const core = [SERVICES_TAB, TABLE_MANAGEMENT_TAB];
+    if (advanced) {
+      return [...core, LAYOUT_TAB, TABLES_TAB, COMBINATIONS_TAB];
+    }
+    return [...core, TABLES_TAB];
+  }, [showTableTab, venue?.table_management_enabled]);
 
   useEffect(() => {
-    if (activeTab === 'table' && !showTableTab) {
+    if (!showTableTab && activeTab !== 'services') {
       setActiveTabState('services');
       replaceAvailabilityUrl((next) => {
         next.set('tab', 'services');
@@ -151,33 +152,25 @@ export default function AvailabilitySettingsClient({
     }
   }, [activeTab, showTableTab, replaceAvailabilityUrl]);
 
+  useEffect(() => {
+    if (!venue?.table_management_enabled && (activeTab === 'layout' || activeTab === 'combinations')) {
+      setActiveTabState('tables');
+      replaceAvailabilityUrl((next) => {
+        next.set('tab', 'tables');
+        next.delete('fp');
+      });
+    }
+  }, [venue?.table_management_enabled, activeTab, replaceAvailabilityUrl]);
+
   const setActiveTab = useCallback(
     (key: TabKey) => {
       setActiveTabState(key);
-      if (key === 'table' && floorPlanTab === 'layout') {
-        setLayoutActivationKey((n) => n + 1);
-      }
-      replaceAvailabilityUrl((next) => {
-        next.set('tab', key);
-        if (key === 'table') {
-          next.set('fp', floorPlanTab);
-        } else {
-          next.delete('fp');
-        }
-      });
-    },
-    [replaceAvailabilityUrl, floorPlanTab],
-  );
-
-  const setFloorPlanTab = useCallback(
-    (key: FloorPlanEditorTabKey) => {
-      setFloorPlanTabState(key);
       if (key === 'layout') {
         setLayoutActivationKey((n) => n + 1);
       }
       replaceAvailabilityUrl((next) => {
-        next.set('tab', 'table');
-        next.set('fp', key);
+        next.set('tab', key);
+        next.delete('fp');
       });
     },
     [replaceAvailabilityUrl],
@@ -303,16 +296,6 @@ export default function AvailabilitySettingsClient({
   }, [areas, deleteTarget, replaceAvailabilityUrl, showToast]);
 
   useEffect(() => {
-    if (venue && !venue.table_management_enabled && floorPlanTab !== 'tables') {
-      setFloorPlanTabState('tables');
-      replaceAvailabilityUrl((next) => {
-        next.set('tab', 'table');
-        next.set('fp', 'tables');
-      });
-    }
-  }, [venue, floorPlanTab, replaceAvailabilityUrl]);
-
-  useEffect(() => {
     if (!venue) return;
     const venueId = venue.id;
     setAreasHydrated(false);
@@ -417,7 +400,7 @@ export default function AvailabilitySettingsClient({
             <Skeleton.Line className="h-3 w-full max-w-2xl" />
           </div>
           <Skeleton.Block className="h-11 w-40" />
-          <DashboardTabRowSkeleton tabCount={2} />
+          <DashboardTabRowSkeleton tabCount={5} />
           <Skeleton.Card>
             <div className="grid gap-4 sm:grid-cols-2">
               <Skeleton.Block className="h-24" />
@@ -609,33 +592,39 @@ export default function AvailabilitySettingsClient({
       )}
       {activeTab === 'table' && showTableTab && (
         <div className="space-y-6">
-            <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
-            {!areasHydrated ? (
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <DashboardGridSkeleton />
-              </div>
-            ) : activeAreas.length > 0 && !selectedAreaId ? (
-              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Select a dining area above to manage tables and layout for that space.
-              </p>
-            ) : (
-              <FloorPlanEditorTabs
-                isAdmin
-                activeTab={floorPlanTab}
-                onTabChange={setFloorPlanTab}
-                advancedTableManagement={Boolean(venue.table_management_enabled)}
-                onLayoutSaved={handleLayoutSaved}
-                combinationThreshold={venue.combination_threshold ?? 80}
-                layoutSaveCount={layoutSaveCount}
-                layoutActivationKey={layoutActivationKey}
-                onCombinationThresholdSaved={(v) => onUpdate({ combination_threshold: v })}
-                diningAreaId={selectedAreaId}
-              />
-            )}
-            {!hasServiceConfig && (
-              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
-            )}
-          </div>
+          <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
+        </div>
+      )}
+      {isFloorPlanTabKey(activeTab) && showTableTab && (
+        <div className="space-y-6">
+          {!areasHydrated ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <DashboardGridSkeleton />
+            </div>
+          ) : activeAreas.length > 0 && !selectedAreaId ? (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Select a dining area above to manage tables and layout for that space.
+            </p>
+          ) : (
+            <FloorPlanEditorTabs
+              isAdmin
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              advancedTableManagement={Boolean(venue.table_management_enabled)}
+              hideTabNavigation
+              hideHeading
+              onLayoutSaved={handleLayoutSaved}
+              combinationThreshold={venue.combination_threshold ?? 80}
+              layoutSaveCount={layoutSaveCount}
+              layoutActivationKey={layoutActivationKey}
+              onCombinationThresholdSaved={(v) => onUpdate({ combination_threshold: v })}
+              diningAreaId={selectedAreaId}
+            />
+          )}
+        </div>
+      )}
+      {showTableTab && !hasServiceConfig && activeTab !== 'services' && (
+        <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
       )}
 
       {toast && (

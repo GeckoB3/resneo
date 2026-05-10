@@ -73,6 +73,11 @@ function getBlockTimeRange(block: TableBlock): { startMin: number; endMin: numbe
   return { startMin, endMin };
 }
 
+function minutesToWallClockTime(minutes: number): string {
+  const wallMinutes = minutes % (24 * 60);
+  return minutesToTime(wallMinutes);
+}
+
 function doIntervalsOverlap(s1: number, e1: number, s2: number, e2: number): boolean {
   return s1 < e2 && s2 < e1;
 }
@@ -436,7 +441,10 @@ export async function getTableAvailabilityGrid(
   const tableNameById = new Map(tables.map((table) => [table.id, table.name]));
 
   const startMin = serviceStartTime ? timeToMinutes(serviceStartTime) : 9 * 60;
-  const configuredEndMin = serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60;
+  let configuredEndMin = serviceEndTime ? timeToMinutes(serviceEndTime) : 23 * 60;
+  if (configuredEndMin <= startMin) {
+    configuredEndMin += 24 * 60;
+  }
   const latestBookingEndMin = bookings.reduce(
     (latest, booking) => Math.max(latest, getBookingTimeRange(booking).endMin),
     configuredEndMin,
@@ -465,7 +473,7 @@ export async function getTableAvailabilityGrid(
 
     const tableBlocks = blocks.filter((block) => block.table_id === table.id);
     for (let m = startMin; m < endMin; m += slotInterval) {
-      const timeStr = minutesToTime(m);
+      const timeStr = minutesToWallClockTime(m);
       let matchedBooking: BookingWithTime | null = null;
 
       for (const b of tableBookings) {
@@ -498,8 +506,8 @@ export async function getTableAvailabilityGrid(
           ? {
               id: matchedBlock.id,
               reason: matchedBlock.reason,
-              start_time: minutesToTime(matchedBlockRange?.startMin ?? 0),
-              end_time: minutesToTime(matchedBlockRange?.endMin ?? 0),
+              start_time: minutesToWallClockTime(matchedBlockRange?.startMin ?? 0),
+              end_time: minutesToWallClockTime(matchedBlockRange?.endMin ?? 0),
             }
           : null,
         booking_details: matchedBooking
@@ -512,7 +520,7 @@ export async function getTableAvailabilityGrid(
               guest_attendance_confirmed_at: matchedBooking.guest_attendance_confirmed_at ?? null,
               staff_attendance_confirmed_at: matchedBooking.staff_attendance_confirmed_at ?? null,
               start_time: matchedBooking.booking_time,
-              end_time: minutesToTime(getBookingTimeRange(matchedBooking).endMin),
+              end_time: minutesToWallClockTime(getBookingTimeRange(matchedBooking).endMin),
               actual_departed_time: matchedBooking.actual_departed_time ?? null,
               table_ids: matchedBooking.table_ids,
               table_names: matchedBooking.table_ids.map((tableId) => tableNameById.get(tableId) ?? tableId),
@@ -548,7 +556,7 @@ export async function getTableAvailabilityGrid(
         guest_name: b.guest_name,
         party_size: b.party_size,
         start_time: b.booking_time,
-        end_time: minutesToTime(range.endMin),
+        end_time: minutesToWallClockTime(range.endMin),
         status: b.status,
         deposit_status: b.deposit_status ?? null,
         deposit_amount_pence: b.deposit_amount_pence ?? null,

@@ -144,6 +144,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
   const [editing, setEditing] = useState<EditingTable | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Mutually exclusive with a non-null `editing` state for add/edit flows (only one add panel at a time). */
   const [showBatch, setShowBatch] = useState(false);
   const [batchCount, setBatchCount] = useState(10);
   const [batchPrefix, setBatchPrefix] = useState('Table');
@@ -362,7 +363,15 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
     }
   };
 
-  const duplicateTable = (table: VenueTable) => {
+  const openEditTable = useCallback((row: EditingTable) => {
+    setShowBatch(false);
+    setError(null);
+    setEditing(row);
+  }, []);
+
+  const duplicateTable = useCallback((table: VenueTable) => {
+    setShowBatch(false);
+    setError(null);
     setEditing({
       name: `${table.name} (copy)`,
       min_covers: table.min_covers,
@@ -373,7 +382,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       server_section: table.server_section ?? '',
       is_active: table.is_active,
     });
-  };
+  }, []);
 
   const createBatch = async () => {
     setSaving(true);
@@ -427,6 +436,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       }
 
       setShowBatch(false);
+      setEditing(null);
       onRefresh();
     } catch (err) {
       console.error('Batch create error:', err);
@@ -435,6 +445,24 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       setSaving(false);
     }
   };
+
+  const openAddSingleForm = useCallback(() => {
+    setShowBatch(false);
+    setError(null);
+    setEditing({ ...emptyTable });
+  }, []);
+
+  const openAddMultipleForm = useCallback(() => {
+    setEditing(null);
+    setError(null);
+    setShowBatch(true);
+  }, []);
+
+  const closeAddPanels = useCallback(() => {
+    setEditing(null);
+    setShowBatch(false);
+    setError(null);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -465,16 +493,18 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       )}
 
       {isAdmin && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button
-            onClick={() => setEditing({ ...emptyTable })}
-            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            type="button"
+            onClick={openAddSingleForm}
+            className="min-h-11 w-full touch-manipulation rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700 sm:w-auto"
           >
             + Add Table
           </button>
           <button
-            onClick={() => setShowBatch(true)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            type="button"
+            onClick={openAddMultipleForm}
+            className="min-h-11 w-full touch-manipulation rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:w-auto"
           >
             + Add Multiple
           </button>
@@ -491,17 +521,18 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       )}
 
       {showBatch && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-base font-medium text-slate-900">Add Multiple Tables</h3>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <h3 className="mb-3 text-base font-medium text-slate-900 sm:mb-4">Add Multiple Tables</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Count</label>
-              <div className="mt-1 flex gap-1">
+              <div className="mt-1.5 flex flex-wrap gap-2">
                 {[5, 10, 15, 20, 25, 30].map((n) => (
                   <button
                     key={n}
+                    type="button"
                     onClick={() => setBatchCount(n)}
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+                    className={`min-h-11 min-w-[2.75rem] touch-manipulation rounded-lg border px-3 py-2 text-sm font-medium ${
                       batchCount === n
                         ? 'border-brand-300 bg-brand-50 text-brand-700'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -512,31 +543,32 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 ))}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Prefix</label>
               <input
                 type="text"
                 value={batchPrefix}
                 onChange={(e) => setBatchPrefix(e.target.value)}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
+                autoComplete="off"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Max Covers</label>
               <NumericInput
                 value={batchMaxCovers}
                 onChange={(v) => setBatchMaxCovers(v)}
                 min={1}
                 max={50}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
               />
             </div>
-            <div className="sm:col-span-1">
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Shape</label>
               <select
                 value={batchShape}
                 onChange={(e) => setBatchShape(e.target.value as TableShape)}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
               >
                 {SHAPES.map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
@@ -544,71 +576,74 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
               </select>
             </div>
           </div>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
             <button
-              onClick={createBatch}
-              disabled={saving}
-              className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {saving ? 'Creating...' : `Create ${batchCount} Tables`}
-            </button>
-            <button
-              onClick={() => setShowBatch(false)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              type="button"
+              onClick={closeAddPanels}
+              className="min-h-11 w-full touch-manipulation rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:w-auto"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void createBatch()}
+              disabled={saving}
+              className="min-h-11 w-full touch-manipulation rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
+            >
+              {saving ? 'Creating...' : `Create ${batchCount} Tables`}
             </button>
           </div>
         </div>
       )}
 
       {editing && (
-        <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-5 shadow-sm">
-          <h3 className="mb-4 text-base font-medium text-slate-900">
+        <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 shadow-sm sm:p-5">
+          <h3 className="mb-3 text-base font-medium text-slate-900 sm:mb-4">
             {editing.id ? 'Edit Table' : 'New Table'}
           </h3>
           {error && (
             <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Name</label>
               <input
                 type="text"
                 value={editing.name}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
                 placeholder="e.g. T1, Booth A"
+                autoComplete="off"
               />
             </div>
             {!isCovers && (
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-medium text-slate-600">Min Covers</label>
                 <NumericInput
                   value={editing.min_covers}
                   onChange={(v) => setEditing({ ...editing, min_covers: v })}
                   min={1}
                   max={50}
-                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                  className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
                 />
               </div>
             )}
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">{isCovers ? 'Seats' : 'Max Covers'}</label>
               <NumericInput
                 value={editing.max_covers}
                 onChange={(v) => setEditing({ ...editing, max_covers: v, ...(isCovers ? { min_covers: 1 } : {}) })}
                 min={1}
                 max={50}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-slate-600">Shape</label>
               <select
                 value={editing.shape}
                 onChange={(e) => setEditing({ ...editing, shape: e.target.value as TableShape })}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
               >
                 {SHAPES.map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
@@ -617,25 +652,25 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
             </div>
             {!isCovers && (
               <>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-slate-600">Table Type</label>
                   <select
                     value={editing.table_type}
                     onChange={(e) => setEditing({ ...editing, table_type: e.target.value as TableType })}
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
                   >
                     {TABLE_TYPES.map((tt) => (
                       <option key={tt} value={tt}>{tt}</option>
                     ))}
                   </select>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-slate-600">Zone / Area</label>
                   <input
                     type="text"
                     value={editing.zone}
                     onChange={(e) => setEditing({ ...editing, zone: e.target.value })}
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
                     placeholder="e.g. Main floor, Upper level"
                     list="zone-suggestions"
                   />
@@ -645,45 +680,49 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                     </datalist>
                   )}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-slate-600">Server Section</label>
                   <input
                     type="text"
                     value={editing.server_section}
                     onChange={(e) => setEditing({ ...editing, server_section: e.target.value })}
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm"
                     placeholder="Optional"
                   />
                 </div>
               </>
             )}
           </div>
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-4 flex items-center gap-3">
             <label className="text-xs font-medium text-slate-600">Active</label>
             <button
+              type="button"
               onClick={() => setEditing({ ...editing, is_active: !editing.is_active })}
-              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer touch-manipulation rounded-full border-2 border-transparent transition-colors ${
                 editing.is_active ? 'bg-brand-600' : 'bg-slate-200'
               }`}
+              aria-pressed={editing.is_active}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
                 editing.is_active ? 'translate-x-4' : 'translate-x-0'
               }`} />
             </button>
           </div>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
             <button
-              onClick={saveTable}
-              disabled={saving || !editing.name.trim()}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : editing.id ? 'Save Changes' : 'Add Table'}
-            </button>
-            <button
-              onClick={() => { setEditing(null); setError(null); }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              type="button"
+              onClick={closeAddPanels}
+              className="min-h-11 w-full touch-manipulation rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:w-auto"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveTable()}
+              disabled={saving || !editing.name.trim()}
+              className="min-h-11 w-full touch-manipulation rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
+            >
+              {saving ? 'Saving...' : editing.id ? 'Save Changes' : 'Add Table'}
             </button>
           </div>
         </div>
@@ -770,7 +809,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                     <button
                                       type="button"
                                       onClick={() =>
-                                        setEditing({
+                                        openEditTable({
                                           id: t.id,
                                           name: t.name,
                                           min_covers: t.min_covers,
@@ -878,7 +917,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                             <button
                               type="button"
                               onClick={() =>
-                                setEditing({
+                                openEditTable({
                                   id: t.id,
                                   name: t.name,
                                   min_covers: t.min_covers,

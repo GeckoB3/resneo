@@ -69,10 +69,10 @@ export function TableSetupStep({ onDone }: Props) {
         <p className="mt-2 text-xs text-slate-500">
           Everything saves as you work. You can come back any time from{' '}
           <Link
-            href="/dashboard/availability?tab=table&fp=layout"
+            href="/dashboard/availability?tab=layout"
             className="font-medium text-brand-600 underline hover:text-brand-700"
           >
-            Availability → Table Management
+            Availability → Layout
           </Link>
           , or open the floor plan in a new tab from the link below.
         </p>

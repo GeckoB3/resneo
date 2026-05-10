@@ -417,9 +417,9 @@ export function TableCombinationsPage({
           </div>
         )}
 
-        <div className="lg:hidden">
+        <div className="lg:hidden sticky top-0 z-20 mx-auto w-full max-w-[40vw] py-2">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
-          <div className="rounded-xl border border-slate-200 bg-slate-50">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/95 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-50/90">
             <MiniFloorPlanPicker
               tables={miniTables}
               selectedIds={previewIds}
@@ -434,7 +434,7 @@ export function TableCombinationsPage({
           </div>
         </div>
 
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,320px)]">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,40vw)]">
         <div className="min-w-0">
           {combinationsSubTab === 'auto' && (
             <section>
@@ -667,9 +667,9 @@ export function TableCombinationsPage({
           )}
         </div>
 
-          <aside className="sticky top-6 z-10 hidden self-start lg:block">
+          <aside className="sticky top-6 z-10 hidden w-full max-w-[40vw] justify-self-end lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
-            <div className="rounded-xl border border-slate-200 bg-slate-50">
+            <div className="w-full rounded-xl border border-slate-200 bg-slate-50">
               <MiniFloorPlanPicker
                 tables={miniTables}
                 selectedIds={previewIds}

@@ -7,6 +7,16 @@ function timeToMinutes(t: string): number {
   return (h ?? 0) * 60 + (m ?? 0);
 }
 
+function endMinutesAfterStart(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutes(start);
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(end);
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
+}
+
 /**
  * Party sizes for unique bookings that overlap `timeMinutes` (minutes from midnight)
  * on the grid's date, optionally limited to visible tables. Each booking is counted once
@@ -30,10 +40,7 @@ export function coversInUseAtTime(
     }
 
     const start = timeToMinutes(bd.start_time);
-    let end = bd.end_time ? timeToMinutes(bd.end_time) : start + 90;
-    if (end <= start) {
-      end = start + 90;
-    }
+    const end = endMinutesAfterStart(bd.start_time, bd.end_time);
 
     if (timeMinutes >= start && timeMinutes < end) {
       if (!seen.has(cell.booking_id)) {
@@ -67,10 +74,7 @@ export function tablesInUseAtTime(
     }
 
     const start = timeToMinutes(bd.start_time);
-    let end = bd.end_time ? timeToMinutes(bd.end_time) : start + 90;
-    if (end <= start) {
-      end = start + 90;
-    }
+    const end = endMinutesAfterStart(bd.start_time, bd.end_time);
 
     if (timeMinutes >= start && timeMinutes < end) {
       inUse.add(cell.table_id);

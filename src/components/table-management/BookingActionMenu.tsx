@@ -16,8 +16,9 @@ function timeToMinutes(t: string): number {
 }
 
 function minutesToTime(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
+  const wallMinutes = m % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const min = wallMinutes % 60;
   return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 }
 

@@ -14,23 +14,39 @@ import {
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
-const VALID_TABS = ['services', 'table'] as const;
+const VALID_TABS = ['services', 'table', 'layout', 'tables', 'combinations'] as const;
 type ValidTab = (typeof VALID_TABS)[number];
 
 const VALID_FLOOR_PLAN_TABS = ['layout', 'tables', 'combinations'] as const;
 type ValidFloorPlanTab = (typeof VALID_FLOOR_PLAN_TABS)[number];
 
 /** Legacy URLs (?tab=capacity|duration|rules) map to the consolidated Services workspace. */
-function resolveInitialTab(tab: string | undefined): ValidTab | undefined {
+function resolveSearchTab(tab: string | undefined, fp: string | undefined): ValidTab | undefined {
+  // Legacy nested floor URLs: ?tab=table&fp=layout → layout (same row as Services).
+  if (tab === 'table' && fp && VALID_FLOOR_PLAN_TABS.includes(fp as ValidFloorPlanTab)) {
+    return fp as ValidFloorPlanTab;
+  }
   if (!tab) return undefined;
   if (tab === 'capacity' || tab === 'duration' || tab === 'rules') return 'services';
   return VALID_TABS.includes(tab as ValidTab) ? (tab as ValidTab) : undefined;
 }
 
-function resolveInitialFloorPlanTab(fp: string | undefined): ValidFloorPlanTab | undefined {
-  if (!fp) return undefined;
-  return VALID_FLOOR_PLAN_TABS.includes(fp as ValidFloorPlanTab) ? (fp as ValidFloorPlanTab) : undefined;
+/** Drop layout/combinations when the venue is in simple covers mode; non-table tiers → services. */
+function normalizeTabForVenue(
+  tab: ValidTab | undefined,
+  venue: VenueSettings | null,
+  isRestaurantTableTier: boolean,
+): ValidTab {
+  const fallback: ValidTab = 'services';
+  if (!venue) return tab ?? fallback;
+  if (!isRestaurantTableTier) return fallback;
+  const resolved = tab ?? fallback;
+  if (!venue.table_management_enabled && (resolved === 'layout' || resolved === 'combinations')) {
+    return 'tables';
+  }
+  return resolved;
 }
 
 export default async function AvailabilitySettingsPage({
@@ -164,15 +180,16 @@ export default async function AvailabilitySettingsPage({
   hasServiceConfig = (count ?? 0) > 0;
 
   const sp = await searchParams;
-  const initialTab = resolveInitialTab(sp.tab);
-  const initialFloorPlanTab = resolveInitialFloorPlanTab(sp.fp);
+  const isRestaurantTableTier =
+    venue != null && isRestaurantTableProductTier(venue.pricing_tier);
+  const rawTab = resolveSearchTab(sp.tab, sp.fp);
+  const initialTab = normalizeTabForVenue(rawTab, venue, Boolean(isRestaurantTableTier));
 
   return (
     <AvailabilitySettingsClient
       initialVenue={venue}
       hasServiceConfig={hasServiceConfig}
       initialTab={initialTab}
-      initialFloorPlanTab={initialFloorPlanTab}
     />
   );
 }

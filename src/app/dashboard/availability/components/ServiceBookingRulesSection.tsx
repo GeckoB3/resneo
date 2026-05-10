@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { useDebouncedCallback } from '@/lib/use-debounced-callback';
 import type { ServiceBookingRestriction } from '@/app/dashboard/availability/service-settings-types';
 import { defaultBookingRestriction } from '@/app/dashboard/availability/service-settings-types';
+
+const AUTOSAVE_MS = 650;
 
 const FIELD_CLASS =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
@@ -17,39 +20,92 @@ interface Props {
   onRestrictionSaved: (r: ServiceBookingRestriction) => void;
 }
 
+interface ComparableFields {
+  min_advance_minutes: number;
+  max_advance_days: number;
+  min_party_size_online: number;
+  max_party_size_online: number;
+  large_party_threshold: number | null;
+  large_party_message: string | null;
+  deposit_required_from_party_size: number | null;
+  deposit_amount_per_person_gbp: number | null;
+  cancellation_notice_hours: number;
+}
+
+function toComparable(r: ServiceBookingRestriction): ComparableFields {
+  return {
+    min_advance_minutes: r.min_advance_minutes,
+    max_advance_days: r.max_advance_days,
+    min_party_size_online: r.min_party_size_online,
+    max_party_size_online: r.max_party_size_online,
+    large_party_threshold: r.large_party_threshold,
+    large_party_message: r.large_party_message,
+    deposit_required_from_party_size: r.deposit_required_from_party_size,
+    deposit_amount_per_person_gbp: r.deposit_amount_per_person_gbp,
+    cancellation_notice_hours: r.cancellation_notice_hours ?? 48,
+  };
+}
+
+function comparableEqual(a: ComparableFields, b: ComparableFields): boolean {
+  return (
+    a.min_advance_minutes === b.min_advance_minutes &&
+    a.max_advance_days === b.max_advance_days &&
+    a.min_party_size_online === b.min_party_size_online &&
+    a.max_party_size_online === b.max_party_size_online &&
+    a.large_party_threshold === b.large_party_threshold &&
+    a.large_party_message === b.large_party_message &&
+    a.deposit_required_from_party_size === b.deposit_required_from_party_size &&
+    a.deposit_amount_per_person_gbp === b.deposit_amount_per_person_gbp &&
+    a.cancellation_notice_hours === b.cancellation_notice_hours
+  );
+}
+
 export function ServiceBookingRulesSection({ serviceId, restriction, showToast, onRestrictionSaved }: Props) {
   const [draft, setDraft] = useState<ServiceBookingRestriction>(() =>
     restriction
       ? { ...restriction, deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null }
-      : ({ id: '', ...defaultBookingRestriction(serviceId) } as ServiceBookingRestriction),
+      : ({ id: '', ...defaultBookingRestriction(serviceId), service_id: serviceId } as ServiceBookingRestriction),
   );
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setDraft(
       restriction
         ? { ...restriction, deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null }
-        : ({ id: '', ...defaultBookingRestriction(serviceId) } as ServiceBookingRestriction),
+        : ({ id: '', ...defaultBookingRestriction(serviceId), service_id: serviceId } as ServiceBookingRestriction),
     );
   }, [serviceId, restriction]);
 
-  async function handleSave() {
-    if (draft.deposit_required_from_party_size != null) {
-      const amt = draft.deposit_amount_per_person_gbp;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  const restrictionRef = useRef(restriction);
+  restrictionRef.current = restriction;
+
+  const baselineFields = useMemo((): ComparableFields => {
+    if (restriction) return toComparable(restriction);
+    const synthetic = { id: '', ...defaultBookingRestriction(serviceId), service_id: serviceId } as ServiceBookingRestriction;
+    return toComparable(synthetic);
+  }, [restriction, serviceId]);
+
+  const persistBookingRules = useDebouncedCallback(async () => {
+    const d = draftRef.current;
+    if (d.deposit_required_from_party_size != null) {
+      const amt = d.deposit_amount_per_person_gbp;
       if (typeof amt !== 'number' || !Number.isFinite(amt) || amt <= 0) {
         showToast('Enter a deposit amount per person greater than £0 when deposits are required.');
         return;
       }
     }
-    setSaving(true);
-    const existing = restriction;
-    const { id: _draftId, ...rest } = draft;
+
+    const existing = restrictionRef.current;
+    const { id: _draftId, ...rest } = d;
     const payload = {
       ...rest,
       online_requires_deposit: true as const,
     };
+
     try {
-      if (existing) {
+      if (existing?.id && existing.service_id === d.service_id) {
         const res = await fetch('/api/venue/booking-restrictions', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -58,7 +114,6 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
         if (!res.ok) throw new Error();
         const json = await res.json();
         onRestrictionSaved(json.restriction as ServiceBookingRestriction);
-        showToast('Booking rules saved');
       } else {
         const res = await fetch('/api/venue/booking-restrictions', {
           method: 'POST',
@@ -68,17 +123,19 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
         if (!res.ok) throw new Error();
         const json = await res.json();
         onRestrictionSaved(json.restriction as ServiceBookingRestriction);
-        showToast('Booking rules saved');
       }
     } catch {
       showToast('Failed to save booking rules');
-    } finally {
-      setSaving(false);
     }
-  }
+  }, AUTOSAVE_MS);
+
+  useEffect(() => {
+    if (comparableEqual(toComparable(draft), baselineFields)) return;
+    persistBookingRules();
+  }, [draft, baselineFields, persistBookingRules]);
 
   return (
-    <div id="rules" className="scroll-mt-24 space-y-4">
+    <section className="space-y-4 border-t border-slate-100 pt-8">
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
         <strong>Deposits:</strong> Configure advance booking windows, party sizes, large-party redirect, and deposits for{' '}
         <span className="font-medium">guest</span> online bookings. Staff use &ldquo;Require deposit&rdquo; on the New Booking form for one-off payment links.
@@ -210,11 +267,7 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
             </div>
           )}
         </div>
-
-        <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
-          {saving ? 'Saving...' : 'Save booking rules'}
-        </button>
       </div>
-    </div>
+    </section>
   );
 }

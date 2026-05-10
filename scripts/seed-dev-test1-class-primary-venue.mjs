@@ -1,7 +1,7 @@
 /**
  * Dev: Supabase auth user + venue with Appointments plan, primary booking model = classes only.
  *
- * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY
  *
  * Usage:
  *   node scripts/seed-dev-test1-class-primary-venue.mjs
@@ -107,9 +107,9 @@ async function ensureDefaultCalendarColumn(admin, venueId) {
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.SUPABASE_SECRET_KEY;
   if (!url || !serviceKey) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local');
+    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY in .env.local');
     process.exit(1);
   }
 

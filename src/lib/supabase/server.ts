@@ -16,16 +16,30 @@ function cookieAdapter(cookieStore: Awaited<ReturnType<typeof cookies>>) {
   };
 }
 
+function getSupabaseServerEnv() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabasePublishableKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabasePublishableKey) {
+    throw new Error('Supabase URL or publishable key is not configured.');
+  }
+
+  return { supabaseUrl, supabasePublishableKey };
+}
+
 /**
  * Supabase client for Server Components, Server Actions, and Route Handlers.
  * Uses cookies for session (magic link). Use this for authenticated dashboard flows.
  */
 export async function createClient() {
   const cookieStore = await cookies();
+  const { supabaseUrl, supabasePublishableKey } = getSupabaseServerEnv();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabasePublishableKey,
     {
       cookies: cookieAdapter(cookieStore),
     },
@@ -39,8 +53,9 @@ export async function createClient() {
 export async function createRouteHandlerClient(request: Request) {
   const cookieStore = await cookies();
   const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(\S+)/i)?.[1]?.trim();
+  const { supabaseUrl, supabasePublishableKey } = getSupabaseServerEnv();
 
-  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+  return createServerClient(supabaseUrl, supabasePublishableKey, {
     cookies: cookieAdapter(cookieStore),
     global: bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : undefined,
   });

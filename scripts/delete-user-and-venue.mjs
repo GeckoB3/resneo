@@ -2,7 +2,7 @@
  * Deletes a Supabase Auth user by email and all data for venue(s) where that email
  * appears in `staff` (test cleanup before reusing the address as superuser).
  *
- * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY
  *
  * Uses DB function admin_hard_delete_venue (see migration) to handle append-only `events`,
  * booking FKs, and staff references — plain DELETE from the client will fail on bookings.
@@ -30,9 +30,9 @@ const EMAIL = (emailArg || process.env.DELETE_USER_EMAIL || 'andrewcourtney@gmai
 
 function requireEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local');
+    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY in .env.local');
     process.exit(1);
   }
   return { url, key };

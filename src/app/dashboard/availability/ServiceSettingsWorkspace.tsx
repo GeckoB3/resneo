@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceBasicsForm, formatServiceDays } from '@/app/dashboard/availability/components/ServiceBasicsForm';
 import { ServiceCapacitySection } from '@/app/dashboard/availability/components/ServiceCapacitySection';
 import { ServiceDurationSection } from '@/app/dashboard/availability/components/ServiceDurationSection';
@@ -19,9 +19,21 @@ import {
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { AvailabilityFormTabSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
+import { useDebouncedCallback } from '@/lib/use-debounced-callback';
 
-const SECTION_LINK_CLASS =
-  'inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-brand-300 hover:text-brand-800';
+const AUTOSAVE_MS = 650;
+
+function serializeBasicsFields(row: Pick<VenueServiceRow, 'name' | 'days_of_week' | 'start_time' | 'end_time' | 'last_booking_time' | 'is_active' | 'sort_order'>): string {
+  return JSON.stringify({
+    name: row.name,
+    days_of_week: [...row.days_of_week].sort((a, b) => a - b),
+    start_time: row.start_time,
+    end_time: row.end_time,
+    last_booking_time: row.last_booking_time,
+    is_active: row.is_active,
+    sort_order: row.sort_order,
+  });
+}
 
 interface Props {
   services: VenueServiceRow[];
@@ -158,26 +170,40 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
     return detectOverlaps(effective);
   }, [services, creatingNew, createDraft]);
 
-  async function saveBasics() {
-    if (!selected || !basicsDraft) return;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const basicsDraftRef = useRef(basicsDraft);
+  basicsDraftRef.current = basicsDraft;
+  const servicesRef = useRef(services);
+  servicesRef.current = services;
+
+  const persistBasics = useDebouncedCallback(async () => {
+    const sel = selectedRef.current;
+    const draft = basicsDraftRef.current;
+    if (!sel || !draft) return;
+    if (serializeBasicsFields({ ...draft }) === serializeBasicsFields(sel)) return;
     try {
       const res = await fetch('/api/venue/services', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...selected, ...basicsDraft }),
+        body: JSON.stringify({ ...sel, ...draft }),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setServices(services.map((s) => (s.id === selected.id ? data.service : s)));
+      setServices(servicesRef.current.map((s) => (s.id === sel.id ? data.service : s)));
       if (data.overlapWarnings?.length > 0) {
-        showToast(`Service updated - Warning: ${data.overlapWarnings[0]}`);
-      } else {
-        showToast('Service updated');
+        showToast(`Service updated — warning: ${data.overlapWarnings[0]}`);
       }
     } catch {
-      showToast('Failed to update service');
+      showToast('Failed to save service');
     }
-  }
+  }, AUTOSAVE_MS);
+
+  useEffect(() => {
+    if (!selected || !basicsDraft) return;
+    if (serializeBasicsFields({ ...basicsDraft }) === serializeBasicsFields(selected)) return;
+    persistBasics();
+  }, [basicsDraft, selected, persistBasics]);
 
   async function handleToggleActive(service: VenueServiceRow) {
     const updated = { ...service, is_active: !service.is_active };
@@ -341,7 +367,7 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
         <SectionCard.Header
           eyebrow="Dining services"
           title="Configure each bookable period end-to-end"
-          description="Pick a service to edit schedule, capacity, table durations, and booking rules in one place. Switch dining area above when your venue has multiple spaces."
+          description="Pick a service and work through schedule, capacity, durations, and booking rules — changes save automatically as you edit. Switch dining area above when your venue has multiple spaces."
           right={
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
               {services.filter((s) => s.is_active).length} active
@@ -434,21 +460,6 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
 
           {selected && basicsDraft && (
             <>
-              <div className="sticky top-0 z-10 -mx-1 flex gap-2 overflow-x-auto bg-white/90 py-2 pb-3 backdrop-blur lg:mx-0 xl:top-4 xl:rounded-2xl xl:border xl:border-slate-100 xl:px-3">
-                <a href="#basics" className={SECTION_LINK_CLASS}>
-                  Basics
-                </a>
-                <a href="#capacity" className={SECTION_LINK_CLASS}>
-                  Capacity
-                </a>
-                <a href="#duration" className={SECTION_LINK_CLASS}>
-                  Duration
-                </a>
-                <a href="#rules" className={SECTION_LINK_CLASS}>
-                  Booking rules
-                </a>
-              </div>
-
               <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">{selected.name}</h2>
@@ -469,54 +480,54 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
                 </div>
               </div>
 
-              <div id="basics" className="scroll-mt-24 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="text-base font-bold text-slate-900">Schedule &amp; name</h3>
-                <ServiceBasicsForm data={basicsDraft} onChange={setBasicsDraft} />
-                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                  <button type="button" onClick={() => void saveBasics()} className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
-                    Save basics
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-4">
-                  {DAY_LABELS.map((label, i) => (
-                    <span
-                      key={i}
-                      className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${selected.days_of_week.includes(i) ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-slate-50 text-slate-300'}`}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <div className="space-y-10 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <p className="text-xs text-slate-500">Changes save automatically as you edit (about {AUTOSAVE_MS / 1000}s after you stop typing).</p>
 
-              {loading ? (
-                <div className="space-y-4 py-4">
-                  <AvailabilityFormTabSkeleton />
-                </div>
-              ) : (
-                <>
-                  <ServiceCapacitySection
-                    serviceId={selected.id}
-                    serviceName={selected.name}
-                    rules={rulesForSelected}
-                    showToast={showToast}
-                    onRulesChange={updateRulesForService}
-                  />
-                  <ServiceDurationSection
-                    serviceId={selected.id}
-                    serviceName={selected.name}
-                    durations={durationsForSelected}
-                    showToast={showToast}
-                    onDurationsChange={updateDurationsForService}
-                  />
-                  <ServiceBookingRulesSection
-                    serviceId={selected.id}
-                    restriction={restrictionForSelected}
-                    showToast={showToast}
-                    onRestrictionSaved={onRestrictionSaved}
-                  />
-                </>
-              )}
+                <section className="space-y-4">
+                  <h3 className="text-base font-bold text-slate-900">Schedule &amp; name</h3>
+                  <ServiceBasicsForm data={basicsDraft} onChange={setBasicsDraft} />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {DAY_LABELS.map((label, i) => (
+                      <span
+                        key={i}
+                        className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${selected.days_of_week.includes(i) ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-slate-50 text-slate-300'}`}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+
+                {loading ? (
+                  <div className="space-y-4 py-4">
+                    <AvailabilityFormTabSkeleton />
+                  </div>
+                ) : (
+                  <>
+                    <ServiceCapacitySection
+                      serviceId={selected.id}
+                      serviceName={selected.name}
+                      rules={rulesForSelected}
+                      showToast={showToast}
+                      onRulesChange={updateRulesForService}
+                    />
+                    <ServiceDurationSection
+                      serviceId={selected.id}
+                      serviceName={selected.name}
+                      durations={durationsForSelected}
+                      showToast={showToast}
+                      onDurationsChange={updateDurationsForService}
+                    />
+                    <ServiceBookingRulesSection
+                      key={selected.id}
+                      serviceId={selected.id}
+                      restriction={restrictionForSelected}
+                      showToast={showToast}
+                      onRestrictionSaved={onRestrictionSaved}
+                    />
+                  </>
+                )}
+              </div>
             </>
           )}
 

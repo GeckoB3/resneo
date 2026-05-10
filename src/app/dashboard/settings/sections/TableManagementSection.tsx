@@ -372,7 +372,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
               Open Table Grid
             </button>
             <Link
-              href="/dashboard/availability?tab=table&fp=layout"
+              href="/dashboard/availability?tab=layout"
               className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Open Floor Plan

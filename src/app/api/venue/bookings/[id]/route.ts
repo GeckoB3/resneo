@@ -47,6 +47,15 @@ import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
 
+function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
+  const startMin = timeToMinutes(startHHmm);
+  let endMin = timeToMinutes(endHHmm);
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin - startMin;
+}
+
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
   const [y, m, d] = bookingDate.split('-').map(Number);
   const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
@@ -1114,11 +1123,10 @@ export async function PATCH(
         const [ry, rmo, rd] = newDate.split('-').map(Number);
         const [rhh, rmm] = timeStr.split(':').map(Number);
         const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));
-        const startMin = timeToMinutes(timeStr);
         let durationMinutes = appointmentSvcDurationMinutes;
         if (typeof body.booking_end_time === 'string' && body.booking_end_time.trim() !== '') {
           const endHm = body.booking_end_time.trim().slice(0, 5);
-          durationMinutes = Math.max(15, timeToMinutes(endHm) - startMin);
+          durationMinutes = Math.max(15, minutesBetweenStartAndEnd(timeStr, endHm));
         }
         rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
         bookingUpdate.estimated_end_time = rEnd.toISOString();

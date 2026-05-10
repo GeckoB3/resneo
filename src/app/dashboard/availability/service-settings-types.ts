@@ -74,12 +74,13 @@ export function defaultCapacityRule(serviceId: string): Omit<ServiceCapacityRule
   };
 }
 
-/** Four bands used by "Add smart defaults" for dining durations. */
+/** Bands used by "Add smart defaults" and when provisioning defaults for a new service. */
 export const DURATION_SMART_DEFAULTS: ReadonlyArray<{ min: number; max: number; dur: number }> = [
-  { min: 1, max: 2, dur: 75 },
-  { min: 3, max: 4, dur: 90 },
+  { min: 1, max: 2, dur: 90 },
+  { min: 3, max: 4, dur: 105 },
   { min: 5, max: 6, dur: 120 },
-  { min: 7, max: 20, dur: 150 },
+  { min: 7, max: 8, dur: 135 },
+  { min: 9, max: 20, dur: 150 },
 ];
 
 export function defaultBookingRestriction(serviceId: string): Omit<ServiceBookingRestriction, 'id'> {

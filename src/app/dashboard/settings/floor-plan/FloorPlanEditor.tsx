@@ -13,6 +13,7 @@ import {
 import { reshapePolygonVertexAtLocalPosition } from '@/lib/floor-plan/polygon-vertex-reshape';
 import type { LayoutResizeAnchor } from '@/app/dashboard/settings/floor-plan/KonvaCanvas';
 import Link from 'next/link';
+import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
@@ -107,7 +108,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   /** Snap table positions to the grid while moving (applied on commit of move). */
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
   /** Show a grid overlay on the canvas. */
-  const [showGrid, setShowGrid] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
 
   // Canvas layout size (from active floor plan)
   const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
@@ -1611,6 +1612,572 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
     }
   }
 
+  const sidebarToolbarLabel =
+    selectedIds.length >= 2 ? `${selectedIds.length} selected` : selectedIds.length === 1 ? 'Properties' : 'Tables';
+
+  const [mobilePanel, setMobilePanel] = useState<null | 'elements' | 'sidebar'>(null);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileElementsTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileSidebarTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileMoreMenuRef = useRef<HTMLDivElement>(null);
+  /** Toolbar strip — vertical anchor for fixed-position popovers (matches OperationsWorkspaceToolbar pattern). */
+  const toolbarSurfaceRef = useRef<HTMLDivElement>(null);
+
+  const openMobilePanel = useCallback((panel: 'elements' | 'sidebar') => {
+    setShowFloorPlanMenu(false);
+    setMobileMoreOpen(false);
+    setMobilePanel((prev) => (prev === panel ? null : panel));
+  }, []);
+
+  const selectTableFromList = useCallback((id: string) => {
+    setSelectedIds([id]);
+  }, []);
+
+  useDismissibleLayer({
+    open: mobileMoreOpen,
+    refs: [mobileMoreTriggerRef, mobileMoreMenuRef],
+    onDismiss: () => setMobileMoreOpen(false),
+  });
+
+  /** Side panels are not used — open the Tables / Properties popover when the user selects table(s) on the canvas or from the list. */
+  useEffect(() => {
+    if (selectedIds.length >= 1) {
+      setMobilePanel('sidebar');
+    } else {
+      setMobilePanel((prev) => (prev === 'sidebar' ? null : prev));
+    }
+  }, [selectedIds]);
+
+  /** Place new tables at layout centre (50%, 50%) — matches drop placement minus cursor variance. */
+  const addTableFromPalette = useCallback(
+    async (shape: TableShape) => {
+      if (shape === 'polygon') return;
+      await handleCreateTable(shape, 50, 50);
+      setMobilePanel(null);
+    },
+    [handleCreateTable],
+  );
+
+  function ElementsPalette() {
+    const startPolygonDraw = () => {
+      setPolygonEditTableId(null);
+      setPolygonDrawPending(true);
+      setMobilePanel(null);
+    };
+
+    const onShapeActivate = (shape: TableShape) => {
+      if (shape === 'polygon') {
+        startPolygonDraw();
+        return;
+      }
+      void addTableFromPalette(shape);
+    };
+
+    return (
+      <>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Elements</p>
+        <p className="mb-3 text-[9px] text-slate-400 leading-relaxed">
+          Tap a shape to add it to the centre of the layout. Tap{' '}
+          <span className="font-medium text-slate-500">Custom</span> to draw vertices on the canvas.
+        </p>
+        <div className="space-y-1.5">
+          {SHAPE_OPTIONS.map(({ shape, label }) => {
+            const isPolygon = shape === 'polygon';
+            return (
+              <button
+                key={shape}
+                type="button"
+                onClick={() => onShapeActivate(shape)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  e.preventDefault();
+                  onShapeActivate(shape);
+                }}
+                className="flex min-h-11 w-full touch-manipulation cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs text-slate-700 shadow-sm hover:border-brand-300 hover:bg-brand-50 active:opacity-90 sm:min-h-0"
+              >
+                <ShapeIcon shape={shape} size={26} />
+                <span className="min-w-0 flex-1 font-medium leading-snug">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  function RightSidebarBody() {
+    return (
+      <>
+        {selectedIds.length >= 2 ? (
+          /* Multi-selection */
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">
+                {selectedIds.length} Tables
+              </h3>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+                title="Deselect"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 line-clamp-2">
+              {tables.filter((t) => selectedIds.includes(t.id)).map((t) => t.name).join(', ')}
+            </p>
+
+            {/* Align */}
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                Align
+              </p>
+              <div className="grid grid-cols-6 gap-1">
+                <AlignButton title="Align left edges" onClick={() => alignSelected('left')}>
+                  <AlignIcon dir="left" />
+                </AlignButton>
+                <AlignButton title="Align horizontal centres" onClick={() => alignSelected('hcenter')}>
+                  <AlignIcon dir="hcenter" />
+                </AlignButton>
+                <AlignButton title="Align right edges" onClick={() => alignSelected('right')}>
+                  <AlignIcon dir="right" />
+                </AlignButton>
+                <AlignButton title="Align top edges" onClick={() => alignSelected('top')}>
+                  <AlignIcon dir="top" />
+                </AlignButton>
+                <AlignButton title="Align vertical centres" onClick={() => alignSelected('vcenter')}>
+                  <AlignIcon dir="vcenter" />
+                </AlignButton>
+                <AlignButton title="Align bottom edges" onClick={() => alignSelected('bottom')}>
+                  <AlignIcon dir="bottom" />
+                </AlignButton>
+              </div>
+            </div>
+
+            {/* Distribute (needs 3+) */}
+            {selectedIds.length >= 3 && (
+              <div>
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Distribute
+                </p>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    onClick={() => distributeSelected('horizontal')}
+                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                    title="Distribute horizontal spacing"
+                  >
+                    ↔ Horizontal
+                  </button>
+                  <button
+                    onClick={() => distributeSelected('vertical')}
+                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                    title="Distribute vertical spacing"
+                  >
+                    ↕ Vertical
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              <button
+                onClick={duplicateSelected}
+                className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                title="Duplicate selection (Ctrl+D)"
+              >
+                Duplicate
+              </button>
+              <button
+                onClick={deleteSelected}
+                className="flex-1 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                title="Delete selection (Del)"
+              >
+                Delete
+              </button>
+            </div>
+
+            {/* Combine */}
+            <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
+              <p className="mb-2 text-[11px] font-medium text-purple-700">
+                Link these tables so they can be booked together:
+              </p>
+              <button
+                onClick={createCombination}
+                disabled={comboSaving}
+                className="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+              >
+                {comboSaving ? 'Linking…' : 'Link as Combination'}
+              </button>
+              <p className="mt-2 text-[10px] text-purple-500">
+                Combined covers:{' '}
+                {tables.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.max_covers, 0)}
+              </p>
+            </div>
+            {combinations.length > 0 && (
+              <CombinationsList combinations={combinations} onDelete={deleteCombination} />
+            )}
+          </div>
+        ) : selected ? (
+          /* Single table selected — properties */
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">Properties</h3>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+                title="Deselect"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {propEdits && (
+              <div className="space-y-3">
+                {propError && (
+                  <p className="rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-600">
+                    {propError}
+                  </p>
+                )}
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={propEdits.name}
+                    onChange={(e) => setPropEdits({ ...propEdits, name: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Table Type
+                  </label>
+                  <select
+                    value={propEdits.table_type}
+                    onChange={(e) => setPropEdits({ ...propEdits, table_type: e.target.value as TableType })}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                  >
+                    {TABLE_TYPES.map((tt) => (
+                      <option key={tt} value={tt}>{tt}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Min
+                    </label>
+                    <NumericInput
+                      min={1}
+                      max={50}
+                      value={propEdits.min_covers}
+                      onChange={(v) => setPropEdits({ ...propEdits, min_covers: v })}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Max
+                    </label>
+                    <NumericInput
+                      min={1}
+                      max={50}
+                      value={propEdits.max_covers}
+                      onChange={(v) => setPropEdits({ ...propEdits, max_covers: v })}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handlePropSave}
+                  disabled={propSaving || !propEdits.name.trim()}
+                  className="w-full rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {propSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            )}
+
+            {/* Display-only geometry info */}
+            <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 space-y-1 text-[10px]">
+              <p className="text-slate-500">Shape: <span className="capitalize text-slate-700">{selected.shape}</span></p>
+              {selected.zone && (
+                <p className="text-slate-500">Zone: <span className="text-slate-700">{selected.zone}</span></p>
+              )}
+            </div>
+
+            {/* Rotation */}
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                Rotation
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={360}
+                  step={15}
+                  value={selected.rotation ?? 0}
+                  onChange={(e) => handleTableRotate(selected.id, parseInt(e.target.value))}
+                  className="flex-1"
+                  title="Drag to rotate · hold Shift on the stage rotation handle for 1° steps"
+                />
+                <NumericInput
+                  min={0}
+                  max={359}
+                  value={Math.round(selected.rotation ?? 0)}
+                  onChange={(v) => handleTableRotate(selected.id, ((v % 360) + 360) % 360)}
+                  className="w-12 rounded border border-slate-300 px-1 py-0.5 text-xs text-right text-slate-600 focus:border-brand-400 focus:outline-none"
+                  title="Precise rotation in degrees"
+                />
+                <span className="text-xs text-slate-500">°</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+                  <button
+                    key={deg}
+                    onClick={() => handleTableRotate(selected.id, deg)}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                      (selected.rotation ?? 0) === deg
+                        ? 'border-brand-300 bg-brand-50 text-brand-700'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    {deg}°
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selected.max_covers > 0 && (
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Chairs
+                </label>
+                <ToggleSwitch
+                  label="Even spacing around table"
+                  checked={!tableHasCustomSeatAngles(selected)}
+                  onChange={() => {
+                    if (tableHasCustomSeatAngles(selected)) {
+                      resetSeatAnglesToEven(selected.id);
+                    }
+                  }}
+                />
+                <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
+                  Drag a chair on the canvas to fine-tune. Turn this on to reset to the automatic layout.
+                </p>
+              </div>
+            )}
+
+            {/* Size */}
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                Size
+              </label>
+              <div className="space-y-1.5">
+                {selected.shape === 'circle' || selected.shape === 'square' ? (
+                  /* Single size slider — W always equals H */
+                  (() => {
+                    const fallback = getTableDimensions(selected.max_covers, selected.shape);
+                    const val = selected.width ?? fallback.width;
+                    const isCircle = selected.shape === 'circle';
+                    return (
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 text-[10px] text-slate-500 uppercase">
+                          {isCircle ? '⌀' : '□'}
+                        </span>
+                        <input
+                          type="range"
+                          min={4}
+                          max={24}
+                          step={0.5}
+                          value={val}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            handleTableResize(selected.id, v, v);
+                          }}
+                          className="flex-1"
+                          title={isCircle ? 'Diameter' : 'Side length'}
+                        />
+                        <span className="w-8 text-right text-[10px] text-slate-600">{val.toFixed(1)}</span>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  /* Oval, rectangle, polygon fallback: separate W / H sliders */
+                  (['width', 'height'] as const).map((dim) => {
+                    const fallback = getTableDimensions(selected.max_covers, selected.shape);
+                    const val = selected[dim] ?? fallback[dim];
+                    return (
+                      <div key={dim} className="flex items-center gap-2">
+                        <span className="w-3 text-[10px] text-slate-500 uppercase">{dim === 'width' ? 'W' : 'H'}</span>
+                        <input
+                          type="range"
+                          min={4}
+                          max={24}
+                          step={0.5}
+                          value={val}
+                          onChange={(e) => {
+                            const fb = getTableDimensions(selected.max_covers, selected.shape);
+                            handleTableResize(
+                              selected.id,
+                              dim === 'width' ? Number(e.target.value) : (selected.width ?? fb.width),
+                              dim === 'height' ? Number(e.target.value) : (selected.height ?? fb.height),
+                            );
+                          }}
+                          className="flex-1"
+                        />
+                        <span className="w-8 text-right text-[10px] text-slate-600">{val.toFixed(1)}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Polygon shape info */}
+            {selected.shape === 'polygon' && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1.5">
+                <p className="font-semibold text-slate-700">
+                  Custom shape · {selected.polygon_points?.length ?? 0} vertices
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  With the table selected on the layout, drag any blue vertex on the outline to reshape it. Drag
+                  the table to move it. Use reset to redraw the polygon while keeping the same table.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPolygonEditTableId(selected.id);
+                    setPolygonDrawPending(true);
+                  }}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Reset shape
+                </button>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleDuplicateTable(selected.id)}
+                className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Duplicate
+              </button>
+              <button
+                onClick={() => handleDeleteTable(selected.id)}
+                className="flex-1 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+              >
+                Delete
+              </button>
+            </div>
+
+            {combinations.length > 0 && (
+              <CombinationsList combinations={combinations} onDelete={deleteCombination} />
+            )}
+          </div>
+        ) : (
+          /* No selection — tables list + dining areas */
+          <div className="divide-y divide-slate-100">
+            {/* Tables header */}
+            <div className="flex items-center gap-2 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-900">Tables</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                {tables.length}
+              </span>
+            </div>
+
+            {/* Table list */}
+            <div className="px-3 py-3">
+              {tables.length === 0 ? (
+                <p className="text-xs text-slate-400">No tables yet. Open Elements and tap a shape to add one to the centre of the layout.</p>
+              ) : (
+                <div className="space-y-3">
+                  {zones.map((zone) => (
+                    <div key={zone}>
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{zone}</p>
+                      <div className="space-y-0.5">
+                        {(tablesByZone.get(zone) ?? []).map((t) => (
+                          <TableListRow key={t.id} table={t} onClick={() => selectTableFromList(t.id)} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {tablesNoZone.length > 0 && (
+                    <div>
+                      {zones.length > 0 && (
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Other</p>
+                      )}
+                      <div className="space-y-0.5">
+                        {tablesNoZone.map((t) => (
+                          <TableListRow key={t.id} table={t} onClick={() => selectTableFromList(t.id)} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Dining Areas */}
+            {zones.length > 0 && (
+              <div className="px-3 py-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dining Areas</p>
+                <div className="space-y-1">
+                  {zones.map((zone) => (
+                    <div key={zone} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                      <span className="text-xs font-medium text-slate-700">{zone}</span>
+                      <span className="text-[10px] text-slate-400">
+                        {(tablesByZone.get(zone) ?? []).length} tables
+                      </span>
+                    </div>
+                  ))}
+                  {tablesNoZone.length > 0 && (
+                    <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                      <span className="text-xs font-medium text-slate-400">No Zone</span>
+                      <span className="text-[10px] text-slate-400">{tablesNoZone.length} tables</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Combinations */}
+            {combinations.length > 0 && (
+              <div className="px-3 py-3">
+                <CombinationsList combinations={combinations} onDelete={deleteCombination} />
+              </div>
+            )}
+
+            {/* Tips */}
+            <div className="px-3 py-3">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Tips</p>
+              <ul className="space-y-0.5 text-[10px] text-slate-400 leading-relaxed">
+                <li>• Tap a shape in Elements to add a table in the centre — Custom opens draw mode</li>
+                <li>• Shift+click or shift-drag a box to multi-select</li>
+                <li>• Arrow keys nudge · Shift+Arrow for 10×</li>
+                <li>• Ctrl+Z undo · Ctrl+Shift+Z redo · Ctrl+D duplicate</li>
+                <li>• Scroll to zoom · Space or middle-click to pan</li>
+                {!embedded && <li>• Purple lines show linked combinations</li>}
+                <li>• Press ? to see all shortcuts</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -1624,12 +2191,15 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   }
 
   return (
-    <div className={`flex min-h-0 flex-col ${className ?? ''}`} style={{ minHeight: '600px' }}>
+    <div className={`flex min-h-[52vh] flex-col lg:min-h-[600px] ${className ?? ''}`}>
       {/* ── Toolbar ── */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
+      <div
+        ref={toolbarSurfaceRef}
+        className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 sm:px-4"
+      >
         {!embedded && (
           <Link
-            href="/dashboard/availability?tab=table&fp=layout"
+            href="/dashboard/availability?tab=layout"
             className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
           >
             ← Back
@@ -1776,85 +2346,292 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
         <SaveStatusPill status={saveStatus} onRetry={retrySaveNow} />
 
-        <div className="flex-1" />
-
-        {/* Layout size controls (commit on blur / Enter, not every keystroke) */}
-        <div className="hidden lg:flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1">
-          <span className="text-[10px] font-medium text-slate-500">Layout</span>
-          <LayoutSizeInput
-            value={Math.round(layoutWidth ?? canvasDims.width)}
-            min={1600}
-            max={12000}
-            onCommit={(v) => {
-              handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
-              handleLayoutResizeEnd();
-            }}
-            title="Canvas width in pixels — press Enter to apply"
-          />
-          <span className="text-[10px] text-slate-400">×</span>
-          <LayoutSizeInput
-            value={Math.round(layoutHeight ?? canvasDims.height)}
-            min={1200}
-            max={9000}
-            onCommit={(v) => {
-              handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
-              handleLayoutResizeEnd();
-            }}
-            title="Canvas height in pixels — press Enter to apply"
-          />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            ref={mobileElementsTriggerRef}
+            id="floor-plan-elements-trigger"
+            type="button"
+            onClick={() => openMobilePanel('elements')}
+            aria-expanded={mobilePanel === 'elements'}
+            aria-controls="floor-plan-elements-popover"
+            className={`touch-manipulation rounded-lg border px-2.5 py-2 text-xs font-semibold shadow-sm ${
+              mobilePanel === 'elements'
+                ? 'border-brand-400 bg-brand-50 text-brand-800'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            Elements
+          </button>
+          <button
+            ref={mobileSidebarTriggerRef}
+            id="floor-plan-sidebar-trigger"
+            type="button"
+            onClick={() => openMobilePanel('sidebar')}
+            aria-expanded={mobilePanel === 'sidebar'}
+            aria-controls="floor-plan-sidebar-popover"
+            className={`max-w-[14rem] touch-manipulation truncate rounded-lg border px-2.5 py-2 text-xs font-semibold shadow-sm ${
+              mobilePanel === 'sidebar'
+                ? 'border-brand-400 bg-brand-50 text-brand-800'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            {sidebarToolbarLabel}
+          </button>
+          <div className="relative lg:hidden">
+            <button
+              ref={mobileMoreTriggerRef}
+              type="button"
+              onClick={() => {
+                setMobileMoreOpen((v) => !v);
+                setShowFloorPlanMenu(false);
+              }}
+              aria-expanded={mobileMoreOpen}
+              aria-haspopup="menu"
+              className="touch-manipulation rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              More
+            </button>
+            {mobileMoreOpen ? (
+              <div
+                ref={mobileMoreMenuRef}
+                id="floor-plan-more-menu"
+                role="menu"
+                className="absolute right-0 top-full z-[70] mt-1 max-h-[min(70dvh,440px)] w-[min(calc(100vw-1.5rem),17.5rem)] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white py-2 shadow-xl"
+              >
+                <div className="space-y-3 border-b border-slate-100 px-3 pb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Layout size</p>
+                  <div className="flex flex-wrap items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-2">
+                    <LayoutSizeInput
+                      value={Math.round(layoutWidth ?? canvasDims.width)}
+                      min={1600}
+                      max={12000}
+                      onCommit={(v) => {
+                        handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
+                        handleLayoutResizeEnd();
+                      }}
+                      title="Canvas width in pixels — press Enter to apply"
+                    />
+                    <span className="text-[10px] text-slate-400">×</span>
+                    <LayoutSizeInput
+                      value={Math.round(layoutHeight ?? canvasDims.height)}
+                      min={1200}
+                      max={9000}
+                      onCommit={(v) => {
+                        handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
+                        handleLayoutResizeEnd();
+                      }}
+                      title="Canvas height in pixels — press Enter to apply"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2 px-3 pt-3">
+                  <ToggleSwitch
+                    label="Snap to guides"
+                    checked={alignmentGuidesEnabled}
+                    onChange={() => setAlignmentGuidesEnabled((v) => !v)}
+                    title="Alignment guides always appear while dragging; toggle this to snap to them"
+                  />
+                  <ToggleSwitch label="Grid" checked={showGrid} onChange={() => setShowGrid((v) => !v)} />
+                  <ToggleSwitch label="Snap" checked={gridSnapEnabled} onChange={() => setGridSnapEnabled((v) => !v)} />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 px-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      autoArrange();
+                      setMobileMoreOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Auto-Arrange
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      snapToGrid();
+                      setMobileMoreOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Snap Grid
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      rotatePlanCW();
+                      setMobileMoreOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    ↻ Rotate CW
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      rotatePlanCCW();
+                      setMobileMoreOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    ↺ Rotate CCW
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-col gap-2 border-t border-slate-100 px-3 py-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      backgroundFileRef.current?.click();
+                    }}
+                    disabled={backgroundUploading}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {backgroundUploading ? 'Uploading…' : backgroundUrl ? 'Change background' : 'Add background'}
+                  </button>
+                  {backgroundUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearBackground();
+                        setMobileMoreOpen(false);
+                      }}
+                      className="rounded-lg border border-red-200 px-2 py-2 text-xs font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Remove background
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowShortcuts(true);
+                      setMobileMoreOpen(false);
+                    }}
+                    className="rounded-lg border border-slate-200 px-2 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Keyboard shortcuts (?)
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
-        {/* Placement aid toggles */}
-        <ToggleSwitch
-          label="Snap to guides"
-          checked={alignmentGuidesEnabled}
-          onChange={() => setAlignmentGuidesEnabled((v) => !v)}
-          title="Alignment guides always appear while dragging; toggle this to snap to them"
-        />
-        <ToggleSwitch
-          label="Grid"
-          checked={showGrid}
-          onChange={() => setShowGrid((v) => !v)}
-        />
-        <ToggleSwitch
-          label="Snap"
-          checked={gridSnapEnabled}
-          onChange={() => setGridSnapEnabled((v) => !v)}
-        />
-        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <div className="min-w-0 flex-1" aria-hidden="true" />
 
-        <button
-          onClick={autoArrange}
-          className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          title="Auto-arrange tables in a grid"
-        >
-          Auto-Arrange
-        </button>
-        <button
-          onClick={snapToGrid}
-          className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          title="Snap all tables to the 2% grid"
-        >
-          Snap Grid
-        </button>
-        <button
-          onClick={rotatePlanCW}
-          className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          title="Rotate entire layout 90° clockwise"
-        >
-          ↻ CW
-        </button>
-        <button
-          onClick={rotatePlanCCW}
-          className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          title="Rotate entire layout 90° counter-clockwise"
-        >
-          ↺ CCW
-        </button>
+        {/* Large screens: same tools as “More”, laid out inline */}
+        <div className="hidden flex-wrap items-center gap-x-2 gap-y-2 lg:flex">
+          <div className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1">
+            <span className="text-[10px] font-medium text-slate-500">Layout</span>
+            <LayoutSizeInput
+              value={Math.round(layoutWidth ?? canvasDims.width)}
+              min={1600}
+              max={12000}
+              onCommit={(v) => {
+                handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
+                handleLayoutResizeEnd();
+              }}
+              title="Canvas width in pixels — press Enter to apply"
+            />
+            <span className="text-[10px] text-slate-400">×</span>
+            <LayoutSizeInput
+              value={Math.round(layoutHeight ?? canvasDims.height)}
+              min={1200}
+              max={9000}
+              onCommit={(v) => {
+                handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
+                handleLayoutResizeEnd();
+              }}
+              title="Canvas height in pixels — press Enter to apply"
+            />
+          </div>
 
-        <div className="mx-1 h-4 w-px bg-slate-200" />
+          <ToggleSwitch
+            label="Snap to guides"
+            checked={alignmentGuidesEnabled}
+            onChange={() => setAlignmentGuidesEnabled((v) => !v)}
+            title="Alignment guides always appear while dragging; toggle this to snap to them"
+          />
+          <ToggleSwitch
+            label="Grid"
+            checked={showGrid}
+            onChange={() => setShowGrid((v) => !v)}
+          />
+          <ToggleSwitch
+            label="Snap"
+            checked={gridSnapEnabled}
+            onChange={() => setGridSnapEnabled((v) => !v)}
+          />
 
-        {/* Background upload */}
+          <div className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden />
+
+          <button
+            type="button"
+            onClick={autoArrange}
+            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            title="Auto-arrange tables in a grid"
+          >
+            Auto-Arrange
+          </button>
+          <button
+            type="button"
+            onClick={snapToGrid}
+            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            title="Snap all tables to the 2% grid"
+          >
+            Snap Grid
+          </button>
+          <button
+            type="button"
+            onClick={rotatePlanCW}
+            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            title="Rotate entire layout 90° clockwise"
+          >
+            ↻ CW
+          </button>
+          <button
+            type="button"
+            onClick={rotatePlanCCW}
+            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            title="Rotate entire layout 90° counter-clockwise"
+          >
+            ↺ CCW
+          </button>
+
+          <div className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden />
+
+          <button
+            type="button"
+            onClick={() => backgroundFileRef.current?.click()}
+            disabled={backgroundUploading}
+            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            title="Upload floor plan background image (JPEG, PNG, or WebP)"
+          >
+            {backgroundUploading ? 'Uploading…' : backgroundUrl ? '⬡ Background' : '+ Background'}
+          </button>
+          {backgroundUrl ? (
+            <button
+              type="button"
+              onClick={clearBackground}
+              className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+              title="Remove background image"
+            >
+              × Background
+            </button>
+          ) : null}
+
+          <div className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden />
+
+          <button
+            type="button"
+            onClick={() => setShowShortcuts(true)}
+            className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50"
+            title="Keyboard shortcuts (?)"
+            aria-label="Keyboard shortcuts"
+          >
+            ?
+          </button>
+        </div>
+
+        {/* Background file input — used by More menu & desktop buttons */}
         <input
           ref={backgroundFileRef}
           type="file"
@@ -1866,92 +2643,46 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
             e.target.value = '';
           }}
         />
-        <button
-          onClick={() => backgroundFileRef.current?.click()}
-          disabled={backgroundUploading}
-          className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-          title="Upload floor plan background image (JPEG, PNG, or WebP)"
-        >
-          {backgroundUploading ? 'Uploading…' : backgroundUrl ? '⬡ Background' : '+ Background'}
-        </button>
-        {backgroundUrl && (
-          <button
-            onClick={clearBackground}
-            className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
-            title="Remove background image"
-          >
-            × Background
-          </button>
-        )}
-
-        <div className="mx-1 h-4 w-px bg-slate-200" />
-        <button
-          type="button"
-          onClick={() => setShowShortcuts(true)}
-          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50"
-          title="Keyboard shortcuts (?)"
-          aria-label="Keyboard shortcuts"
-        >
-          ?
-        </button>
       </div>
+
+      {/* Elements / sidebar — ClampedFixedDropdown (same pattern as OperationsWorkspaceToolbar) */}
+      <ClampedFixedDropdown
+        open={mobilePanel === 'elements'}
+        triggerRef={mobileElementsTriggerRef}
+        verticalAnchorRef={toolbarSurfaceRef}
+        gapPx={4}
+        align="start"
+        maxWidthPx={288}
+        id="floor-plan-elements-popover"
+        onDismiss={() => setMobilePanel(null)}
+        aria-label="Elements — tap a shape to add a table in the centre of the layout"
+        className="animate-fade-in z-[70] max-h-[min(72vh,520px)] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+      >
+        <ElementsPalette />
+      </ClampedFixedDropdown>
+
+      <ClampedFixedDropdown
+        open={mobilePanel === 'sidebar'}
+        triggerRef={mobileSidebarTriggerRef}
+        verticalAnchorRef={toolbarSurfaceRef}
+        gapPx={4}
+        align="end"
+        maxWidthPx={320}
+        id="floor-plan-sidebar-popover"
+        onDismiss={() => setMobilePanel(null)}
+        aria-label="Tables and selection properties"
+        className="animate-fade-in z-[70] max-h-[min(72vh,560px)] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white p-1 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+      >
+        <RightSidebarBody />
+      </ClampedFixedDropdown>
 
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
-      {/* ── Three-column body ── */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-
-        {/* Left: Elements Panel */}
-        <div className="w-36 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto p-3">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Elements</p>
-          <p className="mb-3 text-[9px] text-slate-400 leading-relaxed">
-            Drag a shape onto the canvas. Click <span className="font-medium text-slate-500">Custom</span> to draw
-            vertices on the canvas.
-          </p>
-          <div className="space-y-1.5">
-            {SHAPE_OPTIONS.map(({ shape, label }) => {
-              const isPolygon = shape === 'polygon';
-              const startPolygonDraw = () => {
-                setPolygonEditTableId(null);
-                setPolygonDrawPending(true);
-              };
-              return (
-                <div
-                  key={shape}
-                  draggable={!isPolygon}
-                  onDragStart={
-                    isPolygon ? undefined : (e) => e.dataTransfer.setData('shape', shape)
-                  }
-                  onClick={isPolygon ? startPolygonDraw : undefined}
-                  role={isPolygon ? 'button' : undefined}
-                  tabIndex={isPolygon ? 0 : undefined}
-                  onKeyDown={
-                    isPolygon
-                      ? (e) => {
-                          if (e.key !== 'Enter' && e.key !== ' ') return;
-                          e.preventDefault();
-                          startPolygonDraw();
-                        }
-                      : undefined
-                  }
-                  className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 shadow-sm hover:border-brand-300 hover:bg-brand-50 select-none ${
-                    isPolygon
-                      ? 'cursor-pointer active:opacity-90'
-                      : 'cursor-grab active:cursor-grabbing'
-                  }`}
-                >
-                  <ShapeIcon shape={shape} size={26} />
-                  <span className="min-w-0 flex-1 font-medium leading-snug">{label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Centre: Canvas */}
+      {/* ── Canvas (full width — Elements & Properties live in toolbar popovers) ── */}
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div
           ref={canvasWrapperRef}
-          className="min-h-0 flex-1 overflow-auto"
+          className="relative z-0 min-h-0 flex-1 overflow-auto"
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
           onDrop={handleCanvasDrop}
         >
@@ -1990,474 +2721,6 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
               handleDuplicateTable(id, { offsetX: 0, offsetY: 0, select: true })
             }
           />
-        </div>
-
-        {/* Right: Context Panel */}
-        <div className="w-64 shrink-0 border-l border-slate-200 bg-white overflow-y-auto">
-          {selectedIds.length >= 2 ? (
-            /* Multi-selection */
-            <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  {selectedIds.length} Tables
-                </h3>
-                <button
-                  onClick={() => setSelectedIds([])}
-                  className="rounded p-0.5 text-slate-400 hover:text-slate-600"
-                  title="Deselect"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <p className="text-xs text-slate-500 line-clamp-2">
-                {tables.filter((t) => selectedIds.includes(t.id)).map((t) => t.name).join(', ')}
-              </p>
-
-              {/* Align */}
-              <div>
-                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Align
-                </p>
-                <div className="grid grid-cols-6 gap-1">
-                  <AlignButton title="Align left edges" onClick={() => alignSelected('left')}>
-                    <AlignIcon dir="left" />
-                  </AlignButton>
-                  <AlignButton title="Align horizontal centres" onClick={() => alignSelected('hcenter')}>
-                    <AlignIcon dir="hcenter" />
-                  </AlignButton>
-                  <AlignButton title="Align right edges" onClick={() => alignSelected('right')}>
-                    <AlignIcon dir="right" />
-                  </AlignButton>
-                  <AlignButton title="Align top edges" onClick={() => alignSelected('top')}>
-                    <AlignIcon dir="top" />
-                  </AlignButton>
-                  <AlignButton title="Align vertical centres" onClick={() => alignSelected('vcenter')}>
-                    <AlignIcon dir="vcenter" />
-                  </AlignButton>
-                  <AlignButton title="Align bottom edges" onClick={() => alignSelected('bottom')}>
-                    <AlignIcon dir="bottom" />
-                  </AlignButton>
-                </div>
-              </div>
-
-              {/* Distribute (needs 3+) */}
-              {selectedIds.length >= 3 && (
-                <div>
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Distribute
-                  </p>
-                  <div className="grid grid-cols-2 gap-1">
-                    <button
-                      onClick={() => distributeSelected('horizontal')}
-                      className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
-                      title="Distribute horizontal spacing"
-                    >
-                      ↔ Horizontal
-                    </button>
-                    <button
-                      onClick={() => distributeSelected('vertical')}
-                      className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
-                      title="Distribute vertical spacing"
-                    >
-                      ↕ Vertical
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-2">
-                <button
-                  onClick={duplicateSelected}
-                  className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  title="Duplicate selection (Ctrl+D)"
-                >
-                  Duplicate
-                </button>
-                <button
-                  onClick={deleteSelected}
-                  className="flex-1 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                  title="Delete selection (Del)"
-                >
-                  Delete
-                </button>
-              </div>
-
-              {/* Combine */}
-              <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
-                <p className="mb-2 text-[11px] font-medium text-purple-700">
-                  Link these tables so they can be booked together:
-                </p>
-                <button
-                  onClick={createCombination}
-                  disabled={comboSaving}
-                  className="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {comboSaving ? 'Linking…' : 'Link as Combination'}
-                </button>
-                <p className="mt-2 text-[10px] text-purple-500">
-                  Combined covers:{' '}
-                  {tables.filter((t) => selectedIds.includes(t.id)).reduce((s, t) => s + t.max_covers, 0)}
-                </p>
-              </div>
-              {combinations.length > 0 && (
-                <CombinationsList combinations={combinations} onDelete={deleteCombination} />
-              )}
-            </div>
-          ) : selected ? (
-            /* Single table selected — properties */
-            <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">Properties</h3>
-                <button
-                  onClick={() => setSelectedIds([])}
-                  className="rounded p-0.5 text-slate-400 hover:text-slate-600"
-                  title="Deselect"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {propEdits && (
-                <div className="space-y-3">
-                  {propError && (
-                    <p className="rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-600">
-                      {propError}
-                    </p>
-                  )}
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Name
-                    </label>
-                    <input
-                      type="text"
-                      value={propEdits.name}
-                      onChange={(e) => setPropEdits({ ...propEdits, name: e.target.value })}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Table Type
-                    </label>
-                    <select
-                      value={propEdits.table_type}
-                      onChange={(e) => setPropEdits({ ...propEdits, table_type: e.target.value as TableType })}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
-                    >
-                      {TABLE_TYPES.map((tt) => (
-                        <option key={tt} value={tt}>{tt}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Min
-                      </label>
-                      <NumericInput
-                        min={1}
-                        max={50}
-                        value={propEdits.min_covers}
-                        onChange={(v) => setPropEdits({ ...propEdits, min_covers: v })}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Max
-                      </label>
-                      <NumericInput
-                        min={1}
-                        max={50}
-                        value={propEdits.max_covers}
-                        onChange={(v) => setPropEdits({ ...propEdits, max_covers: v })}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={handlePropSave}
-                    disabled={propSaving || !propEdits.name.trim()}
-                    className="w-full rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                  >
-                    {propSaving ? 'Saving…' : 'Save Changes'}
-                  </button>
-                </div>
-              )}
-
-              {/* Display-only geometry info */}
-              <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 space-y-1 text-[10px]">
-                <p className="text-slate-500">Shape: <span className="capitalize text-slate-700">{selected.shape}</span></p>
-                {selected.zone && (
-                  <p className="text-slate-500">Zone: <span className="text-slate-700">{selected.zone}</span></p>
-                )}
-              </div>
-
-              {/* Rotation */}
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Rotation
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={0}
-                    max={360}
-                    step={15}
-                    value={selected.rotation ?? 0}
-                    onChange={(e) => handleTableRotate(selected.id, parseInt(e.target.value))}
-                    className="flex-1"
-                    title="Drag to rotate · hold Shift on the stage rotation handle for 1° steps"
-                  />
-                  <NumericInput
-                    min={0}
-                    max={359}
-                    value={Math.round(selected.rotation ?? 0)}
-                    onChange={(v) => handleTableRotate(selected.id, ((v % 360) + 360) % 360)}
-                    className="w-12 rounded border border-slate-300 px-1 py-0.5 text-xs text-right text-slate-600 focus:border-brand-400 focus:outline-none"
-                    title="Precise rotation in degrees"
-                  />
-                  <span className="text-xs text-slate-500">°</span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
-                    <button
-                      key={deg}
-                      onClick={() => handleTableRotate(selected.id, deg)}
-                      className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${
-                        (selected.rotation ?? 0) === deg
-                          ? 'border-brand-300 bg-brand-50 text-brand-700'
-                          : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      {deg}°
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {selected.max_covers > 0 && (
-                <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                    Chairs
-                  </label>
-                  <ToggleSwitch
-                    label="Even spacing around table"
-                    checked={!tableHasCustomSeatAngles(selected)}
-                    onChange={() => {
-                      if (tableHasCustomSeatAngles(selected)) {
-                        resetSeatAnglesToEven(selected.id);
-                      }
-                    }}
-                  />
-                  <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
-                    Drag a chair on the canvas to fine-tune. Turn this on to reset to the automatic layout.
-                  </p>
-                </div>
-              )}
-
-              {/* Size */}
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Size
-                </label>
-                <div className="space-y-1.5">
-                  {selected.shape === 'circle' || selected.shape === 'square' ? (
-                    /* Single size slider — W always equals H */
-                    (() => {
-                      const fallback = getTableDimensions(selected.max_covers, selected.shape);
-                      const val = selected.width ?? fallback.width;
-                      const isCircle = selected.shape === 'circle';
-                      return (
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 text-[10px] text-slate-500 uppercase">
-                            {isCircle ? '⌀' : '□'}
-                          </span>
-                          <input
-                            type="range"
-                            min={4}
-                            max={24}
-                            step={0.5}
-                            value={val}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              handleTableResize(selected.id, v, v);
-                            }}
-                            className="flex-1"
-                            title={isCircle ? 'Diameter' : 'Side length'}
-                          />
-                          <span className="w-8 text-right text-[10px] text-slate-600">{val.toFixed(1)}</span>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    /* Oval, rectangle, polygon fallback: separate W / H sliders */
-                    (['width', 'height'] as const).map((dim) => {
-                      const fallback = getTableDimensions(selected.max_covers, selected.shape);
-                      const val = selected[dim] ?? fallback[dim];
-                      return (
-                        <div key={dim} className="flex items-center gap-2">
-                          <span className="w-3 text-[10px] text-slate-500 uppercase">{dim === 'width' ? 'W' : 'H'}</span>
-                          <input
-                            type="range"
-                            min={4}
-                            max={24}
-                            step={0.5}
-                            value={val}
-                            onChange={(e) => {
-                              const fb = getTableDimensions(selected.max_covers, selected.shape);
-                              handleTableResize(
-                                selected.id,
-                                dim === 'width' ? Number(e.target.value) : (selected.width ?? fb.width),
-                                dim === 'height' ? Number(e.target.value) : (selected.height ?? fb.height),
-                              );
-                            }}
-                            className="flex-1"
-                          />
-                          <span className="w-8 text-right text-[10px] text-slate-600">{val.toFixed(1)}</span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Polygon shape info */}
-              {selected.shape === 'polygon' && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1.5">
-                  <p className="font-semibold text-slate-700">
-                    Custom shape · {selected.polygon_points?.length ?? 0} vertices
-                  </p>
-                  <p className="text-[10px] text-slate-500">
-                    With the table selected on the layout, drag any blue vertex on the outline to reshape it. Drag
-                    the table to move it. Use reset to redraw the polygon while keeping the same table.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPolygonEditTableId(selected.id);
-                      setPolygonDrawPending(true);
-                    }}
-                    className="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Reset shape
-                  </button>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleDuplicateTable(selected.id)}
-                  className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Duplicate
-                </button>
-                <button
-                  onClick={() => handleDeleteTable(selected.id)}
-                  className="flex-1 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                >
-                  Delete
-                </button>
-              </div>
-
-              {combinations.length > 0 && (
-                <CombinationsList combinations={combinations} onDelete={deleteCombination} />
-              )}
-            </div>
-          ) : (
-            /* No selection — tables list + dining areas */
-            <div className="divide-y divide-slate-100">
-              {/* Tables header */}
-              <div className="flex items-center gap-2 px-4 py-3">
-                <span className="text-sm font-semibold text-slate-900">Tables</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                  {tables.length}
-                </span>
-              </div>
-
-              {/* Table list */}
-              <div className="px-3 py-3">
-                {tables.length === 0 ? (
-                  <p className="text-xs text-slate-400">No tables yet. Drag a shape from the Elements panel onto the canvas.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {zones.map((zone) => (
-                      <div key={zone}>
-                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{zone}</p>
-                        <div className="space-y-0.5">
-                          {(tablesByZone.get(zone) ?? []).map((t) => (
-                            <TableListRow key={t.id} table={t} onClick={() => setSelectedIds([t.id])} />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    {tablesNoZone.length > 0 && (
-                      <div>
-                        {zones.length > 0 && (
-                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Other</p>
-                        )}
-                        <div className="space-y-0.5">
-                          {tablesNoZone.map((t) => (
-                            <TableListRow key={t.id} table={t} onClick={() => setSelectedIds([t.id])} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Dining Areas */}
-              {zones.length > 0 && (
-                <div className="px-3 py-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dining Areas</p>
-                  <div className="space-y-1">
-                    {zones.map((zone) => (
-                      <div key={zone} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                        <span className="text-xs font-medium text-slate-700">{zone}</span>
-                        <span className="text-[10px] text-slate-400">
-                          {(tablesByZone.get(zone) ?? []).length} tables
-                        </span>
-                      </div>
-                    ))}
-                    {tablesNoZone.length > 0 && (
-                      <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                        <span className="text-xs font-medium text-slate-400">No Zone</span>
-                        <span className="text-[10px] text-slate-400">{tablesNoZone.length} tables</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Combinations */}
-              {combinations.length > 0 && (
-                <div className="px-3 py-3">
-                  <CombinationsList combinations={combinations} onDelete={deleteCombination} />
-                </div>
-              )}
-
-              {/* Tips */}
-              <div className="px-3 py-3">
-                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Tips</p>
-                <ul className="space-y-0.5 text-[10px] text-slate-400 leading-relaxed">
-                  <li>• Drag shapes from Elements to add tables</li>
-                  <li>• Shift+click or shift-drag a box to multi-select</li>
-                  <li>• Arrow keys nudge · Shift+Arrow for 10×</li>
-                  <li>• Ctrl+Z undo · Ctrl+Shift+Z redo · Ctrl+D duplicate</li>
-                  <li>• Scroll to zoom · Space or middle-click to pan</li>
-                  {!embedded && <li>• Purple lines show linked combinations</li>}
-                  <li>• Press ? to see all shortcuts</li>
-                </ul>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -2642,7 +2905,7 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       onClick={onClose}
@@ -2702,6 +2965,7 @@ function ToggleSwitch({ label, checked, onChange, title }: { label: string; chec
 function TableListRow({ table, onClick }: { table: VenueTable; onClick: () => void }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-slate-50 group"
     >

@@ -129,8 +129,8 @@ export function UnifiedFloorPlanView({
 
   const editLayoutHref =
     effectiveDiningAreaId && showDiningAreaChrome
-      ? `/dashboard/availability?tab=table&fp=layout&area=${encodeURIComponent(effectiveDiningAreaId)}`
-      : '/dashboard/availability?tab=table&fp=layout';
+      ? `/dashboard/availability?tab=layout&area=${encodeURIComponent(effectiveDiningAreaId)}`
+      : '/dashboard/availability?tab=layout';
 
   const areaNav: FloorPlanAreaNavConfig | null =
     showDiningAreaChrome && effectiveDiningAreaId

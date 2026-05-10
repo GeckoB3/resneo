@@ -45,16 +45,43 @@ function timeToMinutes(t: string): number {
   return (h ?? 0) * 60 + (m ?? 0);
 }
 
-function minutesToTime(value: number): string {
-  const h = Math.floor(value / 60);
-  const m = value % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+function localDateTimeIso(date: string, minutes: number): string {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  const wallMinutes = minutes % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const m = wallMinutes % 60;
+  const base = new Date(`${date}T00:00:00`);
+  base.setDate(base.getDate() + dayOffset);
+  const targetDate = formatDateInput(base);
+  return new Date(`${targetDate}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).toISOString();
 }
 
-function localDateTimeIso(date: string, minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return new Date(`${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).toISOString();
+function estimatedEndIsoForDate(date: string, startTime: string, endMinutes: number): string {
+  const startMinutes = timeToMinutes(startTime.slice(0, 5));
+  const adjustedEnd = endMinutes <= startMinutes ? endMinutes + 24 * 60 : endMinutes;
+  return localDateTimeIso(date, adjustedEnd);
+}
+
+function endMinutesForDuration(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutes(start.slice(0, 5));
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(end.slice(0, 5));
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
+}
+
+function timelineMinutesForWallTime(time: string, startMinutes: number): number {
+  const minutes = timeToMinutes(time.slice(0, 5));
+  return minutes < startMinutes ? minutes + 24 * 60 : minutes;
+}
+
+function formatTimelineEnd(value: number): string {
+  const wallMinutes = value % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const m = wallMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 /** Matches `TimelineGrid` default slot column width at 100% scale. */
@@ -219,12 +246,12 @@ function withOptimisticBookingMove(
   const startTime = patch.startTime ?? booking.start_time.slice(0, 5);
   const durationMins = (() => {
     const start = timeToMinutes(booking.start_time.slice(0, 5));
-    const end = booking.end_time ? timeToMinutes(booking.end_time.slice(0, 5)) : start + 90;
+    const end = endMinutesForDuration(booking.start_time, booking.end_time);
     return Math.max(15, end - start);
   })();
   const endTime = patch.endTime ?? (() => {
     const end = timeToMinutes(startTime) + durationMins;
-    return `${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
+    return formatTimelineEnd(end);
   })();
   const nextBookingDetails = {
     ...booking,
@@ -244,8 +271,10 @@ function withOptimisticBookingMove(
     }
     const inTargetTable = targetTables.includes(cell.table_id);
     if (!inTargetTable) return cell;
-    const slot = timeToMinutes(cell.time.slice(0, 5));
-    const inRange = slot >= timeToMinutes(startTime) && slot < timeToMinutes(endTime);
+    const startMinutes = timeToMinutes(startTime);
+    const slot = timelineMinutesForWallTime(cell.time, startMinutes);
+    const end = endMinutesForDuration(startTime, endTime);
+    const inRange = slot >= startMinutes && slot < end;
     if (!inRange) return cell;
     return {
       ...cell,
@@ -1361,12 +1390,11 @@ export function TableGridView({
       const oldTime = oldBlock?.booking_details?.start_time ?? '';
 
       const oldStart = timeToMinutes(oldBlock?.booking_details?.start_time?.slice(0, 5) ?? newTime);
-      const oldEnd = oldBlock?.booking_details?.end_time
-        ? timeToMinutes(oldBlock.booking_details.end_time.slice(0, 5))
+      const oldEnd = oldBlock?.booking_details
+        ? endMinutesForDuration(oldBlock.booking_details.start_time, oldBlock.booking_details.end_time)
         : oldStart + 90;
       const durationMins = Math.max(15, oldEnd - oldStart);
       const newEndMins = timeToMinutes(newTime) + durationMins;
-      const newEndTime = `${Math.floor(newEndMins / 60).toString().padStart(2, '0')}:${(newEndMins % 60).toString().padStart(2, '0')}`;
 
       const res = await fetch('/api/venue/tables/assignments', {
         method: 'POST',
@@ -1375,7 +1403,7 @@ export function TableGridView({
           action: 'change_time',
           booking_id: bookingId,
           new_time: newTime,
-          new_estimated_end_time: `${date}T${newEndTime}:00.000Z`,
+          new_estimated_end_time: localDateTimeIso(date, newEndMins),
         }),
       });
 
@@ -1449,7 +1477,7 @@ export function TableGridView({
     if (!startTime) return;
     if (anchorCell?.booking_details?.status === 'Completed') return;
     const startMinutes = timeToMinutes(startTime);
-    const requestedEnd = Math.max(startMinutes + 15, timeToMinutes(newEndTime));
+    const requestedEnd = Math.max(startMinutes + 15, timelineMinutesForWallTime(newEndTime, startMinutes));
     const bookingTableIds = Array.from(new Set(
       (gridData?.cells ?? []).filter((cell) => cell.booking_id === bookingId).map((cell) => cell.table_id),
     ));
@@ -1458,13 +1486,13 @@ export function TableGridView({
       if (!cell.booking_id || !cell.booking_details) continue;
       if (cell.booking_id === bookingId) continue;
       if (!bookingTableIds.includes(cell.table_id)) continue;
-      const otherStart = timeToMinutes(cell.booking_details.start_time.slice(0, 5));
+      const otherStart = timelineMinutesForWallTime(cell.booking_details.start_time, startMinutes);
       if (otherStart > startMinutes && (nextBoundary === null || otherStart < nextBoundary)) {
         nextBoundary = otherStart;
       }
     }
     const clampedEnd = nextBoundary === null ? requestedEnd : Math.min(requestedEnd, nextBoundary);
-    const clampedEndTime = `${Math.floor(clampedEnd / 60).toString().padStart(2, '0')}:${(clampedEnd % 60).toString().padStart(2, '0')}`;
+    const clampedEndTime = formatTimelineEnd(clampedEnd);
     const pendingId = rememberPendingVisualMutation({ type: 'move', bookingId, patch: { endTime: clampedEndTime } });
     commitVisualGridUpdate((prev) => withOptimisticBookingMove(prev, bookingId, { endTime: clampedEndTime }));
     try {
@@ -1475,7 +1503,7 @@ export function TableGridView({
           action: 'change_time',
           booking_id: bookingId,
           new_time: startTime,
-          new_estimated_end_time: `${date}T${clampedEndTime}:00.000Z`,
+          new_estimated_end_time: estimatedEndIsoForDate(date, startTime, clampedEnd),
         }),
       });
       if (!res.ok) {
@@ -1737,7 +1765,11 @@ export function TableGridView({
       }
       return `${String(derivedEndHour).padStart(2, '0')}:00`;
     })();
-    const configuredEndMinutes = timeToMinutes(configuredEnd);
+    const startMinutes = timeToMinutes(timelineStartTime);
+    let configuredEndMinutes = timeToMinutes(configuredEnd);
+    if (configuredEndMinutes <= startMinutes) {
+      configuredEndMinutes += 24 * 60;
+    }
     const latestBookingEndMinutes = Math.max(
       configuredEndMinutes,
       ...(gridData?.cells
@@ -1756,8 +1788,8 @@ export function TableGridView({
         ) ?? []),
     );
     const slotInterval = gridData?.slot_interval_minutes ?? 15;
-    return minutesToTime(Math.ceil(latestBookingEndMinutes / slotInterval) * slotInterval);
-  }, [timeRangeFilterActive, pickerEndHour, serviceId, selectedService, derivedEndHour, gridData, date, coversClockTick]);
+    return formatTimelineEnd(Math.ceil(latestBookingEndMinutes / slotInterval) * slotInterval);
+  }, [timeRangeFilterActive, pickerEndHour, serviceId, selectedService, derivedEndHour, gridData, date, timelineStartTime]);
 
   const timelineCells = useMemo(() => {
     if (!gridData?.cells) return [];

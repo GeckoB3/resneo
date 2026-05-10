@@ -12,7 +12,7 @@
  * before choosing models on /signup/booking-models).
  *
  * Requires .env.local:
- *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY
+ *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, STRIPE_SECRET_KEY
  *   STRIPE_LIGHT_PRICE_ID, STRIPE_SMS_LIGHT_PRICE_ID (Light)
  *   STRIPE_APPOINTMENTS_PLUS_PRICE_ID (Plus)
  *   STRIPE_APPOINTMENTS_PRO_PRICE_ID (Pro)
@@ -363,11 +363,11 @@ async function seedOne(admin, stripe, account) {
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.SUPABASE_SECRET_KEY;
   const stripeSecret = process.env.STRIPE_SECRET_KEY?.trim();
 
   if (!url || !serviceKey) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY');
     process.exit(1);
   }
   if (!stripeSecret) {

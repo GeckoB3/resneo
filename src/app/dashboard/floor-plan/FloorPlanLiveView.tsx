@@ -33,7 +33,14 @@ import type { FloorDragEvent } from './LiveFloorCanvas';
 import { collectTableDayBookings } from '@/lib/floor-plan/table-day-timeline';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
-import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import {
+  getCalendarGridBounds,
+  getOpeningPeriodsForVenueDate,
+  periodToCalendarGridHours,
+} from '@/lib/venue-calendar-bounds';
+import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
+import type { VenueServiceRow } from '@/app/dashboard/availability/service-settings-types';
+import { FloorPlanServicePicker } from '@/components/floor-plan/FloorPlanServicePicker';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueArea } from '@/types/areas';
 import {
@@ -129,9 +136,36 @@ function timeToMinutesShort(t: string): number {
 }
 
 function minutesToTimeShort(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
+  const wallMinutes = m % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const min = wallMinutes % 60;
   return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+}
+
+function localDateTimeIso(date: string, minutes: number): string {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  const wallMinutes = minutes % (24 * 60);
+  const h = Math.floor(wallMinutes / 60);
+  const m = wallMinutes % 60;
+  const base = new Date(`${date}T00:00:00`);
+  base.setDate(base.getDate() + dayOffset);
+  return new Date(`${formatDateInput(base)}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).toISOString();
+}
+
+function estimatedEndIsoForDate(date: string, startTime: string, endMinutes: number): string {
+  const startMinutes = timeToMinutesShort(startTime);
+  const adjustedEnd = endMinutes <= startMinutes ? endMinutes + 24 * 60 : endMinutes;
+  return localDateTimeIso(date, adjustedEnd);
+}
+
+function endMinutesAfterStartShort(start: string, end: string | null | undefined, fallbackMinutes = 90): number {
+  const startMin = timeToMinutesShort(start);
+  if (!end) return startMin + fallbackMinutes;
+  let endMin = timeToMinutesShort(end);
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
 }
 
 function bookingEndMinutes(booking: BookingOnTable, selectedDate: string, nowMinutes: number): number {
@@ -243,6 +277,7 @@ export function FloorPlanLiveView({
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [venueServices, setVenueServices] = useState<VenueServiceRow[]>([]);
   const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(rememberedPreferences.endHourOverride ?? null);
   const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(rememberedPreferences.timeRangeFilterActive ?? false);
@@ -297,6 +332,39 @@ export function FloorPlanLiveView({
     };
   }, [venueBootstrap]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const qs =
+      bookingModel === 'table_reservation' && diningAreaId
+        ? `?area_id=${encodeURIComponent(diningAreaId)}`
+        : '';
+
+    async function loadServices(): Promise<void> {
+      try {
+        const first = await fetch(`/api/venue/services${qs}`);
+        const body = first.ok ? await first.json() : null;
+        let list: VenueServiceRow[] = Array.isArray(body?.services) ? (body.services as VenueServiceRow[]) : [];
+
+        if (list.length === 0 && qs !== '') {
+          const fallback = await fetch('/api/venue/services');
+          const fbBody = fallback.ok ? await fallback.json() : null;
+          if (Array.isArray(fbBody?.services)) {
+            list = fbBody.services as VenueServiceRow[];
+          }
+        }
+
+        if (!cancelled) setVenueServices(list);
+      } catch (e) {
+        console.error('[FloorPlanLiveView] /api/venue/services failed:', e);
+      }
+    }
+
+    void loadServices();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingModel, diningAreaId]);
+
   const selectedDateHydrated = useRef(false);
   useEffect(() => {
     if (!selectedDateHydrated.current) {
@@ -324,6 +392,49 @@ export function FloorPlanLiveView({
   );
   const pickerStartHour = startHourOverride ?? derivedStartHour;
   const pickerEndHour = endHourOverride ?? derivedEndHour;
+
+  /** DB-backed services for the selected weekday, else one row per opening_hours period (floor-plan always has something to pick when hours exist). */
+  const servicePickList = useMemo((): VenueServiceRow[] => {
+    const wd = getDayOfWeekForYmdInTimezone(selectedDate, venueTimezone);
+    const fromDb = venueServices.filter((s) => s.is_active && s.days_of_week.includes(wd));
+    if (fromDb.length > 0) return fromDb;
+
+    const periods = getOpeningPeriodsForVenueDate(selectedDate, openingHours ?? undefined, {
+      timeZone: venueTimezone,
+    });
+    return periods.map((p, i) => ({
+      id: `opening-hours:${i}`,
+      name: `${p.open.slice(0, 5)}–${p.close.slice(0, 5)}`,
+      days_of_week: [0, 1, 2, 3, 4, 5, 6],
+      start_time: p.open.slice(0, 5),
+      end_time: p.close.slice(0, 5),
+      last_booking_time: p.close.slice(0, 5),
+      is_active: true,
+      sort_order: i,
+    }));
+  }, [venueServices, selectedDate, venueTimezone, openingHours]);
+
+  const activeServiceId = useMemo(() => {
+    if (startHourOverride == null || endHourOverride == null) return null;
+    const t = selectedTime.slice(0, 5);
+    for (const s of servicePickList) {
+      const b = periodToCalendarGridHours(s.start_time, s.end_time);
+      if (!b) continue;
+      if (b.startHour === startHourOverride && b.endHour === endHourOverride && t === s.start_time.slice(0, 5)) {
+        return s.id;
+      }
+    }
+    return null;
+  }, [servicePickList, startHourOverride, endHourOverride, selectedTime]);
+
+  const applyVenueServiceToTimeline = useCallback((s: VenueServiceRow) => {
+    const bounds = periodToCalendarGridHours(s.start_time, s.end_time);
+    if (!bounds) return;
+    setStartHourOverride(bounds.startHour);
+    setEndHourOverride(bounds.endHour);
+    setTimeRangeFilterActive(false);
+    setSelectedTime(s.start_time.slice(0, 5));
+  }, []);
 
   /** Inclusive minute range for timeline scrubber (end hour matches calendar: exclusive upper bound). */
   const timelineScrubBounds = useMemo(() => {
@@ -361,6 +472,44 @@ export function FloorPlanLiveView({
     setSelectedDate(today);
     setSelectedTime(minutesToTimeShort(Math.min(Math.max(rawM, minM), maxM)));
   }, [selectedDate, timelineScrubBounds, openingHours, venueTimezone]);
+
+  const applyFloorTimelineRangeStart = useCallback(
+    (start: number) => {
+      if (!Number.isFinite(start) || start < 0 || start > 23) return;
+      const end = Math.max(pickerEndHour, start + 1);
+      const clampedEnd = Math.min(24, end);
+      setStartHourOverride(start);
+      setEndHourOverride(clampedEnd);
+      const minM = start * 60;
+      const maxM = Math.max(minM, clampedEnd * 60 - 1);
+      const cur = minutesFromTime(selectedTime);
+      setSelectedTime(minutesToTimeShort(Math.min(Math.max(cur, minM), maxM)));
+    },
+    [pickerEndHour, selectedTime],
+  );
+
+  const applyFloorTimelineRangeEnd = useCallback(
+    (end: number) => {
+      if (!Number.isFinite(end) || end < 1 || end > 24) return;
+      const start = Math.min(pickerStartHour, end - 1);
+      setStartHourOverride(start);
+      setEndHourOverride(end);
+      const minM = start * 60;
+      const maxM = Math.max(minM, end * 60 - 1);
+      const cur = minutesFromTime(selectedTime);
+      setSelectedTime(minutesToTimeShort(Math.min(Math.max(cur, minM), maxM)));
+    },
+    [pickerStartHour, selectedTime],
+  );
+
+  const resetFloorTimelineRangeToVenueHours = useCallback(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    const minM = derivedStartHour * 60;
+    const maxM = Math.max(minM, derivedEndHour * 60 - 1);
+    const cur = minutesFromTime(selectedTime);
+    setSelectedTime(minutesToTimeShort(Math.min(Math.max(cur, minM), maxM)));
+  }, [derivedStartHour, derivedEndHour, selectedTime]);
 
   const fetchData = useCallback(async () => {
     setViewportRefreshing(true);
@@ -430,7 +579,13 @@ export function FloorPlanLiveView({
               guest_name: cell.booking_details.guest_name,
               party_size: cell.booking_details.party_size,
               start_time: cell.booking_details.start_time,
-              estimated_end_time: cell.booking_details.end_time ? `${selectedDate}T${cell.booking_details.end_time}:00.000Z` : null,
+              estimated_end_time: cell.booking_details.end_time
+                ? estimatedEndIsoForDate(
+                    selectedDate,
+                    cell.booking_details.start_time.slice(0, 5),
+                    endMinutesAfterStartShort(cell.booking_details.start_time, cell.booking_details.end_time),
+                  )
+                : null,
               status: cell.booking_details.status,
               deposit_status: cell.booking_details.deposit_status ?? null,
               deposit_amount_pence: cell.booking_details.deposit_amount_pence ?? null,
@@ -450,7 +605,13 @@ export function FloorPlanLiveView({
             guest_name: ub.guest_name,
             party_size: ub.party_size,
             start_time: ub.start_time,
-            estimated_end_time: ub.end_time ? `${selectedDate}T${ub.end_time.slice(0, 5)}:00.000Z` : null,
+            estimated_end_time: ub.end_time
+              ? estimatedEndIsoForDate(
+                  selectedDate,
+                  ub.start_time.slice(0, 5),
+                  endMinutesAfterStartShort(ub.start_time, ub.end_time),
+                )
+              : null,
             status: ub.status,
             deposit_status: ub.deposit_status ?? null,
             deposit_amount_pence: ub.deposit_amount_pence ?? null,
@@ -1011,7 +1172,11 @@ export function FloorPlanLiveView({
       if (!startTime) return;
       if (anchorCell?.booking_details?.status === 'Completed') return;
       const startMinutes = timeToMinutesShort(startTime);
-      const requestedEnd = Math.max(startMinutes + 15, timeToMinutesShort(newEndTimeHHmm));
+      let requestedEnd = timeToMinutesShort(newEndTimeHHmm);
+      if (requestedEnd <= startMinutes) {
+        requestedEnd += 24 * 60;
+      }
+      requestedEnd = Math.max(startMinutes + 15, requestedEnd);
       const bookingTableIds = Array.from(
         new Set((gridData?.cells ?? []).filter((cell) => cell.booking_id === bookingId).map((cell) => cell.table_id)),
       );
@@ -1026,7 +1191,6 @@ export function FloorPlanLiveView({
         }
       }
       const clampedEnd = nextBoundary === null ? requestedEnd : Math.min(requestedEnd, nextBoundary);
-      const clampedEndTime = minutesToTimeShort(clampedEnd);
       try {
         const res = await fetch('/api/venue/tables/assignments', {
           method: 'POST',
@@ -1035,7 +1199,7 @@ export function FloorPlanLiveView({
             action: 'change_time',
             booking_id: bookingId,
             new_time: startTime,
-            new_estimated_end_time: `${selectedDate}T${clampedEndTime}:00.000Z`,
+            new_estimated_end_time: estimatedEndIsoForDate(selectedDate, startTime, clampedEnd),
           }),
         });
         if (!res.ok) {
@@ -1077,12 +1241,11 @@ export function FloorPlanLiveView({
     async (bookingId: string, newTime: string) => {
       const oldBlock = gridData?.cells.find((c) => c.booking_id === bookingId);
       const oldStart = timeToMinutesShort(oldBlock?.booking_details?.start_time?.slice(0, 5) ?? newTime);
-      const oldEnd = oldBlock?.booking_details?.end_time
-        ? timeToMinutesShort(oldBlock.booking_details.end_time.slice(0, 5))
+      const oldEnd = oldBlock?.booking_details
+        ? endMinutesAfterStartShort(oldBlock.booking_details.start_time, oldBlock.booking_details.end_time)
         : oldStart + 90;
       const durationMins = Math.max(15, oldEnd - oldStart);
       const newEndMins = timeToMinutesShort(newTime) + durationMins;
-      const newEndTime = minutesToTimeShort(newEndMins);
       try {
         const res = await fetch('/api/venue/tables/assignments', {
           method: 'POST',
@@ -1091,7 +1254,7 @@ export function FloorPlanLiveView({
             action: 'change_time',
             booking_id: bookingId,
             new_time: newTime,
-            new_estimated_end_time: `${selectedDate}T${newEndTime}:00.000Z`,
+            new_estimated_end_time: localDateTimeIso(selectedDate, newEndMins),
           }),
         });
         if (!res.ok) {
@@ -1661,6 +1824,57 @@ export function FloorPlanLiveView({
         timelineLabel={selectedTime}
         timelinePanel={(
           <div className="space-y-3">
+            <div className="rounded-lg border border-slate-100 bg-slate-50/90 px-3 py-2.5">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Slider range</p>
+              <p className="mb-2 text-[11px] leading-snug text-slate-600">
+                Widen or narrow the scrubber when bookings run outside your usual service window.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="block min-w-0">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">From (hour)</span>
+                  <select
+                    value={pickerStartHour}
+                    onChange={(e) => applyFloorTimelineRangeStart(Number(e.target.value))}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    aria-label="Timeline slider start hour"
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => hour)
+                      .filter((hour) => hour < pickerEndHour)
+                      .map((hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="block min-w-0">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Until (hour)</span>
+                  <select
+                    value={pickerEndHour}
+                    onChange={(e) => applyFloorTimelineRangeEnd(Number(e.target.value))}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 py-0 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    aria-label="Timeline slider end hour"
+                  >
+                    {Array.from({ length: 24 }, (_, i) => i + 1)
+                      .filter((hour) => hour <= 24 && hour > pickerStartHour)
+                      .map((hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              {startHourOverride != null || endHourOverride != null ? (
+                <button
+                  type="button"
+                  onClick={resetFloorTimelineRangeToVenueHours}
+                  className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                >
+                  Reset range to venue hours
+                </button>
+              ) : null}
+            </div>
             <div>
               <label htmlFor="floor-timeline-time" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Timeline time
@@ -1712,7 +1926,7 @@ export function FloorPlanLiveView({
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Drag to move forward or back; range matches the calendar service window ({String(pickerStartHour).padStart(2, '0')}:00–{String(pickerEndHour).padStart(2, '0')}:00).
+                  Drag to move forward or back. Range is {String(pickerStartHour).padStart(2, '0')}:00–{String(pickerEndHour).padStart(2, '0')}:00 (adjust above if needed).
                 </p>
               </div>
               <p className="mt-1.5 text-xs text-slate-500">
@@ -1785,17 +1999,26 @@ export function FloorPlanLiveView({
         controlsPanel={(
           <div />
         )}
-        toolbarLeadingTools={(toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) =>
-          areaNav ? (
-            <DiningAreaPicker
-              areas={areaNav.areas}
-              value={areaNav.value}
-              onChange={areaNav.onChange}
+        toolbarLeadingTools={(toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
+          <>
+            {areaNav ? (
+              <DiningAreaPicker
+                areas={areaNav.areas}
+                value={areaNav.value}
+                onChange={areaNav.onChange}
+                verticalAnchorRef={toolbarPanelAnchorRef}
+                compact
+              />
+            ) : null}
+            <FloorPlanServicePicker
+              services={servicePickList}
               verticalAnchorRef={toolbarPanelAnchorRef}
               compact
+              selectedServiceId={activeServiceId}
+              onSelectService={applyVenueServiceToTimeline}
             />
-          ) : null
-        }
+          </>
+        )}
       />
 
       {/* Canvas area — fill remaining viewport under dashboard chrome */}

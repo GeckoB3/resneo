@@ -17,6 +17,8 @@ interface Props {
   onTabChange: (tab: FloorPlanEditorTabKey) => void;
   /** When false, only the Tables tab is shown (simple covers mode). */
   advancedTableManagement: boolean;
+  /** When true, omit the inner TabBar and sub-tab label (parent owns top-level tabs). */
+  hideTabNavigation?: boolean;
   /** Hide the built-in section title and intro (e.g. when the parent screen already has a heading). */
   hideHeading?: boolean;
   /** Called after each successful layout auto-save so siblings can react. */
@@ -38,6 +40,7 @@ export function FloorPlanEditorTabs({
   activeTab,
   onTabChange,
   advancedTableManagement,
+  hideTabNavigation = false,
   hideHeading = false,
   onLayoutSaved,
   combinationThreshold,
@@ -128,22 +131,26 @@ export function FloorPlanEditorTabs({
       ) : null}
 
       <SectionCard.Body className={hideHeading ? '!pt-5' : '!pt-0'}>
-      <div className="mb-4 overflow-x-auto pb-1">
-        <TabBar<FloorPlanEditorTabKey>
-          tabs={visibleTabKeys.map((k) => ({
-            id: k,
-            label: k[0]!.toUpperCase() + k.slice(1),
-          }))}
-          value={activeTab}
-          onChange={onTabChange}
-        />
-      </div>
+      {!hideTabNavigation ? (
+        <>
+          <div className="mb-4 overflow-x-auto pb-1">
+            <TabBar<FloorPlanEditorTabKey>
+              tabs={visibleTabKeys.map((k) => ({
+                id: k,
+                label: k[0]!.toUpperCase() + k.slice(1),
+              }))}
+              value={activeTab}
+              onChange={onTabChange}
+            />
+          </div>
 
-      <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tabLabel}</p>
-      </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tabLabel}</p>
+          </div>
+        </>
+      ) : null}
 
-      <div className="mt-4">
+      <div className={hideTabNavigation ? undefined : 'mt-4'}>
         {activeTab === 'layout' && advancedTableManagement && (
           <div>
             <FloorPlanEditor

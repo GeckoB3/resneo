@@ -41,8 +41,8 @@ Reserve NI is a booking and guest management platform for independent restaurant
 - **Never hold deposit funds.** The MVP uses Stripe Connect direct charges. Funds go to the venue's connected Stripe account. Reserve NI never touches the money.
 - **Never call SendGrid or Twilio directly from business logic.** All communications go through the channel abstraction layer in `lib/communications/`.
 - **Webhook handlers must be idempotent.** Processing the same Stripe event twice must produce the same result. Check for existing processing before taking action.
-- **Never expose service role keys to the client.** `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` are server-side only.
-- **All database access respects Row-Level Security.** Use the appropriate Supabase client (anon for client-side, service role for server-side admin operations only).
+- **Never expose secret keys to the client.** `SUPABASE_SECRET_KEY` and `STRIPE_SECRET_KEY` are server-side only.
+- **All database access respects Row-Level Security.** Use the appropriate Supabase client (publishable key for client-side, secret key for server-side admin operations only).
 
 ## When Asked to Build Something
 1. Check if the feature is specified in the PRD (docs/PRD.md or referenced specification).

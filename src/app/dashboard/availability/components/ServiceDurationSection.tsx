@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { useDebouncedCallback } from '@/lib/use-debounced-callback';
 import type { PartySizeDuration } from '@/app/dashboard/availability/service-settings-types';
 import { DAY_LABELS, DURATION_SMART_DEFAULTS } from '@/app/dashboard/availability/service-settings-types';
+
+const AUTOSAVE_MS = 650;
 
 const FIELD_CLASS =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
@@ -80,46 +83,44 @@ async function createDurationApi(
 }
 
 export function ServiceDurationSection({ serviceId, serviceName, durations, showToast, onDurationsChange }: Props) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<PartySizeDuration | null>(null);
+  const durationsRef = useRef(durations);
+  durationsRef.current = durations;
+
   const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
-  const sorted = [...durations].sort((a, b) => a.min_party_size - b.min_party_size);
-
-  async function handleCreate(minPs: number, maxPs: number, dur: number, dayOfWeek: number | null) {
-    setSaving(true);
-    try {
-      const duration = await createDurationApi(serviceId, minPs, maxPs, dur, dayOfWeek);
-      onDurationsChange([...durations, duration]);
-      setCreating(false);
-      showToast('Duration added');
-    } catch {
-      showToast('Failed to add duration');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleUpdate() {
-    if (!editDraft) return;
-    setSaving(true);
+  const persistDuration = useDebouncedCallback(async (row: PartySizeDuration) => {
     try {
       const res = await fetch('/api/venue/party-size-durations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editDraft),
+        body: JSON.stringify(row),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      onDurationsChange(durations.map((d) => (d.id === editDraft.id ? data.duration : d)));
-      setEditingId(null);
-      setEditDraft(null);
-      showToast('Duration updated');
+      const saved = data.duration as PartySizeDuration;
+      onDurationsChange(durationsRef.current.map((d) => (d.id === saved.id ? saved : d)));
     } catch {
-      showToast('Failed to update duration');
+      showToast('Failed to save duration');
+    }
+  }, AUTOSAVE_MS);
+
+  function applyDurationChange(row: PartySizeDuration, patch: Partial<PartySizeDuration>) {
+    const merged = { ...row, ...patch };
+    onDurationsChange(durations.map((d) => (d.id === row.id ? merged : d)));
+    persistDuration(merged as PartySizeDuration);
+  }
+
+  async function handleCreate(minPs: number, maxPs: number, dur: number, dayOfWeek: number | null) {
+    setBulkSaving(true);
+    try {
+      const duration = await createDurationApi(serviceId, minPs, maxPs, dur, dayOfWeek);
+      onDurationsChange([...durations, duration]);
+      setCreating(false);
+    } catch {
+      showToast('Failed to add duration');
     } finally {
-      setSaving(false);
+      setBulkSaving(false);
     }
   }
 
@@ -131,30 +132,30 @@ export function ServiceDurationSection({ serviceId, serviceName, durations, show
         body: JSON.stringify({ id }),
       });
       onDurationsChange(durations.filter((d) => d.id !== id));
-      showToast('Duration deleted');
     } catch {
       showToast('Failed to delete');
     }
   }
 
   async function seedDefaults() {
-    setSaving(true);
+    setBulkSaving(true);
     try {
       const created: PartySizeDuration[] = [];
       for (const { min, max, dur } of DURATION_SMART_DEFAULTS) {
         created.push(await createDurationApi(serviceId, min, max, dur));
       }
       onDurationsChange([...durations, ...created]);
-      showToast('Default durations added');
     } catch {
       showToast('Failed to add default durations');
     } finally {
-      setSaving(false);
+      setBulkSaving(false);
     }
   }
 
+  const sorted = [...durations].sort((a, b) => a.min_party_size - b.min_party_size);
+
   return (
-    <div id="duration" className="scroll-mt-24 space-y-4">
+    <section className="space-y-4 border-t border-slate-100 pt-8">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-base font-bold text-slate-900">Dining duration</h3>
@@ -162,7 +163,12 @@ export function ServiceDurationSection({ serviceId, serviceName, durations, show
         </div>
         <div className="flex flex-wrap gap-2">
           {sorted.length === 0 && (
-            <button type="button" onClick={() => void seedDefaults()} disabled={saving} className="rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={() => void seedDefaults()}
+              disabled={bulkSaving}
+              className="rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+            >
               Add smart defaults
             </button>
           )}
@@ -180,51 +186,26 @@ export function ServiceDurationSection({ serviceId, serviceName, durations, show
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {sorted.map((dur) => (
             <div key={dur.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              {editingId === dur.id && editDraft ? (
-                <div className="space-y-4">
-                  <DurationBandFields
-                    data={editDraft}
-                    onChange={(patch) => setEditDraft({ ...editDraft, ...patch })}
-                  />
-                  <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                    <button type="button" onClick={() => void handleUpdate()} disabled={saving} className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingId(null);
-                        setEditDraft(null);
-                      }}
-                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+              <div className="mb-4 flex flex-col gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Band</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {dur.min_party_size}-{dur.max_party_size} guests · {dur.duration_minutes} min
+                    {dur.day_of_week != null ? ` · ${DAY_LABELS[dur.day_of_week]} override` : ''}
+                  </p>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">
-                      {dur.min_party_size}-{dur.max_party_size} guests stay {dur.duration_minutes} min
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {dur.day_of_week != null ? `${DAY_LABELS[dur.day_of_week]} override` : 'Applies every day'}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => { setEditingId(dur.id); setEditDraft(dur); }} className="rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700">
-                      Edit
-                    </button>
-                    <button type="button" onClick={() => void handleDelete(dur.id)} className="rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(dur.id)}
+                  className="self-start rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 sm:self-auto"
+                >
+                  Delete
+                </button>
+              </div>
+              <DurationBandFields data={dur} onChange={(patch) => applyDurationChange(dur, patch)} />
             </div>
           ))}
         </div>
@@ -232,13 +213,13 @@ export function ServiceDurationSection({ serviceId, serviceName, durations, show
 
       {creating && (
         <CreateDurationBandInline
-          saving={saving}
+          saving={bulkSaving}
           renderForm={(data, onChange) => <DurationBandFields data={data} onChange={onChange} />}
           onCreate={(min, max, dur, day) => void handleCreate(min, max, dur, day)}
           onCancel={() => setCreating(false)}
         />
       )}
-    </div>
+    </section>
   );
 }
 

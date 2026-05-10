@@ -1,7 +1,17 @@
 'use client';
 
+import { useMemo } from 'react';
 import type { StaffSurfaceBookingStackProps } from '@/components/booking/StaffSurfaceBookingStack';
 import { StaffSurfaceBookingStack } from '@/components/booking/StaffSurfaceBookingStack';
+
+/** YYYY-MM-DD and HH:mm in the browser local calendar (matches UnifiedBookingForm / staff flows). */
+function localCalendarNowParts(): { date: string; time: string } {
+  const d = new Date();
+  return {
+    date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+  };
+}
 
 type Props = Omit<StaffSurfaceBookingStackProps, 'onCreated' | 'bookingIntent'> & {
   open: boolean;
@@ -23,7 +33,11 @@ export function DashboardStaffBookingModal({
   bookingIntent = 'new',
   ...stack
 }: Props) {
+  const nowParts = useMemo(() => (open ? localCalendarNowParts() : null), [open]);
+
   if (!open) return null;
+
+  const { date: modalInitialDate, time: modalInitialTime } = nowParts!;
 
   return (
     <div
@@ -54,7 +68,14 @@ export function DashboardStaffBookingModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:pb-6">
-          <StaffSurfaceBookingStack {...stack} bookingIntent={bookingIntent} onCreated={onCreated} onClose={onClose} />
+          <StaffSurfaceBookingStack
+            {...stack}
+            bookingIntent={bookingIntent}
+            onCreated={onCreated}
+            onClose={onClose}
+            initialDate={modalInitialDate}
+            initialTime={modalInitialTime}
+          />
         </div>
       </div>
     </div>

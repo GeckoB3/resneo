@@ -81,7 +81,11 @@ export function EmbedBookingClient({
     : undefined;
 
   return (
-    <main ref={contentRef} className="bg-white px-4 pb-4 pt-6" style={accentStyle}>
+    <main ref={contentRef} className="bg-white px-4 pb-4 pt-4" style={accentStyle}>
+      <p className="mb-3 text-center text-[11px] font-medium tracking-wide text-slate-500">
+        Powered by{' '}
+        <span className="text-slate-700">ReserveNI</span>
+      </p>
       <BookPublicBookingFlow
         venue={venue}
         embed

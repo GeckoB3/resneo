@@ -2,7 +2,7 @@
 /**
  * Run with: node scripts/verify-local.mjs
  * Requires the dev server to be running (npm run dev) and .env.local with
- * NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY set.
+ * NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY set.
  */
 const BASE = 'http://localhost:3000';
 
@@ -42,7 +42,7 @@ async function main() {
 
   console.log(`\n${ok}/${tests.length} checks passed.`);
   if (ok < tests.length) {
-    console.log('Ensure .env.local has NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+    console.log('Ensure .env.local has NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.');
     process.exit(1);
   }
 }

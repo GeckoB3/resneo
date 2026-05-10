@@ -112,3 +112,42 @@ export function getCalendarGridBounds(
   endHour = Math.min(24, Math.max(endHour, startHour + 1));
   return { startHour, endHour };
 }
+
+/**
+ * Valid trading periods for one civil date from `opening_hours` (venue-local weekday when `timeZone` is set).
+ */
+export function getOpeningPeriodsForVenueDate(
+  dateStr: string,
+  openingHours: OpeningHours | null | undefined,
+  options?: CalendarGridBoundsOptions,
+): OpeningHoursPeriod[] {
+  if (!openingHours || Object.keys(openingHours).length === 0) {
+    return [];
+  }
+  const tz = options?.timeZone?.trim();
+  const key = tz ? String(getDayOfWeekForYmdInTimezone(dateStr, tz)) : utcWeekdayKey(dateStr);
+  const day = openingHours[key];
+  const raw = periodsForDay(day);
+  return raw.filter((p) => {
+    if (typeof p.open !== 'string' || typeof p.close !== 'string') return false;
+    const openM = timeToMinutesHM(p.open);
+    const closeM = timeToMinutesHM(p.close);
+    return Number.isFinite(openM) && Number.isFinite(closeM) && closeM > openM;
+  });
+}
+
+/**
+ * Grid hour bounds for a single open/close period. Uses the same rules as
+ * {@link getCalendarGridBounds} when that day has one period.
+ */
+export function periodToCalendarGridHours(open: string, close: string): { startHour: number; endHour: number } | null {
+  const openM = timeToMinutesHM(open);
+  const closeM = timeToMinutesHM(close);
+  if (!Number.isFinite(openM) || !Number.isFinite(closeM)) return null;
+  if (closeM <= openM) return null;
+  const startHour = Math.max(0, Math.floor(openM / 60));
+  let endHour = Math.ceil(closeM / 60);
+  if (endHour <= startHour) endHour = startHour + 1;
+  endHour = Math.min(24, Math.max(endHour, startHour + 1));
+  return { startHour, endHour };
+}

@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { useDebouncedCallback } from '@/lib/use-debounced-callback';
 import type { ServiceCapacityRule } from '@/app/dashboard/availability/service-settings-types';
 import { DAY_LABELS, defaultCapacityRule } from '@/app/dashboard/availability/service-settings-types';
+
+const AUTOSAVE_MS = 650;
 
 const FIELD_CLASS =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
@@ -146,15 +149,38 @@ function CapacityRuleFields({
 }
 
 export function ServiceCapacitySection({ serviceId, serviceName, rules, showToast, onRulesChange }: Props) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<ServiceCapacityRule | null>(null);
+  const rulesRef = useRef(rules);
+  rulesRef.current = rules;
+
   const [creating, setCreating] = useState(false);
   const [createDraft, setCreateDraft] = useState<Omit<ServiceCapacityRule, 'id'> | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [savingNew, setSavingNew] = useState(false);
+
+  const persistRule = useDebouncedCallback(async (rule: ServiceCapacityRule) => {
+    try {
+      const res = await fetch('/api/venue/capacity-rules', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rule),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const saved = data.rule as ServiceCapacityRule;
+      onRulesChange(rulesRef.current.map((r) => (r.id === saved.id ? saved : r)));
+    } catch {
+      showToast('Failed to save capacity rule');
+    }
+  }, AUTOSAVE_MS);
+
+  function applyRuleChange(rule: ServiceCapacityRule, body: Omit<ServiceCapacityRule, 'id'>) {
+    const merged = { ...rule, ...body } as ServiceCapacityRule;
+    onRulesChange(rules.map((r) => (r.id === rule.id ? merged : r)));
+    persistRule(merged);
+  }
 
   async function handleCreate() {
     if (!createDraft) return;
-    setSaving(true);
+    setSavingNew(true);
     try {
       const res = await fetch('/api/venue/capacity-rules', {
         method: 'POST',
@@ -166,33 +192,10 @@ export function ServiceCapacitySection({ serviceId, serviceName, rules, showToas
       onRulesChange([...rules, data.rule]);
       setCreating(false);
       setCreateDraft(null);
-      showToast('Rule created');
     } catch {
       showToast('Failed to create rule');
     } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleUpdate() {
-    if (!editDraft) return;
-    setSaving(true);
-    try {
-      const res = await fetch('/api/venue/capacity-rules', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editDraft),
-      });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      onRulesChange(rules.map((r) => (r.id === editDraft.id ? data.rule : r)));
-      setEditingId(null);
-      setEditDraft(null);
-      showToast('Rule updated');
-    } catch {
-      showToast('Failed to update rule');
-    } finally {
-      setSaving(false);
+      setSavingNew(false);
     }
   }
 
@@ -205,14 +208,13 @@ export function ServiceCapacitySection({ serviceId, serviceName, rules, showToas
         body: JSON.stringify({ id }),
       });
       onRulesChange(rules.filter((r) => r.id !== id));
-      showToast('Rule deleted');
     } catch {
       showToast('Failed to delete rule');
     }
   }
 
   return (
-    <div id="capacity" className="scroll-mt-24 space-y-4">
+    <section className="space-y-4 border-t border-slate-100 pt-8">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-base font-bold text-slate-900">Capacity rules</h3>
@@ -241,67 +243,23 @@ export function ServiceCapacitySection({ serviceId, serviceName, rules, showToas
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {rules.map((rule) => (
           <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            {editingId === rule.id && editDraft ? (
-              <div className="space-y-4">
-                <CapacityRuleFields
-                  data={omitRuleId(editDraft)}
-                  onChange={(d) => setEditDraft({ ...editDraft, ...d } as ServiceCapacityRule)}
-                />
-                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                  <button
-                    type="button"
-                    onClick={handleUpdate}
-                    disabled={saving}
-                    className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(null);
-                      setEditDraft(null);
-                    }}
-                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
+            <div className="mb-4 flex flex-col gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Rule</p>
+                <p className="text-sm font-semibold text-slate-800">{describeRuleScope(rule)}</p>
               </div>
-            ) : (
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">
-                    {rule.max_covers_per_slot} guests / {rule.max_bookings_per_slot} bookings
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {describeRuleScope(rule)} - every {rule.slot_interval_minutes} min - {rule.buffer_minutes} min buffer
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(rule.id);
-                      setEditDraft(rule);
-                    }}
-                    className="rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(rule.id)}
-                    className="rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={() => void handleDelete(rule.id)}
+                className="self-start rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 sm:self-auto"
+              >
+                Delete
+              </button>
+            </div>
+            <CapacityRuleFields data={omitRuleId(rule)} onChange={(body) => applyRuleChange(rule, body)} />
           </div>
         ))}
       </div>
@@ -316,11 +274,11 @@ export function ServiceCapacitySection({ serviceId, serviceName, rules, showToas
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
             <button
               type="button"
-              onClick={handleCreate}
-              disabled={saving}
+              onClick={() => void handleCreate()}
+              disabled={savingNew}
               className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              Create rule
+              {savingNew ? 'Adding…' : 'Add rule'}
             </button>
             <button
               type="button"
@@ -335,6 +293,6 @@ export function ServiceCapacitySection({ serviceId, serviceName, rules, showToas
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

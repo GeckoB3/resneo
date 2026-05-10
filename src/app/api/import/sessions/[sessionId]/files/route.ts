@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import { requireImportAdmin } from '@/lib/import/auth';
-import { detectPlatform, platformTemplateKey, PLATFORM_MAPPINGS } from '@/lib/import/constants';
+import { detectPlatform, platformTemplateKey, FIELD_ALIASES, PLATFORM_MAPPINGS } from '@/lib/import/constants';
 import { syncImportSessionBookingFlags } from '@/lib/import/sync-booking-session-flags';
 
 export async function POST(
@@ -96,15 +96,23 @@ export async function POST(
 
   if (template && Object.keys(template).length) {
     let sortOrder = 0;
-    const mappingRows = Object.entries(template).map(([source_column, target_field]) => ({
-      file_id: fileRow.id,
-      session_id: sessionId,
-      source_column,
-      target_field,
-      action: 'map',
-      ai_suggested: false,
-      sort_order: sortOrder++,
-    }));
+    const aliasMap = tplKey ? FIELD_ALIASES[tplKey] ?? {} : {};
+    const mappingRows = Object.entries(template).flatMap(([source_column, target_field]) => {
+      if (!headers.includes(source_column)) return [];
+      const canonical = aliasMap[source_column];
+      if (canonical && headers.includes(canonical)) return [];
+      return [
+        {
+          file_id: fileRow.id,
+          session_id: sessionId,
+          source_column,
+          target_field,
+          action: 'map',
+          ai_suggested: false,
+          sort_order: sortOrder++,
+        },
+      ];
+    });
     await staff.db.from('import_column_mappings').insert(mappingRows);
   }
 

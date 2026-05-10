@@ -145,8 +145,10 @@ function DroppableTarget({
   id,
   field,
   mappedSource,
+  isConfirmed,
   clientLabel,
   onClear,
+  onConfirm,
   onSelect,
   selectValue,
   options,
@@ -155,8 +157,10 @@ function DroppableTarget({
   id: string;
   field: SchemaField;
   mappedSource: string | null;
+  isConfirmed: boolean;
   clientLabel: string;
   onClear: () => void;
+  onConfirm: () => void;
   onSelect: (value: string) => void;
   selectValue: string;
   options: { value: string; label: string }[];
@@ -165,7 +169,11 @@ function DroppableTarget({
   const { isOver, setNodeRef } = useDroppable({ id });
 
   const label =
-    field.key.includes('client') || field.key === 'first_name' || field.key === 'last_name' || field.key === 'full_name' ?
+    field.key.includes('client') ||
+    field.key.startsWith('guest_') ||
+    field.key === 'first_name' ||
+    field.key === 'last_name' ||
+    field.key === 'full_name' ?
       field.label.replace(/\bClient\b/gi, clientLabel)
     : field.label;
 
@@ -189,13 +197,26 @@ function DroppableTarget({
           <p className="text-xs text-slate-500">{field.type}</p>
         </div>
         {mappedSource && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-800"
-          >
-            Clear
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {isConfirmed ?
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                Confirmed
+              </span>
+            : <button
+                type="button"
+                onClick={onConfirm}
+                className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700"
+              >
+                Confirm
+              </button>}
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-xs font-medium text-slate-500 hover:text-slate-800"
+            >
+              Clear
+            </button>
+          </div>
         )}
       </div>
       <button
@@ -333,16 +354,38 @@ export function ImportMapDndView({
     );
 
     if (!targetKey) {
-      next.push({ file_id: fileId, source_column: source, target_field: null, action: 'ignore' });
+      next.push({
+        file_id: fileId,
+        source_column: source,
+        target_field: null,
+        action: 'ignore',
+        ai_confidence: null,
+        ai_suggested: false,
+      });
     } else {
       next.push({
         file_id: fileId,
         source_column: source,
         target_field: targetKey,
         action: 'map',
+        ai_confidence: 'high',
+        ai_suggested: false,
       });
     }
     setSelectedSource(null);
+    onMappingsChange(next);
+  }
+
+  function confirmMapping(source: string, targetKey: string) {
+    const next = mappings.map((m) => {
+      if (m.file_id !== fileId || m.source_column !== source || m.target_field !== targetKey) return m;
+      return {
+        ...m,
+        action: 'map',
+        ai_confidence: 'high' as const,
+        ai_suggested: false,
+      };
+    });
     onMappingsChange(next);
   }
 
@@ -395,18 +438,10 @@ export function ImportMapDndView({
         ignored.push(h);
         continue;
       }
-      const conf: 'high' | 'medium' | 'low' | null = (() => {
-        const row = mappings.find((x) => x.file_id === fileId && x.source_column === h);
-        const c = row?.ai_confidence;
-        if (c === 'high' || c === 'medium' || c === 'low') return c;
-        return null;
-      })();
       const isMapped = mappings.some(
         (m) => m.file_id === fileId && m.source_column === h && m.action === 'map' && m.target_field,
       );
-      if (isMapped && (conf === 'low' || conf === null)) {
-        needsAttention.push(h);
-      } else if (isMapped) {
+      if (isMapped) {
         mappedOk.push(h);
       } else {
         needsAttention.push(h);
@@ -517,6 +552,16 @@ export function ImportMapDndView({
           <div className="space-y-3">
             {targetFields.map((field) => {
               const mapped = targetByFieldKey.get(field.key) ?? null;
+              const mappedRow =
+                mapped ?
+                  mappings.find(
+                    (m) =>
+                      m.file_id === fileId &&
+                      m.source_column === mapped &&
+                      m.action === 'map' &&
+                      m.target_field === field.key,
+                  )
+                : null;
               const selectVal = mapped ?? '';
               return (
                 <DroppableTarget
@@ -524,10 +569,14 @@ export function ImportMapDndView({
                   id={`field-${field.key}`}
                   field={field}
                   mappedSource={mapped}
+                  isConfirmed={Boolean(mappedRow && mappedRow.ai_suggested === false && mappedRow.ai_confidence === 'high')}
                   clientLabel={clientLabel}
                   selectedSource={selectedSource}
                   onClear={() => {
                     if (mapped) setMappingForSource(mapped, '', true);
+                  }}
+                  onConfirm={() => {
+                    if (mapped) confirmMapping(mapped, field.key);
                   }}
                   onSelect={(value) => {
                     if (!value) {

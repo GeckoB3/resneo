@@ -18,6 +18,7 @@ type MappingRow = {
   ai_suggested?: boolean;
   ai_confidence?: string | null;
   ai_reasoning?: string | null;
+  user_overridden?: boolean;
 };
 
 type ImportFile = {
@@ -138,8 +139,9 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
           source_column: row.source_column,
           target_field: row.target_field,
           action: row.action,
-          ai_confidence: prevRow?.ai_confidence ?? row.ai_confidence ?? null,
-          ai_suggested: prevRow?.ai_suggested ?? row.ai_suggested ?? false,
+          ai_confidence: row.ai_confidence ?? null,
+          ai_suggested: row.ai_suggested ?? false,
+          user_overridden: prevRow ? true : undefined,
         });
       }
       return merged;
@@ -197,7 +199,8 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       if (f.file_type === 'bookings') {
         const hasEmail = mapped.has('client_email');
         const hasPhone = mapped.has('client_phone');
-        if (!hasEmail && !hasPhone) return false;
+        const hasExternalClient = mapped.has('client_external_id');
+        if (!hasEmail && !hasPhone && !hasExternalClient) return false;
         if (!mapped.has('booking_date') || !mapped.has('booking_time')) return false;
       }
     }
@@ -252,8 +255,11 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
               type="button"
               disabled={aiBusy}
               onClick={() => void runAiForFile(activeFile.id)}
-              className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
             >
+              {aiBusy ?
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" aria-hidden />
+              : null}
               {aiBusy ? 'Running AI…' : 'Run AI mapping'}
             </button>
           </div>
@@ -291,7 +297,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       {!canContinue && (
         <p className="text-xs text-amber-700">
           Map required fields: for {clientLabel.toLowerCase()} lists, first + last name (or full name); for bookings,
-          date + time + email or phone.
+          date + time + email, phone, or external client ID.
         </p>
       )}
     </div>

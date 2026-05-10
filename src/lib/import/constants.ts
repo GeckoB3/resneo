@@ -21,7 +21,7 @@ export interface SchemaField {
 
 export const CLIENT_FIELDS: SchemaField[] = [
   { key: 'first_name', label: 'First Name', required: true, type: 'text', examples: ['Sarah', 'John'] },
-  { key: 'last_name', label: 'Last Name', required: true, type: 'text', examples: ['Jones', 'Smith'] },
+  { key: 'last_name', label: 'Surname', required: true, type: 'text', examples: ['Jones', 'Smith'] },
   /** Single-column full name from exports (e.g. Booksy); import splits into first/last when first/last are empty. */
   { key: 'full_name', label: 'Full Name', required: false, type: 'text' },
   {
@@ -79,7 +79,15 @@ export const BOOKING_FIELDS: SchemaField[] = [
   },
   { key: 'party_size', label: 'Party size / covers', required: false, type: 'number' },
   { key: 'client_phone', label: 'Client Phone', required: false, type: 'phone' },
-  { key: 'client_name', label: 'Client Name', required: false, type: 'text' },
+  { key: 'guest_first_name', label: 'Guest First Name', required: false, type: 'text' },
+  { key: 'guest_last_name', label: 'Guest Surname', required: false, type: 'text' },
+  {
+    key: 'guest_full_name',
+    label: 'Guest Full Name',
+    required: false,
+    type: 'text',
+    examples: ['Sarah Jones'],
+  },
   {
     key: 'external_appointment_id',
     label: 'Appointment ID (external)',
@@ -138,6 +146,22 @@ export type PlatformId =
   | 'phorest'
   | 'unknown';
 
+export const FIELD_ALIASES: Record<string, Record<string, string>> = {
+  fresha_clients: {
+    'Client Surname': 'Client Last Name',
+  },
+  vagaro_clients: {
+    Surname: 'Last Name',
+  },
+  timely_clients: {
+    'Client surname': 'Client last name',
+  },
+  phorest_clients: {
+    Surname: 'Last Name',
+    'Family Name': 'Last Name',
+  },
+};
+
 export const PLATFORM_SIGNATURES: Record<
   Exclude<PlatformId, 'unknown'>,
   { columns: string[]; filenames: string[] }
@@ -193,6 +217,7 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   fresha_clients: {
     'Client First Name': 'first_name',
     'Client Last Name': 'last_name',
+    'Client Surname': 'last_name',
     'Client Mobile': 'phone',
     'Client Email': 'email',
     'Date of Birth': 'date_of_birth',
@@ -219,7 +244,7 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   booksy_bookings: {
     'Customer Email': 'client_email',
     'Customer Phone': 'client_phone',
-    'Customer Name': 'client_name',
+    'Customer Name': 'guest_full_name',
     Service: 'service_name',
     Employee: 'staff_name',
     Date: 'booking_date',
@@ -228,6 +253,7 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   vagaro_clients: {
     'First Name': 'first_name',
     'Last Name': 'last_name',
+    Surname: 'last_name',
     'Cell Phone': 'phone',
     Email: 'email',
   },
@@ -246,7 +272,7 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   resdiary_bookings: {
     'Guest Email': 'client_email',
     'Guest Phone': 'client_phone',
-    'Guest Name': 'client_name',
+    'Guest Name': 'guest_full_name',
     'Reservation Date': 'booking_date',
     'Reservation Time': 'booking_time',
     Covers: 'party_size',
@@ -254,6 +280,7 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   timely_clients: {
     'Client first name': 'first_name',
     'Client last name': 'last_name',
+    'Client surname': 'last_name',
     'Client email': 'email',
     Mobile: 'phone',
   },
@@ -268,6 +295,8 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
     'External Id': 'external_system_id',
     'First Name': 'first_name',
     'Last Name': 'last_name',
+    Surname: 'last_name',
+    'Family Name': 'last_name',
     Mobile: 'phone',
     Landline: 'landline',
     Email: 'email',
@@ -289,6 +318,10 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
     'Booking ID': 'external_booking_id',
     'Group Booking ID': 'group_booking_id',
     'Client ID': 'client_external_id',
+    'First Name': 'guest_first_name',
+    'Last Name': 'guest_last_name',
+    Surname: 'guest_last_name',
+    'Client Name': 'guest_full_name',
     'Appointment Date': 'booking_date',
     'Start Time': 'booking_time',
     'End Time': 'booking_end_time',

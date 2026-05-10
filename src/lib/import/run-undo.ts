@@ -109,7 +109,8 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
       await admin
         .from('guests')
         .update({
-          name: prev.name as string | null,
+          first_name: prev.first_name as string | null,
+          last_name: prev.last_name as string | null,
           email: prev.email as string | null,
           phone: prev.phone as string | null,
           visit_count: prev.visit_count as number,

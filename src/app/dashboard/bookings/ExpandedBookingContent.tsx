@@ -27,6 +27,7 @@ import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -35,6 +36,10 @@ import {
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import {
+  showAttendanceConfirmedSupplementPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
 
 export interface BookingRow {
   id: string;
@@ -67,6 +72,9 @@ export interface BookingRow {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  service_name?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   inferred_booking_model?: BookingModel;
 }
 
@@ -213,6 +221,10 @@ export function ExpandedBookingContent({
   const previousVisitDate = detail?.guest?.last_visit_date ?? null;
   const tableNames = (detail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
   const depositAmtStr = booking.deposit_amount_pence ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}` : null;
+  const endTime = booking.estimated_end_time
+    ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+    : null;
+  const serviceLine = booking.service_name ?? detail?.cde_context?.title ?? null;
   const guestProfileAndNotesCount = [
     ...(detail?.guest?.tags ?? []),
     detail?.guest?.customer_profile_notes,
@@ -337,7 +349,25 @@ export function ExpandedBookingContent({
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   <span className="font-medium text-slate-700">{formatDateNice(booking.booking_date)}</span>
                   <span className="text-slate-300">·</span>
-                  <span className="font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
+                  <span className="font-semibold tabular-nums text-slate-700">
+                    {booking.booking_time.slice(0, 5)}{endTime ? ` - ${endTime}` : ''}
+                  </span>
+                  {serviceLine ? (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span className="font-medium text-slate-700">{serviceLine}</span>
+                    </>
+                  ) : null}
+                  {showDepositPendingPill(booking) ? (
+                    <Pill variant="warning" size="sm" dot>
+                      Deposit pending
+                    </Pill>
+                  ) : null}
+                  {showAttendanceConfirmedSupplementPill(booking) ? (
+                    <BookingStatusPill statusKey="Confirmed" dot className="shrink-0">
+                      Confirmed
+                    </BookingStatusPill>
+                  ) : null}
                   {tableStyle ? (
                     <>
                       <span className="text-slate-300">·</span>

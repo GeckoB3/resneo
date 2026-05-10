@@ -925,14 +925,16 @@ export async function runImportExecute(
         }
       }
 
-      const legacyClientName = targets.client_name?.trim();
+      const legacyClientName = targets.guest_full_name?.trim();
       const legacyNameParts = legacyClientName ? splitFullName(legacyClientName) : { first: '', last: '' };
+      const guestFirstName = targets.guest_first_name?.trim() || legacyNameParts.first;
+      const guestLastName = targets.guest_last_name?.trim() || legacyNameParts.last;
 
       const guestId = await findGuestForBooking(
         em,
         ph.e164,
-        legacyNameParts.first || null,
-        legacyNameParts.last || null,
+        guestFirstName || null,
+        guestLastName || null,
         targets.client_external_id ?? null,
       );
       if (!guestId) {
@@ -1034,8 +1036,8 @@ export async function runImportExecute(
         deposit_status: depositFields.deposit_status,
         deposit_amount_pence: depositFields.deposit_amount_pence,
         guest_email: em,
-        guest_first_name: legacyNameParts.first?.trim() || null,
-        guest_last_name: legacyNameParts.last?.trim() || null,
+        guest_first_name: guestFirstName?.trim() || null,
+        guest_last_name: guestLastName?.trim() || null,
         guest_phone: ph.e164,
         special_requests: specialRequests,
         booking_model: bookingModel as BookingModel,

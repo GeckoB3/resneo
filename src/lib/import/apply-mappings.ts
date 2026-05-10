@@ -81,10 +81,10 @@ export function applyMappingsToDataRow(
     }
   }
 
-  if (targets.full_name && !targets.first_name && !targets.last_name) {
+  if (targets.full_name && (!targets.first_name || !targets.last_name)) {
     const { first, last } = splitFullName(targets.full_name);
-    targets.first_name = first;
-    targets.last_name = last;
+    targets.first_name ||= first;
+    targets.last_name ||= last;
   }
 
   return { targets, custom };

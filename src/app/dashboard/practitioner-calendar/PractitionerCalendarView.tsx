@@ -254,6 +254,7 @@ type ViewMode = 'day' | 'week' | 'month';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
+const CALENDAR_MOVE_INCREMENT_MINUTES = 1;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -704,21 +705,42 @@ function computeBookingClusterLayouts(
       if (a.start !== b.start) return a.start - b.start;
       return a.end - b.end;
     });
-  const laneEnds: number[] = [];
-  for (const item of sorted) {
-    let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= item.start);
-    if (laneIndex === -1) {
-      laneEnds.push(item.end);
-      laneIndex = laneEnds.length - 1;
-    } else {
-      laneEnds[laneIndex] = item.end;
+
+  let groupItems: typeof sorted = [];
+  let groupEnd = -Infinity;
+
+  const flushGroup = () => {
+    if (groupItems.length === 0) return;
+    const laneEnds: number[] = [];
+    const groupLayouts: Array<{ key: string; layout: BookingClusterLayout }> = [];
+    for (const item of groupItems) {
+      let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= item.start);
+      if (laneIndex === -1) {
+        laneEnds.push(item.end);
+        laneIndex = laneEnds.length - 1;
+      } else {
+        laneEnds[laneIndex] = item.end;
+      }
+      groupLayouts.push({ key: item.key, layout: { laneIndex, laneCount: 1 } });
     }
-    layouts.set(item.key, { laneIndex, laneCount: 1 });
+    const laneCount = Math.max(1, laneEnds.length);
+    for (const item of groupLayouts) {
+      item.layout.laneCount = laneCount;
+      layouts.set(item.key, item.layout);
+    }
+    groupItems = [];
+    groupEnd = -Infinity;
+  };
+
+  for (const item of sorted) {
+    if (groupItems.length > 0 && item.start >= groupEnd) {
+      flushGroup();
+    }
+    groupItems.push(item);
+    groupEnd = Math.max(groupEnd, item.end);
   }
-  const laneCount = Math.max(1, laneEnds.length);
-  for (const value of layouts.values()) {
-    value.laneCount = laneCount;
-  }
+  flushGroup();
+
   return layouts;
 }
 
@@ -753,6 +775,9 @@ function BookingBlockInfoStack({
   end,
   statusBadge,
   showService = true,
+  compact = false,
+  inline = false,
+  showStatus = true,
 }: {
   serviceName?: string | null;
   resourceName?: string | null;
@@ -760,11 +785,29 @@ function BookingBlockInfoStack({
   end: string;
   statusBadge?: ReactNode;
   showService?: boolean;
+  compact?: boolean;
+  inline?: boolean;
+  showStatus?: boolean;
 }) {
   const subtitleParts = [resourceName, showService && serviceName].filter(Boolean) as string[];
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : null;
+  if (compact && !inline) return null;
+  if (inline) {
+    return (
+      <div className="mt-0.5 flex max-w-full min-w-0 items-center gap-1">
+        {subtitle ? (
+          <p className="min-w-0 truncate text-[10px] font-medium leading-snug text-slate-600/90" title={subtitle}>
+            {subtitle}
+          </p>
+        ) : null}
+        <span className="inline-flex shrink-0 rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
+          {start}–{end}
+        </span>
+      </div>
+    );
+  }
   return (
-    <div className="mt-0.5 flex w-fit max-w-full min-w-0 flex-col gap-1">
+    <div className={`mt-0.5 flex w-fit max-w-full min-w-0 flex-col ${compact ? 'gap-0.5' : 'gap-1'}`}>
       {subtitle ? (
         <p
           className="min-w-0 truncate text-[10px] font-medium leading-snug text-slate-600/90"
@@ -773,12 +816,12 @@ function BookingBlockInfoStack({
           {subtitle}
         </p>
       ) : null}
-      <div className="shrink-0">
+      <div className="min-w-0 shrink-0">
         <span className="inline-flex rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
           {start}–{end}
         </span>
       </div>
-      {statusBadge ? (
+      {showStatus && statusBadge ? (
         <div className="min-w-0">
           {statusBadge}
         </div>
@@ -827,8 +870,8 @@ function countBookingRightColumnActions(b: Booking, graceMinutes: number): numbe
 /** Per-row height when actions would be cramped in a single column; allow multi-column grid when it improves row height. */
 const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
 
-/** Match Tailwind `w-[6.5rem]` action column unit for width budgeting (never squeeze guest name below this strip). */
-const BOOKING_ACTION_COL_WIDTH_REM = 6.5;
+/** Match action column unit for width budgeting (never squeeze guest name below this strip). */
+const BOOKING_ACTION_COL_WIDTH_REM = 5.5;
 const ROOT_FONT_PX = 16;
 /** Minimum width reserved for the guest name column alongside multi-column actions (measured on guest+actions row). */
 const MIN_GUEST_CONTACT_STRIP_PX = 112;
@@ -840,6 +883,12 @@ function bookingActionsStripMinWidthPx(columns: number): number {
     columns * BOOKING_ACTION_COL_WIDTH_REM * ROOT_FONT_PX +
     (columns - 1) * BOOKING_RIGHT_GAP_PX
   );
+}
+
+function narrowBookingActionsWidthPx(shellRowWidthPx: number | null | undefined): number | null {
+  if (shellRowWidthPx == null || shellRowWidthPx <= 0) return null;
+  const actionBudget = Math.max(64, Math.min(88, shellRowWidthPx - BOOKING_CARD_ROW_PAD_RESERVE_PX));
+  return Math.min(shellRowWidthPx, actionBudget);
 }
 
 /** How many action columns fit without crowding the contact column (`shellRowWidthPx` = guest+actions row only). */
@@ -898,7 +947,7 @@ function bookingRightColumnLayout(
   },
 ): BookingRightColumnLayoutResult {
   const emptyBase =
-    'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]';
+    'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]';
 
   if (actionCount <= 0) {
     return { compact: false, columnCount: 1, fontSizePx: 10, baseClass: emptyBase };
@@ -948,7 +997,7 @@ function bookingRightColumnLayout(
         columnCount: 1,
         fontSizePx: 10,
         baseClass:
-          'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+          'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
       };
     }
     return {
@@ -966,7 +1015,7 @@ function bookingRightColumnLayout(
       columnCount: chosenCols,
       fontSizePx: 10,
       baseClass:
-        'inline-flex h-full min-h-0 w-full shrink items-center justify-center whitespace-normal break-words px-1.5 py-1 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+        'inline-flex h-full min-h-0 w-full shrink items-center justify-center whitespace-normal break-words px-1 py-1 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
     };
   }
   return {
@@ -1207,6 +1256,8 @@ function CalendarBookingRightColumn({
   narrow = false,
   allowMultiColumnActions = false,
   shellRowWidthPx,
+  floating = false,
+  bottomReservePx = 0,
 }: {
   b: Booking;
   busy: boolean;
@@ -1220,6 +1271,10 @@ function CalendarBookingRightColumn({
   allowMultiColumnActions?: boolean;
   /** Width of guest+actions row; constrains action columns so the contact name is not cropped. */
   shellRowWidthPx?: number | null;
+  /** Overlap lanes should not reserve a full-width row below the booking content. */
+  floating?: boolean;
+  /** Space reserved below floating actions, e.g. the duration resize handle. */
+  bottomReservePx?: number;
 }) {
   const actionCount = countBookingRightColumnActions(b, graceMinutes);
   const layout = bookingRightColumnLayout(blockHeightPx, actionCount, {
@@ -1230,18 +1285,27 @@ function CalendarBookingRightColumn({
   const compact = narrow || layout.compact;
   const fontSizePx = narrow ? Math.min(9, layout.fontSizePx) : layout.fontSizePx;
   const baseClass = narrow
-    ? 'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-0.5 text-center text-[9px] leading-tight [overflow-wrap:anywhere]'
+    ? 'inline-flex w-full min-w-0 min-h-[1.75rem] shrink-0 items-center justify-center whitespace-normal break-words px-1 py-0.5 text-center text-[9px] leading-tight [overflow-wrap:anywhere]'
     : layout.baseClass;
 
   const widthClass = narrow
-    ? 'mb-2 w-full min-w-0 max-w-none px-1 pb-0'
+    ? floating
+      ? 'min-w-0 max-w-full p-0'
+      : 'mb-2 min-w-0 max-w-full px-1 pb-0'
     : layout.columnCount === 3
       ? 'min-w-[17rem] w-[19.5rem] max-w-[55%] shrink-0 pt-1.5 pb-0 pl-1.5 pr-1'
       : layout.columnCount === 2
         ? 'min-w-[11rem] w-[13rem] max-w-[50%] shrink-0 pt-1.5 pb-0 pl-1.5 pr-1'
-        : 'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] pt-1.5 pb-0 pl-1.5 pr-1';
+        : 'w-[5.5rem] min-w-[5.5rem] max-w-[5.5rem] pt-1.5 pb-0 pl-1 pr-0.5';
+  const narrowWidthPx = narrowBookingActionsWidthPx(shellRowWidthPx);
+  const widthStyle =
+    narrow && narrowWidthPx != null
+      ? { width: narrowWidthPx, ...(floating ? { bottom: bottomReservePx } : {}) }
+      : floating
+        ? { bottom: bottomReservePx }
+        : undefined;
 
-  const heightClass = narrow ? 'h-auto' : 'h-full';
+  const heightClass = narrow ? 'h-auto max-h-full' : 'h-full';
 
   const justifyActions =
     layout.columnCount > 1 || (!layout.compact && !narrow) ? 'justify-end' : '';
@@ -1266,11 +1330,16 @@ function CalendarBookingRightColumn({
 
   return (
     <div
-      className={`flex ${heightClass} min-h-0 shrink-0 flex-col self-stretch overflow-hidden ${widthClass}`}
+      className={`${
+        narrow && floating
+          ? 'pointer-events-auto absolute right-1 z-20'
+          : ''
+      } flex ${heightClass} min-h-0 shrink-0 flex-col ${narrow ? 'self-end' : 'self-stretch'} overflow-hidden ${widthClass}`}
+      style={widthStyle}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className={`flex min-h-0 w-full flex-1 flex-col gap-0.5 ${justifyActions}`}
+        className={`flex min-h-0 w-full ${narrow ? 'flex-none' : 'flex-1'} flex-col gap-0.5 ${justifyActions}`}
       >
         {useGrid && positions ? (
           <div
@@ -1455,6 +1524,10 @@ type DraggableHandleProps = {
   listeners: ReturnType<typeof useDraggable>['listeners'] | undefined;
   attributes: ReturnType<typeof useDraggable>['attributes'] | undefined;
 };
+
+function snapCalendarMoveMinutes(minutes: number): number {
+  return Math.round(minutes / CALENDAR_MOVE_INCREMENT_MINUTES) * CALENDAR_MOVE_INCREMENT_MINUTES;
+}
 
 function DragBookingPreview({
   booking,
@@ -2508,23 +2581,26 @@ export function PractitionerCalendarView({
       setCalendarDragTarget(null);
       return;
     }
-    const { pracId, dateStr, slotStartMins } = over.data.current as {
+    const { pracId, dateStr } = over.data.current as {
       pracId: string;
       dateStr: string;
       slotStartMins: number;
     };
+    const originalStartMins = timeToMinutes(b.booking_time.slice(0, 5));
+    const deltaMinutes = snapCalendarMoveMinutes((e.delta.y / SLOT_HEIGHT) * SLOT_MINUTES);
+    const targetStartMins = originalStartMins + deltaMinutes;
     const duration = getBookingDuration(b);
-    const endMin = slotStartMins + duration;
+    const endMin = targetStartMins + duration;
     const dayStartMin = startHour * 60;
     const dayEndMin = endHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
-    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(b, slotStartMins, serviceMap);
+    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(b, targetStartMins, serviceMap);
     const invalid =
-      slotStartMins < dayStartMin ||
+      targetStartMins < dayStartMin ||
       endMin > dayEndMin ||
       appointmentWindowCollides(
-        slotStartMins,
+        targetStartMins,
         endMin,
         pracId,
         dateStr,
@@ -2535,14 +2611,14 @@ export function PractitionerCalendarView({
         pracClassBlocks,
         pracEventBlocks,
         resourceParentById,
-        { ignoreBookings: false, candidatePractitionerBusy: candBusy },
+        { ignoreBookings: true, candidatePractitionerBusy: candBusy },
       );
     const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
-    const timeLabel = minutesToTime(slotStartMins);
+    const timeLabel = minutesToTime(targetStartMins);
     const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
     const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
     setCalendarDragPreview({ label, invalid });
-    setCalendarDragTarget({ pracId, startMin: slotStartMins, endMin, invalid });
+    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid });
   }
 
   function handleDragCancel(_e: DragCancelEvent) {
@@ -2564,7 +2640,8 @@ export function PractitionerCalendarView({
       dateStr: string;
       slotStartMins: number;
     };
-    const newTime = minutesToTime(slotStartMins);
+    const targetStartMins = target?.startMin ?? slotStartMins;
+    const newTime = minutesToTime(targetStartMins);
     if (
       b.booking_date === dateStr &&
       resolveBookingColumnId(b, resourceParentById) === pracId &&
@@ -2924,6 +3001,8 @@ export function PractitionerCalendarView({
     const startHm = b.booking_time.slice(0, 5);
     const durationMins = bookingDurationMinutes(b, serviceMap);
     const endHm = minutesToTime(timeToMinutes(startHm) + durationMins);
+    const serviceId = serviceIdForBooking(b);
+    const serviceName = serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
     return {
       bookingDate: b.booking_date,
       guestName: b.guest_name,
@@ -2933,6 +3012,7 @@ export function PractitionerCalendarView({
       endTime: endHm,
       specialRequests: b.special_requests,
       depositStatus: b.deposit_status,
+      serviceName,
     };
   }, [detailBookingId, bookings, serviceMap]);
 
@@ -3527,8 +3607,13 @@ export function PractitionerCalendarView({
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
                           const isOverlapLane = layout.laneCount > 1;
-                          const showSubtitle = isOverlapLane || blockH >= 44;
-                          const showPillsRow = !isOverlapLane && blockH >= 48;
+                          const contentHeightPx =
+                            blockH - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0);
+                          const showInfoStack = contentHeightPx >= 38;
+                          const inlineInfoStack = contentHeightPx < 82;
+                          const compactInfoStack = contentHeightPx < 38;
+                          const showStatusBadge = contentHeightPx >= 60;
+                          const showPillsRow = !isOverlapLane && contentHeightPx >= 88;
                           return (
                             <DraggableBookingShell
                               key={b.id}
@@ -3579,7 +3664,23 @@ export function PractitionerCalendarView({
                                     >
                                       {(shellRowWidthPx) => (
                                         <>
-                                          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                                          {(() => {
+                                            const hasHorizontalRoomForInlineInfo =
+                                              !isOverlapLane || (shellRowWidthPx ?? 0) >= 150;
+                                            const showSubtitle =
+                                              ((inlineInfoStack && hasHorizontalRoomForInlineInfo) ||
+                                                isOverlapLane ||
+                                                contentHeightPx >= 70) &&
+                                              (!inlineInfoStack || hasHorizontalRoomForInlineInfo);
+                                            return (
+                                      <div
+                                        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                                        style={
+                                          isOverlapLane
+                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
+                                            : undefined
+                                        }
+                                      >
                                             <button
                                               type="button"
                                               onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
@@ -3588,7 +3689,7 @@ export function PractitionerCalendarView({
                                               }`}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
-                                              <div className="flex min-w-0 shrink-0 flex-col items-start gap-0.5">
+                                              <div className="flex min-h-0 min-w-0 shrink flex-col items-start gap-0.5 overflow-hidden">
                                                 <div className="flex min-w-0 w-full items-center justify-between gap-2">
                                                   <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
                                                     {b.guest_name}
@@ -3605,14 +3706,19 @@ export function PractitionerCalendarView({
                                                     ) : null}
                                                   </div>
                                                 </div>
-                                                <BookingBlockInfoStack
-                                                  resourceName={showSubtitle ? resName : null}
-                                                  serviceName={showSubtitle ? svc?.name : null}
-                                                  start={b.booking_time.slice(0, 5)}
-                                                  end={displayEndHm}
-                                                  statusBadge={<CalendarBookingStatusBadge b={b} />}
-                                                  showService={isOverlapLane || blockH >= 70}
-                                                />
+                                                {showInfoStack ? (
+                                                  <BookingBlockInfoStack
+                                                    resourceName={showSubtitle ? resName : null}
+                                                    serviceName={showSubtitle ? svc?.name : null}
+                                                    start={b.booking_time.slice(0, 5)}
+                                                    end={displayEndHm}
+                                                    statusBadge={<CalendarBookingStatusBadge b={b} />}
+                                                    showService={showSubtitle}
+                                                    compact={compactInfoStack}
+                                                    inline={inlineInfoStack && hasHorizontalRoomForInlineInfo}
+                                                    showStatus={showStatusBadge}
+                                                  />
+                                                ) : null}
                                               </div>
                                               {showPillsRow ? (
                                                 <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-black/[0.06] pt-1.5">
@@ -3624,6 +3730,8 @@ export function PractitionerCalendarView({
                                               <div className="min-h-0 min-w-0 flex-1" aria-hidden />
                                             </button>
                                           </div>
+                                            );
+                                          })()}
                                           <CalendarBookingRightColumn
                                             b={b}
                                             busy={qBusy}
@@ -3638,6 +3746,8 @@ export function PractitionerCalendarView({
                                             narrow={isOverlapLane}
                                             allowMultiColumnActions={layout.laneCount === 1 && !isOverlapLane}
                                             shellRowWidthPx={shellRowWidthPx}
+                                            floating={isOverlapLane}
+                                            bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
                                           />
                                         </>
                                       )}
@@ -3715,15 +3825,31 @@ export function PractitionerCalendarView({
                                 >
                                   {(shellRowWidthPx) => (
                                     <>
-                                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                      <div
+                                        className="flex min-h-0 min-w-0 flex-1 flex-col"
+                                        style={
+                                          isOverlapLane
+                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
+                                            : undefined
+                                        }
+                                      >
                                         {items.map((b, segIdx) => {
                                           const dur = getBookingDuration(b);
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMap.get(sid) : null;
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
-                                          const showSegMeta = isOverlapLane || segmentApproxPx >= 40;
-                                          const showSegPills = segmentApproxPx >= 38;
-                                          const showSegService = segmentApproxPx >= 52;
+                                          const showSegMeta = segmentApproxPx >= 38;
+                                          const inlineSegMeta = segmentApproxPx < 82;
+                                          const compactSegMeta = segmentApproxPx < 38;
+                                          const showSegPills = !isOverlapLane && segmentApproxPx >= 88;
+                                          const hasHorizontalRoomForInlineSegMeta =
+                                            !isOverlapLane || (shellRowWidthPx ?? 0) >= 150;
+                                          const showSegService =
+                                            ((inlineSegMeta && hasHorizontalRoomForInlineSegMeta) ||
+                                              isOverlapLane ||
+                                              segmentApproxPx >= 82) &&
+                                            (!inlineSegMeta || hasHorizontalRoomForInlineSegMeta);
+                                          const showSegStatus = segmentApproxPx >= 50;
                                           return (
                                             <div
                                               key={b.id}
@@ -3737,7 +3863,7 @@ export function PractitionerCalendarView({
                                                 className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
-                                                <div className="flex min-w-0 shrink-0 flex-col items-start gap-0.5 overflow-hidden">
+                                                <div className="flex min-h-0 min-w-0 shrink flex-col items-start gap-0.5 overflow-hidden">
                                                   <div className="flex min-w-0 w-full items-center justify-between gap-2">
                                                     <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">
                                                       {segIdx === 0 ? b.guest_name : '\u00a0'}
@@ -3763,7 +3889,10 @@ export function PractitionerCalendarView({
                                                       start={b.booking_time.slice(0, 5)}
                                                       end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
                                                       statusBadge={segIdx === 0 ? <CalendarBookingStatusBadge b={first} /> : undefined}
-                                                      showService={isOverlapLane || showSegService}
+                                                      showService={showSegService}
+                                                      compact={compactSegMeta}
+                                                      inline={inlineSegMeta && hasHorizontalRoomForInlineSegMeta}
+                                                      showStatus={showSegStatus}
                                                     />
                                                   ) : null}
                                                 </div>
@@ -3791,6 +3920,8 @@ export function PractitionerCalendarView({
                                         narrow={isOverlapLane}
                                         allowMultiColumnActions={layout.laneCount === 1 && !isOverlapLane}
                                         shellRowWidthPx={shellRowWidthPx}
+                                        floating={isOverlapLane}
+                                        bottomReservePx={0}
                                       />
                                     </>
                                   )}

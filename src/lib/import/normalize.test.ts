@@ -3,6 +3,7 @@ import {
   durationMinutesBetweenTimes,
   mapImportBookingStatus,
   resolveDepositFromImport,
+  splitFullName,
   todayIsoLocal,
 } from './normalize';
 
@@ -67,6 +68,16 @@ describe('resolveDepositFromImport', () => {
 describe('durationMinutesBetweenTimes', () => {
   it('computes span between same-day times', () => {
     expect(durationMinutesBetweenTimes('09:00:00', '09:45:00')).toBe(45);
+  });
+});
+
+describe('splitFullName', () => {
+  it('splits a combined name into first name and surname', () => {
+    expect(splitFullName('Sarah Jane Smith')).toEqual({ first: 'Sarah', last: 'Jane Smith' });
+  });
+
+  it('keeps a single-token name as the first name only', () => {
+    expect(splitFullName('Madonna')).toEqual({ first: 'Madonna', last: '' });
   });
 });
 

@@ -32,6 +32,10 @@ import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-t
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
+import {
+  showAttendanceConfirmedSupplementPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
 
 function displayBookingGuestName(
   guest: { first_name?: string | null; last_name?: string | null } | null | undefined,
@@ -117,6 +121,8 @@ interface BookingDetail {
   processing_time_blocks?: unknown | null;
   area_id?: string | null;
   area_name?: string | null;
+  cde_context?: { title?: string | null; subtitle?: string | null } | null;
+  service_variant_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
 }
@@ -172,6 +178,7 @@ export interface BookingDetailPanelSnapshot {
   occasion?: string | null;
   specialRequests?: string | null;
   depositStatus?: string | null;
+  serviceName?: string | null;
   /** Display-only until the booking payload hydrates. */
   tableNames?: string[];
 }
@@ -703,6 +710,11 @@ export function BookingDetailPanel({
     optimisticTableLabel ??
     (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
   const hasAssignedTable = Boolean(tableLine);
+  const serviceLine =
+    d.service_variant_name ??
+    d.cde_context?.title ??
+    initialSnapshot?.serviceName ??
+    null;
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';
   const sectionPadding = isPopover ? 'p-2' : 'p-3.5';
 
@@ -798,9 +810,14 @@ export function BookingDetailPanel({
           ? assignedTables
           : initialSnapshot?.tableNames?.map((name, index) => ({ id: `snapshot-table-${index}`, name })),
       service_id: d.service_id,
+      service_name: serviceLine,
       area_id: d.area_id,
       area_name: d.area_name,
+      guest_attendance_confirmed_at: d.guest_attendance_confirmed_at,
+      staff_attendance_confirmed_at: d.staff_attendance_confirmed_at,
       inferred_booking_model: d.inferred_booking_model,
+    cde_context: d.cde_context,
+    service_variant_name: d.service_variant_name,
     };
     const detailForExpanded = {
       id: d.id,
@@ -1131,8 +1148,20 @@ export function BookingDetailPanel({
                   <p className="text-[9px] font-semibold uppercase tracking-widest text-brand-600">Booking slot</p>
                   <p className={`font-bold tracking-tight text-slate-950 tabular-nums ${isPopover ? 'text-lg leading-tight' : 'mt-0.5 text-2xl'}`}>{startTime} - {endTime}</p>
                   <p className="text-[11px] text-slate-600">
-                    {durationMinutes} min · {d.party_size} cover{d.party_size === 1 ? '' : 's'}
+                    {serviceLine ? `${serviceLine} · ` : ''}{durationMinutes} min · {d.party_size} cover{d.party_size === 1 ? '' : 's'}
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {showDepositPendingPill(d) ? (
+                      <Pill variant="warning" size="sm" dot>
+                        Deposit pending
+                      </Pill>
+                    ) : null}
+                    {showAttendanceConfirmedSupplementPill(d) ? (
+                      <BookingStatusPill statusKey="Confirmed" dot className="shrink-0">
+                        Confirmed
+                      </BookingStatusPill>
+                    ) : null}
+                  </div>
                 </div>
                 <div className={isPopover ? 'grid grid-cols-2 gap-1.5 sm:min-w-44' : 'grid grid-cols-2 gap-2 sm:min-w-40'}>
                   <div className={`rounded-lg border px-2 py-1.5 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>

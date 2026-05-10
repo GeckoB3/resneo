@@ -70,6 +70,11 @@ Rules:
 - Only suggest target fields that exist in the provided field list
 - A target field can only be the destination of ONE source column
 - If two columns could map to the same field, pick the better one and ignore the other
+- For client files, map columns called First Name, Forename, Given Name, or similar to "first_name"
+- For client files, map columns called Surname, Last Name, Family Name, or similar to "last_name"
+- If a client file only has one combined Name, Full Name, Client Name, Customer Name, or Guest Name column, map it to "full_name" or use action "split" into first_name and last_name
+- For booking files, map booking guest/client first-name columns to "guest_first_name" and surname/last-name columns to "guest_last_name"
+- For booking files, if only one booking guest/client name column exists, map it to "guest_full_name"
 - Confidence should be 'high' if clearly matching, 'medium' if reasonable guess, 'low' if uncertain
 - Prefer 'ignore' over a low-confidence mapping for columns you are unsure about
 `;

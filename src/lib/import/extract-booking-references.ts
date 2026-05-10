@@ -254,8 +254,10 @@ export async function runExtractBookingReferences(
 
       const isFuture = isFutureBookingDate(dateIso, today);
 
-      const clientBlob = targets.client_name?.trim();
+      const clientBlob = targets.guest_full_name?.trim();
       const nameParts = clientBlob ? splitFullName(clientBlob) : { first: '', last: '' };
+      const guestFirst = targets.guest_first_name?.trim() || nameParts.first;
+      const guestLast = targets.guest_last_name?.trim() || nameParts.last;
 
       staged.push({
         file_id: f.id,
@@ -279,8 +281,8 @@ export async function runExtractBookingReferences(
         raw_notes: combineBookingNotes(targets),
         raw_client_email: targets.client_email?.trim() || null,
         raw_client_phone: targets.client_phone?.trim() || null,
-        raw_guest_first_name: nameParts.first?.trim() || null,
-        raw_guest_last_name: nameParts.last?.trim() || null,
+        raw_guest_first_name: guestFirst?.trim() || null,
+        raw_guest_last_name: guestLast?.trim() || null,
         raw_external_appointment_id: extAppt ?? null,
         raw_external_booking_id: extBook ?? null,
         raw_external_client_id: extClient ?? null,

@@ -95,6 +95,12 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           Drag and drop one or more <code className="rounded bg-slate-100 px-1">.csv</code> files, then label each as
           client list or booking history.
         </p>
+        <p className="mt-2 text-sm text-slate-600">
+          <strong className="font-medium text-slate-800">Phorest:</strong> export clients from Marketing → Client Export or
+          client reports; export appointments from Manager → Reports → Future Appointments or Staff Appointments (past
+          dates supported). Optional: Manager → Services → Export all services to align service names. Course packs,
+          vouchers, and account balances are preserved in client custom fields or import metadata where mapped.
+        </p>
       </div>
 
       <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-14 text-center hover:border-brand-400">
@@ -173,8 +179,8 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <p className="font-medium text-slate-800">Supported sources</p>
           <p className="mt-2">
-            We detect common exports from Fresha, Booksy, Vagaro, ResDiary, and Timely. You can still import from other
-            systems by mapping columns manually or using AI suggestions on the next step.
+            We detect common exports from Phorest, Fresha, Booksy, Vagaro, ResDiary, and Timely. You can still import from
+            other systems by mapping columns manually or using AI suggestions on the next step.
           </p>
         </div>
       )}

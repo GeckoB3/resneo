@@ -3,7 +3,13 @@ import type { BookingModel } from '@/types/booking-models';
 import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
-import { parseDateString, parseIntSafe, parseTimeString, todayIsoLocal } from '@/lib/import/normalize';
+import {
+  durationMinutesBetweenTimes,
+  parseDateString,
+  parseIntSafe,
+  parseTimeString,
+  todayIsoLocal,
+} from '@/lib/import/normalize';
 
 function isFutureBookingDate(iso: string, today: string): boolean {
   return iso >= today;
@@ -157,8 +163,39 @@ export async function runExtractBookingReferences(
     raw_client_email: string | null;
     raw_client_phone: string | null;
     raw_client_name: string | null;
+    raw_external_appointment_id: string | null;
+    raw_external_booking_id: string | null;
+    raw_external_client_id: string | null;
+    raw_group_booking_id: string | null;
+    raw_booking_end_time: string | null;
+    raw_import_metadata: Record<string, unknown>;
     is_future_booking: boolean;
   };
+
+  function buildBookingImportMetadata(targets: Record<string, string>): Record<string, unknown> {
+    const meta: Record<string, unknown> = {};
+    const keys = [
+      'activation_state',
+      'appointment_source',
+      'room_id',
+      'machine_id',
+      'course_name',
+      'confirmed',
+      'deleted',
+    ] as const;
+    for (const k of keys) {
+      const v = targets[k]?.trim();
+      if (v) meta[k] = v;
+    }
+    return meta;
+  }
+
+  function combineBookingNotes(targets: Record<string, string>): string | null {
+    const parts = [targets.notes, targets.colour_notes, targets.service_notes]
+      .map((s) => s?.trim())
+      .filter(Boolean) as string[];
+    return parts.length ? parts.join('\n') : null;
+  }
 
   const staged: StagedRow[] = [];
 
@@ -177,15 +214,41 @@ export async function runExtractBookingReferences(
       const bt = parseTimeString(btRaw);
       if (!dateIso || !bt) continue;
 
-      const duration = parseIntSafe(targets.duration_minutes) ?? 60;
+      const timeForDb = bt.length === 5 ? `${bt}:00` : bt;
+      const endBt = parseTimeString(targets.booking_end_time ?? null);
+      const endTimeForDb = endBt ? (endBt.length === 5 ? `${endBt}:00` : endBt) : null;
+
+      let duration = parseIntSafe(targets.duration_minutes);
+      let bookingEndTime: string;
+
+      if (endTimeForDb) {
+        const dm = durationMinutesBetweenTimes(timeForDb, endTimeForDb);
+        if (dm != null && dm > 0) {
+          duration = dm;
+        }
+        bookingEndTime = endTimeForDb;
+      } else {
+        const dur = duration ?? 60;
+        const endParts = timeForDb.slice(0, 5).split(':').map(Number);
+        const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + dur;
+        const eh = Math.floor(endMins / 60) % 24;
+        const emin = endMins % 60;
+        bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+        duration = dur;
+      }
+
       const partySize =
         parseIntSafe(targets.party_size) ?? (bookingModel === 'table_reservation' ? 2 : 1);
-      const timeForDb = bt.length === 5 ? `${bt}:00` : bt;
-      const endParts = timeForDb.slice(0, 5).split(':').map(Number);
-      const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + duration;
-      const eh = Math.floor(endMins / 60) % 24;
-      const emin = endMins % 60;
-      const bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+
+      const meta = buildBookingImportMetadata(targets);
+      const extAppt = targets.external_appointment_id?.trim();
+      const extBook = targets.external_booking_id?.trim();
+      const extClient = targets.client_external_id?.trim();
+      const grp = targets.group_booking_id?.trim();
+      if (extAppt) meta.external_appointment_id = extAppt;
+      if (extBook) meta.external_booking_id = extBook;
+      if (extClient) meta.client_external_id = extClient;
+      if (grp) meta.group_booking_id = grp;
 
       const isFuture = isFutureBookingDate(dateIso, today);
 
@@ -208,10 +271,16 @@ export async function runExtractBookingReferences(
         raw_deposit_amount: targets.deposit_amount?.trim() || null,
         raw_deposit_paid: targets.deposit_paid?.trim() || null,
         raw_deposit_status: targets.deposit_status?.trim() || null,
-        raw_notes: targets.notes?.trim() || null,
+        raw_notes: combineBookingNotes(targets),
         raw_client_email: targets.client_email?.trim() || null,
         raw_client_phone: targets.client_phone?.trim() || null,
         raw_client_name: targets.client_name?.trim() || null,
+        raw_external_appointment_id: extAppt ?? null,
+        raw_external_booking_id: extBook ?? null,
+        raw_external_client_id: extClient ?? null,
+        raw_group_booking_id: grp ?? null,
+        raw_booking_end_time: targets.booking_end_time?.trim() || null,
+        raw_import_metadata: meta,
         is_future_booking: isFuture,
       });
     }
@@ -261,6 +330,12 @@ export async function runExtractBookingReferences(
     raw_client_email: r.raw_client_email,
     raw_client_phone: r.raw_client_phone,
     raw_client_name: r.raw_client_name,
+    raw_external_appointment_id: r.raw_external_appointment_id,
+    raw_external_booking_id: r.raw_external_booking_id,
+    raw_external_client_id: r.raw_external_client_id,
+    raw_group_booking_id: r.raw_group_booking_id,
+    raw_booking_end_time: r.raw_booking_end_time,
+    raw_import_metadata: r.raw_import_metadata,
     import_status: 'pending' as const,
     is_future_booking: true,
   }));

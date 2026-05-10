@@ -5,17 +5,26 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
 import { applyMappingsToDataRow, slugCustomFieldKey, type DbMappingRow } from '@/lib/import/apply-mappings';
 import {
+  durationMinutesBetweenTimes,
+  mapImportBookingStatus,
+  normaliseBoolean,
   normaliseEmail,
   normalisePhoneUk,
   parseDateString,
   parseTimeString,
   parseCurrencyPence,
   parseIntSafe,
-  mapBookingStatus,
   resolveDepositFromImport,
   splitFullName,
   todayIsoLocal,
 } from '@/lib/import/normalize';
+import {
+  findBookingIdByExternalRef,
+  findGuestIdByExternalRef,
+  IMPORT_REF_PROVIDER_PHOREST,
+  insertBookingExternalRef,
+  upsertGuestExternalRef,
+} from '@/lib/import/external-refs';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import type { BookingModel } from '@/types/booking-models';
@@ -53,7 +62,16 @@ function rowShouldSkip(list: IssueRow[] | undefined): boolean {
   if (!list?.length) return false;
   for (const iss of list) {
     if (iss.severity === 'error') {
-      if (['duplicate_email', 'duplicate_phone', 'missing_required'].includes(iss.issue_type)) return true;
+      if (
+        [
+          'duplicate_email',
+          'duplicate_phone',
+          'missing_required',
+          'duplicate_external_client_id',
+          'duplicate_external_appointment_id',
+        ].includes(iss.issue_type)
+      )
+        return true;
       if (iss.issue_type === 'email_invalid' && iss.user_decision !== 'import_anyway') return true;
     }
     if (iss.severity === 'warning' && iss.issue_type === 'existing_client') {
@@ -121,12 +139,17 @@ export async function runImportExecute(
 ): Promise<void> {
   const { data: session } = await admin
     .from('import_sessions')
-    .select('id, session_settings, total_rows')
+    .select('id, session_settings, total_rows, detected_platform')
     .eq('id', sessionId)
     .eq('venue_id', venueId)
     .single();
 
   if (!session) throw new Error('Session not found');
+
+  const refProvider =
+    (session as { detected_platform?: string | null }).detected_platform === 'phorest'
+      ? IMPORT_REF_PROVIDER_PHOREST
+      : null;
 
   const settings = (session.session_settings ?? {}) as {
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
@@ -249,10 +272,38 @@ export async function runImportExecute(
         if (['yes', 'true', '1', 'y'].includes(x)) marketingOptOut = false;
         else if (['no', 'false', '0', 'n'].includes(x)) marketingOptOut = true;
       }
+      if (marketingOptOut === null && targets.email_marketing_consent?.trim()) {
+        const emOpt = normaliseBoolean(targets.email_marketing_consent);
+        if (emOpt === true) marketingOptOut = false;
+        if (emOpt === false) marketingOptOut = true;
+      }
 
       const customFields: Record<string, unknown> = { ...custom };
       if (targets.notes?.trim()) customFields.import_client_notes = targets.notes.trim();
       if (targets.gender?.trim()) customFields.gender = targets.gender.trim();
+      if (targets.address?.trim()) customFields.address = targets.address.trim();
+      if (targets.postcode?.trim()) customFields.postcode = targets.postcode.trim();
+      const landPh = normalisePhoneUk(targets.landline ?? null);
+      if (landPh.e164) customFields.landline_phone = landPh.e164;
+      else if (targets.landline?.trim()) customFields.landline_phone_raw = targets.landline.trim();
+      for (const key of ['sms_marketing_consent', 'email_marketing_consent', 'sms_reminder_consent', 'email_reminder_consent'] as const) {
+        const b = normaliseBoolean(targets[key]);
+        if (b !== null) customFields[key] = b;
+      }
+      if (targets.preferred_staff?.trim()) customFields.preferred_staff = targets.preferred_staff.trim();
+      const cs = targets.client_since?.trim();
+      if (cs) {
+        const { iso } = parseDateString(cs, datePref ?? undefined);
+        if (iso) customFields.client_since = iso;
+      }
+      for (const key of ['archived', 'banned'] as const) {
+        const b = normaliseBoolean(targets[key]);
+        if (b !== null) customFields[key] = b;
+      }
+      const loyaltyPts = parseIntSafe(targets.loyalty_points);
+      if (loyaltyPts != null) customFields.loyalty_points = loyaltyPts;
+      const creditPence = parseCurrencyPence(targets.credit_balance);
+      if (creditPence != null) customFields.credit_balance_pence = creditPence;
       for (const dk of ['date_of_birth', 'first_visit_date'] as const) {
         const raw = targets[dk];
         if (!raw?.trim()) continue;
@@ -297,7 +348,26 @@ export async function runImportExecute(
           ).data
         : null;
 
-      const existing = existingByEmail ?? existingByPhone;
+      let existingByExternal: (typeof existingByEmail) | null = null;
+      if (!existingByEmail && !existingByPhone && refProvider && targets.external_client_id?.trim()) {
+        const gid = await findGuestIdByExternalRef(
+          admin,
+          venueId,
+          refProvider,
+          targets.external_client_id.trim(),
+        );
+        if (gid) {
+          const { data: g } = await admin
+            .from('guests')
+            .select('id, name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
+            .eq('venue_id', venueId)
+            .eq('id', gid)
+            .maybeSingle();
+          existingByExternal = g ?? null;
+        }
+      }
+
+      const existing = existingByEmail ?? existingByPhone ?? existingByExternal;
 
       if (existing && shouldUpdateExisting(issues)) {
         const prev = existing as Record<string, unknown>;
@@ -329,6 +399,26 @@ export async function runImportExecute(
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id);
+
+        if (refProvider && targets.external_client_id?.trim()) {
+          await upsertGuestExternalRef(
+            admin,
+            venueId,
+            existing.id as string,
+            refProvider,
+            targets.external_client_id.trim(),
+          );
+        }
+        if (refProvider && targets.external_system_id?.trim()) {
+          await upsertGuestExternalRef(
+            admin,
+            venueId,
+            existing.id as string,
+            refProvider,
+            targets.external_system_id.trim(),
+            { source: 'external_system_id' },
+          );
+        }
 
         updatedExisting += 1;
         importedClients += 1;
@@ -374,6 +464,26 @@ export async function runImportExecute(
         action: 'created',
         previous_data: null,
       });
+
+      if (refProvider && targets.external_client_id?.trim()) {
+        await upsertGuestExternalRef(
+          admin,
+          venueId,
+          inserted.id,
+          refProvider,
+          targets.external_client_id.trim(),
+        );
+      }
+      if (refProvider && targets.external_system_id?.trim()) {
+        await upsertGuestExternalRef(
+          admin,
+          venueId,
+          inserted.id,
+          refProvider,
+          targets.external_system_id.trim(),
+          { source: 'external_system_id' },
+        );
+      }
 
       importedClients += 1;
       await bumpProgress();
@@ -441,7 +551,16 @@ export async function runImportExecute(
     defaultAppointmentServiceId = (s as { id: string } | null)?.id ?? null;
   }
 
-  async function findGuestForBooking(email: string | null, phone: string | null, clientName: string | null) {
+  async function findGuestForBooking(
+    email: string | null,
+    phone: string | null,
+    clientName: string | null,
+    externalClientId: string | null,
+  ) {
+    if (refProvider && externalClientId?.trim()) {
+      const byExt = await findGuestIdByExternalRef(admin, venueId, refProvider, externalClientId.trim());
+      if (byExt) return byExt;
+    }
     if (email) {
       const { data } = await admin
         .from('guests')
@@ -495,6 +614,11 @@ export async function runImportExecute(
         raw_client_email: string | null;
         raw_client_phone: string | null;
         raw_client_name: string | null;
+        raw_external_appointment_id: string | null;
+        raw_external_booking_id: string | null;
+        raw_external_client_id: string | null;
+        raw_group_booking_id: string | null;
+        raw_import_metadata: Record<string, unknown> | null;
         raw_status: string | null;
         raw_price: string | null;
         raw_deposit_amount: string | null;
@@ -517,9 +641,28 @@ export async function runImportExecute(
         continue;
       }
 
+      if (refProvider && row.raw_external_appointment_id?.trim()) {
+        const dupAppt = await findBookingIdByExternalRef(
+          admin,
+          venueId,
+          refProvider,
+          row.raw_external_appointment_id.trim(),
+        );
+        if (dupAppt) {
+          skipped += 1;
+          await bumpProgress();
+          continue;
+        }
+      }
+
       const em = normaliseEmail(row.raw_client_email ?? null);
       const ph = normalisePhoneUk(row.raw_client_phone ?? null);
-      const guestId = await findGuestForBooking(em, ph.e164, row.raw_client_name ?? null);
+      const guestId = await findGuestForBooking(
+        em,
+        ph.e164,
+        row.raw_client_name ?? null,
+        row.raw_external_client_id ?? null,
+      );
       if (!guestId) {
         skipped += 1;
         await bumpProgress();
@@ -529,13 +672,17 @@ export async function runImportExecute(
       const duration = row.duration_minutes ?? 60;
       const partySize =
         row.party_size ?? (bookingModel === 'table_reservation' ? 2 : 1);
-      const status = mapBookingStatus(row.raw_status) as
-        | 'Pending'
-        | 'Confirmed'
-        | 'Cancelled'
-        | 'No-Show'
-        | 'Completed'
-        | 'Seated';
+      const meta = row.raw_import_metadata ?? {};
+      const status = mapImportBookingStatus({
+        rawStatus: row.raw_status,
+        activationState: typeof meta.activation_state === 'string' ? meta.activation_state : null,
+        deletedFlag:
+          typeof meta.deleted === 'string'
+            ? meta.deleted
+            : typeof meta.deleted === 'boolean'
+              ? String(meta.deleted)
+              : null,
+      }) as 'Pending' | 'Confirmed' | 'Cancelled' | 'No-Show' | 'Completed' | 'Seated' | 'Booked';
 
       const pricePence = parseCurrencyPence(row.raw_price);
       const notes = row.raw_notes?.trim() ?? null;
@@ -543,6 +690,24 @@ export async function runImportExecute(
       if (pricePence != null) {
         const priceLabel = `Imported price £${(pricePence / 100).toFixed(2)}`;
         specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
+      }
+
+      const metaNotes: string[] = [];
+      if (typeof meta.course_name === 'string' && meta.course_name.trim()) {
+        metaNotes.push(`Course: ${meta.course_name.trim()}`);
+      }
+      if (typeof meta.appointment_source === 'string' && meta.appointment_source.trim()) {
+        metaNotes.push(`Source: ${meta.appointment_source.trim()}`);
+      }
+      if (typeof meta.room_id === 'string' && meta.room_id.trim()) {
+        metaNotes.push(`Room: ${meta.room_id.trim()}`);
+      }
+      if (typeof meta.machine_id === 'string' && meta.machine_id.trim()) {
+        metaNotes.push(`Machine: ${meta.machine_id.trim()}`);
+      }
+      if (metaNotes.length) {
+        const block = metaNotes.join('\n');
+        specialRequests = specialRequests ? `${specialRequests}\n${block}` : block;
       }
 
       const depositFields = resolveDepositFromImport({
@@ -651,6 +816,32 @@ export async function runImportExecute(
         continue;
       }
 
+      const refPayload = {
+        ...meta,
+        group_booking_id: row.raw_group_booking_id,
+        external_client_id: row.raw_external_client_id,
+      };
+      if (refProvider && row.raw_external_appointment_id?.trim()) {
+        await insertBookingExternalRef(
+          admin,
+          venueId,
+          booking.id as string,
+          refProvider,
+          row.raw_external_appointment_id.trim(),
+          { kind: 'appointment', ...refPayload },
+        );
+      }
+      if (refProvider && row.raw_external_booking_id?.trim()) {
+        await insertBookingExternalRef(
+          admin,
+          venueId,
+          booking.id as string,
+          refProvider,
+          row.raw_external_booking_id.trim(),
+          { kind: 'booking', ...refPayload },
+        );
+      }
+
       importedBookings += 1;
       await bumpProgress();
     }
@@ -691,25 +882,42 @@ export async function runImportExecute(
         continue;
       }
 
-      const guestId = await findGuestForBooking(em, ph.e164, targets.client_name ?? null);
+      if (refProvider && targets.external_appointment_id?.trim()) {
+        const dupAppt = await findBookingIdByExternalRef(
+          admin,
+          venueId,
+          refProvider,
+          targets.external_appointment_id.trim(),
+        );
+        if (dupAppt) {
+          skipped += 1;
+          await bumpProgress();
+          continue;
+        }
+      }
+
+      const guestId = await findGuestForBooking(
+        em,
+        ph.e164,
+        targets.client_name ?? null,
+        targets.client_external_id ?? null,
+      );
       if (!guestId) {
         skipped += 1;
         await bumpProgress();
         continue;
       }
 
-      const duration = parseIntSafe(targets.duration_minutes) ?? 60;
+      let duration = parseIntSafe(targets.duration_minutes);
       const partySize =
         parseIntSafe(targets.party_size) ??
         (bookingModel === 'table_reservation' ? 2 : 1);
 
-      const status = mapBookingStatus(targets.status) as
-        | 'Pending'
-        | 'Confirmed'
-        | 'Cancelled'
-        | 'No-Show'
-        | 'Completed'
-        | 'Seated';
+      const status = mapImportBookingStatus({
+        rawStatus: targets.status,
+        activationState: targets.activation_state ?? null,
+        deletedFlag: targets.deleted ?? null,
+      }) as 'Pending' | 'Confirmed' | 'Cancelled' | 'No-Show' | 'Completed' | 'Seated' | 'Booked';
 
       const pricePence = parseCurrencyPence(targets.price);
       const notes = targets.notes?.trim() ?? null;
@@ -717,6 +925,16 @@ export async function runImportExecute(
       if (pricePence != null) {
         const priceLabel = `Imported price £${(pricePence / 100).toFixed(2)}`;
         specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
+      }
+
+      const csvMetaNotes: string[] = [];
+      if (targets.course_name?.trim()) csvMetaNotes.push(`Course: ${targets.course_name.trim()}`);
+      if (targets.appointment_source?.trim()) csvMetaNotes.push(`Source: ${targets.appointment_source.trim()}`);
+      if (targets.room_id?.trim()) csvMetaNotes.push(`Room: ${targets.room_id.trim()}`);
+      if (targets.machine_id?.trim()) csvMetaNotes.push(`Machine: ${targets.machine_id.trim()}`);
+      if (csvMetaNotes.length) {
+        const block = csvMetaNotes.join('\n');
+        specialRequests = specialRequests ? `${specialRequests}\n${block}` : block;
       }
 
       const depositFields = resolveDepositFromImport({
@@ -754,11 +972,22 @@ export async function runImportExecute(
       }
 
       const timeForDb = bt.length === 5 ? `${bt}:00` : bt;
-      const endParts = timeForDb.slice(0, 5).split(':').map(Number);
-      const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + duration;
-      const eh = Math.floor(endMins / 60) % 24;
-      const emin = endMins % 60;
-      const bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+      const endBt = parseTimeString(targets.booking_end_time ?? null);
+      const endTimeForDb = endBt ? (endBt.length === 5 ? `${endBt}:00` : endBt) : null;
+
+      let bookingEndTime: string;
+      if (endTimeForDb) {
+        const dm = durationMinutesBetweenTimes(timeForDb, endTimeForDb);
+        if (dm != null && dm > 0) duration = dm;
+        bookingEndTime = endTimeForDb;
+      } else {
+        const dur = duration ?? 60;
+        const endParts = timeForDb.slice(0, 5).split(':').map(Number);
+        const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + dur;
+        const eh = Math.floor(endMins / 60) % 24;
+        const emin = endMins % 60;
+        bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+      }
 
       const insert: Record<string, unknown> = {
         venue_id: venueId,
@@ -826,6 +1055,35 @@ export async function runImportExecute(
         skipped += 1;
         await bumpProgress();
         continue;
+      }
+
+      const csvRefPayload = {
+        course_name: targets.course_name?.trim(),
+        appointment_source: targets.appointment_source?.trim(),
+        room_id: targets.room_id?.trim(),
+        machine_id: targets.machine_id?.trim(),
+        client_external_id: targets.client_external_id?.trim(),
+        group_booking_id: targets.group_booking_id?.trim(),
+      };
+      if (refProvider && targets.external_appointment_id?.trim()) {
+        await insertBookingExternalRef(
+          admin,
+          venueId,
+          booking.id as string,
+          refProvider,
+          targets.external_appointment_id.trim(),
+          { kind: 'appointment', ...csvRefPayload },
+        );
+      }
+      if (refProvider && targets.external_booking_id?.trim()) {
+        await insertBookingExternalRef(
+          admin,
+          venueId,
+          booking.id as string,
+          refProvider,
+          targets.external_booking_id.trim(),
+          { kind: 'booking', ...csvRefPayload },
+        );
       }
 
       importedBookings += 1;

@@ -87,6 +87,18 @@ import {
 } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
+/** Same semantics as `minutesBetweenStartAndEnd` in appointment-engine (HH:mm span, wraps past midnight). */
+function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
+  const toMin = (s: string) => {
+    const [h, m] = s.slice(0, 5).split(':').map((x) => Number.parseInt(x, 10));
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+  };
+  let start = toMin(startHHmm);
+  let end = toMin(endHHmm);
+  if (end <= start) end += 24 * 60;
+  return end - start;
+}
+
 interface Practitioner {
   id: string;
   name: string;
@@ -398,6 +410,22 @@ function minutesToTime(m: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+function timelineMinutesToTime(m: number): string {
+  const wallMinutes = m % (24 * 60);
+  const hh = Math.floor(wallMinutes / 60);
+  const mm = wallMinutes % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function minutesAfterStart(start: string, end: string): number {
+  const startM = timeToMinutes(start);
+  let endM = timeToMinutes(end);
+  if (endM <= startM) {
+    endM += 24 * 60;
+  }
+  return endM - startM;
+}
+
 /**
  * Duration for grid layout and collisions: wall-clock ends first, then ISO `estimated_end_time`
  * (same UTC-based delta as walk-in creation), then service default.
@@ -423,7 +451,7 @@ function bookingDurationMinutes(b: Booking, serviceMap: Map<string, AppointmentS
   if (b.booking_end_time) {
     return Math.max(
       SLOT_MINUTES,
-      timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time),
+      minutesAfterStart(b.booking_time, b.booking_end_time),
     );
   }
   const fromEstimated = minutesBetweenBookingStartAndEstimatedEnd(b);
@@ -445,7 +473,7 @@ function bookingCalendarDisplaySpanMinutes(
   if (b.booking_end_time) {
     return Math.max(
       SLOT_MINUTES,
-      timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time),
+      minutesAfterStart(b.booking_time, b.booking_end_time),
     );
   }
   if (minutesBetweenBookingStartAndEstimatedEnd(b) != null) {
@@ -1072,19 +1100,19 @@ function slotOccupied(
   for (const bl of blocks) {
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
-    const b1 = timeToMinutes(bl.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   for (const cb of classScheduleBlocks) {
     if (cb.kind !== 'class_session') continue;
     const b0 = timeToMinutes(cb.start_time);
-    const b1 = timeToMinutes(cb.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(cb.start_time, cb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   for (const eb of eventColumnBlocks) {
     if (eb.kind !== 'event_ticket') continue;
     const b0 = timeToMinutes(eb.start_time);
-    const b1 = timeToMinutes(eb.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(eb.start_time, eb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   return false;
@@ -1126,7 +1154,7 @@ function appointmentWindowCollides(
   for (const bl of blocks) {
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
-    const b1 = timeToMinutes(bl.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
     for (const c of candIntervals) {
       if (overlapsRange(c.start, c.end, b0, b1)) return true;
     }
@@ -1134,7 +1162,7 @@ function appointmentWindowCollides(
   for (const cb of classScheduleBlocks) {
     if (cb.kind !== 'class_session') continue;
     const b0 = timeToMinutes(cb.start_time);
-    const b1 = timeToMinutes(cb.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(cb.start_time, cb.end_time);
     for (const c of candIntervals) {
       if (overlapsRange(c.start, c.end, b0, b1)) return true;
     }
@@ -1142,7 +1170,7 @@ function appointmentWindowCollides(
   for (const eb of eventColumnBlocks) {
     if (eb.kind !== 'event_ticket') continue;
     const b0 = timeToMinutes(eb.start_time);
-    const b1 = timeToMinutes(eb.end_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(eb.start_time, eb.end_time);
     for (const c of candIntervals) {
       if (overlapsRange(c.start, c.end, b0, b1)) return true;
     }
@@ -1543,7 +1571,7 @@ export function PractitionerCalendarView({
       }
 
       const startHour = Math.max(0, Math.floor(minM / 60));
-      const endHour = Math.min(24, Math.max(startHour + 1, Math.ceil(maxM / 60)));
+      const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
     [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
@@ -2123,8 +2151,8 @@ export function PractitionerCalendarView({
     async (booking: Booking, newEndHm: string) => {
       const prev = { ...booking };
       const startHm = booking.booking_time.slice(0, 5);
-      const endLen5 = newEndHm.slice(0, 5);
-      if (timeToMinutes(endLen5) <= timeToMinutes(startHm)) return;
+      const endLen5 = minutesToTime(timeToMinutes(newEndHm));
+      if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
       const bookingEndForStore = `${endLen5}:00`;
       setBookings((rows) =>
         rows.map((b) => (b.id === booking.id ? { ...b, booking_end_time: bookingEndForStore } : b)),
@@ -2394,7 +2422,7 @@ export function PractitionerCalendarView({
 
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
     const mins = startHour * 60 + i * SLOT_MINUTES;
-    return minutesToTime(mins);
+    return timelineMinutesToTime(mins);
   });
 
   const [calendarClockTick, setCalendarClockTick] = useState(0);
@@ -3089,7 +3117,7 @@ export function PractitionerCalendarView({
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
                         const h = Math.max(
-                          ((timeToMinutes(bl.end_time) - timeToMinutes(bl.start_time)) / SLOT_MINUTES) * SLOT_HEIGHT,
+                          (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
                         const label = `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
@@ -3125,10 +3153,7 @@ export function PractitionerCalendarView({
 
                       {pracClassBlocks.map((cb) => {
                         const top = slotTop(cb.start_time);
-                        const durMins = Math.max(
-                          timeToMinutes(cb.end_time) - timeToMinutes(cb.start_time),
-                          SLOT_MINUTES,
-                        );
+                        const durMins = Math.max(minutesBetweenStartAndEnd(cb.start_time, cb.end_time), SLOT_MINUTES);
                         const height = slotHeightFromDuration(durMins);
                         const accent = cb.accent_colour ?? '#6366f1';
                         const uptake =
@@ -3164,10 +3189,7 @@ export function PractitionerCalendarView({
 
                       {pracEventBlocks.map((eb) => {
                         const top = slotTop(eb.start_time);
-                        const durMins = Math.max(
-                          timeToMinutes(eb.end_time) - timeToMinutes(eb.start_time),
-                          SLOT_MINUTES,
-                        );
+                        const durMins = Math.max(minutesBetweenStartAndEnd(eb.start_time, eb.end_time), SLOT_MINUTES);
                         const height = slotHeightFromDuration(durMins);
                         const accent = eb.accent_colour ?? '#F59E0B';
                         const uptake = formatEventUptakeLine(eb);

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
 import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
+import { IMPORT_REF_PROVIDER_PHOREST } from '@/lib/import/external-refs';
 import {
   normaliseEmail,
   normalisePhoneUk,
@@ -19,12 +20,38 @@ export async function runImportValidation(
 
   const { data: session } = await admin
     .from('import_sessions')
-    .select('id, session_settings')
+    .select('id, session_settings, detected_platform')
     .eq('id', sessionId)
     .eq('venue_id', venueId)
     .single();
 
   if (!session) throw new Error('Session not found');
+
+  const detectedPlatform = (session as { detected_platform?: string | null }).detected_platform ?? null;
+  const usePhorestRefs = detectedPlatform === 'phorest';
+
+  let existingPhorestBookingIds = new Set<string>();
+  let existingPhorestGuestIds = new Set<string>();
+  if (usePhorestRefs) {
+    const { data: brefs } = await admin
+      .from('external_record_refs')
+      .select('external_id')
+      .eq('venue_id', venueId)
+      .eq('provider', IMPORT_REF_PROVIDER_PHOREST)
+      .eq('entity_type', 'booking');
+    existingPhorestBookingIds = new Set(
+      (brefs ?? []).map((r) => (r as { external_id: string }).external_id),
+    );
+    const { data: grefs } = await admin
+      .from('external_record_refs')
+      .select('external_id')
+      .eq('venue_id', venueId)
+      .eq('provider', IMPORT_REF_PROVIDER_PHOREST)
+      .eq('entity_type', 'guest');
+    existingPhorestGuestIds = new Set(
+      (grefs ?? []).map((r) => (r as { external_id: string }).external_id),
+    );
+  }
 
   const settings = (session.session_settings ?? {}) as {
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
@@ -91,6 +118,8 @@ export async function runImportValidation(
     const parsed = await downloadAndParseCsv(admin, f.storage_path);
     const seenEmails = new Map<string, number>();
     const seenPhones = new Map<string, number>();
+    const seenExternalClientIds = new Map<string, number>();
+    const seenAppointmentIds = new Map<string, number>();
 
     for (let i = 0; i < parsed.rows.length; i++) {
       const rowNum = i + 1;
@@ -142,6 +171,41 @@ export async function runImportValidation(
           warningCount += 1;
         }
 
+        const extCl = targets.external_client_id?.trim();
+        if (extCl) {
+          if (seenExternalClientIds.has(extCl)) {
+            blockingErrorRowKeys.add(rowKey(f.id, rowNum));
+            await insertIssue(
+              admin,
+              sessionId,
+              f.id,
+              rowNum,
+              'error',
+              'duplicate_external_client_id',
+              'external_client_id',
+              extCl,
+              'Duplicate external client ID in this file',
+            );
+            errorCount += 1;
+          }
+          seenExternalClientIds.set(extCl, rowNum);
+          if (usePhorestRefs && existingPhorestGuestIds.has(extCl)) {
+            existingClientRowKeys.add(rowKey(f.id, rowNum));
+            await insertIssue(
+              admin,
+              sessionId,
+              f.id,
+              rowNum,
+              'warning',
+              'existing_client',
+              'external_client_id',
+              extCl,
+              'This Phorest client ID already exists in ReserveNI',
+            );
+            warningCount += 1;
+          }
+        }
+
         for (const key of ['first_visit_date', 'last_visit_date', 'date_of_birth'] as const) {
           const raw = targets[key];
           if (!raw?.trim()) continue;
@@ -159,9 +223,20 @@ export async function runImportValidation(
       if (f.file_type === 'bookings') {
         const em = normaliseEmail(targets.client_email ?? null);
         const ph = normalisePhoneUk(targets.client_phone ?? null);
-        if (!em && !ph.e164) {
+        const extClient = targets.client_external_id?.trim() ?? '';
+        if (!em && !ph.e164 && !extClient) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'missing_required', 'client_email', '', 'Client email or phone is required');
+          await insertIssue(
+            admin,
+            sessionId,
+            f.id,
+            rowNum,
+            'error',
+            'missing_required',
+            'client_email',
+            '',
+            'Client email, phone, or external client ID is required',
+          );
           errorCount += 1;
         }
         if (em && !EMAIL_RE.test(em)) {
@@ -192,6 +267,41 @@ export async function runImportValidation(
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
           await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'missing_required', 'booking_time', targets.booking_time ?? '', 'Booking time is required');
           errorCount += 1;
+        }
+
+        const apptId = targets.external_appointment_id?.trim();
+        if (apptId) {
+          if (seenAppointmentIds.has(apptId)) {
+            blockingErrorRowKeys.add(rowKey(f.id, rowNum));
+            await insertIssue(
+              admin,
+              sessionId,
+              f.id,
+              rowNum,
+              'error',
+              'duplicate_external_appointment_id',
+              'external_appointment_id',
+              apptId,
+              'Duplicate appointment ID in this file',
+            );
+            errorCount += 1;
+          }
+          seenAppointmentIds.set(apptId, rowNum);
+          if (usePhorestRefs && existingPhorestBookingIds.has(apptId)) {
+            blockingErrorRowKeys.add(rowKey(f.id, rowNum));
+            await insertIssue(
+              admin,
+              sessionId,
+              f.id,
+              rowNum,
+              'error',
+              'duplicate_external_appointment_id',
+              'external_appointment_id',
+              apptId,
+              'This appointment was already imported from Phorest',
+            );
+            errorCount += 1;
+          }
         }
       }
     }

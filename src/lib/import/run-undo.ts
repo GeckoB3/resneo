@@ -32,6 +32,16 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
 
   const bookingIds = rows.filter((r) => r.record_type === 'booking' && r.action === 'created').map((r) => r.record_id);
   if (bookingIds.length) {
+    const { error: refBookingErr } = await admin
+      .from('external_record_refs')
+      .delete()
+      .eq('venue_id', venueId)
+      .eq('entity_type', 'booking')
+      .in('entity_id', bookingIds);
+    if (refBookingErr) {
+      throw new Error(`Undo failed (external_record_refs): ${refBookingErr.message}`);
+    }
+
     // Legacy DBs: table_statuses.booking_id used to block deletes (NO ACTION). Clear before delete.
     const { error: clearTsErr } = await admin.from('table_statuses').update({ booking_id: null }).in('booking_id', bookingIds);
     if (clearTsErr) {
@@ -73,6 +83,21 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
   if (prIds.length) {
     await admin.from('practitioner_services').delete().in('practitioner_id', prIds);
     await admin.from('practitioners').delete().in('id', prIds).eq('venue_id', venueId);
+  }
+
+  const guestIdsDeleted = rows
+    .filter((r) => r.record_type === 'guest' && r.action === 'created')
+    .map((r) => r.record_id);
+  if (guestIdsDeleted.length) {
+    const { error: refGuestErr } = await admin
+      .from('external_record_refs')
+      .delete()
+      .eq('venue_id', venueId)
+      .eq('entity_type', 'guest')
+      .in('entity_id', guestIdsDeleted);
+    if (refGuestErr) {
+      throw new Error(`Undo failed (external_record_refs guests): ${refGuestErr.message}`);
+    }
   }
 
   for (const r of rows) {

@@ -213,6 +213,15 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
   return startA < endB && startB < endA;
 }
 
+function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
+  const start = timeToMinutes(startHHmm);
+  let end = timeToMinutes(endHHmm);
+  if (end <= start) {
+    end += 24 * 60;
+  }
+  return end - start;
+}
+
 /**
  * For rows already scoped to a calendar date: full-day rows add to `days_off` via Set; partial rows become
  * practitioner block ranges (same shape as `practitioner_calendar_blocks` in the engine).
@@ -244,15 +253,6 @@ export function leaveRowsToDaysOffAndBlocks(
   }
 
   return { fullDayPractitionerIds, partialBlocks };
-}
-
-/** Wall-clock end minute for venue hours / breaks (chair span + buffer; legacy tail only when no salon blocks). */
-function appointmentCustomerSpanEndMin(b: AppointmentBooking): number {
-  const bStart = timeToMinutes(b.booking_time);
-  const blocks = b.processing_time_blocks ?? [];
-  const extraLegacy =
-    blocks.length > 0 ? 0 : (b.processing_time_minutes ?? 0);
-  return bStart + b.duration_minutes + b.buffer_minutes + extraLegacy;
 }
 
 function wallBusyIntervalsForBooking(b: AppointmentBooking): Array<{ start: number; end: number }> {
@@ -747,9 +747,9 @@ export function validateAppointmentCustomInterval(
   }
 
   const buffer = svc.buffer_minutes ?? 0;
+
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
-  const endCore = timeToMinutes(endCoreHHmm.slice(0, 5));
-  const coreDuration = endCore - t;
+  const coreDuration = minutesBetweenStartAndEnd(startTimeHHmm.slice(0, 5), endCoreHHmm.slice(0, 5));
   if (!(coreDuration >= 15)) {
     return { ok: false, reason: 'End time must be at least 15 minutes after start' };
   }

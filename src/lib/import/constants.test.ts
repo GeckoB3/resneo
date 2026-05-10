@@ -21,4 +21,25 @@ describe('detectPlatform', () => {
     const { platform } = detectPlatform(['A', 'B'], 'x.csv');
     expect(platform).toBe('unknown');
   });
+
+  it('detects Phorest when signature columns match', () => {
+    const headers = [
+      'Appointment ID',
+      'Client ID',
+      'First Name',
+      'Last Name',
+      'Appointment Date',
+      'Start Time',
+      'Service Name',
+      'Staff Name',
+    ];
+    const { platform } = detectPlatform(headers, 'export.csv');
+    expect(platform).toBe('phorest');
+  });
+
+  it('detects Phorest from filename with partial column match', () => {
+    const headers = ['First Name', 'Last Name', 'Email', 'Appointment Date', 'Start Time'];
+    const { platform } = detectPlatform(headers, 'phorest_clients.csv');
+    expect(platform).toBe('phorest');
+  });
 });

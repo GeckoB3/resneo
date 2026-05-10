@@ -133,6 +133,43 @@ export function mapBookingStatus(raw: string | null | undefined): string {
   return 'Booked';
 }
 
+/** Minutes between two same-day times (HH:mm or HH:mm:ss); negative span wraps +24h (overnight). */
+export function durationMinutesBetweenTimes(startHHMMSS: string, endHHMMSS: string): number | null {
+  const toMins = (t: string) => {
+    const p = t.trim().split(':').map((x) => Number.parseInt(x, 10));
+    if (p.length < 2 || Number.isNaN(p[0]!) || Number.isNaN(p[1]!)) return Number.NaN;
+    const h = p[0]!;
+    const m = p[1]!;
+    const s = p[2] ?? 0;
+    return h * 60 + m + Math.round(s / 60);
+  };
+  const s = toMins(startHHMMSS);
+  const e = toMins(endHHMMSS);
+  if (Number.isNaN(s) || Number.isNaN(e)) return null;
+  let d = e - s;
+  if (d < 0) d += 24 * 60;
+  return d;
+}
+
+/**
+ * Maps salon export enums (e.g. Phorest appointment state / activation) then falls back to generic status text.
+ */
+export function mapImportBookingStatus(params: {
+  rawStatus?: string | null;
+  activationState?: string | null;
+  deletedFlag?: string | null;
+}): string {
+  const del = params.deletedFlag?.trim().toLowerCase();
+  if (del === 'true' || del === 'yes' || del === '1') return 'Cancelled';
+  const act = params.activationState?.trim().toUpperCase();
+  if (act === 'CANCELED' || act === 'CANCELLED') return 'Cancelled';
+  const st = params.rawStatus?.trim().toUpperCase();
+  if (st === 'PAID') return 'Completed';
+  if (st === 'CHECKED_IN') return 'Seated';
+  if (st === 'BOOKED') return 'Booked';
+  return mapBookingStatus(params.rawStatus);
+}
+
 const DEPOSIT_STATUS_ENUMS = [
   'Not Required',
   'Pending',

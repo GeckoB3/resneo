@@ -24,11 +24,36 @@ export const CLIENT_FIELDS: SchemaField[] = [
   { key: 'last_name', label: 'Last Name', required: true, type: 'text', examples: ['Jones', 'Smith'] },
   /** Single-column full name from exports (e.g. Booksy); import splits into first/last when first/last are empty. */
   { key: 'full_name', label: 'Full Name', required: false, type: 'text' },
+  {
+    key: 'external_client_id',
+    label: 'External client ID (e.g. Phorest Client ID)',
+    required: false,
+    type: 'text',
+  },
+  {
+    key: 'external_system_id',
+    label: 'External system ID',
+    required: false,
+    type: 'text',
+  },
   { key: 'email', label: 'Email Address', required: false, type: 'email', examples: ['sarah@email.com'] },
   { key: 'phone', label: 'Phone Number', required: false, type: 'phone', examples: ['+447891234567'] },
+  { key: 'landline', label: 'Landline', required: false, type: 'phone' },
+  { key: 'address', label: 'Address', required: false, type: 'text' },
+  { key: 'postcode', label: 'Postcode', required: false, type: 'text' },
   { key: 'date_of_birth', label: 'Date of Birth', required: false, type: 'date' },
   { key: 'gender', label: 'Gender', required: false, type: 'text' },
   { key: 'marketing_consent', label: 'Marketing Consent', required: false, type: 'boolean' },
+  { key: 'sms_marketing_consent', label: 'SMS marketing consent', required: false, type: 'boolean' },
+  { key: 'email_marketing_consent', label: 'Email marketing consent', required: false, type: 'boolean' },
+  { key: 'sms_reminder_consent', label: 'SMS reminder consent', required: false, type: 'boolean' },
+  { key: 'email_reminder_consent', label: 'Email reminder consent', required: false, type: 'boolean' },
+  { key: 'preferred_staff', label: 'Preferred staff', required: false, type: 'text' },
+  { key: 'client_since', label: 'Client since', required: false, type: 'date' },
+  { key: 'archived', label: 'Archived', required: false, type: 'boolean' },
+  { key: 'banned', label: 'Banned', required: false, type: 'boolean' },
+  { key: 'loyalty_points', label: 'Loyalty points', required: false, type: 'number' },
+  { key: 'credit_balance', label: 'Credit balance (£)', required: false, type: 'currency' },
   { key: 'first_visit_date', label: 'First Visit Date', required: false, type: 'date' },
   { key: 'last_visit_date', label: 'Last Visit Date', required: false, type: 'date' },
   { key: 'total_visits', label: 'Total Visits', required: false, type: 'number' },
@@ -38,16 +63,51 @@ export const CLIENT_FIELDS: SchemaField[] = [
 ];
 
 export const BOOKING_FIELDS: SchemaField[] = [
-  { key: 'client_email', label: 'Client Email', required: true, type: 'email' },
+  {
+    key: 'client_email',
+    label: 'Client Email',
+    required: false,
+    type: 'email',
+    examples: ['sarah@email.com'],
+  },
+  {
+    key: 'client_external_id',
+    label: 'Client ID (external)',
+    required: false,
+    type: 'text',
+    examples: ['Phorest Client ID'],
+  },
   { key: 'party_size', label: 'Party size / covers', required: false, type: 'number' },
   { key: 'client_phone', label: 'Client Phone', required: false, type: 'phone' },
   { key: 'client_name', label: 'Client Name', required: false, type: 'text' },
+  {
+    key: 'external_appointment_id',
+    label: 'Appointment ID (external)',
+    required: false,
+    type: 'text',
+  },
+  {
+    key: 'external_booking_id',
+    label: 'Booking ID (external)',
+    required: false,
+    type: 'text',
+  },
+  { key: 'group_booking_id', label: 'Group booking ID', required: false, type: 'text' },
   { key: 'service_name', label: 'Service Name', required: false, type: 'text' },
   { key: 'staff_name', label: 'Staff Member', required: false, type: 'text' },
   { key: 'booking_date', label: 'Booking Date', required: true, type: 'date' },
   { key: 'booking_time', label: 'Booking Time', required: true, type: 'time' },
+  { key: 'booking_end_time', label: 'End Time', required: false, type: 'time' },
   { key: 'duration_minutes', label: 'Duration (minutes)', required: false, type: 'number' },
   { key: 'status', label: 'Booking Status', required: false, type: 'text' },
+  { key: 'activation_state', label: 'Activation state', required: false, type: 'text', examples: ['ACTIVE', 'CANCELED'] },
+  { key: 'confirmed', label: 'Confirmed', required: false, type: 'boolean' },
+  { key: 'appointment_source', label: 'Appointment source', required: false, type: 'text' },
+  { key: 'room_id', label: 'Room ID', required: false, type: 'text' },
+  { key: 'machine_id', label: 'Machine ID', required: false, type: 'text' },
+  { key: 'course_name', label: 'Course name', required: false, type: 'text' },
+  { key: 'colour_notes', label: 'Colour notes', required: false, type: 'text' },
+  { key: 'service_notes', label: 'Service notes', required: false, type: 'text' },
   { key: 'price', label: 'Price (£)', required: false, type: 'currency' },
   { key: 'deposit_amount', label: 'Deposit amount (£)', required: false, type: 'currency' },
   { key: 'deposit_paid', label: 'Deposit paid', required: false, type: 'boolean' },
@@ -59,6 +119,7 @@ export const BOOKING_FIELDS: SchemaField[] = [
     examples: ['Paid', 'Pending', 'Refunded', 'Not Required'],
   },
   { key: 'notes', label: 'Booking Notes', required: false, type: 'text' },
+  { key: 'deleted', label: 'Deleted row', required: false, type: 'boolean' },
   { key: 'table_ref', label: 'Table', required: false, type: 'text' },
   { key: 'event_name', label: 'Event name', required: false, type: 'text' },
   { key: 'class_name', label: 'Class name', required: false, type: 'text' },
@@ -68,7 +129,14 @@ export const BOOKING_FIELDS: SchemaField[] = [
 export const CLIENT_FIELD_KEYS = new Set(CLIENT_FIELDS.map((f) => f.key));
 export const BOOKING_FIELD_KEYS = new Set(BOOKING_FIELDS.map((f) => f.key));
 
-export type PlatformId = 'fresha' | 'booksy' | 'vagaro' | 'resdiary' | 'timely' | 'unknown';
+export type PlatformId =
+  | 'fresha'
+  | 'booksy'
+  | 'vagaro'
+  | 'resdiary'
+  | 'timely'
+  | 'phorest'
+  | 'unknown';
 
 export const PLATFORM_SIGNATURES: Record<
   Exclude<PlatformId, 'unknown'>,
@@ -102,6 +170,21 @@ export const PLATFORM_SIGNATURES: Record<
   timely: {
     columns: ['Client first name', 'Client last name', 'Client email', 'Mobile', 'Appointment start', 'Service'],
     filenames: ['timely'],
+  },
+  phorest: {
+    columns: [
+      'Appointment ID',
+      'Client ID',
+      'First Name',
+      'Last Name',
+      'Appointment Date',
+      'Start Time',
+      'Service Name',
+      'Staff Name',
+      'Mobile',
+      'Email',
+    ],
+    filenames: ['phorest', 'staff appointment', 'future appointment'],
   },
 };
 
@@ -180,6 +263,51 @@ export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
     'Appointment start': 'booking_date',
     Service: 'service_name',
   },
+  phorest_clients: {
+    'Client ID': 'external_client_id',
+    'External Id': 'external_system_id',
+    'First Name': 'first_name',
+    'Last Name': 'last_name',
+    Mobile: 'phone',
+    Landline: 'landline',
+    Email: 'email',
+    'Birth Date': 'date_of_birth',
+    Gender: 'gender',
+    Notes: 'notes',
+    'SMS Marketing Consent': 'sms_marketing_consent',
+    'Email Marketing Consent': 'email_marketing_consent',
+    'SMS Reminder Consent': 'sms_reminder_consent',
+    'Email Reminder Consent': 'email_reminder_consent',
+    'Street Address 1': 'address',
+    'Postal Code': 'postcode',
+    'First Visit': 'first_visit_date',
+    'Last Visit': 'last_visit_date',
+    'Preferred Staff Id': 'preferred_staff',
+  },
+  phorest_bookings: {
+    'Appointment ID': 'external_appointment_id',
+    'Booking ID': 'external_booking_id',
+    'Group Booking ID': 'group_booking_id',
+    'Client ID': 'client_external_id',
+    'Appointment Date': 'booking_date',
+    'Start Time': 'booking_time',
+    'End Time': 'booking_end_time',
+    'Service Name': 'service_name',
+    'Staff Name': 'staff_name',
+    State: 'status',
+    'Activation State': 'activation_state',
+    Source: 'appointment_source',
+    'Room Id': 'room_id',
+    'Machine Id': 'machine_id',
+    'Course Name': 'course_name',
+    Notes: 'notes',
+    'Colour Notes': 'colour_notes',
+    'Service Notes': 'service_notes',
+    'Deposit Amount': 'deposit_amount',
+    Deleted: 'deleted',
+    Price: 'price',
+    Duration: 'duration_minutes',
+  },
 };
 
 export function detectPlatform(
@@ -208,10 +336,9 @@ export function detectPlatform(
     }
   }
 
-  const columnMatches = PLATFORM_SIGNATURES[best as Exclude<PlatformId, 'unknown'>]
-    ? PLATFORM_SIGNATURES[best as Exclude<PlatformId, 'unknown'>].columns.filter((c) =>
-        headerSet.has(norm(c)),
-      ).length
+  const sigForBest = best !== 'unknown' ? PLATFORM_SIGNATURES[best as Exclude<PlatformId, 'unknown'>] : null;
+  const columnMatches = sigForBest
+    ? sigForBest.columns.filter((c) => headerSet.has(norm(c))).length
     : 0;
 
   if (columnMatches < 3 && best !== 'unknown') {

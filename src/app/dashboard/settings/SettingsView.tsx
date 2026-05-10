@@ -9,7 +9,7 @@
  * booking page URL/widgets → dashboard home / embed docs elsewhere.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { VenueSettings } from './types';
@@ -37,6 +37,7 @@ import {
 } from '@/lib/pricing-constants';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import { planCalendarLimit } from '@/lib/plan-limits';
+import type { VenueBillingQuotePayload } from '@/lib/stripe/billing-quote';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
@@ -128,6 +129,7 @@ type AppointmentsPlanStatusPayload = {
 
 type BillingStatusPayload = AppointmentsPlanStatusPayload & {
   has_default_payment_method?: boolean;
+  billing_quote?: VenueBillingQuotePayload | null;
 };
 
 type MoneyPayload = {
@@ -246,6 +248,21 @@ function formatSubscriptionDateLabel(iso: string | null | undefined): string | n
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+/** Dashboard layout scrolls inside `<main overflow-y-auto>`, not the window. */
+function scrollNearestScrollParentToTop(from: HTMLElement | null) {
+  if (typeof window === 'undefined') return;
+  let p: HTMLElement | null = from;
+  while (p) {
+    const oy = window.getComputedStyle(p).overflowY;
+    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {
+      p.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return;
+    }
+    p = p.parentElement;
+  }
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
 function planPriceLabel(pricingTier: string): string {
   if (pricingTier === 'light') return `£${APPOINTMENTS_LIGHT_PRICE}/month`;
   if (pricingTier === 'plus') return `£${APPOINTMENTS_PLUS_PRICE}/month`;
@@ -277,6 +294,7 @@ function PlanSection({
   const billingPortalRefreshPending = useRef(false);
   const billingPortalOpenedAt = useRef<number | null>(null);
   const billingPortalSyncTimeouts = useRef<number[]>([]);
+  const [billingQuote, setBillingQuote] = useState<VenueBillingQuotePayload | null>(null);
 
   const tier = venue.pricing_tier ?? 'appointments';
   const planStatus = venue.plan_status ?? 'active';
@@ -287,6 +305,11 @@ function PlanSection({
   const currentPlanDetails = appointmentsTier ? APPOINTMENTS_PLAN_DETAILS[appointmentsTier] : null;
   const tierLabel = planDisplayName(tier);
   const planPrice = planPriceLabel(tier);
+  const couponTitles = billingQuote?.coupon_titles?.length
+    ? billingQuote.coupon_titles
+    : (billingQuote?.discount_summaries ?? [])
+        .map((line) => line.split(':')[0]?.trim())
+        .filter((line): line is string => Boolean(line));
   const periodEndLabel = formatSubscriptionDateLabel(venue.subscription_current_period_end);
   const periodStartLabel = formatSubscriptionDateLabel(venue.subscription_current_period_start);
   const periodEndTime = venue.subscription_current_period_end
@@ -347,6 +370,7 @@ function PlanSection({
       });
       if (!res.ok) return;
       const data = (await res.json()) as BillingStatusPayload;
+      setBillingQuote(data.billing_quote ?? null);
       applyBillingStatus(data);
       router.refresh();
       if (opts.showSuccess) {
@@ -375,7 +399,10 @@ function PlanSection({
   }, [applyBillingStatus, isFreeAccess, router]);
 
   useEffect(() => {
-    if (isFreeAccess) return;
+    if (isFreeAccess) {
+      setBillingQuote(null);
+      return;
+    }
     const t = window.setTimeout(() => void fetchBillingStatus(), 0);
     return () => clearTimeout(t);
   }, [isFreeAccess, fetchBillingStatus]);
@@ -686,7 +713,56 @@ function PlanSection({
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">Current plan</p>
           <p className="mt-1 text-sm font-semibold text-slate-900">{tierLabel}</p>
-          <p className="text-xs text-slate-600">{planPrice}</p>
+          {!isFreeAccess && billingQuote?.next_charge ? (
+            <div className="mt-1 space-y-1.5">
+              <p className="text-sm font-medium text-slate-900">
+                Estimated next invoice{' '}
+                <span className="tabular-nums text-brand-800">{billingQuote.next_charge.formatted}</span>
+              </p>
+              <p className="text-xs text-slate-600">
+                Published listing {planPrice}
+                {(billingQuote.invoice_discount_total || billingQuote.discount_summaries.length > 0) && (
+                  <span className="text-slate-500"> · promotional pricing applied in Stripe</span>
+                )}
+              </p>
+              {couponTitles.length > 0 ? (
+                <p className="mt-1 text-xs text-slate-800">
+                  <span className="font-semibold text-slate-900">Coupon applied:</span>{' '}
+                  {couponTitles.join(', ')}
+                </p>
+              ) : null}
+              {billingQuote.discount_summaries.length > 0 ? (
+                <ul className="list-inside list-disc text-xs text-slate-600">
+                  {billingQuote.discount_summaries.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : !isFreeAccess && billingQuote && billingQuote.discount_summaries.length > 0 ? (
+            <div className="mt-1 space-y-1">
+              <p className="text-xs text-slate-600">{planPrice}</p>
+              {couponTitles.length > 0 ? (
+                <p className="text-xs text-slate-800">
+                  <span className="font-semibold text-slate-900">Coupon applied:</span> {couponTitles.join(', ')}
+                </p>
+              ) : null}
+              <ul className="list-inside list-disc text-xs text-slate-600">
+                {billingQuote.discount_summaries.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="mt-1 space-y-1">
+              <p className="text-xs text-slate-600">{isFreeAccess ? 'Complimentary access' : planPrice}</p>
+              {!isFreeAccess && couponTitles.length > 0 ? (
+                <p className="text-xs text-slate-800">
+                  <span className="font-semibold text-slate-900">Coupon applied:</span> {couponTitles.join(', ')}
+                </p>
+              ) : null}
+            </div>
+          )}
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">
@@ -697,6 +773,12 @@ function PlanSection({
             <p className="text-xs text-slate-600">No subscription charges. SMS is capped at your plan allowance.</p>
           ) : cancelledWithAccessUntilPeriodEnd ? (
             <p className="text-xs text-slate-600">No further subscription charge is scheduled for this plan.</p>
+          ) : billingQuote?.next_charge ? (
+            <p className="text-xs text-slate-600">
+              Estimated amount due on that date:{' '}
+              <span className="font-medium text-slate-800">{billingQuote.next_charge.formatted}</span>
+              {isLight ? ' · SMS usage may be billed in addition.' : ' · Metered SMS overage may be added.'}
+            </p>
           ) : (
             <p className="text-xs text-slate-600">
               {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}
@@ -707,6 +789,12 @@ function PlanSection({
           ) : null}
         </div>
       </div>
+      {!isFreeAccess && billingQuote?.next_charge ? (
+        <p className="text-xs text-slate-500">
+          Invoice estimate comes from Stripe&apos;s upcoming invoice preview (includes coupons and account balance). Final
+          amounts may differ if usage or tax changes.
+        </p>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">SMS usage</p>
@@ -971,6 +1059,8 @@ function SettingsViewInner({
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const isAppointmentsProduct = isAppointmentsProductVenue(venue?.pricing_tier ?? null);
   const [selectedTab, setSelectedTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
+  const settingsScrollAnchorRef = useRef<HTMLDivElement>(null);
+  const skipScrollOnTabChangeRef = useRef(true);
   const [completedWarmup, setCompletedWarmup] = useState<Set<SettingsWarmupKey>>(() => new Set());
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
   const showRestaurantTableProfileSections =
@@ -1067,6 +1157,14 @@ function SettingsViewInner({
   useEffect(() => {
     setSelectedTab(activeTabFromUrl);
   }, [activeTabFromUrl]);
+
+  useLayoutEffect(() => {
+    if (skipScrollOnTabChangeRef.current) {
+      skipScrollOnTabChangeRef.current = false;
+      return;
+    }
+    scrollNearestScrollParentToTop(settingsScrollAnchorRef.current);
+  }, [selectedTab]);
 
   useEffect(() => {
     setCurrentTimeMs(Date.now());
@@ -1192,20 +1290,22 @@ function SettingsViewInner({
   return (
     <>
       {!settingsReady ? <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 2} /> : null}
-      <div className={settingsReady ? 'space-y-8' : 'hidden'}>
+      <div ref={settingsScrollAnchorRef} className={settingsReady ? 'space-y-8' : 'hidden'}>
       <header className="space-y-5">
         <PageHeader
           eyebrow="Venue"
           title="Settings"
           subtitle="Manage your venue profile, hours, billing, payments, communications, and team. Simple fields save automatically; hours, staff invites, and Stripe actions use explicit saves."
         />
-        <div className="space-y-3">
-          <div className="overflow-x-auto pb-0.5">
-            <TabBar tabs={tabBarTabs} value={selectedTab} onChange={(id) => replaceWithTab(id)} />
-          </div>
-          <SettingsSaveStrip />
-        </div>
       </header>
+      <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200/90 bg-slate-100/95 py-2 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-100/85 sm:-mx-6 sm:px-0 lg:-mx-8">
+        <div className="overflow-x-auto px-4 pb-0.5 sm:px-6 lg:px-8">
+          <TabBar tabs={tabBarTabs} value={selectedTab} onChange={(id) => replaceWithTab(id)} />
+        </div>
+      </div>
+      <div className="mt-3">
+        <SettingsSaveStrip />
+      </div>
       {showPlanCheckoutBanner && (
         <div className="flex flex-col gap-3 rounded-2xl border border-brand-200/80 bg-brand-50/80 px-4 py-3 text-sm text-brand-950 shadow-sm shadow-slate-900/5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
@@ -1345,7 +1445,7 @@ function SettingsViewInner({
 
         <div className={selectedTab === 'plan' ? '' : 'hidden'} aria-hidden={selectedTab !== 'plan'}>
           <PlanSection
-            key={`plan-${venue.id}-${venue.pricing_tier ?? ''}`}
+            key={`plan-${venue.id}`}
             venue={venue}
             isAdmin={isAdmin}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
@@ -1394,7 +1494,7 @@ function SettingsViewInner({
               <SectionCard.Header
                 eyebrow="Operations"
                 title="Data import"
-                description="Import clients and bookings from CSV exports (Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
+                description="Import clients and bookings from CSV exports (Phorest, Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
               />
               <SectionCard.Body>
                 <Link

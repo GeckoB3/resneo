@@ -43,6 +43,8 @@ interface BaseTemplateOptions {
   /** Second button (e.g. Manage Booking alongside Pay deposit). */
   secondaryCtaLabel?: string;
   secondaryCtaUrl?: string | null;
+  /** Extra HTML rendered after primary/secondary CTAs (e.g. account portal pitch). */
+  postCtaHtml?: string | null;
   footerNote?: string;
   /** Detail card: table reservation vs appointment business */
   emailVariant?: "table" | "appointment";
@@ -260,6 +262,8 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
       ? buildCtaButton(opts.secondaryCtaLabel, opts.secondaryCtaUrl)
       : "";
 
+  const postCtaSection = opts.postCtaHtml?.trim() ? opts.postCtaHtml : "";
+
   const footer =
     opts.footerNote ??
     `You received this email because you have a booking at ${escapeHtml(opts.venueName)}.`;
@@ -291,6 +295,7 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
     customSection,
     ctaSection,
     secondaryCtaSection,
+    postCtaSection,
     "</td></tr>",
 
     // Footer

@@ -150,6 +150,27 @@ function getSecondaryCatalogSteps(enabledModels: BookingModel[], onboardingCompl
   return steps;
 }
 
+function setupChecklistDismissStorageKey(venueId: string): string {
+  return `reserve_ni_setup_checklist_dismissed_${venueId}`;
+}
+
+function readDismissedFromStorage(venueId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(setupChecklistDismissStorageKey(venueId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeDismissedToStorage(venueId: string): void {
+  try {
+    localStorage.setItem(setupChecklistDismissStorageKey(venueId), '1');
+  } catch {
+    /* private mode or quota */
+  }
+}
+
 function getSteps(status: SetupStatus): Step[] {
   const model = status.booking_model;
   const enabledModels = status.enabled_models;
@@ -192,9 +213,11 @@ function getSteps(status: SetupStatus): Step[] {
 }
 
 export function SetupChecklist({
+  venueId,
   setupStatusFromServer,
   disableClientSetupFetch = false,
 }: {
+  venueId: string;
   /** When provided with `disableClientSetupFetch`, skip the client fetch (dashboard home server path). */
   setupStatusFromServer?: SetupStatus | null;
   disableClientSetupFetch?: boolean;
@@ -212,23 +235,21 @@ export function SetupChecklist({
           setDismissed(true);
           return;
         }
-        const key = 'setup_checklist_dismissed';
-        if (sessionStorage.getItem(key) === '1') {
+        if (readDismissedFromStorage(venueId)) {
           setDismissed(true);
           return;
         }
         setStatus(data);
         if (isSetupComplete(data)) {
-          sessionStorage.setItem(key, '1');
+          writeDismissedToStorage(venueId);
           setDismissed(true);
         }
       });
       return;
     }
 
-    const key = 'setup_checklist_dismissed';
     const id = requestAnimationFrame(() => {
-      if (sessionStorage.getItem(key) === '1') {
+      if (readDismissedFromStorage(venueId)) {
         setDismissed(true);
         return;
       }
@@ -242,21 +263,21 @@ export function SetupChecklist({
           }
           setStatus(data);
           if (isSetupComplete(data)) {
-            sessionStorage.setItem(key, '1');
+            writeDismissedToStorage(venueId);
             setDismissed(true);
           }
         })
         .catch((e) => console.error('[SetupChecklist] status load failed:', e));
     });
     return () => cancelAnimationFrame(id);
-  }, [disableClientSetupFetch, setupStatusFromServer]);
+  }, [disableClientSetupFetch, setupStatusFromServer, venueId]);
 
   const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
 
   const incompleteSteps = useMemo(() => steps.filter((s) => !status?.[s.key]), [steps, status]);
 
   function dismiss() {
-    sessionStorage.setItem('setup_checklist_dismissed', '1');
+    writeDismissedToStorage(venueId);
     setDismissed(true);
   }
 

@@ -241,6 +241,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
   ctaUrl?: string | null;
   secondaryCtaLabel?: string;
   secondaryCtaUrl?: string | null;
+  /** HTML inserted after CTAs (e.g. account portal pitch below calendar button). */
+  postCtaHtml?: string | null;
+  /** Plain-text line after CTA URL lines. */
+  postCtaTextLine?: string | null;
 } {
   const guestName = opts.booking.guest_name || 'Guest';
   const date = formatDate(opts.booking.booking_date);
@@ -274,7 +278,6 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
-          acct.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -291,12 +294,13 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.preAppointmentInstructions && appointment
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
             : null,
-          acct.textLine,
           '',
           'Need to make changes?',
         ],
         ctaLabel: 'Manage Your Booking',
         ctaUrl: opts.booking.manage_booking_link ?? null,
+        postCtaHtml: acct.html || null,
+        postCtaTextLine: acct.textLine,
       };
     }
     case 'deposit_payment_request': {
@@ -663,6 +667,7 @@ export function renderCommunicationEmail(
     ctaUrl,
     secondaryCtaLabel,
     secondaryCtaUrl,
+    postCtaHtml: config.postCtaHtml ?? null,
     footerNote: emailFooterText(opts.venue),
     emailVariant: emailVariantForLane(opts.lane),
     practitionerName: opts.booking.practitioner_name ?? null,
@@ -678,6 +683,7 @@ export function renderCommunicationEmail(
     ctaLabel && ctaUrl ? '' : null,
     ctaLabel && ctaUrl ? `${ctaLabel}: ${ctaUrl}` : null,
     secondaryCtaLabel && secondaryCtaUrl ? `${secondaryCtaLabel}: ${secondaryCtaUrl}` : null,
+    config.postCtaTextLine?.trim() ? config.postCtaTextLine : null,
     '',
     opts.venue.name,
     opts.venue.phone ?? null,

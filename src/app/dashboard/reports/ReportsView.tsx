@@ -11,7 +11,6 @@ import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { DashboardStatColor } from '@/components/dashboard/dashboard-stat-types';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -259,31 +258,6 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
     setAppliedRange(range);
   }, [range]);
 
-  const exportReportByModel = useCallback(() => {
-    const rows = data?.report_by_booking_model ?? [];
-    if (rows.length === 0) return;
-    downloadCsv(`report-by-booking-type-${data!.from}-${data!.to}.csv`, [
-      [
-        'Booking type',
-        'Bookings',
-        'Covers',
-        'Cancelled',
-        'Completed',
-        'Checked in',
-        'Deposit collected (£)',
-      ],
-      ...rows.map((row: ReportByBookingModelRow) => [
-        row.label,
-        String(row.booking_count),
-        String(row.covers),
-        String(row.cancelled_count),
-        String(row.completed_count),
-        String(row.checked_in_count),
-        (row.deposit_pence_collected / 100).toFixed(2),
-      ]),
-    ]);
-  }, [data]);
-
   const exportReport1 = useCallback(() => {
     if (!data?.report1_booking_summary) return;
     const r = data.report1_booking_summary;
@@ -442,12 +416,6 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
   const r7 = data?.report7_appointment_insights;
-  const rByModel = data?.report_by_booking_model ?? [];
-  const byModelBarData = rByModel.map((row) => ({
-    name: row.label,
-    bookings: row.booking_count,
-    covers: row.covers,
-  }));
 
   const client = terminology.client;
   const clientLower = client.toLowerCase();
@@ -663,72 +631,6 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
         ) : null}
       </ReportSection>
 
-      <ReportSection
-        title="By booking type"
-        onExport={exportReportByModel}
-        exportBlocked={rByModel.length === 0}
-        exportBlockedMessage="There are no bookings in this date range to break down by type."
-        onExportSuccess={() =>
-          notifyExport('success', 'Booking type breakdown CSV download started - check your downloads folder.')
-        }
-        onExportBlocked={(msg) => notifyExport('notice', msg)}
-      >
-        <p className="mb-4 text-sm text-slate-500">
-          Rows are inferred from each booking (tables, appointments, events, classes, resources). Deposits are
-          sums where deposit status is Paid. Checked in uses door check-in when recorded.
-        </p>
-        {rByModel.length === 0 ? (
-          <p className="text-sm text-slate-400">No bookings in this date range.</p>
-        ) : (
-          <>
-            <div className="mb-6 h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byModelBarData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="bookings" name="Bookings" fill="#4E6B78" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="covers" name="Covers" fill="#059669" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <HorizontalScrollHint />
-            <div className="touch-pan-x overflow-x-auto rounded-lg border border-slate-100">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-3 py-2 font-semibold text-slate-700">Type</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Bookings</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Covers</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Cancelled</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Completed</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Checked in</th>
-                    <th className="px-3 py-2 font-semibold text-slate-700">Deposits paid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rByModel.map((row: ReportByBookingModelRow) => (
-                    <tr key={row.booking_model} className="border-b border-slate-50">
-                      <td className="px-3 py-2 font-medium text-slate-900">{row.label}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.booking_count}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.covers}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.cancelled_count}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.completed_count}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.checked_in_count}</td>
-                      <td className="px-3 py-2 text-slate-700">
-                        £{(row.deposit_pence_collected / 100).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </ReportSection>
-
       {appointmentDashboardExperience && (
         <ReportSection
           title="Team, services & channels"
@@ -741,8 +643,10 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
           onExportBlocked={(msg) => notifyExport('notice', msg)}
         >
           <p className="mb-4 text-sm text-slate-500">
-            Non-cancelled {bookingWord.toLowerCase()}s in this date range: volume by {staffWord.toLowerCase()},
-            by service, and booking source (online, phone, widget, and other channels).
+            Non-cancelled {bookingWord.toLowerCase()}s in this date range, counting only appointment scheduling (table
+            dining and other non-appointment types are excluded). Volume is split by calendar or legacy practitioner (staff),
+            by linked service (appointment service or unified service item), and booking source. The &quot;Arrived or
+            completed&quot; bar includes marked arrival, started, or completed visits.
           </p>
           {!r7 || (pracPerformanceData.length === 0 && svcVolumeData.length === 0 && channelPieData.length === 0) ? (
             <p className="text-sm text-slate-400">

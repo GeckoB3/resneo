@@ -142,11 +142,13 @@ export function DashboardHomeClient({
   initialData,
   setupStatusFromServer,
   disableClientSetupFetch,
+  venueId,
 }: {
   initialData: DashboardHomePayload;
   setupStatusFromServer: SetupStatus | null;
   /** When true, checklist uses server payload and does not call /api/venue/setup-status on mount. */
   disableClientSetupFetch: boolean;
+  venueId: string;
 }) {
   const { data, error, mutate, isValidating } = useSWR('/api/venue/dashboard-home', fetchDashboardHome, {
     fallbackData: initialData,
@@ -279,6 +281,7 @@ export function DashboardHomeClient({
         />
 
         <SetupChecklist
+          venueId={venueId}
           setupStatusFromServer={setupStatusFromServer}
           disableClientSetupFetch={disableClientSetupFetch}
         />

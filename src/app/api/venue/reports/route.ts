@@ -87,6 +87,9 @@ function buildBookingModelBreakdown(rows: BookingBreakdownInput[]): ReportByBook
 }
 
 export interface AppointmentInsightsRow {
+  /**
+   * Legacy practitioner id, or unified calendar id (USE storage puts staff/column on `calendar_id`).
+   */
   practitioner_id: string;
   practitioner_name: string;
   booking_count: number;
@@ -94,9 +97,25 @@ export interface AppointmentInsightsRow {
 }
 
 export interface AppointmentServiceInsightsRow {
+  /** `appointment_services` id or `service_items` id depending on booking storage. */
   service_id: string;
   service_name: string;
   booking_count: number;
+}
+
+/** Appointment scheduling rows only — same inference as the rest of staff reporting (excludes table dining, events, classes, etc.). */
+function isAppointmentSchedulingBooking(row: Parameters<typeof inferBookingRowModel>[0]): boolean {
+  const m = inferBookingRowModel(row);
+  return m === 'practitioner_appointment' || m === 'unified_scheduling';
+}
+
+/** True when the UI should count a booking as "arrived or completed" for staff performance. */
+function isArrivedOrCompletedAppointmentBooking(r: {
+  status: string | null;
+  client_arrived_at?: string | null;
+}): boolean {
+  if (r.status === 'Seated' || r.status === 'Completed') return true;
+  return typeof r.client_arrived_at === 'string' && r.client_arrived_at.trim() !== '';
 }
 
 async function buildAppointmentInsights(
@@ -117,7 +136,9 @@ async function buildAppointmentInsights(
 
   const { data: rows, error } = await supabase
     .from('bookings')
-    .select('id, status, source, practitioner_id, appointment_service_id')
+    .select(
+      'id, status, source, practitioner_id, appointment_service_id, booking_model, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, client_arrived_at',
+    )
     .eq('venue_id', venueId)
     .gte('booking_date', from)
     .lte('booking_date', to)
@@ -128,25 +149,38 @@ async function buildAppointmentInsights(
     return empty;
   }
 
-  if (!rows?.length) return empty;
+  const appointmentRows = (rows ?? []).filter((r) => isAppointmentSchedulingBooking(r));
+  if (!appointmentRows.length) return empty;
 
-  const pracIds = [...new Set(rows.map((r) => r.practitioner_id).filter(Boolean))] as string[];
-  const svcIds = [...new Set(rows.map((r) => r.appointment_service_id).filter(Boolean))] as string[];
+  const legacyPracIds = [...new Set(appointmentRows.map((r) => r.practitioner_id).filter(Boolean))] as string[];
+  const calendarIds = [...new Set(appointmentRows.map((r) => r.calendar_id).filter(Boolean))] as string[];
+  const appointmentServiceIds = [...new Set(appointmentRows.map((r) => r.appointment_service_id).filter(Boolean))] as string[];
+  const serviceItemIds = [...new Set(appointmentRows.map((r) => r.service_item_id).filter(Boolean))] as string[];
 
-  const [pracRes, svcRes] = await Promise.all([
-    pracIds.length
-      ? supabase.from('practitioners').select('id, name').in('id', pracIds)
+  const [pracRes, ucRes, apptSvcRes, itemRes] = await Promise.all([
+    legacyPracIds.length
+      ? supabase.from('practitioners').select('id, name').eq('venue_id', venueId).in('id', legacyPracIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
-    svcIds.length
-      ? supabase.from('appointment_services').select('id, name').in('id', svcIds)
+    calendarIds.length
+      ? supabase.from('unified_calendars').select('id, name').eq('venue_id', venueId).in('id', calendarIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+    appointmentServiceIds.length
+      ? supabase.from('appointment_services').select('id, name').eq('venue_id', venueId).in('id', appointmentServiceIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+    serviceItemIds.length
+      ? supabase.from('service_items').select('id, name').eq('venue_id', venueId).in('id', serviceItemIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
   ]);
 
   if (pracRes.error) console.error('[reports] practitioners lookup:', pracRes.error);
-  if (svcRes.error) console.error('[reports] services lookup:', svcRes.error);
+  if (ucRes.error) console.error('[reports] unified_calendars lookup:', ucRes.error);
+  if (apptSvcRes.error) console.error('[reports] appointment_services lookup:', apptSvcRes.error);
+  if (itemRes.error) console.error('[reports] service_items lookup:', itemRes.error);
 
-  const pracName = new Map((pracRes.data ?? []).map((p) => [p.id, p.name]));
-  const svcName = new Map((svcRes.data ?? []).map((s) => [s.id, s.name]));
+  const legacyPracName = new Map((pracRes.data ?? []).map((p) => [p.id, p.name]));
+  const calendarName = new Map((ucRes.data ?? []).map((c) => [c.id, c.name]));
+  const appointmentServiceName = new Map((apptSvcRes.data ?? []).map((s) => [s.id, s.name]));
+  const serviceItemName = new Map((itemRes.data ?? []).map((s) => [s.id, s.name]));
 
   const byPrac = new Map<string, { name: string; booking_count: number; completed_count: number }>();
   const bySvc = new Map<string, { name: string; booking_count: number }>();
@@ -155,21 +189,39 @@ async function buildAppointmentInsights(
   const UNASSIGNED = '__unassigned__';
   const NO_SERVICE = '__no_service__';
 
-  for (const r of rows) {
+  for (const r of appointmentRows) {
     const src = String(r.source ?? 'unknown');
     bySource.set(src, (bySource.get(src) ?? 0) + 1);
 
-    const pid = r.practitioner_id;
-    const pkey = pid ?? UNASSIGNED;
-    const pname = pid ? (pracName.get(pid) ?? 'Unknown') : 'Unassigned';
+    let pkey: string;
+    let pname: string;
+    if (r.practitioner_id) {
+      pkey = r.practitioner_id;
+      pname = legacyPracName.get(r.practitioner_id) ?? 'Unknown';
+    } else if (r.calendar_id) {
+      pkey = r.calendar_id;
+      pname = calendarName.get(r.calendar_id) ?? 'Unknown calendar';
+    } else {
+      pkey = UNASSIGNED;
+      pname = 'Unassigned';
+    }
     const pcur = byPrac.get(pkey) ?? { name: pname, booking_count: 0, completed_count: 0 };
     pcur.booking_count += 1;
-    if (r.status === 'Seated' || r.status === 'Completed') pcur.completed_count += 1;
+    if (isArrivedOrCompletedAppointmentBooking(r)) pcur.completed_count += 1;
     byPrac.set(pkey, pcur);
 
-    const sid = r.appointment_service_id;
-    const skey = sid ?? NO_SERVICE;
-    const sname = sid ? (svcName.get(sid) ?? 'Unknown') : 'No service linked';
+    let skey: string;
+    let sname: string;
+    if (r.appointment_service_id) {
+      skey = r.appointment_service_id;
+      sname = appointmentServiceName.get(r.appointment_service_id) ?? 'Unknown';
+    } else if (r.service_item_id) {
+      skey = r.service_item_id;
+      sname = serviceItemName.get(r.service_item_id) ?? 'Unknown';
+    } else {
+      skey = NO_SERVICE;
+      sname = 'No service linked';
+    }
     const scur = bySvc.get(skey) ?? { name: sname, booking_count: 0 };
     scur.booking_count += 1;
     bySvc.set(skey, scur);

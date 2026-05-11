@@ -37,6 +37,7 @@ export default async function DashboardHomePage() {
       initialData={initialData}
       setupStatusFromServer={setupStatusFromServer}
       disableClientSetupFetch
+      venueId={staff.venue_id}
     />
   );
 }

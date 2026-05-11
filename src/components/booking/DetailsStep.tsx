@@ -328,13 +328,6 @@ export function DetailsStep({
             />
           </FormField>
         </div>
-        {(isStaff || isStaffWalkIn) && (
-          <p className="-mt-2 text-xs text-slate-500">
-            {isStaffWalkIn
-              ? 'Optional — leave blank for walk-in without a named guest.'
-              : 'Optional — add if you want them on the booking.'}
-          </p>
-        )}
 
         <FormField label="Email" required={audience === 'public'} error={errors.email?.message}>
           <input
@@ -343,11 +336,6 @@ export function DetailsStep({
             className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             placeholder="you@example.com"
           />
-          {(isStaff || isStaffWalkIn) && (
-            <p className="mt-1 text-xs text-slate-500">
-              {isStaffWalkIn ? 'Optional.' : 'Optional — add if you want email confirmation sent to the guest.'}
-            </p>
-          )}
         </FormField>
 
         <FormField label="Phone" required={audience !== 'staff_walk_in'}>

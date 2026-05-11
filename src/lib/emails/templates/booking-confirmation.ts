@@ -104,10 +104,9 @@ export function renderBookingConfirmation(
   mainContent = confirmationIntroLine(booking);
   const accountPortal =
     booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
-  if (accountPortal) {
-    const safeUrl = escapeHtml(accountPortal);
-    mainContent += `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${safeUrl}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`;
-  }
+  const postCtaAccountHtml = accountPortal
+    ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(accountPortal)}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`
+    : null;
   if (!appt && depositPending) {
     mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
   }
@@ -148,6 +147,7 @@ export function renderBookingConfirmation(
     ctaUrl: ctaUrl ?? null,
     secondaryCtaLabel,
     secondaryCtaUrl: secondaryCtaUrl ?? null,
+    postCtaHtml: postCtaAccountHtml,
   });
 
   const textParts = [`Hi ${booking.guest_name},`, ""];

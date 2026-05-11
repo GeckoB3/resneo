@@ -167,9 +167,19 @@ describe('renderCommunicationEmail booking_confirmation account CTA', () => {
     expect(out?.html).toContain('https://example.com/m');
     expect(out?.html).toContain('/auth/magic');
     expect(out?.html).toContain('View or sign in to your account');
+    const html = out!.html;
+    const addCalIdx = html.indexOf('Add to calendar');
+    const acctIdx = html.indexOf('Your bookings across venues');
+    expect(addCalIdx).toBeGreaterThan(-1);
+    expect(acctIdx).toBeGreaterThan(addCalIdx);
     expect(out?.text).toMatch(/View or sign in to your account:/);
     expect(out?.text).toContain('https://rnapp.test/auth/magic');
     expect(out?.text).toMatch(/email=sam%40example\.com/);
+    const text = out!.text;
+    const addCalLine = text.indexOf('Add to calendar:');
+    const acctLine = text.indexOf('View or sign in to your account:');
+    expect(addCalLine).toBeGreaterThan(-1);
+    expect(acctLine).toBeGreaterThan(addCalLine);
   });
 });
 

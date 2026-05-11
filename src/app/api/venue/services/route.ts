@@ -97,7 +97,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('POST /api/venue/services failed:', error);
-      return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to create service.', details: error.message },
+        { status: 500 },
+      );
     }
 
     const overlapWarnings = await getOverlapWarnings(staff.venue_id, areaId);

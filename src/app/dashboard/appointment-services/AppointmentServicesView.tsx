@@ -601,8 +601,12 @@ export function AppointmentServicesView({
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? 'Failed to save service');
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          details?: string;
+        };
+        const baseMsg = data.error ?? 'Failed to save service';
+        throw new Error(data.details ? `${baseMsg} ${data.details}` : baseMsg);
       }
 
       setShowModal(false);

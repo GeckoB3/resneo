@@ -626,7 +626,10 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         console.error('POST /api/venue/appointment-services (service_items) failed:', error);
-        return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Failed to create service.', details: error.message },
+          { status: 500 },
+        );
       }
 
       if (practitionerIdsForLinks.length > 0) {
@@ -692,7 +695,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('POST /api/venue/appointment-services failed:', error);
-      return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to create service.', details: error.message },
+        { status: 500 },
+      );
     }
 
     if (practitionerIdsForLinks.length > 0) {

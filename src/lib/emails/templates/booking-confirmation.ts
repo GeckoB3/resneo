@@ -5,7 +5,6 @@ import {
 } from "@/lib/booking/cancellation-deadline";
 import { isCdeBookingModel } from "@/lib/booking/cde-booking";
 import {
-  renderBaseTemplate,
   buildDepositCallout,
   formatDate,
   formatTime,
@@ -15,6 +14,8 @@ import {
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
 import { confirmationStructuredPriceText } from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
+import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from "@/lib/emails/external-links";
+import { renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
 function isAppointmentStyle(booking: BookingEmailData): boolean {
@@ -29,50 +30,18 @@ function isAppointmentStyle(booking: BookingEmailData): boolean {
   );
 }
 
-function confirmationHeadline(
-  booking: BookingEmailData,
-  venueName: string,
-): { heading: string; subject: string } {
+function confirmationSubject(booking: BookingEmailData, venueName: string): string {
   const m = booking.booking_model;
   if (m === "event_ticket") {
-    return {
-      heading: `Your event at ${venueName} is confirmed`,
-      subject: `Your event at ${venueName} is confirmed`,
-    };
+    return `Your event at ${venueName} is confirmed`;
   }
   if (m === "class_session") {
-    return {
-      heading: `Your class at ${venueName} is confirmed`,
-      subject: `Your class at ${venueName} is confirmed`,
-    };
+    return `Your class at ${venueName} is confirmed`;
   }
   if (m === "resource_booking") {
-    return {
-      heading: `Your booking at ${venueName} is confirmed`,
-      subject: `Your booking at ${venueName} is confirmed`,
-    };
+    return `Your booking at ${venueName} is confirmed`;
   }
-  return {
-    heading: `Your booking at ${venueName} is confirmed`,
-    subject: `Your booking at ${venueName} is confirmed`,
-  };
-}
-
-function confirmationIntroLine(booking: BookingEmailData): string {
-  const m = booking.booking_model;
-  if (m === "event_ticket") {
-    return '<p style="margin:0 0 12px 0">Your event booking is confirmed. We look forward to seeing you.</p>';
-  }
-  if (m === "class_session") {
-    return '<p style="margin:0 0 12px 0">Your class booking is confirmed. We look forward to seeing you.</p>';
-  }
-  if (m === "resource_booking") {
-    return '<p style="margin:0 0 12px 0">Your booking is confirmed. We look forward to seeing you.</p>';
-  }
-  const appt = isAppointmentStyle(booking);
-  return appt
-    ? '<p style="margin:0 0 12px 0">Your booking is confirmed. We look forward to seeing you.</p>'
-    : '<p style="margin:0 0 12px 0">Your booking is confirmed. We look forward to seeing you!</p>';
+  return `Your booking at ${venueName} is confirmed`;
 }
 
 export function renderBookingConfirmation(
@@ -87,10 +56,7 @@ export function renderBookingConfirmation(
   const depositPending =
     booking.deposit_status === "Pending" && booking.deposit_amount_pence;
   const appt = isAppointmentStyle(booking);
-  const { heading: headLine, subject: subjectLine } = confirmationHeadline(
-    booking,
-    venue.name,
-  );
+  const subjectLine = confirmationSubject(booking, venue.name);
 
   let depositHtml: string | null = null;
   if (depositPaid && !appt) {
@@ -100,54 +66,33 @@ export function renderBookingConfirmation(
     );
   }
 
-  let mainContent: string;
-  mainContent = confirmationIntroLine(booking);
   const accountPortal =
     booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
   const postCtaAccountHtml = accountPortal
-    ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(accountPortal)}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`
+    ? `<p style="margin:0;font-size:14px;line-height:1.55;color:#475569">All your bookings: <a href="${escapeHtml(accountPortal)}" style="color:#4E6B78;font-weight:600">View or sign in to your account</a></p>`
     : null;
+
+  let preambleHtml = "";
   if (!appt && depositPending) {
-    mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
+    preambleHtml = `<p style="margin:0;font-size:14px;line-height:1.55;color:#334155">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You&rsquo;ll receive a separate message with payment details shortly.</p>`;
   }
 
   const calendarUrl = buildGoogleCalendarAddUrlForBooking(booking, venue);
-  let ctaLabel: string | undefined = booking.manage_booking_link ? "Manage booking" : undefined;
-  let ctaUrl: string | null | undefined = booking.manage_booking_link;
-  let secondaryCtaLabel: string | undefined;
-  let secondaryCtaUrl: string | null | undefined;
-  if (calendarUrl) {
-    if (ctaUrl) {
-      secondaryCtaLabel = "Add to calendar";
-      secondaryCtaUrl = calendarUrl;
-    } else {
-      ctaLabel = "Add to calendar";
-      ctaUrl = calendarUrl;
-    }
-  }
 
-  const html = renderBaseTemplate({
-    venueName: venue.name,
-    venueLogoUrl: venue.logo_url,
-    heading: headLine,
-    mainContent,
-    bookingDate: date,
-    bookingTime: time,
-    partySize: booking.party_size,
-    venueAddress: venue.address,
-    specialRequests: booking.special_requests ?? booking.dietary_notes,
-    depositInfoHtml: depositHtml,
-    customMessage,
+  const html = renderBookingConfirmationDocumentHtml({
+    booking,
+    venue,
+    appointmentStyle: appt,
     emailVariant: appt ? "appointment" : "table",
-    practitionerName: booking.practitioner_name ?? null,
-    serviceName: booking.appointment_service_name ?? null,
     priceDisplay: confirmationStructuredPriceText(booking),
-    groupAppointments: booking.group_appointments,
-    ctaLabel,
-    ctaUrl: ctaUrl ?? null,
-    secondaryCtaLabel,
-    secondaryCtaUrl: secondaryCtaUrl ?? null,
-    postCtaHtml: postCtaAccountHtml,
+    blocks: {
+      preambleHtml,
+      depositHtml,
+      customMessage: customMessage ?? null,
+      postCtaAccountHtml,
+      cancellationPolicy: null,
+      preAppointmentInstructions: null,
+    },
   });
 
   const textParts = [`Hi ${booking.guest_name},`, ""];
@@ -230,16 +175,14 @@ export function renderBookingConfirmation(
     }
   }
   if (customMessage) textParts.push("", customMessage);
-  if (calendarUrl) {
-    if (booking.manage_booking_link) {
-      textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
-      textParts.push(`Add to calendar: ${calendarUrl}`);
-    } else {
-      textParts.push("", `Add to calendar: ${calendarUrl}`);
-    }
-  } else if (booking.manage_booking_link) {
-    textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
-  }
+  const mapsUrl = buildGoogleMapsDirectionsUrl(venue.address);
+  const venueWeb = normalizeWebsiteUrlForLink(venue.website_url ?? undefined);
+  textParts.push("");
+  if (calendarUrl) textParts.push(`Add to calendar: ${calendarUrl}`);
+  if (mapsUrl) textParts.push(`Location (Google Maps): ${mapsUrl}`);
+  if (venueWeb) textParts.push(`Venue website: ${venueWeb}`);
+  if (booking.manage_booking_link?.trim())
+    textParts.push(`Manage booking: ${booking.manage_booking_link}`);
   const portalText =
     booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
   if (portalText) {

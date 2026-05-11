@@ -12,6 +12,8 @@ import {
   todayIsoLocal,
 } from '@/lib/import/normalize';
 
+const INSERT_CHUNK_SIZE = 200;
+
 function isFutureBookingDate(iso: string, today: string): boolean {
   return iso >= today;
 }
@@ -349,10 +351,18 @@ export async function runExtractBookingReferences(
     is_future_booking: true,
   }));
 
-  const { error: insRowErr } = await admin.from('import_booking_rows').insert(rowInserts);
-  if (insRowErr) {
-    console.error('[extract-booking-references] row insert', insRowErr);
-    throw new Error('Failed to stage booking rows');
+  for (let start = 0; start < rowInserts.length; start += INSERT_CHUNK_SIZE) {
+    const chunk = rowInserts.slice(start, start + INSERT_CHUNK_SIZE);
+    const { error: insRowErr } = await admin.from('import_booking_rows').insert(chunk);
+    if (insRowErr) {
+      console.error('[extract-booking-references] row insert', {
+        error: insRowErr,
+        chunkStart: start,
+        chunkSize: chunk.length,
+        totalRows: rowInserts.length,
+      });
+      throw new Error('Failed to stage booking rows');
+    }
   }
 
   /** Restaurant flow: acknowledge unassigned tables only (slice 2). */
@@ -415,10 +425,18 @@ export async function runExtractBookingReferences(
   }));
 
   if (refRows.length) {
-    const { error: refErr } = await admin.from('import_booking_references').insert(refRows);
-    if (refErr) {
-      console.error('[extract-booking-references] refs insert', refErr);
-      throw new Error('Failed to stage booking references');
+    for (let start = 0; start < refRows.length; start += INSERT_CHUNK_SIZE) {
+      const chunk = refRows.slice(start, start + INSERT_CHUNK_SIZE);
+      const { error: refErr } = await admin.from('import_booking_references').insert(chunk);
+      if (refErr) {
+        console.error('[extract-booking-references] refs insert', {
+          error: refErr,
+          chunkStart: start,
+          chunkSize: chunk.length,
+          totalRows: refRows.length,
+        });
+        throw new Error('Failed to stage booking references');
+      }
     }
   }
 

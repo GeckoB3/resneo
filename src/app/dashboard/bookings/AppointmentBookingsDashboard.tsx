@@ -1487,7 +1487,7 @@ export function AppointmentBookingsDashboard({
               <>
                 {myCalendarIds.map((cid) => {
                   const p = activePractitioners.find((x) => x.id === cid);
-                  const label = myCalendarIds.length === 1 ? 'My appointments' : `Mine - ${p?.name ?? 'Calendar'}`;
+                  const label = myCalendarIds.length === 1 ? (p?.name ?? 'Calendar') : `Mine - ${p?.name ?? 'Calendar'}`;
                   return (
                     <option key={cid} value={cid}>
                       {label}

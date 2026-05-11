@@ -3,20 +3,16 @@ import {
   formatRefundDeadlineIso,
   isDepositRefundAvailableAt,
 } from "@/lib/booking/cancellation-deadline";
-import {
-  renderBaseTemplate,
-  formatDate,
-  formatTime,
-  formatDepositAmount,
-} from "./base-template";
+import { formatDate, formatTime, formatDepositAmount } from "./base-template";
+import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
     booking.email_variant === "appointment" ||
     Boolean(
       booking.group_appointments?.length ||
-      booking.practitioner_name ||
-      booking.appointment_service_name,
+        booking.practitioner_name ||
+        booking.appointment_service_name,
     )
   );
 }
@@ -34,21 +30,24 @@ export function renderDepositRequestEmail(
     : "0.00";
   const appt = isAppointment(booking);
 
-  const lead = `<p style="margin:0 0 12px 0">Please pay your deposit of <strong>£${amount}</strong> to secure your booking.</p>`;
-
   let depositPolicyHtml = "";
   if (booking.refund_cutoff) {
     const fmt = formatRefundDeadlineIso(booking.refund_cutoff);
     depositPolicyHtml = isDepositRefundAvailableAt(booking.refund_cutoff)
-      ? `<p style="margin:12px 0 0 0;font-size:14px;color:#334155;line-height:1.5">You can receive a full refund of this deposit if you cancel before <strong>${fmt}</strong>. After that, the deposit is non-refundable.</p>`
-      : `<p style="margin:12px 0 0 0;font-size:14px;color:#92400e;line-height:1.5">Under the venue's policy, the time to cancel for a deposit refund has already passed for this booking. If you pay now, this deposit is <strong>not refundable</strong> if you cancel.</p>`;
+      ? `<p style="margin:12px 0 0;font-size:14px;color:#334155;line-height:1.5">You can receive a full refund of this deposit if you cancel before <strong>${fmt}</strong>. After that, the deposit is non-refundable.</p>`
+      : `<p style="margin:12px 0 0;font-size:14px;color:#92400e;line-height:1.5">Under the venue's policy, the time to cancel for a deposit refund has already passed for this booking. If you pay now, this deposit is <strong>not refundable</strong> if you cancel.</p>`;
   }
 
-  const html = renderBaseTemplate({
+  const mainContent =
+    `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
+    `<p style="margin:0 0 12px 0">Please pay your deposit of <strong>\u00A3${amount}</strong> to secure your booking.</p>` +
+    depositPolicyHtml;
+
+  const html = renderTransactionalEmailHtml({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: `Deposit required: ${venue.name}`,
-    mainContent: lead + depositPolicyHtml,
+    heading: "Deposit required",
+    mainContent,
     bookingDate: date,
     bookingTime: time,
     partySize: booking.party_size,
@@ -69,7 +68,7 @@ export function renderDepositRequestEmail(
     "",
     `${venue.name}: your booking on ${date} at ${time}${
       !appt ? ` for ${booking.party_size}` : ""
-    } requires a deposit of £${amount}.`,
+    } requires a deposit of \u00A3${amount}.`,
     "",
     `Pay here: ${paymentLink}`,
   ];

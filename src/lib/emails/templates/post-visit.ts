@@ -1,5 +1,5 @@
 import type { BookingEmailData, VenueEmailData, RenderedEmail } from "../types";
-import { renderBaseTemplate } from "./base-template";
+import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
 
 export function renderPostVisitEmail(
   booking: BookingEmailData,
@@ -10,15 +10,15 @@ export function renderPostVisitEmail(
     venue.booking_page_url ??
     `${process.env.NEXT_PUBLIC_BASE_URL || "https://www.reserveni.com"}/book/${venue.name.toLowerCase().replace(/\s+/g, "-")}`;
 
-  const mainContent = [
-    '<p style="margin:0 0 12px 0">We hope you enjoyed your visit.</p>',
-    '<p style="margin:0 0 12px 0">We would love to welcome you back. Book your next visit anytime.</p>',
-  ].join("");
+  const mainContent =
+    `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
+    `<p style="margin:0 0 12px 0">We hope you enjoyed your visit.</p>` +
+    `<p style="margin:0 0 12px 0">We would love to welcome you back. Book your next visit anytime.</p>`;
 
-  const html = renderBaseTemplate({
+  const html = renderTransactionalEmailHtml({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: `Thanks for visiting ${venue.name}!`,
+    heading: "Thanks for your visit!",
     mainContent,
     customMessage,
     ctaLabel: "Book again",

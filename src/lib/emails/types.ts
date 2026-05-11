@@ -5,6 +5,8 @@ export interface VenueEmailData {
   address?: string | null;
   phone?: string | null;
   logo_url?: string | null;
+  /** Business website from venue profile; used in confirmation emails (Venue button). */
+  website_url?: string | null;
   booking_page_url?: string;
   timezone?: string;
   /** Business inbox for Reply-To on guest emails; from Profile / venues.reply_to_email. */

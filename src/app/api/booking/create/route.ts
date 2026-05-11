@@ -102,6 +102,8 @@ const createBookingSchema = z.object({
   /** USE: book a materialised event/class session (capacity enforced server-side). */
   event_session_id: z.string().uuid().optional(),
   capacity_used: z.number().int().min(1).max(50).optional(),
+  /** Public online/widget/booking_page: venue marketing consent from booking form. */
+  marketing_consent: z.boolean().optional(),
 });
 
 /**
@@ -164,12 +166,17 @@ export async function POST(request: NextRequest) {
       silentAuthSignup: isOnlineLikeSource && Boolean(String(email ?? '').trim()),
     };
 
+    const marketingConsentForGuest =
+      isOnlineLikeSource && parsed.data.marketing_consent !== undefined
+        ? parsed.data.marketing_consent
+        : undefined;
+
     const supabase = getSupabaseAdminClient();
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, logo_url, cover_photo_url, website_url, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
       )
       .eq('id', venue_id)
       .single();
@@ -351,6 +358,7 @@ export async function POST(request: NextRequest) {
         last_name: guestLast,
         email: email || null,
         phone: phoneE164,
+        marketing_consent: marketingConsentForGuest,
       },
       guestLinkOptions,
     );
@@ -503,6 +511,10 @@ export async function POST(request: NextRequest) {
                 address: (venue.address as string | null) ?? null,
                 email: (venue as { email?: string | null }).email ?? null,
                 reply_to_email: (venue as { reply_to_email?: string | null }).reply_to_email ?? null,
+                logo_url: (venue as { logo_url?: string | null }).logo_url ?? null,
+                cover_photo_url: (venue as { cover_photo_url?: string | null }).cover_photo_url ?? null,
+                website_url: (venue as { website_url?: string | null }).website_url ?? null,
+                timezone: (venue as { timezone?: string | null }).timezone ?? null,
               }),
               venue.id,
             );
@@ -605,6 +617,9 @@ async function handleNonTableBooking(
       { status: 400 },
     );
   }
+
+  const marketingConsentForGuest =
+    isOnlineLikeSource && data.marketing_consent !== undefined ? data.marketing_consent : undefined;
 
   const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
   const timeStr = timeForDb.slice(0, 5);
@@ -1046,6 +1061,7 @@ async function handleNonTableBooking(
       last_name: guestLast,
       email: email || null,
       phone: phoneE164,
+      marketing_consent: marketingConsentForGuest,
     },
     guestLinkOptions,
   );
@@ -1236,6 +1252,10 @@ async function handleNonTableBooking(
               address: (venue.address as string | null) ?? null,
               email: (venue as { email?: string | null }).email ?? null,
               reply_to_email: (venue as { reply_to_email?: string | null }).reply_to_email ?? null,
+              logo_url: (venue as { logo_url?: string | null }).logo_url ?? null,
+              cover_photo_url: (venue as { cover_photo_url?: string | null }).cover_photo_url ?? null,
+              website_url: (venue as { website_url?: string | null }).website_url ?? null,
+              timezone: (venue as { timezone?: string | null }).timezone ?? null,
             }),
             venue_id,
           );

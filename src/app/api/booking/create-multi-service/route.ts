@@ -55,6 +55,7 @@ const createMultiServiceSchema = z.object({
   services: z.array(serviceEntrySchema).min(1).max(4),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
+  marketing_consent: z.boolean().optional(),
 });
 
 /**
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
       services: rawServices,
       dietary_notes,
       occasion,
+      marketing_consent: marketingConsentRaw,
     } = parsed.data;
     const authClient = await createClient();
     const {
@@ -123,6 +125,9 @@ export async function POST(request: NextRequest) {
     const guestLinkOptions = {
       silentAuthSignup: true,
     };
+
+    const marketingConsentForGuest =
+      isOnlineLikeSource && marketingConsentRaw !== undefined ? marketingConsentRaw : undefined;
 
     const supabase = getSupabaseAdminClient();
 
@@ -352,6 +357,7 @@ export async function POST(request: NextRequest) {
         last_name: guestLast,
         email: emailNorm,
         phone: phoneE164,
+        marketing_consent: marketingConsentForGuest,
       },
       guestLinkOptions,
     );

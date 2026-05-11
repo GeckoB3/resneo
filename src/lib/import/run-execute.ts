@@ -34,6 +34,23 @@ function hashGuest(email: string | null, phone: string | null): string | null {
   return createHash('sha256').update(`${email ?? ''}|${phone ?? ''}`).digest('hex');
 }
 
+function generatedImportClientId(sessionId: string, fileId: string, rowNumber: number): string {
+  return `import:${sessionId}:${fileId}:${rowNumber}`;
+}
+
+function importOnlyGuestName(
+  rawFirst: string | null,
+  rawLast: string | null,
+  rowNumber: number,
+): { firstName: string; lastName: string } {
+  const first = rawFirst?.trim();
+  const last = rawLast?.trim();
+  if (first && last) return { firstName: first, lastName: last };
+  if (first) return { firstName: first, lastName: 'Imported guest' };
+  if (last) return { firstName: 'Imported guest', lastName: last };
+  return { firstName: 'Imported guest', lastName: `#${rowNumber}` };
+}
+
 type IssueRow = {
   id: string;
   file_id: string;
@@ -616,6 +633,90 @@ export async function runImportExecute(
     return null;
   }
 
+  async function ensureGuestForBooking(input: {
+    fileId: string;
+    rowNumber: number;
+    email: string | null;
+    phone: string | null;
+    rawFirst: string | null;
+    rawLast: string | null;
+    externalClientId: string | null;
+  }): Promise<string | null> {
+    const existing = await findGuestForBooking(
+      input.email,
+      input.phone,
+      input.rawFirst,
+      input.rawLast,
+      input.externalClientId,
+    );
+    if (existing) return existing;
+
+    const generatedExternalId =
+      input.externalClientId?.trim() || generatedImportClientId(sessionId, input.fileId, input.rowNumber);
+
+    if (refProvider) {
+      const byGeneratedRef = await findGuestIdByExternalRef(
+        admin,
+        venueId,
+        refProvider,
+        generatedExternalId,
+      );
+      if (byGeneratedRef) return byGeneratedRef;
+    }
+
+    const { firstName, lastName } = importOnlyGuestName(input.rawFirst, input.rawLast, input.rowNumber);
+    const customFields: Record<string, unknown> = {
+      import_generated_client_id: generatedExternalId,
+      import_session_id: sessionId,
+      import_file_id: input.fileId,
+      import_row_number: input.rowNumber,
+    };
+
+    const { data: inserted, error } = await admin
+      .from('guests')
+      .insert({
+        venue_id: venueId,
+        first_name: firstName,
+        last_name: lastName,
+        email: input.email,
+        phone: input.phone,
+        global_guest_hash: hashGuest(input.email, input.phone),
+        visit_count: 0,
+        marketing_opt_out: false,
+        custom_fields: customFields,
+      })
+      .select('id')
+      .single();
+
+    if (error || !inserted) {
+      console.error('[import execute] booking guest insert', error);
+      return null;
+    }
+
+    await admin.from('import_records').insert({
+      session_id: sessionId,
+      venue_id: venueId,
+      record_type: 'guest',
+      record_id: inserted.id,
+      action: 'created',
+      previous_data: null,
+    });
+
+    if (refProvider) {
+      await upsertGuestExternalRef(
+        admin,
+        venueId,
+        inserted.id,
+        refProvider,
+        generatedExternalId,
+        { source: input.externalClientId?.trim() ? 'external_client_id' : 'generated_import_client_id' },
+      );
+    }
+
+    importedClients += 1;
+    return inserted.id as string;
+  }
+
   const { data: stagedBookingRows } = await admin
     .from('import_booking_rows')
     .select('*')
@@ -682,13 +783,15 @@ export async function runImportExecute(
 
       const em = normaliseEmail(row.raw_client_email ?? null);
       const ph = normalisePhoneUk(row.raw_client_phone ?? null);
-      const guestId = await findGuestForBooking(
-        em,
-        ph.e164,
-        row.raw_guest_first_name ?? null,
-        row.raw_guest_last_name ?? null,
-        row.raw_external_client_id ?? null,
-      );
+      const guestId = await ensureGuestForBooking({
+        fileId: row.file_id,
+        rowNumber: row.row_number,
+        email: em,
+        phone: ph.e164,
+        rawFirst: row.raw_guest_first_name ?? null,
+        rawLast: row.raw_guest_last_name ?? null,
+        externalClientId: row.raw_external_client_id ?? null,
+      });
       if (!guestId) {
         skipped += 1;
         await bumpProgress();
@@ -930,13 +1033,15 @@ export async function runImportExecute(
       const guestFirstName = targets.guest_first_name?.trim() || legacyNameParts.first;
       const guestLastName = targets.guest_last_name?.trim() || legacyNameParts.last;
 
-      const guestId = await findGuestForBooking(
-        em,
-        ph.e164,
-        guestFirstName || null,
-        guestLastName || null,
-        targets.client_external_id ?? null,
-      );
+      const guestId = await ensureGuestForBooking({
+        fileId: f.id,
+        rowNumber: rowNum,
+        email: em,
+        phone: ph.e164,
+        rawFirst: guestFirstName || null,
+        rawLast: guestLastName || null,
+        externalClientId: targets.client_external_id ?? null,
+      });
       if (!guestId) {
         skipped += 1;
         await bumpProgress();

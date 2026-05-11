@@ -373,6 +373,7 @@ export function ClassBookingFlow({
             source: 'booking_page',
             class_instance_id: selectedClass.instance_id,
             dietary_notes: details.dietary_notes,
+            marketing_consent: details.marketing_consent,
             ...(payWithClassCredits ? { pay_with_class_credits: true } : {}),
           }),
         });

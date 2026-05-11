@@ -8,6 +8,7 @@ export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePu
     name: data.name as string,
     slug: data.slug as string,
     cover_photo_url: (data.cover_photo_url as string | null) ?? null,
+    logo_url: (data.logo_url as string | null) ?? null,
     address: (data.address as string | null) ?? null,
     phone: (data.phone as string | null) ?? null,
     website_url: (data.website_url as string | null) ?? undefined,

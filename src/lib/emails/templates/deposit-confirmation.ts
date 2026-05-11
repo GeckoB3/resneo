@@ -4,13 +4,13 @@ import {
   isDepositRefundAvailableAt,
 } from "@/lib/booking/cancellation-deadline";
 import {
-  renderBaseTemplate,
   buildDepositCallout,
+  escapeHtml,
   formatDate,
   formatTime,
   formatDepositAmount,
-  escapeHtml,
 } from "./base-template";
+import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
 
 function isAppointment(booking: BookingEmailData): boolean {
@@ -18,8 +18,8 @@ function isAppointment(booking: BookingEmailData): boolean {
     booking.email_variant === "appointment" ||
     Boolean(
       booking.group_appointments?.length ||
-      booking.practitioner_name ||
-      booking.appointment_service_name,
+        booking.practitioner_name ||
+        booking.appointment_service_name,
     )
   );
 }
@@ -36,23 +36,26 @@ export function renderDepositConfirmation(
     : "0.00";
   const appt = isAppointment(booking);
 
-  const depositHtml = buildDepositCallout(
-    amount,
-    booking.refund_cutoff ?? null,
-  );
+  const depositHtml = buildDepositCallout(amount, booking.refund_cutoff ?? null);
 
   const portal =
-    booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
+    booking.account_bookings_link ??
+    accountBookingsMagicLinkUrl(booking.guest_email) ??
+    accountBookingsPortalUrl();
   const portalHtml = portal
     ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(portal)}" style="color:#4E6B78;font-weight:600">View your bookings</a> (sign-in may be required).</p>`
     : "";
 
-  const html = renderBaseTemplate({
+  const mainContent =
+    `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
+    `<p style="margin:0 0 12px 0">Thank you. Your deposit of \u00A3${amount} has been received.</p>` +
+    portalHtml;
+
+  const html = renderTransactionalEmailHtml({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: `Deposit received for your booking at ${venue.name}`,
-    mainContent:
-      `<p style="margin:0 0 12px 0">Thank you. Your deposit of £${amount} has been received.</p>` + portalHtml,
+    heading: "Deposit received",
+    mainContent,
     bookingDate: date,
     bookingTime: time,
     partySize: booking.party_size,
@@ -70,7 +73,7 @@ export function renderDepositConfirmation(
 
   const textParts = [`Hi ${booking.guest_name},`, ""];
   textParts.push(
-    `Thank you. Your deposit of £${amount} has been received for your booking at ${venue.name}.`,
+    `Thank you. Your deposit of \u00A3${amount} has been received for your booking at ${venue.name}.`,
     "",
     `Date: ${date}`,
     `Time: ${time}`,

@@ -315,6 +315,7 @@ export function EventBookingFlow({
             experience_event_id: selectedOccurrence.event_id,
             ticket_lines,
             dietary_notes: details.dietary_notes,
+            marketing_consent: details.marketing_consent,
           }),
         });
         const data = await res.json();

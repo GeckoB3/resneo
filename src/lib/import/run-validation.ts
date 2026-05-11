@@ -116,8 +116,6 @@ export async function runImportValidation(
     if (f.file_type === 'staff') continue;
     const maps = byFile.get(f.id) ?? [];
     const parsed = await downloadAndParseCsv(admin, f.storage_path);
-    const seenEmails = new Map<string, number>();
-    const seenPhones = new Map<string, number>();
     const seenExternalClientIds = new Map<string, number>();
     const seenAppointmentIds = new Map<string, number>();
 
@@ -141,12 +139,6 @@ export async function runImportValidation(
           await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'email_invalid', 'email', targets.email, 'Invalid email format');
           errorCount += 1;
         } else if (em) {
-          if (seenEmails.has(em)) {
-            blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'duplicate_email', 'email', em, 'Duplicate email in this file');
-            errorCount += 1;
-          }
-          seenEmails.set(em, rowNum);
           if (existingEmails.has(em)) {
             existingClientRowKeys.add(rowKey(f.id, rowNum));
             await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'existing_client', 'email', em, 'This email already exists in ReserveNI');
@@ -155,12 +147,6 @@ export async function runImportValidation(
         }
 
         const ph = normalisePhoneUk(targets.phone ?? null);
-        if (ph.e164 && seenPhones.has(ph.e164)) {
-          blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'duplicate_phone', 'phone', ph.e164, 'Duplicate phone in this file');
-          errorCount += 1;
-        }
-        if (ph.e164) seenPhones.set(ph.e164, rowNum);
         if (ph.warning && targets.phone?.trim()) {
           await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'phone_invalid', 'phone', targets.phone, 'Phone could not be normalised to UK E.164; stored as entered');
           warningCount += 1;
@@ -222,23 +208,6 @@ export async function runImportValidation(
 
       if (f.file_type === 'bookings') {
         const em = normaliseEmail(targets.client_email ?? null);
-        const ph = normalisePhoneUk(targets.client_phone ?? null);
-        const extClient = targets.client_external_id?.trim() ?? '';
-        if (!em && !ph.e164 && !extClient) {
-          blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(
-            admin,
-            sessionId,
-            f.id,
-            rowNum,
-            'error',
-            'missing_required',
-            'client_email',
-            '',
-            'Client email, phone, or external client ID is required',
-          );
-          errorCount += 1;
-        }
         if (em && !EMAIL_RE.test(em)) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
           await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'email_invalid', 'client_email', targets.client_email ?? '', 'Invalid email');

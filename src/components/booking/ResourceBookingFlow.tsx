@@ -422,6 +422,7 @@ export function ResourceBookingFlow({
             phone: details.phone,
             source: 'booking_page',
             resource_id: resourceId,
+            marketing_consent: details.marketing_consent,
           }),
         });
         const data = await res.json();

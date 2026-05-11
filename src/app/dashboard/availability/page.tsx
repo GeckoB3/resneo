@@ -95,7 +95,7 @@ export default async function AvailabilitySettingsPage({
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
     .select(
-      'id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, public_booking_area_mode',
+      'id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, public_booking_area_mode',
     )
     .eq('id', venueId)
     .single();
@@ -120,7 +120,7 @@ export default async function AvailabilitySettingsPage({
     const { data: basicVenue } = await staff.db
       .from('venues')
       .select(
-        'id, name, slug, address, phone, email, website_url, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model, enabled_models, active_booking_models, pricing_tier',
+        'id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model, enabled_models, active_booking_models, pricing_tier',
       )
       .eq('id', venueId)
       .single();

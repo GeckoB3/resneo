@@ -1,13 +1,14 @@
 import type { BookingEmailData, VenueEmailData, RenderedEmail } from "../types";
-import { renderBaseTemplate, formatDate, formatTime } from "./base-template";
+import { formatDate, formatTime } from "./base-template";
+import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
     booking.email_variant === "appointment" ||
     Boolean(
       booking.group_appointments?.length ||
-      booking.practitioner_name ||
-      booking.appointment_service_name,
+        booking.practitioner_name ||
+        booking.appointment_service_name,
     )
   );
 }
@@ -24,12 +25,14 @@ export function renderDayOfReminderEmail(
   const [h] = booking.booking_time.slice(0, 5).split(":").map(Number);
   const timeOfDay = (h ?? 18) < 15 ? "today" : "tonight";
 
-  const mainContent = `<p style="margin:0 0 12px 0">This is a friendly reminder about your booking ${timeOfDay}.</p>`;
+  const mainContent =
+    `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
+    `<p style="margin:0 0 12px 0">This is a friendly reminder about your booking ${timeOfDay}.</p>`;
 
-  const html = renderBaseTemplate({
+  const html = renderTransactionalEmailHtml({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: `See you ${timeOfDay} at ${venue.name}!`,
+    heading: `See you ${timeOfDay}!`,
     mainContent,
     bookingDate: date,
     bookingTime: time,

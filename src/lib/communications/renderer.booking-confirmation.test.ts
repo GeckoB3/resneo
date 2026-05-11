@@ -36,7 +36,6 @@ describe('renderCommunicationEmail booking_confirmation', () => {
       venue,
     });
     expect(out?.html).toContain('£45.00');
-    expect(out?.html).not.toContain('(pay at venue)');
     expect(out?.html).not.toMatch(/Total price £45\.00\. Pay at the venue/i);
     expect(out?.html).toMatch(/Due at the venue/i);
     expect(out?.text).toContain('Price and payment:');
@@ -132,7 +131,7 @@ describe('renderCommunicationEmail booking_confirmation', () => {
       }),
       venue,
     });
-    expect(out?.html).toContain('>Free</span>');
+    expect(out?.html).toMatch(/>Free<\/p>/);
     expect(out?.html).not.toContain('There is no charge for this booking');
     expect(out?.text).toContain('Price and payment:');
     expect(out?.text).toContain('Free');
@@ -163,7 +162,7 @@ describe('renderCommunicationEmail booking_confirmation account CTA', () => {
       },
       venue,
     });
-    expect(out?.html).toContain('Manage Your Booking');
+    expect(out?.html).toMatch(/>\s*Manage\s*</);
     expect(out?.html).toContain('https://example.com/m');
     expect(out?.html).toContain('/auth/magic');
     expect(out?.html).toContain('View or sign in to your account');

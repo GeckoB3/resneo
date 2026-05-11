@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const { data: venue, error } = await supabase
       .from('venues')
       .select(
-        'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
+        'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
       )
       .eq('slug', slug.trim())
       .single();

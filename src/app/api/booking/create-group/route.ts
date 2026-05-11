@@ -54,6 +54,7 @@ const createGroupSchema = z.object({
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   people: z.array(personEntrySchema).min(1).max(10),
   dietary_notes: z.string().max(1000).optional(),
+  marketing_consent: z.boolean().optional(),
 });
 
 /**
@@ -72,7 +73,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { venue_id, first_name, last_name, email, phone, source, people, dietary_notes } = parsed.data;
+    const {
+      venue_id,
+      first_name,
+      last_name,
+      email,
+      phone,
+      source,
+      people,
+      dietary_notes,
+      marketing_consent: marketingConsentRaw,
+    } = parsed.data;
     const authClient = await createClient();
     const {
       data: { user },
@@ -116,6 +127,9 @@ export async function POST(request: NextRequest) {
     const guestLinkOptions = {
       silentAuthSignup: true,
     };
+
+    const marketingConsentForGuest =
+      isOnlineLikeSource && marketingConsentRaw !== undefined ? marketingConsentRaw : undefined;
 
     const supabase = getSupabaseAdminClient();
 
@@ -335,6 +349,7 @@ export async function POST(request: NextRequest) {
         last_name: guestLast,
         email: emailNorm,
         phone: phoneE164,
+        marketing_consent: marketingConsentForGuest,
       },
       guestLinkOptions,
     );

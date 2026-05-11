@@ -60,7 +60,9 @@ export async function POST(request: NextRequest) {
     // Retrieve the venue's connected account to query the PaymentIntent.
     const { data: venue } = await supabase
       .from('venues')
-      .select('name, stripe_connected_account_id, address, email, reply_to_email')
+      .select(
+        'name, stripe_connected_account_id, address, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone',
+      )
       .eq('id', booking.venue_id)
       .single();
 
@@ -146,6 +148,10 @@ export async function POST(request: NextRequest) {
       address: venue.address ?? null,
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
+      logo_url: (venue as { logo_url?: string | null }).logo_url ?? null,
+      cover_photo_url: (venue as { cover_photo_url?: string | null }).cover_photo_url ?? null,
+      website_url: (venue as { website_url?: string | null }).website_url ?? null,
+      timezone: (venue as { timezone?: string | null }).timezone ?? null,
     });
 
     after(async () => {

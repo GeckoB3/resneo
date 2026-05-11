@@ -14,6 +14,8 @@ export interface VenueSettings {
   /** Public https URL for the business website; shown on the booking page when set. */
   website_url: string | null;
   cover_photo_url: string | null;
+  /** Square logo shown as avatar on the booking page and in emails. */
+  logo_url: string | null;
   cuisine_type: string | null;
   price_band: string | null;
   no_show_grace_minutes: number;

@@ -238,6 +238,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           source: embed ? 'widget' : 'booking_page',
           service_id: selectedSlot.service_id || undefined,
           area_id: selectedSlot.area_id ?? guestAreaId ?? undefined,
+          marketing_consent: details.marketing_consent,
         }),
       });
       const data = await res.json();

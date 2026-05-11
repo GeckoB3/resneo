@@ -3,23 +3,19 @@ import {
   formatRefundDeadlineIso,
   isDepositRefundAvailableAt,
 } from "@/lib/booking/cancellation-deadline";
-import {
-  renderBaseTemplate,
-  formatDate,
-  formatTime,
-  formatDepositAmount,
-} from "./base-template";
+import { formatDate, formatTime, formatDepositAmount } from "./base-template";
+import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
 
 const AMBER_BG = "#FFF3CD";
 const AMBER_TEXT = "#664D03";
-const BRAND = "#4E6B78";
+
 function isAppointment(booking: BookingEmailData): boolean {
   return (
     booking.email_variant === "appointment" ||
     Boolean(
       booking.group_appointments?.length ||
-      booking.practitioner_name ||
-      booking.appointment_service_name,
+        booking.practitioner_name ||
+        booking.appointment_service_name,
     )
   );
 }
@@ -43,35 +39,6 @@ function buildRefundNotice(
   ].join("");
 }
 
-/**
- * Primary: confirm attendance (guest page records confirmation for staff).
- * Secondary: manage / change / cancel booking (full guest manage flow).
- */
-function buildReminderActionButtons(
-  confirmLink: string,
-  manageLink: string | null | undefined,
-): string {
-  const m = manageLink?.trim();
-  const blocks: string[] = [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0">',
-    "<tr><td>",
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:12px">`,
-    `<tr><td align="center" style="background-color:${BRAND};border-radius:8px;text-align:center">`,
-    `<a href="${confirmLink}" target="_blank" style="display:block;padding:16px 32px;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">Confirm my booking</a>`,
-    "</td></tr></table>",
-  ];
-  if (m) {
-    blocks.push(
-      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">`,
-      `<tr><td align="center" style="background-color:#ffffff;border:2px solid ${BRAND};border-radius:8px;text-align:center">`,
-      `<a href="${m}" target="_blank" style="display:block;padding:14px 32px;color:${BRAND};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">Manage or cancel</a>`,
-      "</td></tr></table>",
-    );
-  }
-  blocks.push("</td></tr></table>");
-  return blocks.join("\n");
-}
-
 export function renderReminder56h(
   booking: BookingEmailData,
   venue: VenueEmailData,
@@ -91,20 +58,20 @@ export function renderReminder56h(
     );
   }
 
-  const introTable = `<p style="margin:0 0 12px 0">You have an upcoming booking. Please confirm you are still coming, or use <strong>Manage or cancel</strong> if you need to change or cancel your booking. <strong>If you do not reply, your booking stays in place</strong>. We will not cancel it automatically.</p>`;
+  const mainContent =
+    `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
+    `<p style="margin:0 0 12px 0">You have an upcoming booking. Please confirm you're still coming, ` +
+    `or use <strong>Manage or cancel</strong> if you need to change or cancel your booking. ` +
+    `<strong>If you do not reply, your booking stays in place</strong> — we will not cancel it automatically.</p>`;
 
   const confirmCancelLink = booking.confirm_cancel_link ?? "";
   const manageLink = booking.manage_booking_link ?? "";
 
-  const actionButtonsHtml = confirmCancelLink
-    ? buildReminderActionButtons(confirmCancelLink, manageLink || null)
-    : "";
-
-  const html = renderBaseTemplate({
+  const html = renderTransactionalEmailHtml({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: `Please confirm your booking at ${venue.name}`,
-    mainContent: introTable + actionButtonsHtml,
+    heading: "Please confirm your booking",
+    mainContent,
     bookingDate: date,
     bookingTime: time,
     partySize: booking.party_size,
@@ -116,6 +83,10 @@ export function renderReminder56h(
     serviceName: booking.appointment_service_name ?? null,
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
+    ctaLabel: confirmCancelLink ? "Confirm my booking" : undefined,
+    ctaUrl: confirmCancelLink || null,
+    secondaryCtaLabel: manageLink ? "Manage or cancel" : undefined,
+    secondaryCtaUrl: manageLink || null,
     footerNote:
       "Paid a deposit? The notice above explains when it is refundable. Use Manage or cancel to change your booking or request cancellation.",
   });

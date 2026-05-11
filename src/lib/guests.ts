@@ -36,6 +36,8 @@ export interface GuestInput {
   last_name: string | null;
   email: string | null;
   phone: string | null;
+  /** When set (public online flows), updates `guests.marketing_consent` / `marketing_consent_at`. */
+  marketing_consent?: boolean;
 }
 
 export interface FindOrCreateGuestOptions {
@@ -55,10 +57,42 @@ export interface GuestRecord {
   phone: string | null;
   visit_count: number;
   user_id?: string | null;
+  marketing_opt_out?: boolean;
+  marketing_consent?: boolean;
+  marketing_consent_at?: string | null;
+}
+
+function marketingPayloadFromConsent(consented: boolean): {
+  marketing_consent: boolean;
+  marketing_consent_at: string | null;
+} {
+  return {
+    marketing_consent: consented,
+    marketing_consent_at: consented ? new Date().toISOString() : null,
+  };
+}
+
+async function maybeInsertMarketingConsentEvent(
+  supabase: SupabaseClient,
+  venueId: string,
+  guestId: string,
+  opts: { prevOptOut: boolean; prevConsent: boolean; nextConsent: boolean; created: boolean },
+): Promise<void> {
+  if (!opts.created && opts.prevConsent === opts.nextConsent) return;
+  const { error } = await supabase.from('guest_marketing_consent_events').insert({
+    venue_id: venueId,
+    guest_id: guestId,
+    actor_staff_id: null,
+    marketing_consent: opts.nextConsent,
+    marketing_opt_out: opts.prevOptOut,
+  });
+  if (error) {
+    console.error('[findOrCreateGuest] guest_marketing_consent_events insert failed:', error.message);
+  }
 }
 
 const guestSelect =
-  'id, venue_id, first_name, last_name, email, phone, visit_count, user_id';
+  'id, venue_id, first_name, last_name, email, phone, visit_count, user_id, marketing_opt_out, marketing_consent, marketing_consent_at';
 
 async function resolveAuthUserIdForGuest(
   admin: SupabaseClient,
@@ -127,6 +161,9 @@ export async function findOrCreateGuest(
         });
       }
 
+      const marketingPatch =
+        input.marketing_consent !== undefined ? marketingPayloadFromConsent(input.marketing_consent) : null;
+
       const { error: updErr } = await supabase
         .from('guests')
         .update({
@@ -135,10 +172,19 @@ export async function findOrCreateGuest(
           phone: nextPhone,
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
+          ...(marketingPatch ?? {}),
         })
         .eq('id', byEmail.id);
 
       if (!updErr) {
+        if (marketingPatch) {
+          await maybeInsertMarketingConsentEvent(supabase, venueId, byEmail.id, {
+            prevOptOut: Boolean(byEmail.marketing_opt_out),
+            prevConsent: Boolean(byEmail.marketing_consent),
+            nextConsent: marketingPatch.marketing_consent,
+            created: false,
+          });
+        }
         return {
           guest: {
             ...byEmail,
@@ -146,6 +192,7 @@ export async function findOrCreateGuest(
             last_name: nextLast,
             phone: nextPhone,
             user_id: nextUserId,
+            ...(marketingPatch ?? {}),
           },
           created: false,
         };
@@ -172,6 +219,9 @@ export async function findOrCreateGuest(
         }
       }
 
+      const marketingPatchPhone =
+        input.marketing_consent !== undefined ? marketingPayloadFromConsent(input.marketing_consent) : null;
+
       const { error: updErr } = await supabase
         .from('guests')
         .update({
@@ -180,10 +230,19 @@ export async function findOrCreateGuest(
           email: nextEmail,
           user_id: nextUserId,
           updated_at: new Date().toISOString(),
+          ...(marketingPatchPhone ?? {}),
         })
         .eq('id', byPhone.id);
 
       if (!updErr) {
+        if (marketingPatchPhone) {
+          await maybeInsertMarketingConsentEvent(supabase, venueId, byPhone.id, {
+            prevOptOut: Boolean(byPhone.marketing_opt_out),
+            prevConsent: Boolean(byPhone.marketing_consent),
+            nextConsent: marketingPatchPhone.marketing_consent,
+            created: false,
+          });
+        }
         return {
           guest: {
             ...byPhone,
@@ -191,6 +250,7 @@ export async function findOrCreateGuest(
             last_name: nextLast,
             email: nextEmail,
             user_id: nextUserId,
+            ...(marketingPatchPhone ?? {}),
           },
           created: false,
         };
@@ -199,6 +259,9 @@ export async function findOrCreateGuest(
   }
 
   const insertUserId = email && silentAuthSignup ? authUserId : null;
+
+  const marketingInsert =
+    input.marketing_consent !== undefined ? marketingPayloadFromConsent(input.marketing_consent) : {};
 
   const { data: inserted, error: insertErr } = await supabase
     .from('guests')
@@ -212,10 +275,20 @@ export async function findOrCreateGuest(
       global_guest_hash: computeGlobalGuestHash(email, phone),
       visit_count: 0,
       source: silentAuthSignup ? 'self_booked' : null,
+      ...marketingInsert,
     })
     .select(guestSelect)
     .single();
 
   if (insertErr) throw insertErr;
-  return { guest: inserted as GuestRecord, created: true };
+  const guestRow = inserted as GuestRecord;
+  if (input.marketing_consent !== undefined) {
+    await maybeInsertMarketingConsentEvent(supabase, venueId, guestRow.id, {
+      prevOptOut: Boolean(guestRow.marketing_opt_out),
+      prevConsent: false,
+      nextConsent: input.marketing_consent,
+      created: true,
+    });
+  }
+  return { guest: guestRow, created: true };
 }

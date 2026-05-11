@@ -98,7 +98,11 @@ export function VenueProfileSection({
 }: VenueProfileSectionProps) {
   const isAppointmentsProduct =
     isAppointmentsProductProp ?? isAppointmentsProductVenue(venue.pricing_tier ?? null);
+  const [logoSaving, setLogoSaving] = useState(false);
+  const [logoRemoving, setLogoRemoving] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const [coverSaving, setCoverSaving] = useState(false);
+  const [coverRemoving, setCoverRemoving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
   const { integerProps } = useNumericField();
   const int = integerProps();
@@ -259,6 +263,69 @@ export function VenueProfileSection({
     return () => window.clearTimeout(timer);
   }, [watched, isAdmin, persistProfile, report, getValues]);
 
+  const onLogoChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !isAdmin) return;
+      setLogoSaving(true);
+      setLogoError(null);
+      report({ status: 'saving', message: null });
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch('/api/venue/logo', { method: 'POST', body: form });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error((j as { error?: string }).error ?? 'Upload failed');
+        }
+        const { url } = await res.json();
+        const patchRes = await fetch('/api/venue', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logo_url: url }),
+        });
+        if (!patchRes.ok) throw new Error('Failed to update logo URL');
+        onUpdate({ logo_url: url });
+        report({ status: 'saved', message: 'Logo updated.' });
+      } catch (err) {
+        setLogoError(err instanceof Error ? err.message : 'Upload failed');
+        report({
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Upload failed',
+        });
+      } finally {
+        setLogoSaving(false);
+        e.target.value = '';
+      }
+    },
+    [isAdmin, onUpdate, report],
+  );
+
+  const onLogoRemove = useCallback(async () => {
+    if (!isAdmin || logoRemoving) return;
+    setLogoRemoving(true);
+    setLogoError(null);
+    report({ status: 'saving', message: null });
+    try {
+      const res = await fetch('/api/venue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logo_url: null }),
+      });
+      if (!res.ok) throw new Error('Failed to remove logo');
+      onUpdate({ logo_url: null });
+      report({ status: 'saved', message: 'Logo removed.' });
+    } catch (err) {
+      setLogoError(err instanceof Error ? err.message : 'Failed to remove');
+      report({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to remove logo',
+      });
+    } finally {
+      setLogoRemoving(false);
+    }
+  }, [isAdmin, logoRemoving, onUpdate, report]);
+
   const onCoverChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -297,6 +364,31 @@ export function VenueProfileSection({
     [isAdmin, onUpdate, report],
   );
 
+  const onCoverRemove = useCallback(async () => {
+    if (!isAdmin || coverRemoving) return;
+    setCoverRemoving(true);
+    setCoverError(null);
+    report({ status: 'saving', message: null });
+    try {
+      const res = await fetch('/api/venue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cover_photo_url: null }),
+      });
+      if (!res.ok) throw new Error('Failed to remove cover photo');
+      onUpdate({ cover_photo_url: null });
+      report({ status: 'saved', message: 'Cover photo removed.' });
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : 'Failed to remove');
+      report({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to remove cover photo',
+      });
+    } finally {
+      setCoverRemoving(false);
+    }
+  }, [isAdmin, coverRemoving, onUpdate, report]);
+
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50';
 
@@ -313,6 +405,56 @@ export function VenueProfileSection({
       />
       <SectionCard.Body>
         <div className="mb-6">
+          <span className="mb-2 block text-sm font-medium text-slate-700">Logo</span>
+          <div className="flex items-center gap-4">
+            <div className="flex-shrink-0">
+              {venue.logo_url ? (
+                <div className="h-16 w-16 rounded-full bg-white p-1 ring-1 ring-slate-200 shadow-[0_2px_10px_rgba(15,23,42,0.08)]">
+                  <img src={venue.logo_url} alt="Logo" className="h-full w-full rounded-full object-cover bg-white" />
+                </div>
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400 ring-1 ring-slate-200">
+                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </div>
+              )}
+            </div>
+            {isAdmin && (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${logoSaving || logoRemoving ? 'pointer-events-none opacity-50' : ''}`}
+                  >
+                    <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                    </svg>
+                    {venue.logo_url ? 'Change logo' : 'Upload logo'}
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onLogoChange} disabled={logoSaving || logoRemoving} className="sr-only" />
+                  </label>
+                  {venue.logo_url && (
+                    <button
+                      type="button"
+                      onClick={onLogoRemove}
+                      disabled={logoSaving || logoRemoving}
+                      className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                      </svg>
+                      {logoRemoving ? 'Removing…' : 'Remove logo'}
+                    </button>
+                  )}
+                </div>
+                {logoSaving && <p className="text-sm text-amber-700">Uploading…</p>}
+                {logoError && <p className="text-sm text-red-600">{logoError}</p>}
+                <p className="text-xs text-slate-500">Logo is shown on your booking page and in emails.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-6">
           <span className="mb-1 block text-sm font-medium text-slate-700">Cover photo</span>
           {venue.cover_photo_url ? (
             <img src={venue.cover_photo_url} alt="Cover" className="mb-2 h-40 w-full rounded-xl object-cover" />
@@ -323,19 +465,34 @@ export function VenueProfileSection({
           )}
           {isAdmin && (
             <>
-              <label
-                className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${coverSaving ? 'pointer-events-none opacity-50' : ''}`}
-              >
-                <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-                  />
-                </svg>
-                {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
-                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverChange} disabled={coverSaving} className="sr-only" />
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${coverSaving || coverRemoving ? 'pointer-events-none opacity-50' : ''}`}
+                >
+                  <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                    />
+                  </svg>
+                  {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverChange} disabled={coverSaving || coverRemoving} className="sr-only" />
+                </label>
+                {venue.cover_photo_url && (
+                  <button
+                    type="button"
+                    onClick={onCoverRemove}
+                    disabled={coverSaving || coverRemoving}
+                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                    </svg>
+                    {coverRemoving ? 'Removing…' : 'Remove photo'}
+                  </button>
+                )}
+              </div>
               {coverSaving && <p className="mt-2 text-sm text-amber-700">Uploading…</p>}
               {coverError && <p className="mt-2 text-sm text-red-600">{coverError}</p>}
             </>

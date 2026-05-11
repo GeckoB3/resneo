@@ -2954,7 +2954,7 @@ export function PractitionerCalendarView({
                 const mine = myCalendarIds.includes(col.id);
                 const label =
                   mine && myCalendarIds.length === 1
-                    ? 'My appointments'
+                    ? col.name
                     : mine
                       ? `Mine - ${col.name}`
                       : col.name;

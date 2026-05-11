@@ -944,6 +944,7 @@ export function AppointmentBookingFlow({
                 start_time: s.startTime,
                 ...(s.serviceVariantId ? { service_variant_id: s.serviceVariantId } : {}),
               })),
+              marketing_consent: details.marketing_consent,
             }),
           });
           const data = await res.json();
@@ -1034,6 +1035,7 @@ export function AppointmentBookingFlow({
             service_variant_id: selectedVariantId ?? undefined,
             dietary_notes: details.dietary_notes,
             occasion: details.occasion,
+            marketing_consent: details.marketing_consent,
           }),
         });
         const data = await res.json();
@@ -1151,6 +1153,7 @@ export function AppointmentBookingFlow({
             booking_date: p.date,
             booking_time: p.time,
           })),
+          marketing_consent: details.marketing_consent,
         }),
       });
       const data = await res.json();

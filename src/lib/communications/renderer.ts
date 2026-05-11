@@ -9,9 +9,10 @@ import {
   formatDate,
   formatSmsDate,
   formatTime,
-  renderBaseTemplate,
 } from '@/lib/emails/templates/base-template';
+import { renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
+import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
 import {
   bookingConfirmationSmsPriceSuffix,
@@ -367,7 +368,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaUrl: opts.booking.manage_booking_link ?? null,
       };
     }
-    case 'confirm_or_cancel_prompt':
+    case 'confirm_or_cancel_prompt': {
+      const hasPaidDeposit =
+        opts.booking.deposit_status === 'Paid' && Boolean(opts.booking.deposit_amount_pence);
+      const policyText = hasPaidDeposit ? (opts.cancellationPolicy ?? null) : null;
       return {
         subject: `Are you still coming to ${opts.venue.name}?`,
         heading: appointment ? 'Can you still make your appointment?' : 'Are you still coming?',
@@ -378,7 +382,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? "We're getting ready for your appointment and want to make sure everything is in order."
               : "We're getting ready for your visit and want to make sure everything is in order.",
           ),
-          opts.cancellationPolicy ? htmlRaw(escapeHtml(opts.cancellationPolicy)) : '',
+          policyText ? htmlRaw(escapeHtml(policyText)) : '',
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -390,13 +394,14 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
-          opts.cancellationPolicy ?? null,
+          policyText,
         ],
         ctaLabel: "Yes, I'm Coming",
         ctaUrl: opts.confirmLink ?? null,
         secondaryCtaLabel: appointment ? 'Cancel My Appointment' : 'Cancel My Booking',
         secondaryCtaUrl: opts.cancelLink ?? null,
       };
+    }
     case 'deposit_payment_reminder':
       return {
         subject: `Reminder: Complete your deposit for ${opts.venue.name}`,
@@ -627,62 +632,97 @@ export function renderCommunicationEmail(
 ): RenderedEmail | null {
   const config = buildMainContentEmail(opts);
 
+  const appointmentLane = isAppointmentLane(opts.lane);
+
+  let html: string;
+
+  if (opts.messageKey === 'booking_confirmation') {
+    const structuredPrice = confirmationStructuredPriceText(opts.booking);
+
+    html = renderBookingConfirmationDocumentHtml({
+      booking: opts.booking,
+      venue: opts.venue,
+      appointmentStyle: appointmentLane,
+      emailVariant: appointmentLane ? 'appointment' : 'table',
+      priceDisplay: structuredPrice?.trim() ? structuredPrice : null,
+      blocks: {
+        preambleHtml: '',
+        depositHtml: null,
+        customMessage: opts.emailCustomMessage ?? null,
+        postCtaAccountHtml: config.postCtaHtml ?? null,
+        cancellationPolicy: opts.cancellationPolicy ?? null,
+        preAppointmentInstructions:
+          opts.preAppointmentInstructions && appointmentLane
+            ? opts.preAppointmentInstructions
+            : null,
+      },
+    });
+  } else {
+    html = renderTransactionalEmailHtml({
+      venueName: opts.venue.name,
+      venueLogoUrl: opts.venue.logo_url ?? null,
+      heading: config.heading,
+      mainContent: config.mainContent,
+      bookingDate: formatDate(opts.booking.booking_date),
+      bookingTime: formatTime(opts.booking.booking_time),
+      partySize: opts.booking.party_size,
+      venueAddress: opts.venue.address ?? null,
+      specialRequests: opts.booking.special_requests ?? null,
+      customMessage: opts.emailCustomMessage ?? null,
+      ctaLabel: config.ctaLabel,
+      ctaUrl: config.ctaUrl,
+      secondaryCtaLabel: config.secondaryCtaLabel,
+      secondaryCtaUrl: config.secondaryCtaUrl,
+      postCtaHtml: config.postCtaHtml ?? null,
+      footerNote: emailFooterText(opts.venue),
+      emailVariant: emailVariantForLane(opts.lane),
+      practitionerName: opts.booking.practitioner_name ?? null,
+      serviceName: appointmentLane ? bookingLabel(opts.booking) : null,
+      priceDisplay: null,
+      groupAppointments: opts.booking.group_appointments,
+    });
+  }
+
   const calendarUrl =
     opts.messageKey === 'booking_confirmation'
       ? buildGoogleCalendarAddUrlForBooking(opts.booking, opts.venue)
       : null;
+  const mapsUrl = buildGoogleMapsDirectionsUrl(opts.venue.address);
+  const venueWeb = normalizeWebsiteUrlForLink(opts.venue.website_url ?? undefined);
 
   let ctaLabel = config.ctaLabel;
   let ctaUrl = config.ctaUrl;
   let secondaryCtaLabel = config.secondaryCtaLabel;
   let secondaryCtaUrl = config.secondaryCtaUrl;
 
-  if (calendarUrl) {
-    if (ctaUrl) {
-      secondaryCtaLabel = 'Add to calendar';
-      secondaryCtaUrl = calendarUrl;
-    } else {
-      ctaLabel = 'Add to calendar';
-      ctaUrl = calendarUrl;
+  if (opts.messageKey !== 'booking_confirmation') {
+    if (calendarUrl) {
+      if (ctaUrl) {
+        secondaryCtaLabel = 'Add to calendar';
+        secondaryCtaUrl = calendarUrl;
+      } else {
+        ctaLabel = 'Add to calendar';
+        ctaUrl = calendarUrl;
+      }
     }
   }
-
-  const priceForCard =
-    opts.messageKey === 'booking_confirmation' && isAppointmentLane(opts.lane)
-      ? confirmationStructuredPriceText(opts.booking)
-      : null;
-
-  const html = renderBaseTemplate({
-    venueName: opts.venue.name,
-    venueLogoUrl: opts.venue.logo_url ?? null,
-    heading: config.heading,
-    mainContent: config.mainContent,
-    bookingDate: formatDate(opts.booking.booking_date),
-    bookingTime: formatTime(opts.booking.booking_time),
-    partySize: opts.booking.party_size,
-    venueAddress: opts.venue.address ?? null,
-    specialRequests: opts.booking.special_requests ?? null,
-    customMessage: opts.emailCustomMessage ?? null,
-    ctaLabel,
-    ctaUrl,
-    secondaryCtaLabel,
-    secondaryCtaUrl,
-    postCtaHtml: config.postCtaHtml ?? null,
-    footerNote: emailFooterText(opts.venue),
-    emailVariant: emailVariantForLane(opts.lane),
-    practitionerName: opts.booking.practitioner_name ?? null,
-    serviceName: isAppointmentLane(opts.lane) ? bookingLabel(opts.booking) : null,
-    priceDisplay: priceForCard,
-    groupAppointments: opts.booking.group_appointments,
-  });
 
   const text = buildTextLines([
     ...config.textLines,
     opts.emailCustomMessage ? '' : null,
     opts.emailCustomMessage ?? null,
-    ctaLabel && ctaUrl ? '' : null,
-    ctaLabel && ctaUrl ? `${ctaLabel}: ${ctaUrl}` : null,
-    secondaryCtaLabel && secondaryCtaUrl ? `${secondaryCtaLabel}: ${secondaryCtaUrl}` : null,
+    opts.messageKey === 'booking_confirmation' ? '' : null,
+    opts.messageKey === 'booking_confirmation' && calendarUrl ? `Add to calendar: ${calendarUrl}` : null,
+    opts.messageKey === 'booking_confirmation' && mapsUrl ? `Location (Google Maps): ${mapsUrl}` : null,
+    opts.messageKey === 'booking_confirmation' && venueWeb ? `Venue website: ${venueWeb}` : null,
+    opts.messageKey === 'booking_confirmation' && opts.booking.manage_booking_link?.trim()
+      ? `Manage booking: ${opts.booking.manage_booking_link}`
+      : null,
+    opts.messageKey !== 'booking_confirmation' && ctaLabel && ctaUrl ? '' : null,
+    opts.messageKey !== 'booking_confirmation' && ctaLabel && ctaUrl ? `${ctaLabel}: ${ctaUrl}` : null,
+    opts.messageKey !== 'booking_confirmation' && secondaryCtaLabel && secondaryCtaUrl
+      ? `${secondaryCtaLabel}: ${secondaryCtaUrl}`
+      : null,
     config.postCtaTextLine?.trim() ? config.postCtaTextLine : null,
     '',
     opts.venue.name,

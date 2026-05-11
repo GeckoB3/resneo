@@ -11,6 +11,8 @@ export interface VenuePublic {
   name: string;
   slug: string;
   cover_photo_url: string | null;
+  /** Square logo shown as avatar on the booking page and in emails. */
+  logo_url?: string | null;
   address: string | null;
   phone: string | null;
   /** Business website; shown in booking header when set. */
@@ -99,6 +101,8 @@ export interface GuestDetails {
   phone: string;
   dietary_notes?: string;
   occasion?: string;
+  /** Public booking flow: venue marketing consent from confirm step. */
+  marketing_consent?: boolean;
 }
 
 export type BookingStep = 'date' | 'slot' | 'details' | 'payment' | 'confirmation';

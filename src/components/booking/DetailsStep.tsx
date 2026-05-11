@@ -43,6 +43,7 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
     })
     .and(
       z.object({
+        marketingConsent: z.boolean(),
         acceptTerms: z.boolean().refine((v) => v === true, { message: 'You must accept the booking terms' }),
       }),
     );
@@ -160,6 +161,7 @@ export function DetailsStep({
       occasion: '',
       comments_requests: '',
       acceptTerms: false,
+      marketingConsent: true,
     },
   });
 
@@ -302,6 +304,9 @@ export function DetailsStep({
               ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
               : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
             occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
+            ...(audience === 'public' && 'marketingConsent' in d
+              ? { marketing_consent: Boolean(d.marketingConsent) }
+              : {}),
           });
         })}
         className="space-y-4"
@@ -392,6 +397,13 @@ export function DetailsStep({
 
         {audience === 'public' && (
           <>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+              <input type="checkbox" {...register('marketingConsent')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+              <span className="text-sm text-slate-600">
+                Sign me up to receive offers and news from this business by email.
+              </span>
+            </label>
+
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
               <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
               <span className="text-sm text-slate-600">

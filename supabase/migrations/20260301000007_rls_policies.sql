@@ -1,5 +1,6 @@
 -- Reserve NI: Row-Level Security - staff can only read/write data for their venue(s)
 -- Staff are identified by email from Supabase Auth JWT (auth.jwt() ->> 'email').
+-- Idempotent: Supabase Preview / branched DBs may already have RLS enabled.
 
 ALTER TABLE venues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
@@ -7,10 +8,7 @@ ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 
--- Helper: venue_ids the current user (staff email) is associated with
--- Returns empty set if not authenticated or not in staff table.
-
--- venues: staff can view and update their venue(s)
+DROP POLICY IF EXISTS "staff_select_own_venue" ON venues;
 CREATE POLICY "staff_select_own_venue"
   ON venues FOR SELECT
   USING (
@@ -20,6 +18,7 @@ CREATE POLICY "staff_select_own_venue"
     )
   );
 
+DROP POLICY IF EXISTS "staff_update_own_venue" ON venues;
 CREATE POLICY "staff_update_own_venue"
   ON venues FOR UPDATE
   USING (
@@ -29,12 +28,12 @@ CREATE POLICY "staff_update_own_venue"
     )
   );
 
--- staff: staff can view their own row(s) (one per venue)
+DROP POLICY IF EXISTS "staff_select_own" ON staff;
 CREATE POLICY "staff_select_own"
   ON staff FOR SELECT
   USING (email = (auth.jwt() ->> 'email'));
 
--- guests: staff can manage guests for their venue(s)
+DROP POLICY IF EXISTS "staff_manage_guests" ON guests;
 CREATE POLICY "staff_manage_guests"
   ON guests FOR ALL
   USING (
@@ -50,7 +49,7 @@ CREATE POLICY "staff_manage_guests"
     )
   );
 
--- bookings: staff can manage bookings for their venue(s)
+DROP POLICY IF EXISTS "staff_manage_bookings" ON bookings;
 CREATE POLICY "staff_manage_bookings"
   ON bookings FOR ALL
   USING (
@@ -66,7 +65,7 @@ CREATE POLICY "staff_manage_bookings"
     )
   );
 
--- events: staff can view and insert events for their venue(s); no update/delete
+DROP POLICY IF EXISTS "staff_select_events" ON events;
 CREATE POLICY "staff_select_events"
   ON events FOR SELECT
   USING (
@@ -76,6 +75,7 @@ CREATE POLICY "staff_select_events"
     )
   );
 
+DROP POLICY IF EXISTS "staff_insert_events" ON events;
 CREATE POLICY "staff_insert_events"
   ON events FOR INSERT
   WITH CHECK (

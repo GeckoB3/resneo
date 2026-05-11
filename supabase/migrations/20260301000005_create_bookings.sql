@@ -1,6 +1,7 @@
 -- Reserve NI: bookings table
+-- Idempotent: Supabase Preview / branched DBs may already include this table.
 
-CREATE TABLE bookings (
+CREATE TABLE IF NOT EXISTS bookings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   venue_id uuid NOT NULL REFERENCES venues (id) ON DELETE CASCADE,
   guest_id uuid NOT NULL REFERENCES guests (id) ON DELETE RESTRICT,
@@ -20,7 +21,7 @@ CREATE TABLE bookings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_bookings_venue_id ON bookings (venue_id);
-CREATE INDEX idx_bookings_venue_date ON bookings (venue_id, booking_date);
-CREATE INDEX idx_bookings_guest_id ON bookings (guest_id);
-CREATE INDEX idx_bookings_status ON bookings (venue_id, status);
+CREATE INDEX IF NOT EXISTS idx_bookings_venue_id ON bookings (venue_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_venue_date ON bookings (venue_id, booking_date);
+CREATE INDEX IF NOT EXISTS idx_bookings_guest_id ON bookings (guest_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings (venue_id, status);

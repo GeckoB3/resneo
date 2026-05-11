@@ -1,6 +1,7 @@
 -- Reserve NI: venues table (core venue profile)
+-- Idempotent: Supabase Preview / branched DBs may already include this table.
 
-CREATE TABLE venues (
+CREATE TABLE IF NOT EXISTS venues (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
@@ -17,4 +18,4 @@ CREATE TABLE venues (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_venues_slug ON venues (slug);
+CREATE INDEX IF NOT EXISTS idx_venues_slug ON venues (slug);

@@ -1,4 +1,5 @@
 -- Reserve NI: on booking insert or status change, append an event row
+-- Idempotent: Supabase Preview / branched DBs may already have this trigger.
 
 CREATE OR REPLACE FUNCTION log_booking_event()
 RETURNS trigger
@@ -39,6 +40,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS booking_events_trigger ON bookings;
 CREATE TRIGGER booking_events_trigger
   AFTER INSERT OR UPDATE ON bookings
   FOR EACH ROW

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 import { BOOKING_FIELDS, CLIENT_FIELDS, type SchemaField } from '@/lib/import/constants';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
 
@@ -51,11 +52,11 @@ export function ReviewStepClient({ sessionId }: { sessionId: string }) {
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
-    const data = (await res.json()) as {
+    const data = await readResponseJson<{
       files?: ImportFile[];
       mappings?: MappingRow[];
       error?: string;
-    };
+    }>(res);
     if (!res.ok) throw new Error(data.error ?? 'Failed to load');
     setFiles(data.files ?? []);
     setMappings(data.mappings ?? []);
@@ -104,7 +105,7 @@ export function ReviewStepClient({ sessionId }: { sessionId: string }) {
           user_overridden: true,
         }),
       });
-      const j = (await res.json()) as { error?: string };
+      const j = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(j.error ?? 'Save failed');
       await load();
     } catch (e) {
@@ -142,7 +143,7 @@ export function ReviewStepClient({ sessionId }: { sessionId: string }) {
           user_overridden: true,
         }),
       });
-      const j = (await res.json()) as { error?: string };
+      const j = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(j.error ?? 'Save failed');
       await load();
     } catch (e) {

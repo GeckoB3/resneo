@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 
 type SessionRow = {
   id: string;
@@ -30,7 +31,7 @@ export function ImportHub() {
     setError(null);
     try {
       const res = await fetch('/api/import/sessions');
-      const data = (await res.json()) as { sessions?: SessionRow[]; error?: string };
+      const data = await readResponseJson<{ sessions?: SessionRow[]; error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Failed to load');
       setSessions(data.sessions ?? []);
     } catch (e) {
@@ -48,7 +49,7 @@ export function ImportHub() {
     setError(null);
     try {
       const res = await fetch(`/api/import/sessions/${id}`, { method: 'DELETE' });
-      const data = (await res.json()) as { error?: string };
+      const data = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Failed to delete');
       await load();
     } catch (e) {
@@ -62,7 +63,7 @@ export function ImportHub() {
     setError(null);
     try {
       const res = await fetch('/api/import/sessions', { method: 'POST' });
-      const data = (await res.json()) as { id?: string; error?: string };
+      const data = await readResponseJson<{ id?: string; error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Failed to start');
       if (data.id) {
         window.location.href = `/dashboard/import/${data.id}/upload`;
@@ -179,7 +180,7 @@ export function ImportHub() {
                         void (async () => {
                           const res = await fetch(`/api/import/sessions/${s.id}/undo`, { method: 'POST' });
                           if (!res.ok) {
-                            const j = (await res.json()) as { error?: string };
+                            const j = await readResponseJson<{ error?: string }>(res);
                             alert(j.error ?? 'Undo failed');
                             return;
                           }

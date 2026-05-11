@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 
 function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';
@@ -33,7 +34,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
     let timer: ReturnType<typeof setInterval> | undefined;
     async function poll() {
       const pr = await fetch(`/api/import/sessions/${sessionId}/progress`);
-      const data = (await pr.json()) as {
+      const data = await readResponseJson<{
         status: string;
         percent: number;
         progress_processed: number;
@@ -42,7 +43,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
         imported_bookings: number;
         skipped_rows: number;
         updated_existing?: number;
-      };
+      }>(pr);
       if (data.status === 'importing' && importStartMs.current === null) {
         importStartMs.current = Date.now();
       }
@@ -56,15 +57,15 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
       setError(null);
       try {
         const prog0 = await fetch(`/api/import/sessions/${sessionId}/progress`);
-        const initial = (await prog0.json()) as { status?: string };
+        const initial = await readResponseJson<{ status?: string }>(prog0);
         if (initial.status === 'complete' || initial.status === 'failed') {
           setProgress(initial as typeof progress);
           return;
         }
         const res = await fetch(`/api/import/sessions/${sessionId}/execute`, { method: 'POST' });
+        const body = await readResponseJson<{ ok?: boolean; error?: string; message?: string }>(res);
         if (!res.ok) {
-          const j = (await res.json()) as { error?: string; message?: string };
-          throw new Error(j.message ?? j.error ?? 'Import failed to start');
+          throw new Error(body.message ?? body.error ?? 'Import failed to start');
         }
         await poll();
         timer = setInterval(() => void poll(), 1200);

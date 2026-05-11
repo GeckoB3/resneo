@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 import { CLIENT_FIELDS, BOOKING_FIELDS } from '@/lib/import/constants';
 import { ImportMapDndView, type ColumnDetail, type MapDndMapping } from '@/components/import/ImportMapDndView';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
@@ -42,12 +43,12 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
-    const data = (await res.json()) as {
+    const data = await readResponseJson<{
       files?: ImportFile[];
       mappings?: MappingRow[];
       session?: { detected_platform?: string | null; ai_mapping_used?: boolean };
       error?: string;
-    };
+    }>(res);
     if (!res.ok) throw new Error(data.error ?? 'Failed to load');
     setFiles(data.files ?? []);
     setMappings(data.mappings ?? []);
@@ -160,7 +161,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mappings: deduped }),
       });
-      const j = (await res.json()) as { error?: string };
+      const j = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(j.error ?? 'Save failed');
       window.location.href = `/dashboard/import/${sessionId}/review`;
     } catch (e) {
@@ -174,7 +175,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
     setError(null);
     try {
       const res = await fetch(`/api/import/sessions/${sessionId}/files/${fileId}/ai-map`, { method: 'POST' });
-      const j = (await res.json()) as { error?: string; message?: string };
+      const j = await readResponseJson<{ error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(j.error ?? 'AI mapping failed');
       await load();
       if (j.message) setBanner(j.message);

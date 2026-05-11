@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 
 type ImportFile = {
   id: string;
@@ -21,7 +22,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
-    const data = (await res.json()) as { files?: ImportFile[]; error?: string };
+    const data = await readResponseJson<{ files?: ImportFile[]; error?: string }>(res);
     if (!res.ok) {
       setError(data.error ?? 'Failed to load');
       return;
@@ -54,7 +55,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           method: 'POST',
           body: fd,
         });
-        const j = (await res.json()) as { error?: string };
+        const j = await readResponseJson<{ error?: string }>(res);
         if (!res.ok) throw new Error(j.error ?? 'Upload failed');
       }
       await load();
@@ -68,7 +69,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
     if (!window.confirm('Remove this file from the import?')) return;
     const res = await fetch(`/api/import/sessions/${sessionId}/files/${id}`, { method: 'DELETE' });
     if (!res.ok) {
-      const j = (await res.json()) as { error?: string };
+      const j = await readResponseJson<{ error?: string }>(res);
       setError(j.error ?? 'Remove failed');
       return;
     }

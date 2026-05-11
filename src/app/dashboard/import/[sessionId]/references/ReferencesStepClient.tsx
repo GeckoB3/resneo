@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { readResponseJson } from '@/lib/api/read-response-json';
 
 type ExtractResponse = {
   ok?: boolean;
@@ -60,11 +61,11 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
 
   const loadSession = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
-    const data = (await res.json()) as {
+    const data = await readResponseJson<{
       session?: { references_resolved?: boolean };
       booking_references?: BookingRef[];
       error?: string;
-    };
+    }>(res);
     if (!res.ok) throw new Error(data.error ?? 'Failed to load session');
     setRefs((data.booking_references ?? []) as BookingRef[]);
     setResolvedFlag(data.session?.references_resolved === true);
@@ -75,20 +76,19 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     setError(null);
     try {
       const res = await fetch(`/api/import/sessions/${sessionId}/extract-references`, { method: 'POST' });
-      const data = (await res.json()) as ExtractResponse;
+      const data = await readResponseJson<ExtractResponse>(res);
       if (!res.ok) throw new Error(data.error ?? 'Failed to analyse booking references');
       setExtract(data);
       await loadSession();
-      const extracted = (await (await fetch(`/api/import/sessions/${sessionId}`)).json()) as {
-        booking_references?: BookingRef[];
-      };
+      const sesRes = await fetch(`/api/import/sessions/${sessionId}`);
+      const extracted = await readResponseJson<{ booking_references?: BookingRef[] }>(sesRes);
       const br = extracted.booking_references ?? [];
       if (br.some((x) => !x.is_resolved)) {
         await fetch(`/api/import/sessions/${sessionId}/ai-map-references`, { method: 'POST' });
         await loadSession();
       }
       const catRes = await fetch(`/api/import/sessions/${sessionId}/reference-catalog`);
-      const cat = (await catRes.json()) as Catalog & { error?: string };
+      const cat = await readResponseJson<Catalog & { error?: string }>(catRes);
       if (catRes.ok) setCatalog(cat);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
@@ -107,7 +107,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       const res = await fetch(`/api/import/sessions/${sessionId}/confirm-table-unassigned`, {
         method: 'POST',
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = await readResponseJson<{ ok?: boolean; error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not confirm');
       setExtract((prev) => (prev ? { ...prev, referencesResolved: true, requiresTableConfirmation: false } : prev));
       setResolvedFlag(true);
@@ -202,11 +202,11 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
           resolved_entity_type,
         }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
       await loadSession();
       const ses = await fetch(`/api/import/sessions/${sessionId}`);
-      const j = (await ses.json()) as { session?: { references_resolved?: boolean } };
+      const j = await readResponseJson<{ session?: { references_resolved?: boolean } }>(ses);
       setResolvedFlag(j.session?.references_resolved === true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
@@ -223,11 +223,11 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resolution_action: 'skip' }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
       await loadSession();
       const ses = await fetch(`/api/import/sessions/${sessionId}`);
-      const j = (await ses.json()) as { session?: { references_resolved?: boolean } };
+      const j = await readResponseJson<{ session?: { references_resolved?: boolean } }>(ses);
       setResolvedFlag(j.session?.references_resolved === true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');

@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
 import { runImportExecute } from '@/lib/import/run-execute';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export const maxDuration = 300;
 
@@ -55,19 +56,55 @@ export async function POST(
     );
   }
 
-  try {
-    await runImportExecute(staff.db, sessionId, staff.venue_id, staff.id);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    console.error('[import execute]', e);
-    await staff.db
-      .from('import_sessions')
-      .update({
-        status: 'failed',
-        error_message: e instanceof Error ? e.message : 'Import failed',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', sessionId);
-    return NextResponse.json({ error: 'Import failed' }, { status: 500 });
+  /**
+   * Avoid holding the HTTP request open for the entire import (often minutes). Proxies and
+   * platform limits may return a non-JSON error page if the response takes too long. Same
+   * pattern as POST .../validate: respond immediately, run work in `after()`.
+   */
+  const { data: locked, error: lockErr } = await staff.db
+    .from('import_sessions')
+    .update({
+      status: 'importing',
+      started_at: new Date().toISOString(),
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .eq('status', 'ready')
+    .select('id')
+    .maybeSingle();
+
+  if (lockErr) {
+    console.error('[import execute] lock', lockErr);
+    return NextResponse.json({ error: 'Failed to start import' }, { status: 500 });
   }
+  if (!locked) {
+    return NextResponse.json(
+      { error: 'Import could not be started — session is no longer in the ready state.' },
+      { status: 409 },
+    );
+  }
+
+  const venueId = staff.venue_id;
+  const staffId = staff.id;
+
+  after(async () => {
+    const admin = getSupabaseAdminClient();
+    try {
+      await runImportExecute(admin, sessionId, venueId, staffId);
+    } catch (e) {
+      console.error('[import execute]', e);
+      await admin
+        .from('import_sessions')
+        .update({
+          status: 'failed',
+          error_message: e instanceof Error ? e.message : 'Import failed',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', sessionId);
+    }
+  });
+
+  return NextResponse.json({ ok: true, started: true });
 }

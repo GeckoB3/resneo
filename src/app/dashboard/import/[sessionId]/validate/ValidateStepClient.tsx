@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ImportRowPreviewDialog } from '@/components/import/ImportRowPreviewDialog';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
+import { readResponseJson } from '@/lib/api/read-response-json';
 
 type Issue = {
   id: string;
@@ -43,7 +44,7 @@ type LoadResult = {
 
 async function fetchSession(sessionId: string): Promise<LoadResult> {
   const res = await fetch(`/api/import/sessions/${sessionId}`);
-  const data = (await res.json()) as LoadResult & { error?: string };
+  const data = await readResponseJson<LoadResult & { error?: string }>(res);
   if (!res.ok) throw new Error(data.error ?? 'Failed to load session');
   return data;
 }
@@ -191,11 +192,11 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        const payload = (await res.json()) as {
+        const payload = await readResponseJson<{
           jobId?: string;
           error?: string;
           message?: string;
-        };
+        }>(res);
         if (!res.ok) {
           throw new Error(payload.message ?? payload.error ?? 'Validation failed');
         }
@@ -229,7 +230,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           : undefined,
         }),
       });
-      const payload = (await res.json()) as { jobId?: string; error?: string; message?: string };
+      const payload = await readResponseJson<{ jobId?: string; error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(payload.message ?? payload.error ?? 'Validation failed');
       setIssues([]);
       setCounts(null);

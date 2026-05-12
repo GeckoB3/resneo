@@ -13,7 +13,7 @@ export async function GET(
   const { data: session, error } = await staff.db
     .from('import_sessions')
     .select(
-      'status, progress_processed, progress_total, imported_clients, imported_bookings, skipped_rows, updated_existing, error_message, completed_at',
+      'status, started_at, progress_processed, progress_total, imported_clients, imported_bookings, skipped_rows, updated_existing, error_message, completed_at',
     )
     .eq('id', sessionId)
     .eq('venue_id', staff.venue_id)

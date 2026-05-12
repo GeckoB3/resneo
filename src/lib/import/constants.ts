@@ -22,11 +22,11 @@ export interface SchemaField {
 export const CLIENT_FIELDS: SchemaField[] = [
   { key: 'first_name', label: 'First Name', required: true, type: 'text', examples: ['Sarah', 'John'] },
   { key: 'last_name', label: 'Surname', required: true, type: 'text', examples: ['Jones', 'Smith'] },
-  /** Single-column full name from exports (e.g. Booksy); import splits into first/last when first/last are empty. */
+  /** Single-column full name from exports; import splits into first/last when first/last are empty. */
   { key: 'full_name', label: 'Full Name', required: false, type: 'text' },
   {
     key: 'external_client_id',
-    label: 'External client ID (e.g. Phorest Client ID)',
+    label: 'External client ID (from your previous system)',
     required: false,
     type: 'text',
   },
@@ -75,7 +75,7 @@ export const BOOKING_FIELDS: SchemaField[] = [
     label: 'Client ID (external)',
     required: false,
     type: 'text',
-    examples: ['Phorest Client ID'],
+    examples: ['Client ID from your previous system'],
   },
   { key: 'party_size', label: 'Party size / covers', required: false, type: 'number' },
   { key: 'client_phone', label: 'Client Phone', required: false, type: 'phone' },

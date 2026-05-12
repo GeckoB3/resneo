@@ -14,6 +14,57 @@ const bodySchema = z.object({
     .optional(),
 });
 
+/** Lightweight status for polling while validation runs (avoids loading issues/mappings each tick). */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> },
+) {
+  const ctx = await requireImportAdmin();
+  if ('response' in ctx) return ctx.response;
+  const { staff } = ctx;
+  const { sessionId } = await params;
+
+  const { data: row, error } = await staff.db
+    .from('import_sessions')
+    .select(
+      'validation_job_id, validation_job_status, validation_job_error, status, validation_rows_processed, validation_rows_total',
+    )
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[import validate GET]', error);
+    return NextResponse.json({ error: 'Failed to load session' }, { status: 500 });
+  }
+  if (!row) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const r = row as {
+    validation_job_id: string | null;
+    validation_job_status: string | null;
+    validation_job_error: string | null;
+    status: string;
+    validation_rows_processed: number;
+    validation_rows_total: number;
+  };
+
+  const total = r.validation_rows_total ?? 0;
+  const processed = r.validation_rows_processed ?? 0;
+  const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+  return NextResponse.json({
+    validation_job_id: r.validation_job_id,
+    validation_job_status: r.validation_job_status,
+    validation_job_error: r.validation_job_error,
+    status: r.status,
+    validation_rows_processed: processed,
+    validation_rows_total: total,
+    percent,
+  });
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -73,6 +124,8 @@ export async function POST(
       validation_job_id: jobId,
       validation_job_status: 'queued',
       validation_job_error: null,
+      validation_rows_processed: 0,
+      validation_rows_total: 0,
       updated_at: new Date().toISOString(),
     })
     .eq('id', sessionId);
@@ -106,6 +159,7 @@ export async function POST(
     ok: true,
     jobId,
     jobStatus: 'queued',
-    message: 'Validation queued. Poll GET /api/import/sessions/[sessionId] until validation_job_status is complete.',
+    message:
+      'Validation queued. Poll GET /api/import/sessions/[sessionId]/validate until validation_job_status is complete.',
   });
 }

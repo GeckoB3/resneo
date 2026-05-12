@@ -11,7 +11,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 export const maxDuration = 300;
 
 /** Per-request row budget so each invocation stays under serverless limits; importer resumes across POSTs. */
-const IMPORT_BATCH_MAX_ROWS = 200;
+const IMPORT_BATCH_MAX_ROWS = 300;
 
 function isImportExecuteStateV1(x: unknown): x is ImportExecuteStateV1 {
   if (!x || typeof x !== 'object') return false;
@@ -121,6 +121,44 @@ export async function POST(
       return NextResponse.json(
         { error: 'Run validation first — session must be in "ready" state before import.' },
         { status: 409 },
+      );
+    }
+
+    const { data: unresolved } = await staff.db
+      .from('import_validation_issues')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('issue_type', 'existing_client')
+      .is('user_decision', null)
+      .limit(1);
+    if ((unresolved ?? []).length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Existing-client decisions required',
+          message:
+            'Some rows match an existing client. Choose Update existing or Skip for each before starting the import.',
+          code: 'EXISTING_CLIENT_DECISIONS_REQUIRED',
+        },
+        { status: 400 },
+      );
+    }
+
+    const { data: blockingDefaults } = await staff.db
+      .from('import_validation_issues')
+      .select('id, message')
+      .eq('session_id', sessionId)
+      .eq('issue_type', 'booking_defaults_missing')
+      .limit(1);
+    if ((blockingDefaults ?? []).length > 0) {
+      const msg = (blockingDefaults![0] as { message?: string }).message;
+      return NextResponse.json(
+        {
+          error: 'Venue is missing required defaults',
+          message:
+            msg ?? 'Configure the venue before importing bookings (default area, calendar, service, or practitioner).',
+          code: 'BOOKING_DEFAULTS_MISSING',
+        },
+        { status: 400 },
       );
     }
 

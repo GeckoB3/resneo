@@ -7,7 +7,6 @@ import { readResponseJson } from '@/lib/api/read-response-json';
 type SessionRow = {
   id: string;
   status: string;
-  detected_platform: string | null;
   total_rows: number;
   imported_clients: number;
   imported_bookings: number;
@@ -81,7 +80,7 @@ export function ImportHub() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Data import</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Import clients and bookings from CSV exports (Phorest, Fresha, Booksy, Vagaro, and others).
+            Import clients and bookings from CSV exports of your previous booking system.
           </p>
         </div>
         <button
@@ -136,7 +135,6 @@ export function ImportHub() {
                     >
                       {s.undone_at ? 'undone' : s.status.replace(/_/g, ' ')}
                     </span>
-                    {s.detected_platform ? ` · ${s.detected_platform}` : ''}
                     {s.status === 'complete' && !s.undone_at ?
                       ` · ${s.imported_clients} clients, ${s.imported_bookings} bookings`
                     : ''}
@@ -161,6 +159,14 @@ export function ImportHub() {
                       className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       Continue
+                    </Link>
+                  )}
+                  {s.status === 'importing' && (
+                    <Link
+                      href={`/dashboard/import/${s.id}/importing`}
+                      className="inline-flex min-h-10 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-900 hover:bg-sky-100"
+                    >
+                      Resume import
                     </Link>
                   )}
                   {s.status === 'complete' && (

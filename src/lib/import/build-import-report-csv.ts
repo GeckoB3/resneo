@@ -33,7 +33,6 @@ export async function buildImportReportCsv(
   lines.push(['Status', String(s.status ?? '')]);
   lines.push(['Created', String(s.created_at ?? '')]);
   lines.push(['Completed', String(s.completed_at ?? '')]);
-  lines.push(['Platform', String(s.detected_platform ?? '')]);
   lines.push(['Total rows (files)', String(s.total_rows ?? '')]);
   lines.push(['Imported clients', String(s.imported_clients ?? '')]);
   lines.push(['Imported bookings', String(s.imported_bookings ?? '')]);

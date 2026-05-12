@@ -2,6 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
 import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
 import { IMPORT_REF_PROVIDER_PHOREST } from '@/lib/import/external-refs';
+import { ValidationIssueBuffer } from '@/lib/import/validation-issue-buffer';
+import { evaluateClientRowNameRule } from '@/lib/import/client-row-name-rule';
+import { loadVenueGuestEmailsAndPhones, phoneForMatching } from '@/lib/import/guest-lookup';
+import {
+  evaluateBookingDefaultsForImport,
+  resolveBookingImportDefaults,
+} from '@/lib/import/booking-import-defaults';
 import {
   normaliseEmail,
   normalisePhoneUk,
@@ -10,6 +17,9 @@ import {
 } from '@/lib/import/normalize';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+/** How often to persist validation row progress to `import_sessions` (reduces write load). */
+const VALIDATION_PROGRESS_FLUSH_EVERY = 400;
 
 export async function runImportValidation(
   admin: SupabaseClient,
@@ -77,22 +87,9 @@ export async function runImportValidation(
     byFile.set(fid, list);
   }
 
-  const { data: existingGuests } = await admin
-    .from('guests')
-    .select('email, phone')
-    .eq('venue_id', venueId);
-
-  const existingEmails = new Set(
-    (existingGuests ?? [])
-      .map((g) => (g as { email?: string | null }).email)
-      .filter(Boolean)
-      .map((e) => String(e).toLowerCase()),
-  );
-  const existingPhones = new Set(
-    (existingGuests ?? [])
-      .map((g) => (g as { phone?: string | null }).phone)
-      .filter(Boolean)
-      .map((p) => String(p)),
+  const { emails: existingEmails, phones: existingPhones } = await loadVenueGuestEmailsAndPhones(
+    admin,
+    venueId,
   );
 
   let errorCount = 0;
@@ -111,6 +108,29 @@ export async function runImportValidation(
     totalDataRows += meta.row_count ?? 0;
   }
 
+  await admin
+    .from('import_sessions')
+    .update({
+      validation_rows_total: totalDataRows,
+      validation_rows_processed: 0,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId);
+
+  const issueBuffer = new ValidationIssueBuffer(admin);
+  let scannedRows = 0;
+
+  async function maybeFlushValidationProgress() {
+    if (scannedRows === 0 || scannedRows % VALIDATION_PROGRESS_FLUSH_EVERY !== 0) return;
+    await admin
+      .from('import_sessions')
+      .update({
+        validation_rows_processed: scannedRows,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
+  }
+
   for (const file of files ?? []) {
     const f = file as { id: string; file_type: string; storage_path: string };
     if (f.file_type === 'staff') continue;
@@ -127,33 +147,136 @@ export async function runImportValidation(
       if (f.file_type === 'clients' || f.file_type === 'unknown') {
         const fn = targets.first_name?.trim() ?? '';
         const ln = targets.last_name?.trim() ?? '';
-        if (!fn || !ln) {
+        const emPreview = normaliseEmail(targets.email ?? null);
+        const phPreview = normalisePhoneUk(targets.phone ?? null);
+        const nameOutcome = evaluateClientRowNameRule({
+          firstName: fn,
+          lastName: ln,
+          email: emPreview ?? targets.email ?? null,
+          phone: phPreview.e164 ?? targets.phone ?? null,
+        });
+
+        if (nameOutcome.kind === 'missing_name') {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'missing_required', 'first_name', fn, 'First and last name are required (or map a full name column).');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'missing_required',
+            column_name: 'first_name',
+            raw_value: fn,
+            message: 'A first name or last name is required (or map a full name column).',
+          });
           errorCount += 1;
+        } else if (nameOutcome.kind === 'missing_contact') {
+          blockingErrorRowKeys.add(rowKey(f.id, rowNum));
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'missing_required',
+            column_name: fn ? 'last_name' : 'first_name',
+            raw_value: fn || ln,
+            message:
+              'When only one of first or last name is provided, an email or mobile number is required to identify the client.',
+          });
+          errorCount += 1;
+        } else if (nameOutcome.kind === 'partial_name_ok') {
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'warning',
+            issue_type: 'partial_name',
+            column_name: fn ? 'last_name' : 'first_name',
+            raw_value: fn || ln,
+            message: fn ?
+              'Only first name provided; importing with surname left blank.'
+            : 'Only last name provided; importing with first name left blank.',
+          });
+          warningCount += 1;
         }
 
-        const em = normaliseEmail(targets.email ?? null);
+        if (
+          nameOutcome.kind === 'ok' &&
+          !targets.email?.trim() &&
+          !targets.phone?.trim()
+        ) {
+          /** Full name with no contact details: not blocking, but flag because re-imports cannot dedupe these rows. */
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'warning',
+            issue_type: 'no_contact_details',
+            column_name: 'email',
+            raw_value: '',
+            message:
+              'No email or phone — this row will be imported but cannot be deduplicated against existing or future imports.',
+          });
+          warningCount += 1;
+        }
+
+        const em = emPreview;
         if (targets.email?.trim() && !em) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'email_invalid', 'email', targets.email, 'Invalid email format');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'email_invalid',
+            column_name: 'email',
+            raw_value: targets.email,
+            message: 'Invalid email format',
+          });
           errorCount += 1;
         } else if (em) {
           if (existingEmails.has(em)) {
             existingClientRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'existing_client', 'email', em, 'This email already exists in ReserveNI');
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'warning',
+              issue_type: 'existing_client',
+              column_name: 'email',
+              raw_value: em,
+              message: 'This email already exists in ReserveNI',
+            });
             warningCount += 1;
           }
         }
 
-        const ph = normalisePhoneUk(targets.phone ?? null);
+        const ph = phPreview;
         if (ph.warning && targets.phone?.trim()) {
-          await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'phone_invalid', 'phone', targets.phone, 'Phone could not be normalised to UK E.164; stored as entered');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'warning',
+            issue_type: 'phone_invalid',
+            column_name: 'phone',
+            raw_value: targets.phone,
+            message: 'Phone could not be normalised to UK E.164; stored as entered',
+          });
           warningCount += 1;
         }
-        if (existingPhones.has(ph.e164 ?? '') && ph.e164) {
+        const phMatchKey = phoneForMatching(ph);
+        if (phMatchKey && existingPhones.has(phMatchKey)) {
           existingClientRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'existing_client', 'phone', ph.e164, 'This phone already exists in ReserveNI');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'warning',
+            issue_type: 'existing_client',
+            column_name: 'phone',
+            raw_value: phMatchKey,
+            message: 'This phone already exists in ReserveNI',
+          });
           warningCount += 1;
         }
 
@@ -161,33 +284,31 @@ export async function runImportValidation(
         if (extCl) {
           if (seenExternalClientIds.has(extCl)) {
             blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(
-              admin,
-              sessionId,
-              f.id,
-              rowNum,
-              'error',
-              'duplicate_external_client_id',
-              'external_client_id',
-              extCl,
-              'Duplicate external client ID in this file',
-            );
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'error',
+              issue_type: 'duplicate_external_client_id',
+              column_name: 'external_client_id',
+              raw_value: extCl,
+              message: 'Duplicate external client ID in this file',
+            });
             errorCount += 1;
           }
           seenExternalClientIds.set(extCl, rowNum);
           if (usePhorestRefs && existingPhorestGuestIds.has(extCl)) {
             existingClientRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(
-              admin,
-              sessionId,
-              f.id,
-              rowNum,
-              'warning',
-              'existing_client',
-              'external_client_id',
-              extCl,
-              'This Phorest client ID already exists in ReserveNI',
-            );
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'warning',
+              issue_type: 'existing_client',
+              column_name: 'external_client_id',
+              raw_value: extCl,
+              message: 'This external client ID has already been imported into ReserveNI',
+            });
             warningCount += 1;
           }
         }
@@ -197,10 +318,28 @@ export async function runImportValidation(
           if (!raw?.trim()) continue;
           const { iso, ambiguous } = parseDateString(raw, datePref ?? undefined);
           if (!iso) {
-            await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'invalid_format', key, raw, 'Could not parse date');
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'warning',
+              issue_type: 'invalid_format',
+              column_name: key,
+              raw_value: raw,
+              message: 'Could not parse date',
+            });
             warningCount += 1;
           } else if (ambiguous && !datePref) {
-            await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'date_format_ambiguous', key, raw, 'Date format is ambiguous (DD/MM vs MM/DD). Choose a format below.');
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'warning',
+              issue_type: 'date_format_ambiguous',
+              column_name: key,
+              raw_value: raw,
+              message: 'Date format is ambiguous (DD/MM vs MM/DD). Choose a format below.',
+            });
             warningCount += 1;
           }
         }
@@ -210,23 +349,59 @@ export async function runImportValidation(
         const em = normaliseEmail(targets.client_email ?? null);
         if (em && !EMAIL_RE.test(em)) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'email_invalid', 'client_email', targets.client_email ?? '', 'Invalid email');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'email_invalid',
+            column_name: 'client_email',
+            raw_value: targets.client_email ?? '',
+            message: 'Invalid email',
+          });
           errorCount += 1;
         }
 
         const bdRaw = targets.booking_date?.trim() ?? '';
         if (!bdRaw) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'missing_required', 'booking_date', '', 'Booking date is required');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'missing_required',
+            column_name: 'booking_date',
+            raw_value: '',
+            message: 'Booking date is required',
+          });
           errorCount += 1;
         } else {
           const { iso, ambiguous } = parseDateString(bdRaw, datePref ?? undefined);
           if (!iso) {
             blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'invalid_format', 'booking_date', bdRaw, 'Could not parse booking date');
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'error',
+              issue_type: 'invalid_format',
+              column_name: 'booking_date',
+              raw_value: bdRaw,
+              message: 'Could not parse booking date',
+            });
             errorCount += 1;
           } else if (ambiguous && !datePref) {
-            await insertIssue(admin, sessionId, f.id, rowNum, 'warning', 'date_format_ambiguous', 'booking_date', bdRaw, 'Ambiguous date — pick DD/MM or MM/DD in session settings.');
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'warning',
+              issue_type: 'date_format_ambiguous',
+              column_name: 'booking_date',
+              raw_value: bdRaw,
+              message: 'Ambiguous date — pick DD/MM or MM/DD in session settings.',
+            });
             warningCount += 1;
           }
         }
@@ -234,7 +409,16 @@ export async function runImportValidation(
         const bt = parseTimeString(targets.booking_time ?? null);
         if (!targets.booking_time?.trim() || !bt) {
           blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-          await insertIssue(admin, sessionId, f.id, rowNum, 'error', 'missing_required', 'booking_time', targets.booking_time ?? '', 'Booking time is required');
+          await issueBuffer.add({
+            session_id: sessionId,
+            file_id: f.id,
+            row_number: rowNum,
+            severity: 'error',
+            issue_type: 'missing_required',
+            column_name: 'booking_time',
+            raw_value: targets.booking_time ?? '',
+            message: 'Booking time is required',
+          });
           errorCount += 1;
         }
 
@@ -242,37 +426,38 @@ export async function runImportValidation(
         if (apptId) {
           if (seenAppointmentIds.has(apptId)) {
             blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(
-              admin,
-              sessionId,
-              f.id,
-              rowNum,
-              'error',
-              'duplicate_external_appointment_id',
-              'external_appointment_id',
-              apptId,
-              'Duplicate appointment ID in this file',
-            );
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'error',
+              issue_type: 'duplicate_external_appointment_id',
+              column_name: 'external_appointment_id',
+              raw_value: apptId,
+              message: 'Duplicate appointment ID in this file',
+            });
             errorCount += 1;
           }
           seenAppointmentIds.set(apptId, rowNum);
           if (usePhorestRefs && existingPhorestBookingIds.has(apptId)) {
             blockingErrorRowKeys.add(rowKey(f.id, rowNum));
-            await insertIssue(
-              admin,
-              sessionId,
-              f.id,
-              rowNum,
-              'error',
-              'duplicate_external_appointment_id',
-              'external_appointment_id',
-              apptId,
-              'This appointment was already imported from Phorest',
-            );
+            await issueBuffer.add({
+              session_id: sessionId,
+              file_id: f.id,
+              row_number: rowNum,
+              severity: 'error',
+              issue_type: 'duplicate_external_appointment_id',
+              column_name: 'external_appointment_id',
+              raw_value: apptId,
+              message: 'This appointment ID has already been imported into ReserveNI',
+            });
             errorCount += 1;
           }
         }
       }
+
+      scannedRows += 1;
+      await maybeFlushValidationProgress();
     }
   }
 
@@ -290,19 +475,45 @@ export async function runImportValidation(
     const f = skippedList[idx] as { file_id: string; raw_value: string; reference_type: string };
     /** Sentinel row numbers so the UI does not collide with real CSV line numbers (see ValidateStepClient). */
     const syntheticRow = 900_000 + idx;
-    await insertIssue(
-      admin,
-      sessionId,
-      f.file_id,
-      syntheticRow,
-      'warning',
-      'reference_skipped',
-      f.reference_type,
-      f.raw_value,
-      `Reference skipped (${f.reference_type}): rows using "${f.raw_value}" may be omitted at import.`,
-    );
+    await issueBuffer.add({
+      session_id: sessionId,
+      file_id: f.file_id,
+      row_number: syntheticRow,
+      severity: 'warning',
+      issue_type: 'reference_skipped',
+      column_name: f.reference_type,
+      raw_value: f.raw_value,
+      message: `Reference skipped (${f.reference_type}): rows using "${f.raw_value}" may be omitted at import.`,
+    });
     warningCount += 1;
   }
+
+  let bookingDefaultsBlocked = false;
+  const bookingFileForBlocking = (files ?? []).find(
+    (x) => (x as { file_type: string }).file_type === 'bookings',
+  ) as { id: string } | undefined;
+  if (bookingFileForBlocking) {
+    const defaults = await resolveBookingImportDefaults(admin, venueId);
+    const blocking = evaluateBookingDefaultsForImport(defaults);
+    if (blocking) {
+      bookingDefaultsBlocked = true;
+      /** Sentinel row number distinct from `reference_skipped` (900_000+) so UI groups separately. */
+      const syntheticRow = 800_000;
+      await issueBuffer.add({
+        session_id: sessionId,
+        file_id: bookingFileForBlocking.id,
+        row_number: syntheticRow,
+        severity: 'error',
+        issue_type: 'booking_defaults_missing',
+        column_name: blocking.bookingModel,
+        raw_value: '',
+        message: blocking.message,
+      });
+      errorCount += 1;
+    }
+  }
+
+  await issueBuffer.flushAll();
 
   const prevSettings = (session.session_settings ?? {}) as Record<string, unknown>;
   const nextSettings = {
@@ -315,6 +526,7 @@ export async function runImportValidation(
       error_issue_count: errorCount,
       warning_issue_count: warningCount,
       staff_files_skipped: (files ?? []).filter((x) => (x as { file_type: string }).file_type === 'staff').length,
+      booking_defaults_blocked: bookingDefaultsBlocked,
     },
   };
 
@@ -324,33 +536,12 @@ export async function runImportValidation(
       status: 'ready',
       validation_job_status: 'complete',
       validation_job_error: null,
+      validation_rows_processed: totalDataRows,
+      validation_rows_total: totalDataRows,
       session_settings: nextSettings,
       updated_at: new Date().toISOString(),
     })
     .eq('id', sessionId);
 
   return { errorCount, warningCount };
-}
-
-async function insertIssue(
-  admin: SupabaseClient,
-  sessionId: string,
-  fileId: string,
-  rowNumber: number,
-  severity: 'error' | 'warning',
-  issueType: string,
-  columnName: string | null,
-  rawValue: string | null,
-  message: string,
-) {
-  await admin.from('import_validation_issues').insert({
-    session_id: sessionId,
-    file_id: fileId,
-    row_number: rowNumber,
-    severity,
-    issue_type: issueType,
-    column_name: columnName,
-    raw_value: rawValue,
-    message,
-  });
 }

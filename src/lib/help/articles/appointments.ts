@@ -406,7 +406,7 @@ Edit guest details in depth, use **tags**, and review **history** across models.
 ## Flow
 
 1. **Start** a new import session.
-2. **Upload** a CSV. The tool may recognise common salon or clinic export shapes (for example Fresha, Booksy, or Vagaro style data) when the detector matches them.
+2. **Upload** a CSV exported from your previous booking system. The mapping step works regardless of which platform the export came from.
 3. **Map** columns to ReserveNI fields.
 4. **Validate** and fix errors before you commit.
 5. **Review** counts (clients, bookings, skipped, updated).

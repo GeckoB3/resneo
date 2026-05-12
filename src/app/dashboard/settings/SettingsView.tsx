@@ -1494,7 +1494,7 @@ function SettingsViewInner({
               <SectionCard.Header
                 eyebrow="Operations"
                 title="Data import"
-                description="Import clients and bookings from CSV exports (Phorest, Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
+                description="Import clients and bookings from CSV exports of your previous booking system. The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
               />
               <SectionCard.Body>
                 <Link

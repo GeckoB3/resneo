@@ -265,9 +265,13 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       )}
 
       {loading && (
-        <p className="text-sm text-slate-600" role="status">
-          Analysing booking file…
-        </p>
+        <div className="space-y-2" role="status">
+          <div className="flex items-center gap-2">
+            <div className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <p className="text-sm text-slate-600">Analysing booking file…</p>
+          </div>
+          <p className="text-xs text-slate-500">Large files can take a minute — this runs on the server.</p>
+        </div>
       )}
 
       {!loading && extract && (

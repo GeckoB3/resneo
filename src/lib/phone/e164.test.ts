@@ -4,6 +4,7 @@ import {
   parseStoredPhoneForUi,
   composeNationalAndCountry,
   normalizeToE164Lenient,
+  formatPhoneForDisplay,
 } from './e164';
 
 describe('normalizeToE164', () => {
@@ -50,5 +51,18 @@ describe('composeNationalAndCountry', () => {
 describe('normalizeToE164Lenient', () => {
   it('matches strict when valid', () => {
     expect(normalizeToE164Lenient('07725002232', 'GB')).toBe('+447725002232');
+  });
+});
+
+describe('formatPhoneForDisplay', () => {
+  it('returns null for empty input', () => {
+    expect(formatPhoneForDisplay(null)).toBeNull();
+    expect(formatPhoneForDisplay('')).toBeNull();
+  });
+
+  it('formats valid E.164 as national', () => {
+    const s = formatPhoneForDisplay('+447725002232');
+    expect(s).toBeTruthy();
+    expect(s).toContain('7725');
   });
 });

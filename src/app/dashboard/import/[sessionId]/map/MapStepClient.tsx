@@ -46,15 +46,15 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
     const data = await readResponseJson<{
       files?: ImportFile[];
       mappings?: MappingRow[];
-      session?: { detected_platform?: string | null; ai_mapping_used?: boolean };
+      session?: { ai_mapping_used?: boolean };
       error?: string;
     }>(res);
     if (!res.ok) throw new Error(data.error ?? 'Failed to load');
     setFiles(data.files ?? []);
     setMappings(data.mappings ?? []);
     if (data.files?.[0]?.id) setActiveFileId(data.files[0].id);
-    if (data.session?.detected_platform && data.session?.ai_mapping_used) {
-      setBanner(`We detected a ${data.session.detected_platform} export. Review mappings below.`);
+    if (data.session?.ai_mapping_used) {
+      setBanner('We pre-filled mappings from your column headers. Review them below before continuing.');
     }
   }, [sessionId]);
 

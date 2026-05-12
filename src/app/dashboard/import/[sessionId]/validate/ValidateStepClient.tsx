@@ -24,6 +24,7 @@ type ValidationSummary = {
   error_issue_count?: number;
   warning_issue_count?: number;
   staff_files_skipped?: number;
+  booking_defaults_blocked?: boolean;
 };
 
 type SessionPayload = {
@@ -46,6 +47,23 @@ async function fetchSession(sessionId: string): Promise<LoadResult> {
   const res = await fetch(`/api/import/sessions/${sessionId}`);
   const data = await readResponseJson<LoadResult & { error?: string }>(res);
   if (!res.ok) throw new Error(data.error ?? 'Failed to load session');
+  return data;
+}
+
+type ValidationJobPoll = {
+  validation_job_id: string | null;
+  validation_job_status: string | null;
+  validation_job_error: string | null;
+  status: string;
+  validation_rows_processed: number;
+  validation_rows_total: number;
+  percent: number;
+};
+
+async function fetchValidationJob(sessionId: string): Promise<ValidationJobPoll> {
+  const res = await fetch(`/api/import/sessions/${sessionId}/validate`);
+  const data = await readResponseJson<ValidationJobPoll & { error?: string }>(res);
+  if (!res.ok) throw new Error(data.error ?? 'Failed to load validation status');
   return data;
 }
 
@@ -78,6 +96,11 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const [counts, setCounts] = useState<{ errorCount: number; warningCount: number } | null>(null);
   const [dateChoice, setDateChoice] = useState<'dd/MM/yyyy' | 'MM/dd/yyyy' | ''>('');
   const [jobId, setJobId] = useState<string | null>(null);
+  const [validationScan, setValidationScan] = useState<{
+    processed: number;
+    total: number;
+    percent: number;
+  } | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [preview, setPreview] = useState<{ fileId: string; row: number; filename: string } | null>(null);
@@ -106,26 +129,36 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     async (initialJob?: string | null) => {
       setPolling(true);
       setJobError(null);
+      setValidationScan(null);
       if (initialJob) setJobId(initialJob);
 
       const pollOnce = async () => {
-        const data = await fetchSession(sessionId);
-        const st = data.session?.validation_job_status;
-        if (data.session?.validation_job_id) setJobId(data.session.validation_job_id);
+        const lite = await fetchValidationJob(sessionId);
+        const st = lite.validation_job_status;
+        if (lite.validation_job_id) setJobId(lite.validation_job_id);
+        setValidationScan({
+          processed: lite.validation_rows_processed,
+          total: lite.validation_rows_total,
+          percent: lite.percent,
+        });
 
         if (st === 'failed') {
           clearPoll();
           setPolling(false);
           setLoading(false);
-          setJobError(data.session?.validation_job_error ?? 'Validation failed');
+          setJobError(lite.validation_job_error ?? 'Validation failed');
+          const data = await fetchSession(sessionId);
           applyLoaded(data);
+          setValidationScan(null);
           return true;
         }
         if (st === 'complete') {
           clearPoll();
           setPolling(false);
           setLoading(false);
+          const data = await fetchSession(sessionId);
           applyLoaded(data);
+          setValidationScan(null);
           return true;
         }
         return false;
@@ -141,6 +174,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             clearPoll();
             setPolling(false);
             setLoading(false);
+            setValidationScan(null);
             setError(e instanceof Error ? e.message : 'Polling failed');
           }
         })();
@@ -219,6 +253,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     setLoading(true);
     setError(null);
     setJobError(null);
+    setValidationScan(null);
     clearPoll();
     try {
       const res = await fetch(`/api/import/sessions/${sessionId}/validate`, {
@@ -284,15 +319,35 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const existingRows = summary?.rows_with_existing_client_warning ?? null;
   const staffSkipped = summary?.staff_files_skipped ?? 0;
 
-  const canProceed = !jobError && !loading && !polling;
+  const unresolvedExistingClientCount = useMemo(
+    () =>
+      issues.filter((i) => i.issue_type === 'existing_client' && !i.user_decision).length,
+    [issues],
+  );
+  const bookingDefaultsBlocking = useMemo(
+    () => issues.some((i) => i.issue_type === 'booking_defaults_missing'),
+    [issues],
+  );
+
+  const canProceed =
+    !jobError &&
+    !loading &&
+    !polling &&
+    unresolvedExistingClientCount === 0 &&
+    !bookingDefaultsBlocking;
 
   const friendlyTypeLabel = (t: string) => {
     if (t === 'reference_skipped') return 'Skipped references (Step 3b)';
+    if (t === 'booking_defaults_missing') return 'Booking defaults missing';
+    if (t === 'no_contact_details') return 'No contact details';
+    if (t === 'skipped_at_execute') return 'Skipped during import';
     return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
   const isSyntheticReferenceIssue = (i: Issue) =>
-    i.issue_type === 'reference_skipped' || i.row_number >= 900_000;
+    i.issue_type === 'reference_skipped' ||
+    i.issue_type === 'booking_defaults_missing' ||
+    i.row_number >= 800_000;
 
   return (
     <div className="space-y-6">
@@ -326,9 +381,23 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
             <span className="text-sm text-slate-600">
-              {polling ? 'Checking your data…' : 'Starting validation…'}
+              {polling ? 'Scanning CSV rows on the server…' : 'Starting validation…'}
             </span>
           </div>
+          {polling && validationScan && validationScan.total > 0 && (
+            <div className="space-y-1 pt-1">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full bg-brand-600 transition-all" style={{ width: `${validationScan.percent}%` }} />
+              </div>
+              <p className="text-xs text-slate-500">
+                {validationScan.processed.toLocaleString()} / {validationScan.total.toLocaleString()} rows (
+                {validationScan.percent}%)
+              </p>
+            </div>
+          )}
+          {polling && (!validationScan || validationScan.total === 0) && (
+            <p className="text-xs text-slate-500">Preparing row scan…</p>
+          )}
           {jobId && <p className="text-xs text-slate-500">Job id: {jobId}</p>}
         </div>
       )}
@@ -534,6 +603,29 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
                 </ul>
               </div>
             ))}
+        </div>
+      )}
+
+      {!loading && !polling && bookingDefaultsBlocking && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <p className="font-medium">Venue not ready for booking import</p>
+          <p className="mt-1 text-xs">
+            Resolve the &quot;Booking defaults missing&quot; issue below (configure the venue, then re-validate) before
+            you can start the import.
+          </p>
+        </div>
+      )}
+
+      {!loading && !polling && unresolvedExistingClientCount > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">
+            Decide what to do with {unresolvedExistingClientCount} existing-{clientLabel.toLowerCase()} match
+            {unresolvedExistingClientCount === 1 ? '' : 'es'}
+          </p>
+          <p className="mt-1 text-xs">
+            Choose &quot;Update existing&quot; or &quot;Skip&quot; for each row, or use the bulk action above. The
+            import cannot start while any are unresolved.
+          </p>
         </div>
       )}
 

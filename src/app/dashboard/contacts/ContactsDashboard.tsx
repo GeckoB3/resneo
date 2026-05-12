@@ -48,6 +48,18 @@ const CONTACTS_TOOLBAR_SUMMARY_STUB: ViewToolbarSummary = {
   combos_in_use: 0,
 };
 
+const CONTACTS_PAGE_LIMIT_STORAGE_KEY = 'contacts-directory-page-limit';
+const CONTACTS_PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const;
+type ContactsPageLimit = (typeof CONTACTS_PAGE_SIZE_OPTIONS)[number];
+
+function parseContactsPageLimit(raw: string | null): ContactsPageLimit {
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(n) && (CONTACTS_PAGE_SIZE_OPTIONS as readonly number[]).includes(n)) {
+    return n as ContactsPageLimit;
+  }
+  return 25;
+}
+
 function isoDateToday(): string {
   const d = new Date();
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
@@ -279,7 +291,7 @@ export function ContactsDashboard({
   const [venueTags, setVenueTags] = useState<string[]>([]);
   const [guests, setGuests] = useState<GuestListRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [limit] = useState(25);
+  const [limit, setLimit] = useState<ContactsPageLimit>(25);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -298,10 +310,20 @@ export function ContactsDashboard({
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'filter' | 'sort'>('none');
+  const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'filter' | 'sort' | 'pageSize'>('none');
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const pageSizeTriggerRef = useRef<HTMLButtonElement>(null);
   const contactsToolbarPanelsId = useId();
+
+  useEffect(() => {
+    try {
+      const next = parseContactsPageLimit(window.localStorage.getItem(CONTACTS_PAGE_LIMIT_STORAGE_KEY));
+      if (next !== 25) setLimit(next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -362,7 +384,7 @@ export function ContactsDashboard({
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [page, debouncedSearch, filter, segment, tagFilter, dateFrom, dateTo, marketing, lastStaffId, lastServiceId]);
+  }, [page, limit, debouncedSearch, filter, segment, tagFilter, dateFrom, dateTo, marketing, lastStaffId, lastServiceId]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -1157,12 +1179,52 @@ export function ContactsDashboard({
             ))}
           </div>
         </ContactsToolbarOptionPopover>
+        <ContactsToolbarOptionPopover
+          toolbarPanelAnchorRef={toolbarPanelAnchorRef}
+          triggerRef={pageSizeTriggerRef}
+          triggerText={`${limit} / page`}
+          panelHeading="Contacts per page"
+          open={filterPopoverKind === 'pageSize'}
+          onDismiss={() => setFilterPopoverKind('none')}
+          onTriggerClick={() =>
+            setFilterPopoverKind((k) => (k === 'pageSize' ? 'none' : 'pageSize'))
+          }
+          isDirty={limit !== 25}
+          panelId={`${contactsToolbarPanelsId}-page-size`}
+          triggerAriaLabel="Choose how many contacts to show per page"
+          maxWidthPx={220}
+        >
+          <div role="radiogroup" aria-label="Contacts per page" className="space-y-0.5">
+            {CONTACTS_PAGE_SIZE_OPTIONS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={limit === n}
+                onClick={() => {
+                  setLimit(n);
+                  setPage(0);
+                  setFilterPopoverKind('none');
+                  try {
+                    window.localStorage.setItem(CONTACTS_PAGE_LIMIT_STORAGE_KEY, String(n));
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(limit === n)}`}
+              >
+                {n} per page
+              </button>
+            ))}
+          </div>
+        </ContactsToolbarOptionPopover>
       </>
     ),
     [
       filter,
       segment,
       sort,
+      limit,
       filterPopoverKind,
       contactsToolbarPanelsId,
       dateFrom,

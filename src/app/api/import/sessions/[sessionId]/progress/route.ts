@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
 
+/** Import progress must never be cached (stale status caused the UI to sit on "Checking status…"). */
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -13,7 +16,7 @@ export async function GET(
   const { data: session, error } = await staff.db
     .from('import_sessions')
     .select(
-      'status, progress_processed, progress_total, imported_clients, imported_bookings, skipped_rows, updated_existing, error_message, completed_at',
+      'status, started_at, progress_processed, progress_total, imported_clients, imported_bookings, skipped_rows, updated_existing, error_message, completed_at',
     )
     .eq('id', sessionId)
     .eq('venue_id', staff.venue_id)

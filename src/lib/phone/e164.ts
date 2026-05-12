@@ -132,3 +132,17 @@ export function composeNationalAndCountry(
   const cc = getCountryCallingCode(countryCode);
   return `+${cc}${digits}`;
 }
+
+/**
+ * Human-readable national format for dashboard lists (e.g. calendar cards).
+ * Falls back to trimmed raw string when libphonenumber cannot parse.
+ */
+export function formatPhoneForDisplay(stored: string | null | undefined): string | null {
+  if (!stored?.trim()) return null;
+  const trimmed = stored.trim();
+  const parsed = parsePhoneNumberFromString(trimmed);
+  if (parsed?.isValid()) return parsed.formatNational();
+  const parsedGb = parsePhoneNumberFromString(trimmed, 'GB');
+  if (parsedGb?.isValid()) return parsedGb.formatNational();
+  return trimmed;
+}

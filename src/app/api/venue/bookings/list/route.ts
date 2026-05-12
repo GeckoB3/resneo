@@ -22,6 +22,7 @@ import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-labe
  * Sorted by date then time.
  *
  * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
+ *   Cancelled bookings are excluded from this view by default; pass `status=Cancelled` to opt in.
  */
 const BOOKINGS_LIST_SELECT_FULL =
   'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
@@ -45,6 +46,12 @@ export async function GET(request: NextRequest) {
     const to = request.nextUrl.searchParams.get('to');
     const ids = request.nextUrl.searchParams.get('ids');
     const statusFilter = request.nextUrl.searchParams.get('status');
+    /**
+     * The dashboard calendar grid shows what is currently scheduled, so cancelled
+     * bookings are excluded from `view=calendar` responses unless the caller has
+     * explicitly opted in via `status=Cancelled`.
+     */
+    const calendarExcludeCancelled = calendarView && statusFilter !== 'Cancelled';
     const attendanceConfirmedFilter = request.nextUrl.searchParams.get('attendance_confirmed') === '1';
     const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
     const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
@@ -70,6 +77,10 @@ export async function GET(request: NextRequest) {
           .eq('venue_id', staff.venue_id)
           .order('booking_date', { ascending: true })
           .order('booking_time', { ascending: true });
+
+    if (calendarExcludeCancelled) {
+      query = query.neq('status', 'Cancelled');
+    }
 
     if (guestIdParam && guestUuidRe.test(guestIdParam)) {
       query = query.eq('guest_id', guestIdParam);

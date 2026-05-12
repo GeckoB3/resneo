@@ -298,6 +298,8 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+DROP POLICY IF EXISTS "venue_cover_public_read" ON storage.objects;
+
 CREATE POLICY "venue_cover_public_read"
 ON storage.objects FOR SELECT
 TO public

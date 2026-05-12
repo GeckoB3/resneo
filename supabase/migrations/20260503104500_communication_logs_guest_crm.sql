@@ -10,9 +10,10 @@ ALTER TABLE communication_logs
 ALTER TABLE communication_logs
   DROP CONSTRAINT IF EXISTS unique_message_per_booking_lane;
 
-CREATE UNIQUE INDEX IF NOT EXISTS communication_logs_booking_message_lane_uidx
-  ON communication_logs (booking_id, message_type, communication_lane)
-  WHERE booking_id IS NOT NULL;
+-- Partial unique on (booking_id, message_type, communication_lane) deferred: `communication_lane`
+-- is added in 20260601000000_lane_keyed_communication_policies.sql (after this file). That migration
+-- adds table constraint `unique_message_per_booking_lane`, which enforces the same keys for
+-- booking-anchored rows.
 
 CREATE INDEX IF NOT EXISTS communication_logs_guest_id_created_idx
   ON communication_logs (guest_id, created_at DESC)

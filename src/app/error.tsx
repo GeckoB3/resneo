@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
-import * as Sentry from '@sentry/nextjs';
 
 export default function Error({
   error,
@@ -13,7 +12,11 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error('App error boundary:', error);
-    Sentry.captureException(error);
+    // Load Sentry only in the browser so the server bundle (and its
+    // OpenTelemetry instrumentation) is never pulled into Client Component SSR.
+    void import('@sentry/nextjs').then((Sentry) => {
+      Sentry.captureException(error);
+    });
   }, [error]);
 
   return (

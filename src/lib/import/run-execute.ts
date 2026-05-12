@@ -16,7 +16,6 @@ import {
   parseIntSafe,
   resolveDepositFromImport,
   splitFullName,
-  todayIsoLocal,
 } from '@/lib/import/normalize';
 import {
   findBookingIdByExternalRef,
@@ -25,8 +24,16 @@ import {
   insertBookingExternalRef,
   upsertGuestExternalRef,
 } from '@/lib/import/external-refs';
+import {
+  findGuestByEmailCi,
+  findGuestByPhone,
+  findGuestIdByExactName,
+  phoneForMatching,
+} from '@/lib/import/guest-lookup';
+import { recordExecuteSkip } from '@/lib/import/execute-skip-audit';
+import { resolveNamedRowId } from '@/lib/import/name-match';
+import { resolveBookingImportDefaults } from '@/lib/import/booking-import-defaults';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
-import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import type { BookingModel } from '@/types/booking-models';
 import {
   fetchPractitionerServiceCommercialDefaults,
@@ -41,6 +48,8 @@ import {
   snapshotImportExecuteStateForPause,
   type ImportExecuteStateV1,
 } from '@/lib/import/import-execute-state';
+import { shouldFlushImportProgressToDb } from '@/lib/import/import-execute-progress';
+import { evaluateClientRowNameRule } from '@/lib/import/client-row-name-rule';
 
 function hashGuest(email: string | null, phone: string | null): string | null {
   if (!email && !phone) return null;
@@ -277,12 +286,22 @@ export async function runImportExecuteBatch(
 
   const { data: stagedBookingRows } = await admin
     .from('import_booking_rows')
-    .select('*')
+    .select('file_id, row_number')
     .eq('session_id', sessionId)
     .eq('is_future_booking', true);
 
-  const hasStagedFutureBookings = (stagedBookingRows ?? []).length > 0;
-  const todayStr = todayIsoLocal();
+  /**
+   * Set of `${file_id}:${row_number}` for rows that were staged via the
+   * references step. The CSV booking phase skips a row only when it is in this
+   * set, so future-dated CSV rows that *were not* staged still get imported
+   * through the CSV path instead of being silently dropped.
+   */
+  const stagedRowKeys = new Set<string>(
+    (stagedBookingRows ?? []).map(
+      (r) =>
+        `${(r as { file_id: string }).file_id}:${(r as { row_number: number }).row_number}`,
+    ),
+  );
 
   async function flushCountersToSession() {
     st.importedClients = importedClients;
@@ -297,15 +316,22 @@ export async function runImportExecuteBatch(
         imported_clients: importedClients,
         imported_bookings: importedBookings,
         skipped_rows: skipped,
+        updated_existing: updatedExisting,
         updated_at: new Date().toISOString(),
       })
       .eq('id', sessionId);
   }
 
+  let rowsSinceProgressFlush = 0;
+
   async function bumpProgress() {
     processed += 1;
-    await flushCountersToSession();
     budget -= 1;
+    rowsSinceProgressFlush += 1;
+    if (shouldFlushImportProgressToDb(rowsSinceProgressFlush, budget)) {
+      await flushCountersToSession();
+      rowsSinceProgressFlush = 0;
+    }
     if (budget <= 0) {
       throw new ImportBatchPaused(snapshotImportExecuteStateForPause(st));
     }
@@ -320,79 +346,19 @@ export async function runImportExecuteBatch(
 
   async function loadDefaultsIntoState() {
     if (st.defaultsPayload) return;
-    let defaultAreaId: string | null = null;
-    if (bookingModel === 'table_reservation') {
-      defaultAreaId = await getDefaultAreaIdForVenue(admin, venueId);
-    }
-
-    let defaultCalendarId: string | null = null;
-    let defaultServiceItemId: string | null = null;
-    let defaultPractitionerId: string | null = null;
-    let defaultAppointmentServiceId: string | null = null;
-
-    if (unified) {
-      const { data: cal } = await admin
-        .from('unified_calendars')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('is_active', true)
-        .order('sort_order')
-        .limit(1)
-        .maybeSingle();
-      defaultCalendarId = (cal as { id: string } | null)?.id ?? null;
-      if (defaultCalendarId) {
-        const { data: csa } = await admin
-          .from('calendar_service_assignments')
-          .select('service_item_id')
-          .eq('calendar_id', defaultCalendarId)
-          .limit(1)
-          .maybeSingle();
-        defaultServiceItemId = (csa as { service_item_id: string } | null)?.service_item_id ?? null;
-      }
-      if (!defaultServiceItemId) {
-        const { data: si } = await admin
-          .from('service_items')
-          .select('id')
-          .eq('venue_id', venueId)
-          .eq('is_active', true)
-          .order('sort_order')
-          .limit(1)
-          .maybeSingle();
-        defaultServiceItemId = (si as { id: string } | null)?.id ?? null;
-      }
-    } else if (bookingModel === 'practitioner_appointment') {
-      const { data: p } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('is_active', true)
-        .order('sort_order')
-        .limit(1)
-        .maybeSingle();
-      const { data: s } = await admin
-        .from('appointment_services')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('is_active', true)
-        .order('sort_order')
-        .limit(1)
-        .maybeSingle();
-      defaultPractitionerId = (p as { id: string } | null)?.id ?? null;
-      defaultAppointmentServiceId = (s as { id: string } | null)?.id ?? null;
-    }
-
+    const defaults = await resolveBookingImportDefaults(admin, venueId);
     st.defaultsPayload = {
-      defaultAreaId,
-      defaultCalendarId,
-      defaultServiceItemId,
-      defaultPractitionerId,
-      defaultAppointmentServiceId,
+      defaultAreaId: defaults.defaultAreaId,
+      defaultCalendarId: defaults.defaultCalendarId,
+      defaultServiceItemId: defaults.defaultServiceItemId,
+      defaultPractitionerId: defaults.defaultPractitionerId,
+      defaultAppointmentServiceId: defaults.defaultAppointmentServiceId,
     };
   }
 
   while (st.phase === 'clients') {
     if (st.clientFileIndex >= clientFiles.length) {
-      st.phase = hasStagedFutureBookings ? 'staged_bookings' : 'csv_bookings';
+      st.phase = stagedRowKeys.size > 0 ? 'staged_bookings' : 'csv_bookings';
       break;
     }
     const f = clientFiles[st.clientFileIndex] as { id: string; storage_path: string };
@@ -423,15 +389,24 @@ export async function runImportExecuteBatch(
         fn = fn || sp.first;
         ln = ln || sp.last;
       }
-      if (!fn || !ln) {
+
+      const email = normaliseEmail(targets.email ?? null);
+      const ph = normalisePhoneUk(targets.phone ?? null);
+
+      const nameOutcome = evaluateClientRowNameRule({
+        firstName: fn,
+        lastName: ln,
+        email: email ?? targets.email ?? null,
+        phone: ph.e164 ?? targets.phone ?? null,
+      });
+      if (nameOutcome.kind === 'missing_name' || nameOutcome.kind === 'missing_contact') {
         skipped += 1;
         st.clientRowIndex += 1;
         await bumpProgress();
         continue;
       }
-
-      const email = normaliseEmail(targets.email ?? null);
-      const ph = normalisePhoneUk(targets.phone ?? null);
+      const firstNameForDb: string | null = fn || null;
+      const lastNameForDb: string | null = ln || null;
 
       const tagsRaw = targets.tags?.split(/[,;]/).map((t) => t.trim()).filter(Boolean) ?? [];
       const tags = normaliseGuestTagsInput(tagsRaw);
@@ -495,29 +470,27 @@ export async function runImportExecuteBatch(
         lastVisitDate = parseDateString(targets.last_visit_date, datePref ?? undefined).iso;
       }
 
-      const existingByEmail =
-        email ?
-          (
-            await admin
-              .from('guests')
-              .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
-              .eq('venue_id', venueId)
-              .eq('email', email)
-              .maybeSingle()
-          ).data
+      const guestSelectColumns =
+        'id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date';
+      const existingByEmail = email
+        ? await findGuestByEmailCi<Record<string, unknown> & { id: string }>(
+            admin,
+            venueId,
+            email,
+            guestSelectColumns,
+          )
         : null;
 
+      const phoneMatchKey = phoneForMatching(ph);
       const existingByPhone =
-        !existingByEmail && ph.e164 ?
-          (
-            await admin
-              .from('guests')
-              .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
-              .eq('venue_id', venueId)
-              .eq('phone', ph.e164)
-              .maybeSingle()
-          ).data
-        : null;
+        !existingByEmail && phoneMatchKey
+          ? await findGuestByPhone<Record<string, unknown> & { id: string }>(
+              admin,
+              venueId,
+              phoneMatchKey,
+              guestSelectColumns,
+            )
+          : null;
 
       let existingByExternal: (typeof existingByEmail) | null = null;
       if (!existingByEmail && !existingByPhone && refProvider && targets.external_client_id?.trim()) {
@@ -559,8 +532,8 @@ export async function runImportExecuteBatch(
         await admin
           .from('guests')
           .update({
-            first_name: fn,
-            last_name: ln,
+            first_name: firstNameForDb ?? (prev.first_name as string | null),
+            last_name: lastNameForDb ?? (prev.last_name as string | null),
             email: email ?? (prev.email as string | null),
             phone: ph.e164 ?? (prev.phone as string | null),
             tags: tags.length ? tags : (prev.tags as string[] | undefined),
@@ -600,6 +573,17 @@ export async function runImportExecuteBatch(
       }
 
       if (existing && !shouldUpdateExisting(issues)) {
+        const existingDecision = (issues ?? []).find((i) => i.issue_type === 'existing_client');
+        if (existingDecision && !existingDecision.user_decision) {
+          /** Defensive: the API guard should already block this, but log + audit so the row is not silently dropped. */
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: f.id,
+            rowNumber: rowNum,
+            code: 'existing_client_no_decision',
+            message:
+              'Existing-client warning had no decision when import ran; row was skipped. Choose Update existing or Skip and re-validate.',
+          });
+        }
         skipped += 1;
         st.clientRowIndex += 1;
         await bumpProgress();
@@ -610,8 +594,8 @@ export async function runImportExecuteBatch(
         .from('guests')
         .insert({
           venue_id: venueId,
-          first_name: fn,
-          last_name: ln,
+          first_name: firstNameForDb,
+          last_name: lastNameForDb,
           email,
           phone: ph.e164,
           global_guest_hash: hashGuest(email, ph.e164),
@@ -626,6 +610,12 @@ export async function runImportExecuteBatch(
 
       if (insErr || !inserted) {
         console.error('[import execute] guest insert', insErr);
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'guest_insert_failed',
+          message: `Could not create the guest record: ${insErr?.message ?? 'unknown error'}`,
+        });
         skipped += 1;
         st.clientRowIndex += 1;
         await bumpProgress();
@@ -684,54 +674,27 @@ export async function runImportExecuteBatch(
       if (byExt) return byExt;
     }
     if (email) {
-      const { data } = await admin
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('email', email)
-        .maybeSingle();
-      if (data) return data.id as string;
+      const byEmail = await findGuestByEmailCi<{ id: string }>(admin, venueId, email, 'id');
+      if (byEmail) return byEmail.id;
     }
     if (phone) {
-      const { data } = await admin
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('phone', phone)
-        .maybeSingle();
-      if (data) return data.id as string;
+      const byPhone = await findGuestByPhone<{ id: string }>(admin, venueId, phone, 'id');
+      if (byPhone) return byPhone.id;
+    }
+    const hasStrongerIdentifier = Boolean(email || phone || (refProvider && externalClientId?.trim()));
+    if (hasStrongerIdentifier) {
+      /** With email/phone/external id present we already had stronger signals; do not fall back to name-only matching. */
+      return null;
     }
     const fn = rawFirst?.trim() ? rawFirst.trim() : null;
     const ln = rawLast?.trim() ? rawLast.trim() : null;
-    if (fn && ln) {
-      const { data } = await admin
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('first_name', fn)
-        .eq('last_name', ln)
-        .maybeSingle();
-      if (data) return data.id as string;
-    }
-    if (fn && !ln) {
-      const { data } = await admin
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venueId)
-        .eq('first_name', fn)
-        .is('last_name', null)
-        .maybeSingle();
-      if (data) return data.id as string;
-    }
-    if (!fn && ln) {
-      const { data } = await admin
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venueId)
-        .is('first_name', null)
-        .eq('last_name', ln)
-        .maybeSingle();
-      if (data) return data.id as string;
+    const byName = await findGuestIdByExactName(admin, venueId, fn, ln);
+    if (byName && !byName.ambiguous) return byName.id;
+    if (byName?.ambiguous) {
+      console.warn(
+        '[import execute] multiple guests share the same name; will create a synthetic import-only guest',
+        { venueId, fn, ln },
+      );
     }
     return null;
   }
@@ -877,6 +840,12 @@ export async function runImportExecuteBatch(
           row.raw_external_appointment_id.trim(),
         );
         if (dupAppt) {
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: row.file_id,
+            rowNumber: row.row_number,
+            code: 'duplicate_external_appointment_id',
+            message: `External appointment ID "${row.raw_external_appointment_id.trim()}" already exists in ReserveNI; the new row was skipped.`,
+          });
           skipped += 1;
           st.stagedRowIndex += 1;
           await bumpProgress();
@@ -890,12 +859,18 @@ export async function runImportExecuteBatch(
         fileId: row.file_id,
         rowNumber: row.row_number,
         email: em,
-        phone: ph.e164,
+        phone: phoneForMatching(ph),
         rawFirst: row.raw_guest_first_name ?? null,
         rawLast: row.raw_guest_last_name ?? null,
         externalClientId: row.raw_external_client_id ?? null,
       });
       if (!guestId) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'guest_resolution_failed',
+          message: 'Could not find or create a guest for this booking row (no email/phone/external id and no unique name match).',
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
@@ -1047,16 +1022,34 @@ export async function runImportExecuteBatch(
       } else if (bookingModel === 'resource_booking' && row.resolved_resource_id) {
         insert.resource_id = row.resolved_resource_id;
       } else if (unified) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'unified_resolution_failed',
+          message: 'Could not resolve a calendar and service item for this row from the references step.',
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       } else if (bookingModel === 'practitioner_appointment') {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'practitioner_resolution_failed',
+          message: 'Could not resolve a practitioner and service for this row from the references step.',
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
       } else if (bookingModel === 'event_ticket' || bookingModel === 'class_session' || bookingModel === 'resource_booking') {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'unsupported_resolution',
+          message: `Could not resolve a ${bookingModel} target for this row.`,
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
@@ -1065,6 +1058,12 @@ export async function runImportExecuteBatch(
 
       if (bookingModel === 'table_reservation') {
         if (!defaultAreaId) {
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: row.file_id,
+            rowNumber: row.row_number,
+            code: 'no_default_area',
+            message: 'No default seating area is configured for this venue.',
+          });
           skipped += 1;
           st.stagedRowIndex += 1;
           await bumpProgress();
@@ -1078,6 +1077,12 @@ export async function runImportExecuteBatch(
       const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
       if (bErr || !booking) {
         console.error('[import execute] staged booking insert', bErr);
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'booking_insert_failed',
+          message: `Could not insert the booking: ${bErr?.message ?? 'unknown error'}`,
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
@@ -1095,6 +1100,12 @@ export async function runImportExecuteBatch(
       if (recErr) {
         console.error('[import execute] import_records after staged booking', recErr);
         await admin.from('bookings').delete().eq('id', booking.id);
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'audit_insert_failed',
+          message: `Booking was inserted then rolled back because the audit record could not be written: ${recErr.message}`,
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();
@@ -1173,14 +1184,20 @@ export async function runImportExecuteBatch(
       const { iso: dateIso } = parseDateString(bdRaw, datePref ?? undefined);
       const bt = parseTimeString(btRaw);
       if (!dateIso || !bt) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'unparseable_date_or_time',
+          message: 'Could not parse booking date or time at execute time.',
+        });
         skipped += 1;
         st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
       }
 
-      if (hasStagedFutureBookings && dateIso >= todayStr) {
-        skipped += 1;
+      if (stagedRowKeys.has(`${f.id}:${rowNum}`)) {
+        /** Already imported via the staged-bookings phase; do not double-import. */
         st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
@@ -1194,6 +1211,12 @@ export async function runImportExecuteBatch(
           targets.external_appointment_id.trim(),
         );
         if (dupAppt) {
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: f.id,
+            rowNumber: rowNum,
+            code: 'duplicate_external_appointment_id',
+            message: `External appointment ID "${targets.external_appointment_id.trim()}" already exists in ReserveNI; the new row was skipped.`,
+          });
           skipped += 1;
           st.bookingRowIndex += 1;
           await bumpProgress();
@@ -1210,12 +1233,18 @@ export async function runImportExecuteBatch(
         fileId: f.id,
         rowNumber: rowNum,
         email: em,
-        phone: ph.e164,
+        phone: phoneForMatching(ph),
         rawFirst: guestFirstName || null,
         rawLast: guestLastName || null,
         externalClientId: targets.client_external_id ?? null,
       });
       if (!guestId) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'guest_resolution_failed',
+          message: 'Could not find or create a guest for this booking row (no email/phone/external id and no unique name match).',
+        });
         skipped += 1;
         st.bookingRowIndex += 1;
         await bumpProgress();
@@ -1241,26 +1270,38 @@ export async function runImportExecuteBatch(
 
       if (unified && (targets.staff_name?.trim() || targets.service_name?.trim())) {
         if (targets.staff_name?.trim()) {
-          const { data: calMatch } = await admin
-            .from('unified_calendars')
-            .select('id')
-            .eq('venue_id', venueId)
-            .ilike('name', `%${targets.staff_name.trim()}%`)
-            .eq('is_active', true)
-            .limit(1)
-            .maybeSingle();
-          if (calMatch) calendarId = (calMatch as { id: string }).id;
+          const calMatch = await resolveNamedRowId(admin, {
+            table: 'unified_calendars',
+            venueId,
+            name: targets.staff_name,
+            isActiveOnly: true,
+          });
+          if (calMatch.id) calendarId = calMatch.id;
+          if (calMatch.ambiguous) {
+            await recordExecuteSkip(admin, sessionId, {
+              fileId: f.id,
+              rowNumber: rowNum,
+              code: 'ambiguous_calendar_match',
+              message: `Multiple calendars matched "${targets.staff_name.trim()}"; using the first deterministically. Rename calendars or map columns to avoid ambiguity.`,
+            });
+          }
         }
         if (targets.service_name?.trim()) {
-          const { data: svcMatch } = await admin
-            .from('service_items')
-            .select('id')
-            .eq('venue_id', venueId)
-            .ilike('name', `%${targets.service_name.trim()}%`)
-            .eq('is_active', true)
-            .limit(1)
-            .maybeSingle();
-          if (svcMatch) serviceItemId = (svcMatch as { id: string }).id;
+          const svcMatch = await resolveNamedRowId(admin, {
+            table: 'service_items',
+            venueId,
+            name: targets.service_name,
+            isActiveOnly: true,
+          });
+          if (svcMatch.id) serviceItemId = svcMatch.id;
+          if (svcMatch.ambiguous) {
+            await recordExecuteSkip(admin, sessionId, {
+              fileId: f.id,
+              rowNumber: rowNum,
+              code: 'ambiguous_service_match',
+              message: `Multiple services matched "${targets.service_name.trim()}"; using the first deterministically. Rename services or map columns to avoid ambiguity.`,
+            });
+          }
         }
       }
 
@@ -1383,6 +1424,12 @@ export async function runImportExecuteBatch(
         insert.calendar_id = null;
         insert.service_item_id = null;
       } else if (unified) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'unified_no_default_calendar_or_service',
+          message: 'No default calendar or service item is configured; this booking row was skipped.',
+        });
         skipped += 1;
         st.bookingRowIndex += 1;
         await bumpProgress();
@@ -1391,6 +1438,12 @@ export async function runImportExecuteBatch(
 
       if (bookingModel === 'table_reservation') {
         if (!defaultAreaId) {
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: f.id,
+            rowNumber: rowNum,
+            code: 'no_default_area',
+            message: 'No default seating area is configured for this venue.',
+          });
           skipped += 1;
           st.bookingRowIndex += 1;
           await bumpProgress();
@@ -1404,6 +1457,12 @@ export async function runImportExecuteBatch(
       const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
       if (bErr || !booking) {
         console.error('[import execute] booking insert', bErr);
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'booking_insert_failed',
+          message: `Could not insert the booking: ${bErr?.message ?? 'unknown error'}`,
+        });
         skipped += 1;
         st.bookingRowIndex += 1;
         await bumpProgress();
@@ -1421,6 +1480,12 @@ export async function runImportExecuteBatch(
       if (recErr) {
         console.error('[import execute] import_records after booking', recErr);
         await admin.from('bookings').delete().eq('id', booking.id);
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'audit_insert_failed',
+          message: `Booking was inserted then rolled back because the audit record could not be written: ${recErr.message}`,
+        });
         skipped += 1;
         st.bookingRowIndex += 1;
         await bumpProgress();
@@ -1463,6 +1528,11 @@ export async function runImportExecuteBatch(
 
     st.bookingFileIndex += 1;
     st.bookingRowIndex = 0;
+  }
+
+  if (rowsSinceProgressFlush > 0) {
+    await flushCountersToSession();
+    rowsSinceProgressFlush = 0;
   }
 
   const undoUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

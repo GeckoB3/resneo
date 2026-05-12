@@ -1,4 +1,4 @@
-import { parse, isValid } from 'date-fns';
+import { format, parse, isValid } from 'date-fns';
 import { normalizeToE164, normalizeToE164Lenient } from '@/lib/phone/e164';
 
 const DATE_FORMATS_TRY = [
@@ -18,7 +18,12 @@ export function normaliseEmail(raw: string | null | undefined): string | null {
   return t.toLowerCase();
 }
 
-export function normalisePhoneUk(raw: string | null | undefined): { e164: string | null; warning: boolean } {
+export interface NormalisedPhone {
+  e164: string | null;
+  warning: boolean;
+}
+
+export function normalisePhoneUk(raw: string | null | undefined): NormalisedPhone {
   const t = raw?.trim();
   if (!t) return { e164: null, warning: false };
   const strict = normalizeToE164(t, 'GB');
@@ -54,13 +59,13 @@ export function parseDateString(
 
   if (preferred === 'dd/MM/yyyy' || preferred === 'MM/dd/yyyy') {
     const p = parse(t, preferred, new Date());
-    if (isValid(p)) return { iso: p.toISOString().slice(0, 10), ambiguous: false };
+    if (isValid(p)) return { iso: format(p, 'yyyy-MM-dd'), ambiguous: false };
   }
 
   for (const fmt of DATE_FORMATS_TRY) {
     const p = parse(t, fmt, new Date());
     if (isValid(p)) {
-      const iso = p.toISOString().slice(0, 10);
+      const iso = format(p, 'yyyy-MM-dd');
       if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(t)) {
         const parts = t.split(/[/.-]/);
         if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
@@ -78,7 +83,7 @@ export function parseDateString(
   const native = Date.parse(t);
   if (!Number.isNaN(native)) {
     const d = new Date(native);
-    return { iso: d.toISOString().slice(0, 10), ambiguous: false };
+    return { iso: format(d, 'yyyy-MM-dd'), ambiguous: false };
   }
 
   return { iso: null, ambiguous: false };
@@ -117,6 +122,12 @@ export function parseIntSafe(raw: string | null | undefined): number | null {
 export function splitFullName(full: string): { first: string; last: string } {
   const t = full.trim();
   if (!t) return { first: '', last: '' };
+  const commaIdx = t.indexOf(',');
+  if (commaIdx > 0) {
+    const last = t.slice(0, commaIdx).trim();
+    const first = t.slice(commaIdx + 1).trim();
+    if (last && first) return { first, last };
+  }
   const sp = t.indexOf(' ');
   if (sp === -1) return { first: t, last: '' };
   return { first: t.slice(0, sp).trim(), last: t.slice(sp + 1).trim() };

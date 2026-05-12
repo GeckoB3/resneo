@@ -150,7 +150,7 @@ export function parseGuestListQuery(sp: URLSearchParams): ParsedGuestListQuery {
   const pageRaw = Number.parseInt(sp.get('page') ?? '0', 10);
   const page = Number.isFinite(pageRaw) && pageRaw >= 0 ? pageRaw : 0;
   const limitRaw = Number.parseInt(sp.get('limit') ?? '25', 10) || 25;
-  const limit = Math.min(50, Math.max(1, limitRaw));
+  const limit = Math.min(250, Math.max(1, limitRaw));
   const icf = sp.get('include_custom_fields');
   const include_custom_fields = icf === '1' || icf === 'true';
 

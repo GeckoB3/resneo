@@ -29,6 +29,7 @@ export function ClampedFixedDropdown({
   children,
   id,
   onDismiss,
+  ignoreDismissIf,
   'aria-label': ariaLabel,
 }: {
   open: boolean;
@@ -43,6 +44,8 @@ export function ClampedFixedDropdown({
   children: ReactNode;
   id?: string;
   onDismiss?: () => void;
+  /** Targets inside nested portaled panels (still inside this dropdown logically) won't dismiss */
+  ignoreDismissIf?: (target: EventTarget | null) => boolean;
   'aria-label'?: string;
 }) {
   const [style, setStyle] = useState<CSSProperties>({});
@@ -52,6 +55,7 @@ export function ClampedFixedDropdown({
     open: open && Boolean(onDismiss),
     refs: [triggerRef, panelRef],
     onDismiss: onDismiss ?? (() => {}),
+    ignoreDismissIf,
   });
 
   useLayoutEffect(() => {

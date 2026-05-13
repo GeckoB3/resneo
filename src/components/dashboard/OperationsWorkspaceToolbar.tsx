@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from 'react';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
+import { CALENDAR_PICKER_SUBPOPOVER_SELECTOR } from '@/components/calendar/CalendarDateTimePicker';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { nextBookingsTileContent } from '@/lib/table-management/next-bookings-slot';
 
@@ -325,6 +326,8 @@ export function OperationsWorkspaceToolbar({
     if (!inlineInfoOpen && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen) return;
 
     const onPointerDown = (event: PointerEvent) => {
+      const t = event.target;
+      if (t instanceof Element && t.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR)) return;
       if (infoPopoverRef.current?.contains(event.target as Node)) return;
       if (datePopoverRef.current?.contains(event.target as Node)) return;
       if (controlsPopoverRef.current?.contains(event.target as Node)) return;
@@ -462,6 +465,9 @@ export function OperationsWorkspaceToolbar({
                       maxWidthPx={352}
                       id={datePanelId}
                       onDismiss={close}
+                      ignoreDismissIf={(target) =>
+                        target instanceof Element && Boolean(target.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR))
+                      }
                       aria-label="Date and calendar"
                       className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
                     >

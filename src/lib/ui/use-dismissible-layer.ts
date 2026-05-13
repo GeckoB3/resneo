@@ -6,6 +6,8 @@ interface UseDismissibleLayerOptions {
   open: boolean;
   refs: Array<RefObject<Node | null>>;
   onDismiss: () => void;
+  /** When true, dismissed pointer/click handlers no-op (nested floating UI anchored to portal). */
+  ignoreDismissIf?: (target: EventTarget | null) => boolean;
 }
 
 function eventTargetInsideRefs(target: EventTarget | null, refs: Array<RefObject<Node | null>>): boolean {
@@ -44,19 +46,27 @@ function installOneShotGestureBlocker(): void {
  * Dismisses a floating layer from outside interaction while consuming the gesture,
  * so the click does not also activate whatever sits underneath the popover.
  */
-export function useDismissibleLayer({ open, refs, onDismiss }: UseDismissibleLayerOptions): void {
+export function useDismissibleLayer({
+  open,
+  refs,
+  onDismiss,
+  ignoreDismissIf,
+}: UseDismissibleLayerOptions): void {
   const refsRef = useRef(refs);
   const onDismissRef = useRef(onDismiss);
+  const ignoreDismissIfRef = useRef(ignoreDismissIf);
 
   useLayoutEffect(() => {
     refsRef.current = refs;
     onDismissRef.current = onDismiss;
+    ignoreDismissIfRef.current = ignoreDismissIf;
   });
 
   useEffect(() => {
     if (!open) return;
 
     const onPointerDownCapture = (event: PointerEvent) => {
+      if (ignoreDismissIfRef.current?.(event.target)) return;
       if (eventTargetInsideRefs(event.target, refsRef.current)) return;
       consumeEvent(event);
       installOneShotGestureBlocker();
@@ -64,6 +74,7 @@ export function useDismissibleLayer({ open, refs, onDismiss }: UseDismissibleLay
     };
 
     const onClickCapture = (event: MouseEvent) => {
+      if (ignoreDismissIfRef.current?.(event.target)) return;
       if (eventTargetInsideRefs(event.target, refsRef.current)) return;
       consumeEvent(event);
       onDismissRef.current();

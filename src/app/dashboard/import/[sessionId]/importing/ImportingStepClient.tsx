@@ -47,7 +47,6 @@ function createExecuteAbortSignal(): { signal: AbortSignal; cancel: () => void }
 }
 
 export function ImportingStepClient({ sessionId }: { sessionId: string }) {
-  const ran = useRef(false);
   /** Wall-clock baseline for elapsed + ETA (before first execute POST, or server `started_at` when resuming). */
   const importStartMs = useRef<number | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -65,10 +64,12 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
     return () => clearInterval(id);
   }, [progress?.status, executingBatch]);
 
+  /**
+   * No `didRun` ref: React 18 Strict Mode runs effects as mount → cleanup → mount. A ref “run once”
+   * survives that cycle and skips the second mount, cancelling all async/poll timers with nothing left
+   * to restart — progress/UI stuck until refresh.
+   */
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-
     let cancelled = false;
 
     function clearPollTimer() {

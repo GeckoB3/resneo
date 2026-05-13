@@ -816,6 +816,11 @@ function countBookingRightColumnActions(b: Booking): number {
   return n;
 }
 
+/** When true, the right column shows Arrived or Clear before Confirm/Start (short bars may omit this row). */
+function bookingHasArrivalToggleInRightColumn(b: Booking): boolean {
+  return b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed';
+}
+
 /** Per-row height for the single-column action stack. */
 const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
 /** Overlap lanes stack every action vertically in one narrow strip — delay compact/smaller typography slightly vs the padded wide strip. */
@@ -938,6 +943,7 @@ function collectBookingRightColumnActionNodes({
   fontSizePx,
   compact,
   narrow = false,
+  omitArrivalActions = false,
 }: {
   b: Booking;
   busy: boolean;
@@ -947,6 +953,8 @@ function collectBookingRightColumnActionNodes({
   fontSizePx: number;
   compact: boolean;
   narrow?: boolean;
+  /** Hide Arrived / Clear so Confirm or Start stays readable on very short booking bars. */
+  omitArrivalActions?: boolean;
 }): ReactElement[] {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return [];
 
@@ -973,7 +981,10 @@ function collectBookingRightColumnActionNodes({
     );
   }
   if (b.status !== 'Completed') {
-    if (b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') {
+    if (
+      !omitArrivalActions &&
+      (b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed')
+    ) {
       if (!arrived) {
         out.push(
           <button
@@ -1089,10 +1100,18 @@ function CalendarBookingRightColumn({
 }) {
   const reserveRightColumnTopPad = !(narrow && floating);
 
+  const layoutOptions = { reserveRightColumnTopPad };
+
   const fullActionCount = countBookingRightColumnActions(b);
-  const layout = bookingRightColumnLayout(blockHeightPx, fullActionCount, {
-    reserveRightColumnTopPad,
-  });
+  const layoutIfAllActions = bookingRightColumnLayout(blockHeightPx, fullActionCount, layoutOptions);
+
+  const omitArrivalActions =
+    layoutIfAllActions.compact &&
+    bookingHasArrivalToggleInRightColumn(b) &&
+    fullActionCount > 1;
+
+  const effectiveActionCount = omitArrivalActions ? fullActionCount - 1 : fullActionCount;
+  const layout = bookingRightColumnLayout(blockHeightPx, effectiveActionCount, layoutOptions);
 
   /** Do not OR in `narrow`: that forced compact typography/padding whenever lanes overlapped, so buttons shrunk below wide-lane sizing for the same `blockHeightPx`. */
   const compact = layout.compact;
@@ -1133,6 +1152,7 @@ function CalendarBookingRightColumn({
     fontSizePx,
     compact,
     narrow,
+    omitArrivalActions,
   });
 
   return (

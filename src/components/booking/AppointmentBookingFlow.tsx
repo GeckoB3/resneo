@@ -134,6 +134,19 @@ interface AppointmentBookingFlowProps {
   preselectedPractitionerId?: string;
   /** Staff walk-ins: optional guest contact (defaults name to Walk In). */
   staffBookingSource?: 'phone' | 'walk-in';
+  editBooking?: {
+    id: string;
+    booking_date: string;
+    booking_time: string;
+    party_size: number;
+    practitioner_id: string;
+    service_id: string;
+    guest_first_name?: string;
+    guest_last_name?: string;
+    guest_email?: string;
+    guest_phone?: string;
+    publicAuth?: { token?: string; hmac?: string };
+  };
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -177,8 +190,10 @@ export function AppointmentBookingFlow({
   initialTime,
   preselectedPractitionerId,
   staffBookingSource = 'phone',
+  editBooking,
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isEdit = Boolean(editBooking);
   const isStaffWalkInAppointment = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
@@ -192,9 +207,9 @@ export function AppointmentBookingFlow({
 
   // Shared state
   const [step, setStep] = useState<Step>(() =>
-    isLockedPractitionerFlow ? 'service' : 'mode_choice',
+    editBooking ? 'service' : isLockedPractitionerFlow ? 'service' : 'mode_choice',
   );
-  const [date, setDate] = useState(() => initialDate ?? todayStr());
+  const [date, setDate] = useState(() => editBooking?.booking_date ?? initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
@@ -203,13 +218,13 @@ export function AppointmentBookingFlow({
   const [submitting, setSubmitting] = useState(false);
 
   // Single booking state
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? null);
   /** When the chosen service has variants, this is the picked variant id; null otherwise. */
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
-    lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null,
+    editBooking?.practitioner_id ?? (lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null),
   );
-  const [selectedTime, setSelectedTime] = useState<string | null>(() => initialTime ?? null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(() => editBooking?.booking_time.slice(0, 5) ?? initialTime ?? null);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{
     booking_id: string;
@@ -336,11 +351,11 @@ export function AppointmentBookingFlow({
   }, [initialDate]);
 
   useEffect(() => {
-    if (!preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
+    if (editBooking || !preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
     if (catalogStaff.some((p) => p.id === preselectedPractitionerId)) {
       setSelectedPractitionerId(preselectedPractitionerId);
     }
-  }, [preselectedPractitionerId, catalogStaff, lockedPractitioner]);
+  }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner]);
 
   const fetchAvailability = useCallback(
     async (opts: { serviceId: string; practitionerId: string; variantId?: string | null }) => {
@@ -1073,8 +1088,70 @@ export function AppointmentBookingFlow({
       isStaffWalkInAppointment,
       selectedServiceForPractitioner,
       onBookingCreated,
+      editBooking,
     ],
   );
+
+  const handleEditSave = useCallback(async () => {
+    if (!editBooking || !selectedPractitionerId || !selectedServiceId || !selectedTime) {
+      setError('Choose a service, practitioner and time before saving.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const body = {
+        booking_date: date,
+        booking_time: selectedTime.length === 5 ? `${selectedTime}:00` : selectedTime,
+        party_size: editBooking.party_size,
+        practitioner_id: selectedPractitionerId,
+        appointment_service_id: selectedServiceId,
+      };
+      const res = editBooking.publicAuth
+        ? await fetch('/api/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_id: editBooking.id,
+              ...editBooking.publicAuth,
+              action: 'modify',
+              ...body,
+            }),
+          })
+        : await fetch(`/api/venue/bookings/${editBooking.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...body,
+              allow_manual_overlap: true,
+            }),
+          });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? 'Could not update appointment');
+      }
+      setCreateResult({
+        booking_id: editBooking.id,
+        requires_deposit: false,
+        deposit_amount_pence: 0,
+        cancellation_notice_hours: refundNoticeHours,
+      });
+      setStep('confirmation');
+      onBookingCreated?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update appointment');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    date,
+    editBooking,
+    onBookingCreated,
+    refundNoticeHours,
+    selectedPractitionerId,
+    selectedServiceId,
+    selectedTime,
+  ]);
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -1298,7 +1375,7 @@ export function AppointmentBookingFlow({
       {/* ════════════════════════════════════════════════
           MODE CHOICE: Book for myself vs Group
           ════════════════════════════════════════════════ */}
-      {step === 'mode_choice' && !isLockedPractitionerFlow && (
+      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && (
         <div>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">How would you like to book?</h2>
           <p className="mb-5 text-sm text-slate-500">Choose a single appointment or a group booking for several people.</p>
@@ -1343,14 +1420,18 @@ export function AppointmentBookingFlow({
 
       {step === 'service' && (
         <div>
-          {!isLockedPractitionerFlow && (
+          {!isLockedPractitionerFlow && !isEdit && (
             <button type="button" onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
               Back
             </button>
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
-          <p className="mb-4 text-sm text-slate-500">Choose the service you want. You will pick a date and time in a later step.</p>
+          <p className="mb-4 text-sm text-slate-500">
+            {isEdit
+              ? 'Choose the service for your changed appointment.'
+              : 'Choose the service you want. You will pick a date and time in a later step.'}
+          </p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : servicesWithFromPrice.length === 0 ? (
@@ -1378,6 +1459,19 @@ export function AppointmentBookingFlow({
                     })();
                     if (variantsForSvc.length > 0) {
                       setStep('variant');
+                      return;
+                    }
+                    if (isEdit) {
+                      const existingOrFirst =
+                        catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === svc.id)) ??
+                        catalogStaff.find((p) => p.services.some((s) => s.id === svc.id));
+                      setSelectedPractitionerId(existingOrFirst?.id ?? null);
+                      if (existingOrFirst?.id) {
+                        primeSelectedAppointmentCalendar(existingOrFirst.id, svc.id);
+                        setStep('slot');
+                      } else {
+                        setStep('practitioner');
+                      }
                       return;
                     }
                     if (isLockedPractitionerFlow && selectedPractitionerId) {
@@ -1471,6 +1565,10 @@ export function AppointmentBookingFlow({
                 setStep('variant');
                 return;
               }
+              if (isEdit) {
+                setStep('service');
+                return;
+              }
               setSelectedServiceId(null);
               setSelectedVariantId(null);
               setSelectedPractitionerId(null);
@@ -1488,7 +1586,11 @@ export function AppointmentBookingFlow({
             </div>
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
-          <p className="mb-4 text-sm text-slate-500">Choose your preferred {terms.staff.toLowerCase()}. Prices shown are what they charge for this service.</p>
+          <p className="mb-4 text-sm text-slate-500">
+            {isEdit
+              ? `Choose the ${terms.staff.toLowerCase()} for your changed appointment.`
+              : `Choose your preferred ${terms.staff.toLowerCase()}. Prices shown are what they charge for this service.`}
+          </p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : practitionersForSelectedService.length === 0 ? (
@@ -1828,7 +1930,26 @@ export function AppointmentBookingFlow({
               </label>
             );
           })()}
-          {submitting ? (
+          {isEdit ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void handleEditSave()}
+                className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-50"
+              >
+                {submitting ? 'Saving...' : 'Save appointment changes'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep('slot')}
+                disabled={submitting}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Back to time selection
+              </button>
+            </div>
+          ) : submitting ? (
             <BookingSubmittingPanel variant="appointment" />
           ) : (
             <DetailsStep
@@ -1863,8 +1984,30 @@ export function AppointmentBookingFlow({
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              initialDetails={editBooking ? {
+                first_name: editBooking.guest_first_name,
+                last_name: editBooking.guest_last_name,
+                email: editBooking.guest_email,
+                phone: editBooking.guest_phone,
+              } : undefined}
+              hideAppointmentRequestField={isEdit}
+              submitLabel={isEdit ? 'Save changes' : undefined}
             />
           )}
+        </div>
+      )}
+
+      {isEdit && step === 'confirmation' && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+            <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-green-900">{terms.booking} Updated</h2>
+          <p className="mt-2 text-sm text-green-700">{selectedService?.name} with {selectedPrac?.name}</p>
+          <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
+          <p className="mt-3 text-xs text-green-700">Your changes have been saved.</p>
         </div>
       )}
 
@@ -1891,10 +2034,10 @@ export function AppointmentBookingFlow({
         />
       )}
 
-      {step === 'confirmation' && (
+      {!isEdit && step === 'confirmation' && (
         <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100"><svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
-          <h2 className="text-xl font-bold text-green-900">{terms.booking} Confirmed</h2>
+          <h2 className="text-xl font-bold text-green-900">{isEdit ? `${terms.booking} Updated` : `${terms.booking} Confirmed`}</h2>
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
             <div className="mt-3 space-y-2 text-left text-sm text-green-800">
               <p className="text-center text-green-700">{formatDateHuman(date)} with {selectedPrac?.name}</p>
@@ -1913,23 +2056,26 @@ export function AppointmentBookingFlow({
               <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
             </>
           )}
-          {(guestDetails?.email || guestDetails?.phone) ? (
+          {!isEdit && (guestDetails?.email || guestDetails?.phone) ? (
             <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>
           ) : null}
-          {isStaff && createResult?.payment_url ? (
+          {isEdit ? (
+            <p className="mt-3 text-xs text-green-700">Your changes have been saved.</p>
+          ) : null}
+          {!isEdit && isStaff && createResult?.payment_url ? (
             <p className="mt-3 text-xs text-green-800">A deposit payment link was sent to the guest.</p>
           ) : null}
-          {(createResult?.deposit_amount_pence ?? 0) > 0 ? (
+          {!isEdit && (createResult?.deposit_amount_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
               {singleConfirmationDepositCopy ??
                 `Full refund if you cancel ≥${createResult?.cancellation_notice_hours ?? refundNoticeHours}h before start (see venue terms).`}
             </p>
-          ) : (
+          ) : !isEdit ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
-          )}
+          ) : null}
         </div>
       )}
 

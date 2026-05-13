@@ -9,18 +9,14 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import {
-  ModifyTableBookingModal,
-  bookingDetailToEditSnapshot,
-  type UnifiedBookingEditSnapshot,
-} from '@/components/booking/ModifyTableBookingModal';
+import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
-import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
@@ -36,6 +32,18 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  bookingExpandAccordionBodyClass,
+  bookingExpandAccordionDetailsClass,
+  bookingExpandAccordionSummaryClass,
+} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+
+export type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+import {
+  BOOKING_DETAIL_MAX_STACK_DEPTH,
+  GuestBookingsForGuestAccordion,
+} from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 
 function displayBookingGuestName(
   guest: { first_name?: string | null; last_name?: string | null } | null | undefined,
@@ -116,6 +124,13 @@ interface BookingDetail {
   inferred_booking_model?: BookingModel;
   appointment_service_id?: string | null;
   service_item_id?: string | null;
+  practitioner_id?: string | null;
+  calendar_id?: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  booking_model?: string | null;
   service_variant_id?: string | null;
   booking_end_time?: string | null;
   processing_time_blocks?: unknown | null;
@@ -165,23 +180,6 @@ interface AssignmentSuggestion {
   table_names: string[];
   combined_capacity: number;
   spare_covers: number;
-}
-
-/** Shown immediately when opening from table grid / floor plan before GET completes. */
-export interface BookingDetailPanelSnapshot {
-  bookingDate: string;
-  guestName: string;
-  partySize: number;
-  status: string;
-  startTime: string;
-  endTime: string;
-  dietaryNotes?: string | null;
-  occasion?: string | null;
-  specialRequests?: string | null;
-  depositStatus?: string | null;
-  serviceName?: string | null;
-  /** Display-only until the booking payload hydrates. */
-  tableNames?: string[];
 }
 
 function formatDateNice(value: string): string {
@@ -263,6 +261,8 @@ export function BookingDetailPanel({
   isAppointment = false,
   presentation = 'drawer',
   anchor,
+  stackDepth = 0,
+  venueTimezone = 'Europe/London',
 }: {
   bookingId: string;
   onClose: () => void;
@@ -275,6 +275,10 @@ export function BookingDetailPanel({
   isAppointment?: boolean;
   presentation?: 'drawer' | 'popover';
   anchor?: { x: number; y: number } | null;
+  /** Nested detail panels use a higher z-index and swallow Escape / outside-click first. */
+  stackDepth?: number;
+  /** Used to split upcoming vs previous guest bookings (defaults to UK). */
+  venueTimezone?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<BookingDetail | null>(null);
@@ -282,7 +286,6 @@ export function BookingDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
-  const [modifyFrozenSnapshot, setModifyFrozenSnapshot] = useState<UnifiedBookingEditSnapshot | null>(null);
   const [assignedTables, setAssignedTables] = useState<Array<{ id: string; name: string }>>([]);
   const [allTables, setAllTables] = useState<Array<{ id: string; name: string; max_covers: number }>>([]);
   const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
@@ -294,6 +297,21 @@ export function BookingDetailPanel({
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
   const [processingBlocksDraft, setProcessingBlocksDraft] = useState<ProcessingTimeBlock[]>([]);
+  const [nestedBookingOpen, setNestedBookingOpen] = useState<{
+    id: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
+  const [guestHistoryListRefresh, setGuestHistoryListRefresh] = useState(0);
+
+  const { zDismiss, zPanel, zConfirm } = useMemo(
+    () => ({
+      zDismiss: 40 + stackDepth * 25,
+      zPanel: 50 + stackDepth * 25,
+      zConfirm: 65 + stackDepth * 25,
+    }),
+    [stackDepth],
+  );
 
   const optimisticDetail = useMemo(() => {
     if (!initialSnapshot || !venueId) return null;
@@ -317,6 +335,13 @@ export function BookingDetailPanel({
       maxPanelWidth: 640,
     });
   }, [anchor?.x, anchor?.y, isPopover, viewport.width, viewport.height]);
+
+  const panelShellStyle = useMemo((): CSSProperties => {
+    if (isPopover && popoverStyle) {
+      return { ...popoverStyle, zIndex: zPanel };
+    }
+    return { zIndex: zPanel };
+  }, [isPopover, popoverStyle, zPanel]);
 
   const notesVariant: BookingNotesVariant = useMemo(() => {
     const m = displayDetail?.inferred_booking_model;
@@ -350,6 +375,7 @@ export function BookingDetailPanel({
 
     const data = (await bookingRes.json()) as BookingDetail;
     setDetail(data);
+    setGuestHistoryListRefresh((k) => k + 1);
 
     try {
       const tablesRes = await tablesPromise;
@@ -425,6 +451,7 @@ export function BookingDetailPanel({
     setCustomMessage('');
     setModifyBookingOpen(false);
     setShowAssignModal(false);
+    setNestedBookingOpen(null);
     setLoading(true);
     setError(null);
     void load().finally(() => setLoading(false));
@@ -436,15 +463,29 @@ export function BookingDetailPanel({
   }, [detail?.id, detail?.processing_time_blocks, detail]);
 
   useEffect(() => {
+    if (stackDepth === 0 && nestedBookingOpen) {
+      return undefined;
+    }
+    if (stackDepth > 0) {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onClose();
+      };
+      window.addEventListener('keydown', onKeyDown, true);
+      return () => window.removeEventListener('keydown', onKeyDown, true);
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, stackDepth, nestedBookingOpen]);
 
   useEffect(() => {
     if (!isPopover) return;
+    if (nestedBookingOpen) return;
 
     /** Capture phase so the underneath grid/floor booking never receives this pointer gesture (would open another booking or drag). */
     const onPointerDownCapture = (event: PointerEvent) => {
@@ -469,7 +510,7 @@ export function BookingDetailPanel({
       document.removeEventListener('pointerdown', onPointerDownCapture, true);
       document.removeEventListener('click', onClickCapture, true);
     };
-  }, [confirmDialog, isPopover, onClose]);
+  }, [confirmDialog, isPopover, onClose, nestedBookingOpen]);
 
   const executeStatusChange = useCallback(async (newStatus: BookingStatus) => {
     if (!detail) return;
@@ -605,7 +646,8 @@ export function BookingDetailPanel({
       type="button"
       tabIndex={-1}
       aria-label="Close booking details"
-      className="fixed inset-0 z-40 cursor-default bg-transparent p-0"
+      className="fixed inset-0 cursor-default bg-transparent p-0"
+      style={{ zIndex: zDismiss }}
       onPointerDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -618,14 +660,40 @@ export function BookingDetailPanel({
     />
   ) : null;
 
+  const nestedDetailPanelEl =
+    nestedBookingOpen && stackDepth + 1 < BOOKING_DETAIL_MAX_STACK_DEPTH ? (
+      <BookingDetailPanel
+        key={nestedBookingOpen.id}
+        bookingId={nestedBookingOpen.id}
+        initialSnapshot={nestedBookingOpen.snapshot}
+        venueId={detail?.venue_id ?? venueId}
+        venueCurrency={venueCurrency}
+        isAppointment={nestedBookingOpen.isAppointment}
+        presentation={presentation}
+        anchor={null}
+        stackDepth={stackDepth + 1}
+        venueTimezone={venueTimezone}
+        onClose={() => setNestedBookingOpen(null)}
+        onUpdated={() => {
+          void load();
+          onUpdated();
+        }}
+        onStatusChange={onStatusChange}
+      />
+    ) : null;
+
   if (!displayDetail) {
     return (
       <>
         {popoverDismissLayer}
         <div
-          className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
-          style={popoverStyle}
-          onClick={isPopover ? undefined : onClose}
+          className={
+            isPopover
+              ? 'fixed'
+              : 'fixed inset-0 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'
+          }
+          style={panelShellStyle}
+          onClick={isPopover ? undefined : nestedBookingOpen ? undefined : onClose}
         >
           <div
             ref={panelRef}
@@ -662,6 +730,7 @@ export function BookingDetailPanel({
             )}
           </div>
         </div>
+        {nestedDetailPanelEl}
       </>
     );
   }
@@ -723,7 +792,7 @@ export function BookingDetailPanel({
     return (
       <>
         {popoverDismissLayer}
-        <div className="fixed z-50" style={popoverStyle}>
+        <div className="fixed" style={panelShellStyle}>
           <div
             ref={panelRef}
             role="dialog"
@@ -768,6 +837,15 @@ export function BookingDetailPanel({
                 area_id: d.area_id,
                 area_name: d.area_name,
                 inferred_booking_model: d.inferred_booking_model,
+                booking_model: d.booking_model,
+                practitioner_id: d.practitioner_id,
+                calendar_id: d.calendar_id,
+                appointment_service_id: d.appointment_service_id,
+                service_item_id: d.service_item_id,
+                experience_event_id: d.experience_event_id,
+                class_instance_id: d.class_instance_id,
+                resource_id: d.resource_id,
+                event_session_id: d.event_session_id,
               }}
               detail={undefined}
               detailLoading
@@ -783,6 +861,7 @@ export function BookingDetailPanel({
             />
           </div>
         </div>
+        {nestedDetailPanelEl}
       </>
     );
   }
@@ -818,6 +897,15 @@ export function BookingDetailPanel({
       staff_attendance_confirmed_at: d.staff_attendance_confirmed_at,
       client_arrived_at: d.client_arrived_at ?? null,
       inferred_booking_model: d.inferred_booking_model,
+      booking_model: d.booking_model,
+      practitioner_id: d.practitioner_id,
+      calendar_id: d.calendar_id,
+      appointment_service_id: d.appointment_service_id,
+      service_item_id: d.service_item_id,
+      experience_event_id: d.experience_event_id,
+      class_instance_id: d.class_instance_id,
+      resource_id: d.resource_id,
+      event_session_id: d.event_session_id,
       cde_context: d.cde_context,
       service_variant_name: d.service_variant_name,
     };
@@ -852,7 +940,7 @@ export function BookingDetailPanel({
     return (
       <>
         {popoverDismissLayer}
-        <div className="fixed z-50" style={popoverStyle}>
+        <div className="fixed" style={panelShellStyle}>
           <div
             ref={panelRef}
             role="dialog"
@@ -932,6 +1020,16 @@ export function BookingDetailPanel({
                   ? () => setShowAssignModal(true)
                   : undefined
               }
+              venueTimezone={venueTimezone}
+              guestHistoryListRefresh={guestHistoryListRefresh}
+              relatedBookingsStackDepth={stackDepth}
+              onOpenRelatedGuestBooking={(payload) => {
+                setNestedBookingOpen({
+                  id: payload.bookingId,
+                  snapshot: payload.snapshot,
+                  isAppointment: !isTableReservationBooking(payload.row),
+                });
+              }}
             />
             {showAssignModal ? (
               <div className="mx-2 mb-2 rounded-xl border border-brand-200 bg-brand-50/30 p-3">
@@ -1049,7 +1147,11 @@ export function BookingDetailPanel({
           </div>
         </div>
         {confirmDialog && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]" onClick={() => setConfirmDialog(null)}>
+          <div
+            className="fixed inset-0 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+            style={{ zIndex: zConfirm }}
+            onClick={() => setConfirmDialog(null)}
+          >
             <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100" onClick={(event) => event.stopPropagation()}>
               <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
               <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
@@ -1072,6 +1174,7 @@ export function BookingDetailPanel({
             </div>
           </div>
         )}
+        {nestedDetailPanelEl}
       </>
     );
   }
@@ -1080,9 +1183,13 @@ export function BookingDetailPanel({
     <>
       {popoverDismissLayer}
       <div
-        className={isPopover ? 'fixed z-50' : 'fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'}
-        style={popoverStyle}
-        onClick={isPopover ? undefined : onClose}
+        className={
+          isPopover
+            ? 'fixed'
+            : 'fixed inset-0 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'
+        }
+        style={panelShellStyle}
+        onClick={isPopover ? undefined : nestedBookingOpen ? undefined : onClose}
       >
         <div
           ref={panelRef}
@@ -1356,6 +1463,26 @@ export function BookingDetailPanel({
                 </div>
               </SectionCard.Body>
             </SectionCard>
+
+            {isHydrated && d.guest?.id ? (
+              <div className="col-span-full w-full min-w-0">
+                <GuestBookingsForGuestAccordion
+                  guestId={d.guest.id}
+                  currentBookingId={bookingId}
+                  guestDisplayNameForSnapshots={displayBookingGuestName(d.guest, initialSnapshot?.guestName)}
+                  venueTimeZone={venueTimezone}
+                  canOpenNested={stackDepth + 1 < BOOKING_DETAIL_MAX_STACK_DEPTH}
+                  onOpenBookingDetail={(payload) => {
+                    setNestedBookingOpen({
+                      id: payload.bookingId,
+                      snapshot: payload.snapshot,
+                      isAppointment: !isTableReservationBooking(payload.row),
+                    });
+                  }}
+                  listRefreshKey={guestHistoryListRefresh}
+                />
+              </div>
+            ) : null}
 
             <SectionCard>
               <SectionCard.Body className={sectionPadding}>
@@ -1677,41 +1804,76 @@ export function BookingDetailPanel({
             </SectionCard>
           )}
 
-          {/* Modify booking — same flow as new booking (modal) */}
-          {bookingStyleIsTable &&
-            ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(d.status)) && (
-              <>
-                <button
-                  type="button"
-                  disabled={!isHydrated}
-                  onClick={() => {
-                    setModifyFrozenSnapshot(bookingDetailToEditSnapshot(d));
-                    setModifyBookingOpen(true);
+          {/* Modify booking — table, appointment, or details-only (CDE) */}
+          {['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(d.status)) && (
+            <>
+              <button
+                type="button"
+                disabled={!isHydrated}
+                onClick={() => {
+                  setModifyBookingOpen(true);
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Modify booking
+              </button>
+              {modifyBookingOpen ? (
+                <StaffExpandedBookingModifyModal
+                  open
+                  onClose={() => {
+                    setModifyBookingOpen(false);
                   }}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Modify booking
-                </button>
-                {modifyBookingOpen && modifyFrozenSnapshot && (
-                  <ModifyTableBookingModal
-                    open
-                    onClose={() => {
-                      setModifyBookingOpen(false);
-                      setModifyFrozenSnapshot(null);
-                    }}
-                    onSaved={async () => {
-                      await load();
-                      onUpdated();
-                    }}
-                    venueId={d.venue_id || venueId || ''}
-                    currency={venueCurrency ?? 'GBP'}
-                    advancedMode={tableManagementEnabled}
-                    bookingId={bookingId}
-                    editSnapshot={modifyFrozenSnapshot}
-                  />
-                )}
-              </>
-            )}
+                  onSaved={async () => {
+                    await load();
+                    onUpdated();
+                    setModifyBookingOpen(false);
+                  }}
+                  venueId={d.venue_id || venueId || ''}
+                  venueCurrency={venueCurrency ?? 'GBP'}
+                  tableManagementEnabled={tableManagementEnabled}
+                  booking={{
+                    id: d.id,
+                    booking_date: d.booking_date,
+                    booking_time: d.booking_time,
+                    party_size: d.party_size,
+                    estimated_end_time: d.estimated_end_time,
+                    status: d.status,
+                    deposit_status: d.deposit_status,
+                    dietary_notes: d.dietary_notes,
+                    occasion: d.occasion,
+                    guest_name: displayBookingGuestName(d.guest, initialSnapshot?.guestName),
+                    ...guestFirstLastForBookingRow(d.guest ?? null, initialSnapshot?.guestName),
+                    guest_email: d.guest?.email ?? null,
+                    guest_phone: d.guest?.phone ?? null,
+                    inferred_booking_model: d.inferred_booking_model,
+                    booking_model: d.booking_model,
+                    experience_event_id: d.experience_event_id,
+                    class_instance_id: d.class_instance_id,
+                    resource_id: d.resource_id,
+                    event_session_id: d.event_session_id,
+                    calendar_id: d.calendar_id,
+                    service_item_id: d.service_item_id,
+                    practitioner_id: d.practitioner_id,
+                    appointment_service_id: d.appointment_service_id,
+                    area_id: d.area_id,
+                    table_assignments: assignedTables.length > 0 ? assignedTables : d.table_assignments,
+                  }}
+                  detail={{
+                    special_requests: d.special_requests,
+                    internal_notes: d.internal_notes,
+                    guest: d.guest
+                      ? {
+                          first_name: d.guest.first_name,
+                          last_name: d.guest.last_name,
+                          email: d.guest.email,
+                          phone: d.guest.phone,
+                        }
+                      : null,
+                  }}
+                />
+              ) : null}
+            </>
+          )}
 
           <div className={isPopover ? 'grid gap-1.5 md:grid-cols-2' : 'grid gap-3'}>
           {/* Timeline */}
@@ -1822,7 +1984,11 @@ export function BookingDetailPanel({
         </div>
       </div>
       {confirmDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]" onClick={() => setConfirmDialog(null)}>
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
+          style={{ zIndex: zConfirm }}
+          onClick={() => setConfirmDialog(null)}
+        >
           <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
             <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
@@ -1846,6 +2012,7 @@ export function BookingDetailPanel({
         </div>
       )}
       </div>
+      {nestedDetailPanelEl}
     </>
   );
 }

@@ -15,3 +15,7 @@ export const bookingExpandAccordionMessagingBodyClass = 'bg-brand-50/45 p-3 sm:p
 
 export const bookingExpandActionsBarClass =
   'overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]';
+
+/** Outer shell for inline expanded booking rows (bookings list, day sheet, appointments). */
+export const expandedBookingRowShellClass =
+  'border-t border-slate-100/95 bg-slate-50/30 px-2 pb-2.5 pt-2 sm:px-3';

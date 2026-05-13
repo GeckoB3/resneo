@@ -7,6 +7,7 @@ import type { OccupancyMap, TableForSelector } from '@/components/table-tracking
 import { createClient } from '@/lib/supabase/browser';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
+import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import {
@@ -56,6 +57,8 @@ import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
+import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 
 interface BookingRow {
   id: string;
@@ -381,6 +384,12 @@ export function BookingsDashboard({
   const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [guestHistoryRevisionById, setGuestHistoryRevisionById] = useState<Record<string, number>>({});
+  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
+    bookingId: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
   const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
   const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
@@ -830,6 +839,10 @@ export function BookingsDashboard({
       if (!res.ok) return;
       const data = await res.json();
       setDetailById((prev) => ({ ...prev, [bookingId]: data as BookingDetailLite }));
+      setGuestHistoryRevisionById((prev) => ({
+        ...prev,
+        [bookingId]: (prev[bookingId] ?? 0) + 1,
+      }));
     } finally {
       setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
     }
@@ -844,6 +857,10 @@ export function BookingsDashboard({
         .then((data) => {
           if (!data) return;
           setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: data as BookingDetailLite }));
+          setGuestHistoryRevisionById((prev) => ({
+            ...prev,
+            [bookingId]: (prev[bookingId] ?? 0) + 1,
+          }));
         })
         .catch(() => {});
     },
@@ -1832,6 +1849,15 @@ export function BookingsDashboard({
           onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
           venueId={venueId}
           venueCurrency={currency ?? 'GBP'}
+          venueTimezone={venueTimezone}
+          guestHistoryRevisionById={guestHistoryRevisionById}
+          onOpenRelatedGuestBooking={(payload) => {
+            setRelatedGuestHistoryBooking({
+              bookingId: payload.bookingId,
+              snapshot: payload.snapshot,
+              isAppointment: !isTableReservationBooking(payload.row),
+            });
+          }}
           onToggleExpand={toggleExpand}
           onSendMessage={sendMessageToBooking}
           onStatusAction={requestStatusChange}
@@ -1874,6 +1900,15 @@ export function BookingsDashboard({
                 onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
                 venueId={venueId}
                 venueCurrency={currency ?? 'GBP'}
+                venueTimezone={venueTimezone}
+                guestHistoryRevisionById={guestHistoryRevisionById}
+                onOpenRelatedGuestBooking={(payload) => {
+                  setRelatedGuestHistoryBooking({
+                    bookingId: payload.bookingId,
+                    snapshot: payload.snapshot,
+                    isAppointment: !isTableReservationBooking(payload.row),
+                  });
+                }}
                 onToggleExpand={toggleExpand}
                 onSendMessage={sendMessageToBooking}
                 onStatusAction={requestStatusChange}
@@ -1897,6 +1932,32 @@ export function BookingsDashboard({
           onSend={(message, channel) => { void runBulkMessage(message, channel); }}
         />
       )}
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={currency ?? 'GBP'}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="popover"
+          anchor={null}
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            const id = expandedIds[0];
+            if (id) {
+              setGuestHistoryRevisionById((prev) => ({
+                ...prev,
+                [id]: (prev[id] ?? 0) + 1,
+              }));
+            }
+            void fetchBookings({ silent: true });
+          }}
+        />
+      ) : null}
 
       {walkInOpen && (
         <DashboardStaffBookingModal
@@ -2113,6 +2174,9 @@ function BookingsAccordionList({
   onRequestChangeTable,
   venueId,
   venueCurrency = 'GBP',
+  venueTimezone,
+  guestHistoryRevisionById,
+  onOpenRelatedGuestBooking,
   onToggleExpand,
   onSendMessage,
   onStatusAction,
@@ -2137,6 +2201,9 @@ function BookingsAccordionList({
   onRequestChangeTable: (booking: BookingRow) => void;
   venueId: string;
   venueCurrency?: string;
+  venueTimezone: string;
+  guestHistoryRevisionById: Record<string, number>;
+  onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
   onToggleExpand: (id: string) => void;
   onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
@@ -2392,7 +2459,7 @@ function BookingsAccordionList({
                 </svg>
               </div>
               {expanded && (
-                <div className="border-t border-slate-100/95 bg-slate-50/30">
+                <div className={expandedBookingRowShellClass}>
                   <ExpandedBookingContent
                     booking={booking}
                     detail={detail}
@@ -2400,6 +2467,10 @@ function BookingsAccordionList({
                     tableManagementEnabled={tableManagementEnabled}
                     venueId={venueId}
                     venueCurrency={venueCurrency}
+                    venueTimezone={venueTimezone}
+                    guestHistoryListRefresh={guestHistoryRevisionById[booking.id] ?? 0}
+                    relatedBookingsStackDepth={0}
+                    onOpenRelatedGuestBooking={onOpenRelatedGuestBooking}
                     draftMessage={draftMessage}
                     sendingMessage={sendingMessage}
                     onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}

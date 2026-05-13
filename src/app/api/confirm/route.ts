@@ -36,6 +36,7 @@ import { inferBookingRowModel } from "@/lib/booking/infer-booking-row-model";
 import { logBookingOp } from "@/lib/observability/booking-ops-log";
 import type { BookingModel } from "@/types/booking-models";
 import { formatGuestDisplayName } from "@/lib/guests/name";
+import { buildVenuePublicForBookingById } from "@/lib/booking/build-venue-public";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -259,6 +260,9 @@ export async function GET(request: NextRequest) {
       guest_attendance_confirmed_at:
         (booking as { guest_attendance_confirmed_at?: string | null })
           .guest_attendance_confirmed_at ?? null,
+      venue_public: isAppointment
+        ? await buildVenuePublicForBookingById(booking.venue_id)
+        : null,
       manage_booking_url: await createOrGetBookingShortLink({
         venueId: booking.venue_id,
         bookingId: booking.id,
@@ -627,7 +631,23 @@ export async function POST(request: NextRequest) {
 
       const venueMode = await resolveVenueMode(supabase, booking.venue_id);
 
-      if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+      const currentBookingModel = inferBookingRowModel(
+        booking as {
+          experience_event_id?: string | null;
+          class_instance_id?: string | null;
+          resource_id?: string | null;
+          event_session_id?: string | null;
+          calendar_id?: string | null;
+          service_item_id?: string | null;
+          practitioner_id?: string | null;
+          appointment_service_id?: string | null;
+        },
+      );
+      const isAppointmentBooking =
+        currentBookingModel === "unified_scheduling" ||
+        currentBookingModel === "practitioner_appointment";
+
+      if (isAppointmentBooking) {
         if (
           !booking_date ||
           !booking_time ||
@@ -668,10 +688,14 @@ export async function POST(request: NextRequest) {
           .eq("id", booking.venue_id)
           .single();
 
+        const effectiveBookingModel =
+          currentBookingModel === "practitioner_appointment"
+            ? "practitioner_appointment"
+            : venueMode.bookingModel;
         const svcWindow = await loadServiceEntityBookingWindow(
           supabase,
           booking.venue_id,
-          venueMode.bookingModel,
+          effectiveBookingModel,
           bodyAppointmentServiceId,
         );
         const tz =
@@ -746,8 +770,8 @@ export async function POST(request: NextRequest) {
           {
             supabase,
             venueId: booking.venue_id,
-            effectiveModel: venueMode.bookingModel,
-            ...(venueMode.bookingModel === "unified_scheduling"
+            effectiveModel: effectiveBookingModel,
+            ...(effectiveBookingModel === "unified_scheduling"
               ? { serviceItemId: bodyAppointmentServiceId }
               : { appointmentServiceId: bodyAppointmentServiceId }),
           },
@@ -770,11 +794,19 @@ export async function POST(request: NextRequest) {
             booking_date: newDate,
             booking_time: newTime,
             party_size: newPartySize,
-            // Unified scheduling stores staff/service on calendar_id + service_item_id; legacy Model B uses practitioner_id + appointment_service_id.
-            calendar_id: bodyPractitionerId,
-            service_item_id: bodyAppointmentServiceId,
-            practitioner_id: null,
-            appointment_service_id: null,
+            ...(currentBookingModel === "unified_scheduling"
+              ? {
+                  calendar_id: bodyPractitionerId,
+                  service_item_id: bodyAppointmentServiceId,
+                  practitioner_id: null,
+                  appointment_service_id: null,
+                }
+              : {
+                  practitioner_id: bodyPractitionerId,
+                  appointment_service_id: bodyAppointmentServiceId,
+                  calendar_id: null,
+                  service_item_id: null,
+                }),
             estimated_end_time: estimatedEndTime,
             cancellation_deadline,
             cancellation_policy_snapshot,
@@ -804,6 +836,24 @@ export async function POST(request: NextRequest) {
             { status: 412 },
           );
         }
+
+        after(async () => {
+          try {
+            const { executeBookingModificationGuestNotification } = await import(
+              "@/lib/booking/send-booking-modification-guest-notification"
+            );
+            await executeBookingModificationGuestNotification(
+              supabase,
+              booking.venue_id,
+              bookingId,
+            );
+          } catch (commsErr) {
+            console.error(
+              "Self-service appointment modification notification failed:",
+              commsErr,
+            );
+          }
+        });
 
         return NextResponse.json({
           success: true,
@@ -925,6 +975,24 @@ export async function POST(request: NextRequest) {
           { status: 412 },
         );
       }
+
+      after(async () => {
+        try {
+          const { executeBookingModificationGuestNotification } = await import(
+            "@/lib/booking/send-booking-modification-guest-notification"
+          );
+          await executeBookingModificationGuestNotification(
+            supabase,
+            booking.venue_id,
+            bookingId,
+          );
+        } catch (commsErr) {
+          console.error(
+            "Self-service booking modification notification failed:",
+            commsErr,
+          );
+        }
+      });
 
       return NextResponse.json({
         success: true,

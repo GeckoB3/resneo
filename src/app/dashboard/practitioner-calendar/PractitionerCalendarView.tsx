@@ -787,6 +787,9 @@ const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
 /** Space kept between interactive booking chrome and resize gestures (paint + cushion so actions never butt the slider). */
 const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 2;
 
+/** Deferred guest modification notify after calendar drag: Confirm or timer end. */
+const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
+
 /** Left strip for drag-to-reschedule; ~25% narrower than former w-6 / w-3. */
 const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
 const BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX = 9;
@@ -1494,6 +1497,12 @@ export function PractitionerCalendarView({
     prev: Booking;
   } | null>(null);
   const [scheduleUndoPending, setScheduleUndoPending] = useState(false);
+  /** After a drag-reschedule succeeds, booking bar shows Confirm / Undo until timer or Confirm (toolbar undo may remain). */
+  const [dragMoveConfirmBookingId, setDragMoveConfirmBookingId] = useState<string | null>(null);
+  /** Guest modification notify for drag-reschedule fires after Confirm or {@link BOOKING_MODIFY_NOTIFY_DEFER_MS}. */
+  const pendingDeferredModificationNotifyBookingIdRef = useRef<string | null>(null);
+  const deferredModificationNotifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const guestModificationNotifyInFlightRef = useRef(false);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRootRef = useRef<HTMLDivElement>(null);
@@ -1518,6 +1527,69 @@ export function PractitionerCalendarView({
   useEffect(() => {
     calendarDragTargetRef.current = calendarDragTarget;
   }, [calendarDragTarget]);
+
+  const clearDeferredModificationGuestNotifyTimer = useCallback(() => {
+    if (deferredModificationNotifyTimerRef.current != null) {
+      window.clearTimeout(deferredModificationNotifyTimerRef.current);
+      deferredModificationNotifyTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelPendingDeferredModificationGuestNotify = useCallback(() => {
+    clearDeferredModificationGuestNotifyTimer();
+    pendingDeferredModificationNotifyBookingIdRef.current = null;
+  }, [clearDeferredModificationGuestNotifyTimer]);
+
+  const postGuestModificationNotify = useCallback(async (bookingId: string) => {
+    if (guestModificationNotifyInFlightRef.current) return;
+    guestModificationNotifyInFlightRef.current = true;
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}/guest-modification-notify`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not send booking update to guest', 'error');
+      }
+    } catch {
+      addToast('Could not send booking update to guest', 'error');
+    } finally {
+      guestModificationNotifyInFlightRef.current = false;
+    }
+  }, [addToast]);
+
+  const scheduleDeferredModificationGuestNotify = useCallback(
+    (bookingId: string) => {
+      clearDeferredModificationGuestNotifyTimer();
+      pendingDeferredModificationNotifyBookingIdRef.current = bookingId;
+      deferredModificationNotifyTimerRef.current = setTimeout(() => {
+        deferredModificationNotifyTimerRef.current = null;
+        pendingDeferredModificationNotifyBookingIdRef.current = null;
+        setDragMoveConfirmBookingId(null);
+        void postGuestModificationNotify(bookingId);
+      }, BOOKING_MODIFY_NOTIFY_DEFER_MS);
+    },
+    [clearDeferredModificationGuestNotifyTimer, postGuestModificationNotify],
+  );
+
+  const confirmInlineDragMove = useCallback(async () => {
+    clearDeferredModificationGuestNotifyTimer();
+    const bid = pendingDeferredModificationNotifyBookingIdRef.current;
+    pendingDeferredModificationNotifyBookingIdRef.current = null;
+    setDragMoveConfirmBookingId(null);
+    setLastScheduleEditUndo(null);
+    if (bid) await postGuestModificationNotify(bid);
+  }, [
+    clearDeferredModificationGuestNotifyTimer,
+    postGuestModificationNotify,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearDeferredModificationGuestNotifyTimer();
+      pendingDeferredModificationNotifyBookingIdRef.current = null;
+    };
+  }, [clearDeferredModificationGuestNotifyTimer]);
 
   const handleCalendarMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -2235,6 +2307,7 @@ export function PractitionerCalendarView({
           practitioner_id: newPracId,
           booking_end_time: bookingEndForStore,
           allow_manual_overlap: true,
+          defer_modification_guest_notification: true,
         }),
       });
       if (!res.ok) {
@@ -2244,6 +2317,8 @@ export function PractitionerCalendarView({
         return;
       }
       setLastScheduleEditUndo({ kind: 'move', prev });
+      setDragMoveConfirmBookingId(booking.id);
+      scheduleDeferredModificationGuestNotify(booking.id);
       void fetchData({ silent: true });
     } catch {
       addToast('Could not move appointment', 'error');
@@ -2273,6 +2348,8 @@ export function PractitionerCalendarView({
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
           return;
         }
+        cancelPendingDeferredModificationGuestNotify();
+        setDragMoveConfirmBookingId(null);
         setLastScheduleEditUndo({ kind: 'resize', prev });
         void fetchData({ silent: true });
       } catch {
@@ -2280,7 +2357,7 @@ export function PractitionerCalendarView({
         setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
       }
     },
-    [addToast, fetchData],
+    [addToast, fetchData, cancelPendingDeferredModificationGuestNotify],
   );
 
   const undoLastScheduleEdit = useCallback(async () => {
@@ -2317,6 +2394,8 @@ export function PractitionerCalendarView({
         }
       } else {
         const timeForStore = bookingTimeToStore(prev.booking_time);
+        const skipBookingModificationGuestNotification =
+          pendingDeferredModificationNotifyBookingIdRef.current === bookingId;
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -2326,6 +2405,9 @@ export function PractitionerCalendarView({
             practitioner_id: colId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
+            ...(skipBookingModificationGuestNotification
+              ? { skip_booking_modification_guest_notification: true }
+              : {}),
           }),
         });
         if (!res.ok) {
@@ -2335,7 +2417,9 @@ export function PractitionerCalendarView({
           return;
         }
       }
+      cancelPendingDeferredModificationGuestNotify();
       setLastScheduleEditUndo(null);
+      setDragMoveConfirmBookingId(null);
       addToast('Change undone', 'success');
       void fetchData({ silent: true });
     } catch {
@@ -2351,6 +2435,7 @@ export function PractitionerCalendarView({
     resourceParentById,
     scheduleUndoPending,
     serviceMap,
+    cancelPendingDeferredModificationGuestNotify,
   ]);
 
   async function quickPatchBooking(bookingId: string, body: Record<string, unknown>) {
@@ -3448,6 +3533,10 @@ export function PractitionerCalendarView({
                               ? resizePreviewEnd.endHm
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
+                          const showInlineMoveFollowUp =
+                            dragMoveConfirmBookingId === b.id &&
+                            lastScheduleEditUndo?.kind === 'move' &&
+                            lastScheduleEditUndo.prev.id === b.id;
                           const isOverlapLane = layout.laneCount > 1;
                           const contentHeightPx =
                             blockH - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0);
@@ -3576,6 +3665,47 @@ export function PractitionerCalendarView({
                                         >
                                           Until {resizePreviewEnd.endHm}
                                         </span>
+                                      ) : null}
+                                      {showInlineMoveFollowUp ? (
+                                        <div
+                                          className="pointer-events-auto absolute left-1/2 z-[45] -translate-x-1/2"
+                                          style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+                                          data-no-calendar-pan="true"
+                                        >
+                                          <div
+                                            role="group"
+                                            aria-label="Confirm or undo this move"
+                                            className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
+                                            style={{
+                                              backgroundColor: palette.bg,
+                                              backgroundImage: `linear-gradient(135deg, ${palette.bg} 0%, rgba(255,255,255,0.94) 100%)`,
+                                              borderColor: palette.border,
+                                              color: palette.text,
+                                            }}
+                                          >
+                                            <span
+                                              className="mr-0.5 h-3 w-[3px] shrink-0 rounded-full"
+                                              style={{ backgroundColor: palette.accent }}
+                                              aria-hidden
+                                            />
+                                            <button
+                                              type="button"
+                                              disabled={scheduleUndoPending}
+                                              onClick={() => void confirmInlineDragMove()}
+                                              className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
+                                            >
+                                              Confirm
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={scheduleUndoPending}
+                                              onClick={() => void undoLastScheduleEdit()}
+                                              className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+                                            >
+                                              Undo
+                                            </button>
+                                          </div>
+                                        </div>
                                       ) : null}
                                       <span
                                         role="separator"
@@ -3958,6 +4088,7 @@ export function PractitionerCalendarView({
           isAppointment
           presentation="popover"
           anchor={detailBookingAnchor}
+          venueTimezone={venueTimezone}
           onClose={() => {
             setDetailBookingId(null);
             setDetailBookingAnchor(null);

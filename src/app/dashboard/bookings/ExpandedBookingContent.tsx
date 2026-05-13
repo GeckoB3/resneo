@@ -9,11 +9,7 @@ import {
   isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import {
-  ModifyTableBookingModal,
-  expandedRowToEditSnapshot,
-  type UnifiedBookingEditSnapshot,
-} from '@/components/booking/ModifyTableBookingModal';
+import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
@@ -35,6 +31,11 @@ import {
   bookingExpandAccordionSummaryClass,
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import {
+  BOOKING_DETAIL_MAX_STACK_DEPTH,
+  GuestBookingsForGuestAccordion,
+  type GuestHistoryRelatedBookingPayload,
+} from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
@@ -78,6 +79,9 @@ export interface BookingRow {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  practitioner_id?: string | null;
+  appointment_service_id?: string | null;
+  booking_model?: string | null;
   service_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
@@ -133,6 +137,13 @@ function formatDateNice(value: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/** CDE context repeats the expanded header summary (service line / title) for these models. */
+const BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD: ReadonlySet<BookingModel> = new Set([
+  'class_session',
+  'event_ticket',
+  'resource_booking',
+]);
+
 export function ExpandedBookingContent({
   booking,
   detail,
@@ -147,6 +158,10 @@ export function ExpandedBookingContent({
   onDetailUpdated,
   onRequestChangeTable,
   venueCurrency = 'GBP',
+  venueTimezone = 'Europe/London',
+  guestHistoryListRefresh = 0,
+  onOpenRelatedGuestBooking,
+  relatedBookingsStackDepth = 0,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -154,6 +169,14 @@ export function ExpandedBookingContent({
   tableManagementEnabled: boolean;
   venueId: string;
   venueCurrency?: string;
+  /** Venue IANA zone; drives upcoming vs previous in “Guest bookings”. */
+  venueTimezone?: string;
+  /** Bump when booking detail reloads so guest history refetches. */
+  guestHistoryListRefresh?: number;
+  /** Open nested booking detail (e.g. BookingDetailPanel overlay). */
+  onOpenRelatedGuestBooking?: (payload: GuestHistoryRelatedBookingPayload) => void;
+  /** Current depth of nested detail stack (0 = inline row or root panel). */
+  relatedBookingsStackDepth?: number;
   draftMessage: string;
   sendingMessage: boolean;
   onMessageDraftChange: (value: string) => void;
@@ -165,7 +188,6 @@ export function ExpandedBookingContent({
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
   const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
-  const [modifyFrozenSnapshot, setModifyFrozenSnapshot] = useState<UnifiedBookingEditSnapshot | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
@@ -200,8 +222,7 @@ export function ExpandedBookingContent({
   const inferredBookingModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
   const tableStyle = inferredBookingModel === 'table_reservation';
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
-  const canStaffModifyTableBooking =
-    tableStyle && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
+  const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
 
   if (detailLoading) {
     return (
@@ -620,22 +641,18 @@ export function ExpandedBookingContent({
 
             <div className="min-w-1.5 flex-1" />
 
-            {canStaffModifyTableBooking && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModifyFrozenSnapshot(expandedRowToEditSnapshot(booking, detail));
-                    setModifyBookingOpen(true);
-                    setShowMessageBox(false);
-                  }}
-                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 sm:text-[11px]"
-                >
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
-                  Modify
-                </button>
-                <div className="mx-0.5 h-3.5 w-px bg-slate-200" />
-              </>
+            {canStaffModifyBooking && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModifyBookingOpen(true);
+                  setShowMessageBox(false);
+                }}
+                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 sm:text-[11px]"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
+                Modify
+              </button>
             )}
 
             {canCancel && (
@@ -674,40 +691,40 @@ export function ExpandedBookingContent({
             </svg>
           </summary>
           <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
-            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-5">
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Name</p>
-                <p className="truncate text-xs font-bold text-slate-800">{guestName}</p>
+                <p className="break-words text-xs font-bold leading-snug text-slate-800">{guestName}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
                 {guestEmail ? (
-                  <a href={`mailto:${guestEmail}`} className="block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+                  <a href={`mailto:${guestEmail}`} className="block min-w-0 text-xs font-bold leading-snug text-slate-800 break-words [overflow-wrap:anywhere] hover:text-brand-700">
                     {guestEmail}
                   </a>
                 ) : (
-                  <p className="truncate text-xs font-bold text-slate-400">Not provided</p>
+                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
                 )}
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
                 {guestPhone ? (
-                  <a href={`tel:${guestPhone}`} className="block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+                  <a href={`tel:${guestPhone}`} className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
                     {guestPhone}
                   </a>
                 ) : (
-                  <p className="truncate text-xs font-bold text-slate-400">Not provided</p>
+                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
                 )}
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
-                <p className="truncate text-xs font-bold text-slate-800">
+                <p className="break-words text-xs font-bold leading-snug text-slate-800">
                   {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
-                <p className="truncate text-xs font-bold text-slate-800">
+                <p className="break-words text-xs font-bold leading-snug text-slate-800">
                   {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
                 </p>
               </div>
@@ -762,36 +779,21 @@ export function ExpandedBookingContent({
         </details>
       ) : null}
 
-      <details className={bookingExpandAccordionDetailsClass}>
-        <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Payments and confirmation</span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{booking.deposit_status}</span>
-          <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-          </svg>
-        </summary>
-        <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
-          <div className="flex flex-wrap gap-1.5">
-            {booking.deposit_status !== 'Paid' && booking.deposit_status !== 'Refunded' ? (
-              <>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Send payment link</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Waive</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Record cash</button>
-              </>
-            ) : null}
-            {booking.deposit_status === 'Paid' ? (
-              <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Refund deposit</button>
-            ) : null}
-            <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Resend confirmation</button>
-          </div>
-          {detail?.cancellation_deadline ? (
-            <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(detail.cancellation_deadline)}</p>
-          ) : null}
-          {inlineActionError ? (
-            <p className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] font-medium text-red-700">{inlineActionError}</p>
-          ) : null}
+      {detail?.guest?.id && !detailLoading ? (
+        <div className="px-0 sm:px-0.5">
+          <GuestBookingsForGuestAccordion
+            guestId={detail.guest.id}
+            currentBookingId={booking.id}
+            guestDisplayNameForSnapshots={guestName}
+            venueTimeZone={venueTimezone}
+            canOpenNested={Boolean(onOpenRelatedGuestBooking) && relatedBookingsStackDepth + 1 < BOOKING_DETAIL_MAX_STACK_DEPTH}
+            onOpenBookingDetail={(payload) => {
+              onOpenRelatedGuestBooking?.(payload);
+            }}
+            listRefreshKey={guestHistoryListRefresh}
+          />
         </div>
-      </details>
+      ) : null}
 
       <details
         className={bookingExpandAccordionDetailsClass}
@@ -872,6 +874,37 @@ export function ExpandedBookingContent({
         </div>
       </details>
 
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
+          <span>Payments and confirmation</span>
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{booking.deposit_status}</span>
+          <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </summary>
+        <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
+          <div className="flex flex-wrap gap-1.5">
+            {booking.deposit_status !== 'Paid' && booking.deposit_status !== 'Refunded' ? (
+              <>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Send payment link</button>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Waive</button>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Record cash</button>
+              </>
+            ) : null}
+            {booking.deposit_status === 'Paid' ? (
+              <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Refund deposit</button>
+            ) : null}
+            <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Resend confirmation</button>
+          </div>
+          {detail?.cancellation_deadline ? (
+            <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(detail.cancellation_deadline)}</p>
+          ) : null}
+          {inlineActionError ? (
+            <p className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] font-medium text-red-700">{inlineActionError}</p>
+          ) : null}
+        </div>
+      </details>
+
       {!detail?.guest?.id ? (
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
@@ -902,8 +935,8 @@ export function ExpandedBookingContent({
       </details>
       ) : null}
 
-      {/* CDE context */}
-      {detail?.cde_context && (
+      {/* CDE context — omitted when title already appears in the summary row */}
+      {detail?.cde_context && !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) && (
         <SectionCard className="border-emerald-200 bg-emerald-50/30">
           <SectionCard.Body className="p-4">
             <div className="flex items-start gap-3">
@@ -1023,23 +1056,34 @@ export function ExpandedBookingContent({
         </SectionCard>
       )}
 
-      {modifyBookingOpen && modifyFrozenSnapshot && (
-        <ModifyTableBookingModal
+      {modifyBookingOpen && (
+        <StaffExpandedBookingModifyModal
           open
-          onClose={() => {
-            setModifyBookingOpen(false);
-            setModifyFrozenSnapshot(null);
-          }}
+          onClose={() => setModifyBookingOpen(false)}
           onSaved={() => {
             setModifyBookingOpen(false);
-            setModifyFrozenSnapshot(null);
             onDetailUpdated();
           }}
           venueId={venueId}
-          currency={venueCurrency}
-          advancedMode={tableManagementEnabled}
-          bookingId={booking.id}
-          editSnapshot={modifyFrozenSnapshot}
+          venueCurrency={venueCurrency}
+          tableManagementEnabled={tableManagementEnabled}
+          booking={booking}
+          detail={
+            detail
+              ? {
+                  special_requests: detail.special_requests,
+                  internal_notes: detail.internal_notes,
+                  guest: detail.guest
+                    ? {
+                        first_name: detail.guest.first_name,
+                        last_name: detail.guest.last_name,
+                        email: detail.guest.email,
+                        phone: detail.guest.phone,
+                      }
+                    : null,
+                }
+              : undefined
+          }
         />
       )}
     </div>

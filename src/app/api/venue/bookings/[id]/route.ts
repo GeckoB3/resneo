@@ -918,6 +918,8 @@ export async function PATCH(
       body.booking_time !== undefined ||
       body.party_size !== undefined ||
       body.booking_end_time !== undefined ||
+      body.appointment_service_id !== undefined ||
+      body.service_item_id !== undefined ||
       body.duration_minutes !== undefined ||
       body.processing_time_blocks !== undefined
     ) {
@@ -946,6 +948,13 @@ export async function PATCH(
         );
       }
 
+      const deferModificationGuestNotification =
+        (body as Record<string, unknown>).defer_modification_guest_notification === true ||
+        /** @deprecated camelCase alias */
+        (body as Record<string, unknown>).defer_modification_notification === true;
+      const skipModificationGuestNotification =
+        (body as Record<string, unknown>).skip_booking_modification_guest_notification === true;
+
       const newDate = (body.booking_date as string) ?? booking.booking_date;
       const newTimeRaw = (body.booking_time as string) ?? (typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00');
       const newTime = newTimeRaw.length === 5 ? newTimeRaw + ':00' : newTimeRaw;
@@ -966,7 +975,14 @@ export async function PATCH(
       const allowManualCalendarOverlap =
         isAppointment &&
         (body.allow_manual_overlap === true || body.allow_booking_overlap === true) &&
-        (body.booking_date !== undefined || body.booking_time !== undefined || body.booking_end_time !== undefined || body.practitioner_id !== undefined);
+        (
+          body.booking_date !== undefined ||
+          body.booking_time !== undefined ||
+          body.booking_end_time !== undefined ||
+          body.practitioner_id !== undefined ||
+          body.appointment_service_id !== undefined ||
+          body.service_item_id !== undefined
+        );
       const idLc = id.toLowerCase();
       const beforeEndHm =
         typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
@@ -990,7 +1006,10 @@ export async function PATCH(
           (booking.practitioner_id as string | null) ??
           (booking.calendar_id as string | null);
         const svcId =
-          (booking.appointment_service_id as string | null) ?? (booking.service_item_id as string | null);
+          (body.appointment_service_id as string | undefined) ??
+          (body.service_item_id as string | undefined) ??
+          (booking.appointment_service_id as string | null) ??
+          (booking.service_item_id as string | null);
         if (!practId || !svcId) {
           return NextResponse.json(
             { error: 'Cannot validate appointment: missing practitioner or service on booking' },
@@ -998,8 +1017,12 @@ export async function PATCH(
           );
         }
 
-        const appointmentSvcIdForDuration = booking.appointment_service_id as string | null | undefined;
-        const serviceItemIdForDuration = booking.service_item_id as string | null | undefined;
+        const appointmentSvcIdForDuration =
+          (body.appointment_service_id as string | undefined) ??
+          (booking.appointment_service_id as string | null | undefined);
+        const serviceItemIdForDuration =
+          (body.service_item_id as string | undefined) ??
+          (booking.service_item_id as string | null | undefined);
         if (appointmentSvcIdForDuration) {
           const { data: svcRow } = await admin
             .from('appointment_services')
@@ -1128,6 +1151,9 @@ export async function PATCH(
         booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '',
         party_size: booking.party_size,
       };
+      /** Guest-facing “slot” shifted (date or start clock). Duration / end-only edits must not notify. */
+      const bookingStartChanged =
+        newDate !== before.booking_date || timeStr !== before.booking_time;
 
       const bookingUpdate: Record<string, unknown> = {
         booking_date: newDate,
@@ -1149,6 +1175,14 @@ export async function PATCH(
           bookingUpdate.calendar_id = body.practitioner_id;
         } else {
           bookingUpdate.practitioner_id = body.practitioner_id;
+        }
+      }
+      if (isAppointment && (body.appointment_service_id || body.service_item_id)) {
+        const nextServiceId = (body.appointment_service_id as string | undefined) ?? (body.service_item_id as string | undefined);
+        if (booking.service_item_id) {
+          bookingUpdate.service_item_id = nextServiceId;
+        } else {
+          bookingUpdate.appointment_service_id = nextServiceId;
         }
       }
 
@@ -1345,75 +1379,44 @@ export async function PATCH(
         }
       }
 
-          const { data: guestRow } = await staff.db
-            .from('guests')
-            .select('first_name, last_name, email, phone')
-            .eq('id', booking.guest_id)
-            .single();
-      const { data: venueRow } = await staff.db
-        .from('venues')
-        .select('name, address, phone, email, reply_to_email')
-        .eq('id', staff.venue_id)
-        .single();
-      if (guestRow && venueRow?.name) {
-        const { sendBookingModificationNotification } = await import('@/lib/communications/send-templated');
-        const { createOrGetBookingShortLink } = await import('@/lib/booking-short-links');
-        const manageLink = await createOrGetBookingShortLink({
-          venueId: staff.venue_id,
-          bookingId: id,
-          purpose: 'manage',
-        });
-        const bookingEmail: import('@/lib/emails/types').BookingEmailData = {
-          id,
-          guest_name: formatGuestDisplayName(guestRow.first_name, guestRow.last_name),
-          guest_email: guestRow.email ?? null,
-          guest_phone: guestRow.phone ?? null,
-          booking_date: newDate,
-          booking_time: timeStr,
-          party_size: newPartySize,
-          deposit_amount_pence: updatedAfterModify.deposit_amount_pence ?? null,
-          deposit_status: updatedAfterModify.deposit_status ?? null,
-          manage_booking_link: manageLink,
-        };
-        const venueEmail = venueRowToEmailData({
-          name: venueRow.name,
-          address: venueRow.address ?? null,
-          phone: venueRow.phone ?? null,
-          email: venueRow.email ?? null,
-          reply_to_email: venueRow.reply_to_email ?? null,
-        });
-        const vid = staff.venue_id;
+      if (
+        bookingStartChanged &&
+        !deferModificationGuestNotification &&
+        !skipModificationGuestNotification
+      ) {
         after(async () => {
           try {
-            const enriched = await enrichBookingEmailForComms(admin, id, bookingEmail);
-            await sendBookingModificationNotification(enriched, venueEmail, vid);
+            const { executeBookingModificationGuestNotification } = await import(
+              '@/lib/booking/send-booking-modification-guest-notification'
+            );
+            await executeBookingModificationGuestNotification(admin, staff.venue_id, id);
           } catch (commsErr) {
             console.error('Booking modification notification failed:', commsErr);
           }
         });
       }
-
-      // Reset scheduled communication logs so reminders re-trigger for the new date/time
-      try {
-        await admin
-          .from('communication_logs')
-          .delete()
-          .eq('booking_id', id)
-          .in('message_type', [
-            'reminder_56h_email',
-            'day_of_reminder_sms',
-            'day_of_reminder_email',
-            'post_visit_email',
-            'reminder_1_email',
-            'reminder_1_sms',
-            'reminder_2_email',
-            'reminder_2_sms',
-            'unified_post_visit_email',
-          ]);
-      } catch (logResetErr) {
-        console.error('Communication log reset failed after modification:', logResetErr);
+      // Reset scheduled communication logs when the booking start shifted so reminders re-trigger
+      if (bookingStartChanged) {
+        try {
+          await admin
+            .from('communication_logs')
+            .delete()
+            .eq('booking_id', id)
+            .in('message_type', [
+              'reminder_56h_email',
+              'day_of_reminder_sms',
+              'day_of_reminder_email',
+              'post_visit_email',
+              'reminder_1_email',
+              'reminder_1_sms',
+              'reminder_2_email',
+              'reminder_2_sms',
+              'unified_post_visit_email',
+            ]);
+        } catch (logResetErr) {
+          console.error('Communication log reset failed after modification:', logResetErr);
+        }
       }
-
       return NextResponse.json({
         ...updatedAfterModify,
         ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),

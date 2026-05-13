@@ -112,6 +112,9 @@ interface DetailsStepProps {
   payAtVenuePaymentRequirement?: ClassPaymentRequirement;
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
   audience?: 'public' | 'staff' | 'staff_walk_in';
+  initialDetails?: Partial<GuestDetails>;
+  submitLabel?: string;
+  hideAppointmentRequestField?: boolean;
 }
 
 export function DetailsStep({
@@ -132,6 +135,9 @@ export function DetailsStep({
   payAtVenueBalancePence,
   payAtVenuePaymentRequirement,
   audience = 'public',
+  initialDetails,
+  submitLabel,
+  hideAppointmentRequestField = false,
 }: DetailsStepProps) {
   const isStaff = audience === 'staff';
   const isStaffWalkIn = audience === 'staff_walk_in';
@@ -153,13 +159,13 @@ export function DetailsStep({
   >({
     resolver: zodResolver(activeSchema),
     defaultValues: {
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      dietary_notes: '',
-      occasion: '',
-      comments_requests: '',
+      first_name: initialDetails?.first_name ?? '',
+      last_name: initialDetails?.last_name ?? '',
+      email: initialDetails?.email ?? '',
+      phone: initialDetails?.phone ?? '',
+      dietary_notes: initialDetails?.dietary_notes ?? '',
+      occasion: initialDetails?.occasion ?? '',
+      comments_requests: initialDetails?.dietary_notes ?? '',
       acceptTerms: false,
       marketingConsent: true,
     },
@@ -373,7 +379,7 @@ export function DetailsStep({
           </>
         )}
 
-        {isAppointment && (
+        {isAppointment && !hideAppointmentRequestField && (
           <FormField label="Comments or requests" error={errors.comments_requests?.message}>
             <textarea
               {...register('comments_requests')}
@@ -424,11 +430,12 @@ export function DetailsStep({
         >
           {isSubmitting
             ? 'Processing...'
-            : (isAppointment || isClass) && hasDeposit
+            : submitLabel ??
+              ((isAppointment || isClass) && hasDeposit
               ? 'Continue to payment'
               : !useAppointmentFields && requiresDeposit
                 ? 'Continue to Payment'
-                : 'Confirm Booking'}
+                : 'Confirm Booking')}
         </button>
       </form>
     </div>

@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
+import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
+import type { VenuePublic } from '@/components/booking/types';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 interface BookingDetails {
@@ -31,6 +33,7 @@ interface BookingDetails {
   refund_notice_hours?: number;
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
+  venue_public?: VenuePublic | null;
 }
 
 function isCdeModel(m: BookingModel): boolean {
@@ -42,28 +45,6 @@ interface Slot {
   label: string;
   start_time: string;
   available_covers: number;
-}
-
-interface AppointmentServiceOption {
-  id: string;
-  name: string;
-  duration_minutes: number;
-  price_pence: number | null;
-}
-
-interface AppointmentPractitionerDay {
-  id: string;
-  name: string;
-  services: AppointmentServiceOption[];
-  slots: Array<{
-    practitioner_id: string;
-    practitioner_name: string;
-    service_id: string;
-    service_name: string;
-    start_time: string;
-    duration_minutes: number;
-    price_pence: number | null;
-  }>;
 }
 
 export function ManageBookingView({ bookingId, token, hmac }: { bookingId: string; token?: string; hmac?: string }) {
@@ -273,19 +254,38 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
           )}
 
           {showGuestModify && showModify && isAppointment && details.practitioner_id && details.appointment_service_id && (
-            <ModifyAppointmentSection
-              bookingId={bookingId}
-              venueId={details.venue_id}
-              venuePhone={details.venue_phone}
-              initialPractitionerId={details.practitioner_id}
-              initialServiceId={details.appointment_service_id}
-              currentDate={details.booking_date}
-              currentTime={details.booking_time}
-              partySize={details.party_size}
-              authPayload={hmac ? { hmac } : { token }}
-              onSaved={handleModifySaved}
-              onCancel={() => setShowModify(false)}
-            />
+            details.venue_public ? (
+              <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4">
+                <AppointmentBookingFlow
+                  venue={details.venue_public}
+                  bookingAudience="public"
+                  initialDate={details.booking_date}
+                  initialTime={details.booking_time}
+                  preselectedPractitionerId={details.practitioner_id}
+                  onBookingCreated={handleModifySaved}
+                  editBooking={{
+                    id: bookingId,
+                    booking_date: details.booking_date,
+                    booking_time: details.booking_time,
+                    party_size: details.party_size,
+                    practitioner_id: details.practitioner_id,
+                    service_id: details.appointment_service_id,
+                    publicAuth: hmac ? { hmac } : { token },
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowModify(false)}
+                  className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Back
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                Could not load the booking form. Please contact the venue to change this appointment.
+              </div>
+            )
           )}
 
           {canModify && showModify && !isAppointment && (
@@ -343,313 +343,6 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       <p className="mt-4 text-center text-xs text-slate-400">
         <Link href="/" className="hover:text-brand-600">Powered by ReserveNI</Link>
       </p>
-    </div>
-  );
-}
-
-function ModifyAppointmentSection({
-  bookingId,
-  venueId,
-  venuePhone,
-  initialPractitionerId,
-  initialServiceId,
-  currentDate,
-  currentTime,
-  partySize,
-  authPayload,
-  onSaved,
-  onCancel,
-}: {
-  bookingId: string;
-  venueId: string;
-  venuePhone: string | null;
-  initialPractitionerId: string;
-  initialServiceId: string;
-  currentDate: string;
-  currentTime: string;
-  partySize: number;
-  authPayload: { hmac?: string; token?: string };
-  onSaved: () => void;
-  onCancel: () => void;
-}) {
-  const [date, setDate] = useState(currentDate);
-  const [practitionerId, setPractitionerId] = useState(initialPractitionerId);
-  const [serviceId, setServiceId] = useState(initialServiceId);
-  const [selectedTime, setSelectedTime] = useState(currentTime.slice(0, 5));
-  const [dayPractitioners, setDayPractitioners] = useState<AppointmentPractitionerDay[]>([]);
-  const [loadingDay, setLoadingDay] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const loadDay = useCallback(
-    async (dateStr: string) => {
-      setLoadingDay(true);
-      setError(null);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      debounceRef.current = setTimeout(async () => {
-        try {
-          const url = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(dateStr)}`;
-          const res = await fetch(url, { signal: controller.signal });
-          if (!res.ok) throw new Error('Failed to load availability');
-          const data = (await res.json()) as { practitioners?: AppointmentPractitionerDay[] };
-          if (controller.signal.aborted) return;
-          setDayPractitioners(data.practitioners ?? []);
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') return;
-          if (!controller.signal.aborted) {
-            setDayPractitioners([]);
-            setError('Could not load available appointments for this date.');
-          }
-        } finally {
-          if (!controller.signal.aborted) setLoadingDay(false);
-        }
-      }, 200);
-    },
-    [venueId],
-  );
-
-  useEffect(() => {
-    loadDay(date);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, [date, loadDay]);
-
-  const selectedPractitioner = useMemo(
-    () => dayPractitioners.find((p) => p.id === practitionerId),
-    [dayPractitioners, practitionerId],
-  );
-
-  const serviceOptions = selectedPractitioner?.services ?? [];
-
-  const timeSlots = useMemo(() => {
-    if (!selectedPractitioner) return [];
-    return selectedPractitioner.slots.filter((s) => s.service_id === serviceId);
-  }, [selectedPractitioner, serviceId]);
-
-  useEffect(() => {
-    if (dayPractitioners.length === 0) return;
-    const stillHasPractitioner = dayPractitioners.some((p) => p.id === practitionerId);
-    if (!stillHasPractitioner) {
-      const first = dayPractitioners[0];
-      if (first) {
-        setPractitionerId(first.id);
-        const firstSvc = first.services[0];
-        if (firstSvc) setServiceId(firstSvc.id);
-      }
-      return;
-    }
-    const pr = dayPractitioners.find((p) => p.id === practitionerId);
-    if (!pr) return;
-    const hasService = pr.services.some((s) => s.id === serviceId);
-    if (!hasService && pr.services[0]) {
-      setServiceId(pr.services[0].id);
-    }
-  }, [dayPractitioners, practitionerId, serviceId]);
-
-  useEffect(() => {
-    const times = timeSlots.map((s) => s.start_time.slice(0, 5));
-    if (times.length === 0) return;
-    if (!times.includes(selectedTime)) {
-      setSelectedTime(times[0]!);
-    }
-  }, [timeSlots, selectedTime]);
-
-  const hasChanges =
-    date !== currentDate ||
-    selectedTime !== currentTime.slice(0, 5) ||
-    practitionerId !== initialPractitionerId ||
-    serviceId !== initialServiceId;
-
-  const handleSave = useCallback(async () => {
-    if (!hasChanges) {
-      onCancel();
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const base = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${base}/api/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_id: bookingId,
-          ...authPayload,
-          action: 'modify',
-          booking_date: date,
-          booking_time: selectedTime,
-          party_size: partySize,
-          practitioner_id: practitionerId,
-          appointment_service_id: serviceId,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const msg =
-          res.status === 412
-            ? 'This booking was updated elsewhere. Refresh the page and try again.'
-            : ((j as { error?: string }).error ?? 'Failed to update appointment.');
-        setError(msg);
-        return;
-      }
-      onSaved();
-    } catch {
-      setError('Network error. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    bookingId,
-    authPayload,
-    date,
-    selectedTime,
-    partySize,
-    practitionerId,
-    serviceId,
-    hasChanges,
-    onCancel,
-    onSaved,
-  ]);
-
-  return (
-    <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
-      <p className="text-sm font-semibold text-slate-800">Change your appointment</p>
-      <p className="text-xs text-slate-600">
-        Choose the service, staff member, date and time. Your selection must be available in real time.
-      </p>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
-        />
-      </div>
-
-      {!loadingDay && dayPractitioners.length === 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          No availability could be loaded for this date. Try another date or contact the venue
-          {venuePhone ? (
-            <>
-              {' '}
-              on{' '}
-              <a href={`tel:${venuePhone}`} className="font-semibold underline">
-                {venuePhone}
-              </a>
-            </>
-          ) : null}
-          .
-        </div>
-      )}
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-slate-500">Staff member</label>
-        {loadingDay ? (
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-            <span className="text-xs text-slate-500">Loading...</span>
-          </div>
-        ) : (
-          <select
-            value={practitionerId}
-            onChange={(e) => setPractitionerId(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
-          >
-            {dayPractitioners.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-slate-500">Service</label>
-        <select
-          value={serviceId}
-          onChange={(e) => setServiceId(e.target.value)}
-          disabled={!selectedPractitioner || serviceOptions.length === 0}
-          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 disabled:opacity-50"
-        >
-          {serviceOptions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-              {s.duration_minutes ? ` (${s.duration_minutes} min)` : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-slate-500">Time</label>
-        {loadingDay ? (
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-            <span className="text-xs text-slate-500">Loading times...</span>
-          </div>
-        ) : timeSlots.length === 0 ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            No available times for this staff member and service on this date.
-            {venuePhone ? (
-              <span className="mt-1 block">
-                Call{' '}
-                <a href={`tel:${venuePhone}`} className="font-semibold underline">
-                  {venuePhone}
-                </a>{' '}
-                for help.
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <select
-            value={selectedTime}
-            onChange={(e) => setSelectedTime(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
-          >
-            {timeSlots.map((slot) => (
-              <option key={`${slot.start_time}-${slot.service_id}`} value={slot.start_time.slice(0, 5)}>
-                {slot.start_time.slice(0, 5)} ({slot.service_name})
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-          {error}
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving || !hasChanges || loadingDay || timeSlots.length === 0}
-          className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save changes'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          Back
-        </button>
-      </div>
     </div>
   );
 }

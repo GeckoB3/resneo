@@ -19,6 +19,8 @@ import type { UndoAction } from '@/types/table-management';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import type { BookingModel } from '@/types/booking-models';
 import { ExpandedBookingContent } from '@/app/dashboard/bookings/ExpandedBookingContent';
+import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
@@ -459,6 +461,12 @@ export function DaySheetView({
 
   // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [guestHistoryRevisionById, setGuestHistoryRevisionById] = useState<Record<string, number>>({});
+  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
+    bookingId: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
   const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
   const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
@@ -669,6 +677,10 @@ export function DaySheetView({
       if (!res.ok) return;
       const detail = await res.json();
       setDetailById((prev) => ({ ...prev, [bookingId]: detail as BookingDetailLite }));
+      setGuestHistoryRevisionById((prev) => ({
+        ...prev,
+        [bookingId]: (prev[bookingId] ?? 0) + 1,
+      }));
     } finally {
       setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
     }
@@ -682,6 +694,10 @@ export function DaySheetView({
         .then((detail) => {
           if (!detail) return;
           setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: detail as BookingDetailLite }));
+          setGuestHistoryRevisionById((prev) => ({
+            ...prev,
+            [bookingId]: (prev[bookingId] ?? 0) + 1,
+          }));
         })
         .catch(() => {});
     },
@@ -1506,7 +1522,7 @@ export function DaySheetView({
                         </div>
 
                         {isExpanded && (
-                          <div className="border-t border-slate-100/95 bg-slate-50/30">
+                          <div className={expandedBookingRowShellClass}>
                             <ExpandedBookingContent
                               booking={bookingRow}
                               detail={detailById[b.id]}
@@ -1514,6 +1530,16 @@ export function DaySheetView({
                               tableManagementEnabled={tableManagementEnabled}
                               venueId={venueId}
                               venueCurrency={currency ?? 'GBP'}
+                              venueTimezone={venueTimezone}
+                              guestHistoryListRefresh={guestHistoryRevisionById[b.id] ?? 0}
+                              relatedBookingsStackDepth={0}
+                              onOpenRelatedGuestBooking={(payload) => {
+                                setRelatedGuestHistoryBooking({
+                                  bookingId: payload.bookingId,
+                                  snapshot: payload.snapshot,
+                                  isAppointment: !isTableReservationBooking(payload.row),
+                                });
+                              }}
                               draftMessage={messageDraftById[b.id] ?? ''}
                               sendingMessage={sendingMessageIds.includes(b.id)}
                               onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
@@ -1536,6 +1562,31 @@ export function DaySheetView({
           ))}
         </div>
       )}
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={currency ?? 'GBP'}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="popover"
+          anchor={null}
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            if (expandedId) {
+              setGuestHistoryRevisionById((prev) => ({
+                ...prev,
+                [expandedId]: (prev[expandedId] ?? 0) + 1,
+              }));
+            }
+            void fetchDaySheet();
+          }}
+        />
+      ) : null}
 
       {/* ── Modals ── */}
       {showWalkIn && (

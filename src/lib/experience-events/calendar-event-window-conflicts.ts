@@ -19,6 +19,18 @@ function intervalsOverlap(a0: number, a1: number, b0: number, b1: number): boole
   return a0 < b1 && b0 < a1;
 }
 
+/** Parse `estimated_end_time` saved as Postgres `time`, ISO local, or ISO with zone. */
+export function estimatedEndMinutesFromDb(value: string): number {
+  const s = String(value).trim();
+  const tIdx = s.indexOf('T');
+  if (tIdx !== -1) {
+    const afterT = s.slice(tIdx + 1);
+    const timePart = afterT.split(/[Z+-]/)[0]?.trim() ?? afterT;
+    return hhmmToMinutes(timePart);
+  }
+  return hhmmToMinutes(s);
+}
+
 function bookingWindowEnd(row: {
   booking_time: string;
   booking_end_time?: string | null;
@@ -26,8 +38,13 @@ function bookingWindowEnd(row: {
 }): number {
   const start = hhmmToMinutes(row.booking_time);
   if (row.booking_end_time) return hhmmToMinutes(String(row.booking_end_time));
-  if (row.estimated_end_time) return hhmmToMinutes(String(row.estimated_end_time).slice(0, 8));
+  if (row.estimated_end_time) return estimatedEndMinutesFromDb(String(row.estimated_end_time));
   return start + 60;
+}
+
+function bookingStatusIsActive(status: string): status is (typeof BOOKING_ACTIVE_STATUSES)[number] {
+  const s = status.trim();
+  return (BOOKING_ACTIVE_STATUSES as readonly string[]).includes(s);
 }
 
 /**
@@ -77,13 +94,54 @@ export async function assertExperienceEventWindowFreeOnCalendar(
     console.error('[assertExperienceEventWindowFreeOnCalendar] experience_events', evErr.message);
     return 'Could not verify calendar availability.';
   } else {
+    const overlappingEventIds: string[] = [];
     for (const ev of otherEvents ?? []) {
       const row = ev as { id: string; start_time: string; end_time: string };
       if (excludeEv && row.id === excludeEv) continue;
       const e0 = hhmmToMinutes(row.start_time);
       const e1 = hhmmToMinutes(row.end_time);
-      if (intervalsOverlap(w0, w1, e0, e1)) {
-        return 'Another event on this calendar overlaps this time.';
+      if (intervalsOverlap(w0, w1, e0, e1)) overlappingEventIds.push(row.id);
+    }
+
+    /**
+     * An `experience_events` row still occupies the column when tickets may be sold—
+     * but if every linked booking for this date is no longer active (e.g. only Cancelled
+     * rows remain), the slot should behave like freed time for scheduling (e.g. a class).
+     * When no bookings exist yet, the hosted event continues to reserve the window.
+     */
+    if (overlappingEventIds.length > 0) {
+      const { data: evBookingRows, error: evBkErr } = await admin
+        .from('bookings')
+        .select('experience_event_id, status')
+        .eq('venue_id', venueId)
+        .eq('booking_date', eventDate)
+        .in('experience_event_id', overlappingEventIds);
+
+      if (evBkErr) {
+        console.error('[assertExperienceEventWindowFreeOnCalendar] experience_event bookings', evBkErr.message);
+        return 'Could not verify calendar availability.';
+      }
+
+      const statsByEventId = new Map<string, { hasAny: boolean; hasActive: boolean }>();
+      for (const evId of overlappingEventIds) {
+        statsByEventId.set(evId, { hasAny: false, hasActive: false });
+      }
+      for (const raw of evBookingRows ?? []) {
+        const r = raw as { experience_event_id: string | null; status?: string | null };
+        const eid = r.experience_event_id;
+        if (!eid) continue;
+        const agg = statsByEventId.get(eid);
+        if (!agg) continue;
+        agg.hasAny = true;
+        const st = String(r.status ?? '').trim();
+        if (bookingStatusIsActive(st)) agg.hasActive = true;
+      }
+
+      for (const evId of overlappingEventIds) {
+        const agg = statsByEventId.get(evId)!;
+        if (!agg.hasAny || agg.hasActive) {
+          return 'Another event on this calendar overlaps this time.';
+        }
       }
     }
   }
@@ -123,7 +181,8 @@ export async function assertExperienceEventWindowFreeOnCalendar(
       'id, booking_time, booking_end_time, estimated_end_time, status, calendar_id, practitioner_id, resource_id, class_instance_id, experience_event_id',
     )
     .eq('venue_id', venueId)
-    .eq('booking_date', eventDate);
+    .eq('booking_date', eventDate)
+    .in('status', [...BOOKING_ACTIVE_STATUSES]);
 
   if (bkErr) {
     console.error('[assertExperienceEventWindowFreeOnCalendar] bookings', bkErr.message);
@@ -132,8 +191,8 @@ export async function assertExperienceEventWindowFreeOnCalendar(
 
   for (const raw of bookings ?? []) {
     const r = raw as Record<string, unknown>;
-    const status = String(r.status ?? '');
-    if (!BOOKING_ACTIVE_STATUSES.includes(status as (typeof BOOKING_ACTIVE_STATUSES)[number])) continue;
+    const status = String(r.status ?? '').trim();
+    if (!bookingStatusIsActive(status)) continue;
 
     const expEvId = r.experience_event_id as string | null | undefined;
     if (excludeEv && typeof expEvId === 'string' && expEvId === excludeEv) continue;

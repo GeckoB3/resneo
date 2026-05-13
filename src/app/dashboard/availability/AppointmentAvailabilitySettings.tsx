@@ -1056,7 +1056,7 @@ export function AppointmentAvailabilitySettings({
               ) : (
                 <>
                   <div className="mb-4">
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Team member</label>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
                     <select
                       value={selectedPractitionerId}
                       onChange={(e) => setSelectedPractitionerId(e.target.value)}
@@ -1065,7 +1065,6 @@ export function AppointmentAvailabilitySettings({
                       {practitionersForScheduleTabs.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
-                          {currentStaffId && staffIdsForPractitioner(p).includes(currentStaffId) ? ' (you)' : ''}
                         </option>
                       ))}
                     </select>
@@ -1073,8 +1072,8 @@ export function AppointmentAvailabilitySettings({
                       selectedPrac &&
                       !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mt-2 text-sm text-slate-600">
-                          View only - you can change hours and breaks for your own calendar; ask an admin to edit someone
-                          else’s schedule.
+                          View only - you can change hours and breaks for calendars linked to your account. Ask an admin
+                          to edit other calendars.
                         </p>
                       )}
                   </div>
@@ -1087,7 +1086,7 @@ export function AppointmentAvailabilitySettings({
                       readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}
                       readOnlyHint={
                         !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
-                          ? 'View only - this is another team member’s schedule. You can edit working hours on your own calendar, or ask an admin.'
+                          ? 'View only - this calendar is not linked to your account. You can edit working hours on calendars you manage, or ask an admin.'
                           : undefined
                       }
                     />
@@ -1095,10 +1094,11 @@ export function AppointmentAvailabilitySettings({
 
                   {selectedPrac && tab === 'breaks' && (
                     <>
-                      {!isAdmin && canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
+                      {canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mb-4 text-sm text-slate-600">
-                          Set breaks for each day you work. Guests cannot book during these times. Only an admin can
-                          change working hours.
+                          Breaks are short windows on a day when this calendar stays closed to bookings (for example a
+                          lunch break), using the working-hours window you set on the Working hours tab. Guests cannot book
+                          during a break.
                         </p>
                       )}
                       <BreaksScheduleEditor
@@ -1109,7 +1109,7 @@ export function AppointmentAvailabilitySettings({
                         readOnly={!canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)}
                         readOnlyHint={
                           !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
-                            ? 'View only - you can edit breaks for your own calendar only.'
+                            ? 'View only - you can edit breaks for calendars linked to your account only.'
                             : undefined
                         }
                       />
@@ -1204,7 +1204,7 @@ function WorkingHoursEditor({
       )}
       {readOnly && (
         <p className="mt-4 text-sm text-slate-500">
-          {readOnlyHint ?? 'Only admins can change working hours.'}
+          {readOnlyHint ?? "You can't edit working hours for this calendar."}
         </p>
       )}
     </div>
@@ -1310,9 +1310,10 @@ function BreaksScheduleEditor({
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        For each day of the week, add one or more breaks when appointments should not be offered. Leave a day with no
-        breaks if you are available for the full working day. If several days share the same pattern, set Monday first
-        and use <span className="font-medium text-slate-800">Copy Monday to all days</span>.
+        For each day of the week, add one or more breaks when this calendar should not offer appointments. Leave a day
+        with no breaks if it stays bookable for the full working-hours window that day. If several days share the same
+        pattern, set Monday first and use{' '}
+        <span className="font-medium text-slate-800">Copy Monday to all days</span>.
       </p>
 
       {!readOnly && (
@@ -1343,7 +1344,7 @@ function BreaksScheduleEditor({
                 )}
               </div>
               {ranges.length === 0 ? (
-                <p className="mt-1 text-xs text-slate-400">No breaks - bookable for the full working hours</p>
+                <p className="mt-1 text-xs text-slate-400">No breaks - bookable for the full working-hours window</p>
               ) : (
                 <div className="mt-2 space-y-2">
                   {ranges.map((r, ri) => (
@@ -1394,7 +1395,7 @@ function BreaksScheduleEditor({
       {readOnly && (
         <p className="text-sm text-slate-500">
           {readOnlyHint ??
-            'You can only edit breaks for the calendar linked to your account. Ask an admin if you need a different profile selected.'}
+            'You can only edit breaks for calendars linked to your account. Ask an admin to select a different calendar.'}
         </p>
       )}
     </div>

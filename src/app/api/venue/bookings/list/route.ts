@@ -9,11 +9,12 @@ import {
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
+import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
- * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
+ * Optional: `guest=<uuid>&guest_history=1` — bookings for that guest across a wide venue-local date window (max 250 rows); use with `guest` filter.
  * Optional: service=<uuid>[,<uuid>...] filters table reservations by venue_services.id.
  * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
@@ -120,8 +121,23 @@ export async function GET(request: NextRequest) {
       query = query.eq('booking_date', date);
     } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
       query = query.gte('booking_date', from).lte('booking_date', to);
+    } else if (
+      guestIdParam &&
+      guestUuidRe.test(guestIdParam) &&
+      request.nextUrl.searchParams.get('guest_history') === '1'
+    ) {
+      const { data: vTzRow } = await staff.db.from('venues').select('timezone').eq('id', staff.venue_id).maybeSingle();
+      const tzRaw = (vTzRow as { timezone?: string | null } | null)?.timezone;
+      const tz = typeof tzRaw === 'string' && tzRaw.trim() !== '' ? tzRaw.trim() : 'Europe/London';
+      const y = Number.parseInt(calendarDateInTimeZone(new Date(), tz).slice(0, 4), 10);
+      const fromWide = `${Number.isFinite(y) ? y - 4 : 1970}-01-01`;
+      const toWide = `${Number.isFinite(y) ? y + 4 : 2100}-12-31`;
+      query = query.gte('booking_date', fromWide).lte('booking_date', toWide).limit(250);
     } else {
-      return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=... or ids=...' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Provide date=YYYY-MM-DD or from=...&to=... or ids=..., or guest=guestId&guest_history=1' },
+        { status: 400 },
+      );
     }
 
     const { data: rows, error } = await query;

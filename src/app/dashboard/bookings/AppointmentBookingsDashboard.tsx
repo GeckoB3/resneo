@@ -10,6 +10,8 @@ import {
   type BookingDetailLite,
   type BookingRow,
 } from './ExpandedBookingContent';
+import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
+import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -19,7 +21,7 @@ import { useToast } from '@/components/ui/Toast';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
-import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { inferBookingRowModel, bookingModelShortLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
@@ -277,13 +279,16 @@ function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
     client_arrived_at: b.client_arrived_at,
     guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
     staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
+    practitioner_id: b.practitioner_id,
+    calendar_id: b.calendar_id,
+    appointment_service_id: b.appointment_service_id,
     experience_event_id: b.experience_event_id,
     class_instance_id: b.class_instance_id,
     resource_id: b.resource_id,
     event_session_id: b.event_session_id,
-    calendar_id: b.calendar_id,
     service_item_id: b.service_item_id,
     inferred_booking_model: inferRegistryModel(b),
+    booking_model: b.booking_model,
   };
 }
 
@@ -339,6 +344,12 @@ export function AppointmentBookingsDashboard({
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   /** Appointment rows expanded inline in the list. */
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [guestHistoryRevisionById, setGuestHistoryRevisionById] = useState<Record<string, number>>({});
+  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
+    bookingId: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
   const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
   const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
   const searchParams = useSearchParams();
@@ -415,6 +426,10 @@ export function AppointmentBookingsDashboard({
       if (!res.ok) return;
       const data = (await res.json()) as BookingDetailLite;
       setDetailById((prev) => ({ ...prev, [bookingId]: data }));
+      setGuestHistoryRevisionById((prev) => ({
+        ...prev,
+        [bookingId]: (prev[bookingId] ?? 0) + 1,
+      }));
       setBookings((rows) =>
         rows.map((booking) =>
           booking.id === bookingId && data.inferred_booking_model
@@ -1370,7 +1385,7 @@ export function AppointmentBookingsDashboard({
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
-            className="border-t border-slate-100/95 bg-slate-50/30 px-2 pb-2.5 pt-2 space-y-2 sm:px-3"
+            className={expandedBookingRowShellClass}
           >
             <ExpandedBookingContent
               booking={registryToExpandedBookingRow(b)}
@@ -1379,6 +1394,16 @@ export function AppointmentBookingsDashboard({
               tableManagementEnabled={bookingModel === 'table_reservation'}
               venueId={venueId}
               venueCurrency={currency}
+              venueTimezone={venueTimezone}
+              guestHistoryListRefresh={guestHistoryRevisionById[b.id] ?? 0}
+              relatedBookingsStackDepth={0}
+              onOpenRelatedGuestBooking={(payload) => {
+                setRelatedGuestHistoryBooking({
+                  bookingId: payload.bookingId,
+                  snapshot: payload.snapshot,
+                  isAppointment: !isTableReservationBooking(payload.row),
+                });
+              }}
               draftMessage={draftMessage}
               sendingMessage={sendingMessage}
               onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
@@ -1916,6 +1941,33 @@ export function AppointmentBookingsDashboard({
           }}
         />
       )}
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={currency}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="popover"
+          anchor={null}
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            setGuestHistoryRevisionById((prev) => {
+              const next = { ...prev };
+              for (const id of expandedIds) {
+                next[id] = (next[id] ?? 0) + 1;
+              }
+              return next;
+            });
+            void fetchBookings({ silent: true });
+            void fetchBookingsForStats();
+          }}
+        />
+      ) : null}
 
       <DashboardStaffBookingModal
         open={newBookingOpen}

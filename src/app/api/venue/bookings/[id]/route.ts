@@ -11,6 +11,12 @@ import {
   fetchAppointmentInput,
   validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
+import {
+  minutesBetweenStartAndEndHM,
+  resolveAppointmentModifyEndCoreHHmm,
+  validateAppointmentModificationInterval,
+} from '@/lib/booking/validate-appointment-modification';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { parseProcessingTimeBlocksFromDb, validateProcessingTimeBlocks } from '@/lib/appointments/processing-time';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
@@ -47,15 +53,6 @@ import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/nam
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
-
-function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
-  const startMin = timeToMinutes(startHHmm);
-  let endMin = timeToMinutes(endHHmm);
-  if (endMin <= startMin) {
-    endMin += 24 * 60;
-  }
-  return endMin - startMin;
-}
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
   const [y, m, d] = bookingDate.split('-').map(Number);
@@ -921,7 +918,9 @@ export async function PATCH(
       body.appointment_service_id !== undefined ||
       body.service_item_id !== undefined ||
       body.duration_minutes !== undefined ||
-      body.processing_time_blocks !== undefined
+      body.processing_time_blocks !== undefined ||
+      body.practitioner_id !== undefined ||
+      (body as { service_variant_id?: unknown }).service_variant_id !== undefined
     ) {
       const inferredForModify = inferBookingRowModel({
         booking_model: (booking as { booking_model?: string | null }).booking_model,
@@ -966,12 +965,6 @@ export async function PATCH(
 
       const timeStr = newTime.slice(0, 5);
       const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
-      if (isAppointment && body.duration_minutes !== undefined) {
-        return NextResponse.json(
-          { error: 'Cover time cannot be changed here for appointment bookings' },
-          { status: 400 },
-        );
-      }
       const allowManualCalendarOverlap =
         isAppointment &&
         (body.allow_manual_overlap === true || body.allow_booking_overlap === true) &&
@@ -979,6 +972,7 @@ export async function PATCH(
           body.booking_date !== undefined ||
           body.booking_time !== undefined ||
           body.booking_end_time !== undefined ||
+          body.duration_minutes !== undefined ||
           body.practitioner_id !== undefined ||
           body.appointment_service_id !== undefined ||
           body.service_item_id !== undefined
@@ -1039,53 +1033,46 @@ export async function PATCH(
           appointmentSvcDurationMinutes = (siRow as { duration_minutes?: number } | null)?.duration_minutes ?? 30;
         }
 
-        const apptInput = await fetchAppointmentInput({
-          supabase: admin,
-          venueId: staff.venue_id,
-          date: newDate,
-          practitionerId: practId,
-          serviceId: svcId,
-        });
-        apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== idLc);
-        apptInput.skipPastSlotFilter = true;
-        const { data: venueClock } = await admin
-          .from('venues')
-          .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
-          .eq('id', staff.venue_id)
-          .single();
-        attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
-
-        const startMin = timeToMinutes(timeStr);
-        let endCoreHHmm: string;
-        if (typeof body.booking_end_time === 'string' && body.booking_end_time.trim() !== '') {
-          const raw = body.booking_end_time.trim();
-          endCoreHHmm = raw.length >= 5 ? raw.slice(0, 5) : minutesToTime(startMin + appointmentSvcDurationMinutes);
-        } else {
-          endCoreHHmm = minutesToTime(startMin + appointmentSvcDurationMinutes);
+        const variantIdForDefault =
+          (body as { service_variant_id?: string | null }).service_variant_id !== undefined
+            ? ((body as { service_variant_id?: string | null }).service_variant_id as string | null)
+            : ((booking as { service_variant_id?: string | null }).service_variant_id ?? null);
+        if (variantIdForDefault) {
+          const vRow = await loadActiveVariantForService({
+            admin,
+            venueId: staff.venue_id,
+            serviceId: svcId,
+            variantId: variantIdForDefault,
+          });
+          if (!vRow) {
+            return NextResponse.json({ error: 'Invalid or inactive variant for this service' }, { status: 400 });
+          }
+          appointmentSvcDurationMinutes = vRow.duration_minutes;
         }
 
-        const intervalCheck = validateAppointmentCustomInterval(
-          apptInput,
+        const intervalResult = await validateAppointmentModificationInterval({
+          admin,
+          venueId: staff.venue_id,
+          bookingId: id,
+          newDate,
+          timeStr,
           practId,
           svcId,
-          timeStr,
-          endCoreHHmm,
-          id,
-          {
-            allowBookingOverlap: allowManualCalendarOverlap,
-            processingTimeBlocks:
-              body.processing_time_blocks !== undefined
-                ? parseProcessingTimeBlocksFromDb(body.processing_time_blocks)
-                : booking.processing_time_blocks != null
-                  ? parseProcessingTimeBlocksFromDb(
-                      (booking as { processing_time_blocks?: unknown }).processing_time_blocks,
-                    )
-                  : undefined,
-          },
-        );
-        if (!intervalCheck.ok) {
+          durationMinutes: body.duration_minutes as number | null | undefined,
+          bookingEndTime: body.booking_end_time as string | null | undefined,
+          serviceVariantId:
+            (body as { service_variant_id?: string | null }).service_variant_id !== undefined
+              ? ((body as { service_variant_id?: string | null }).service_variant_id as string | null)
+              : undefined,
+          bookingServiceVariantId: (booking as { service_variant_id?: string | null }).service_variant_id ?? null,
+          bookingProcessingSnapshot: (booking as { processing_time_blocks?: unknown }).processing_time_blocks,
+          processingTimeBlocksOverride:
+            body.processing_time_blocks !== undefined ? body.processing_time_blocks : undefined,
+          allowManualOverlap: allowManualCalendarOverlap,
+        });
+        if (!intervalResult.ok) {
           return NextResponse.json(
-            { error: intervalCheck.reason ?? 'Selected time is not available for this practitioner' },
+            { error: intervalResult.reason ?? 'Selected time is not available for this practitioner' },
             { status: 409 },
           );
         }
@@ -1192,14 +1179,19 @@ export async function PATCH(
         const [ry, rmo, rd] = newDate.split('-').map(Number);
         const [rhh, rmm] = timeStr.split(':').map(Number);
         const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));
-        let durationMinutes = appointmentSvcDurationMinutes;
-        if (typeof body.booking_end_time === 'string' && body.booking_end_time.trim() !== '') {
-          const endHm = body.booking_end_time.trim().slice(0, 5);
-          durationMinutes = Math.max(15, minutesBetweenStartAndEnd(timeStr, endHm));
+        const endResolved = resolveAppointmentModifyEndCoreHHmm({
+          startHHmm: timeStr,
+          durationMinutes: body.duration_minutes as number | null | undefined,
+          bookingEndTime: body.booking_end_time as string | null | undefined,
+          defaultDurationMinutes: appointmentSvcDurationMinutes,
+        });
+        if (!endResolved.ok) {
+          return NextResponse.json({ error: endResolved.reason }, { status: 400 });
         }
+        const durationMinutes = minutesBetweenStartAndEndHM(timeStr, endResolved.endCoreHHmm);
         rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
         bookingUpdate.estimated_end_time = rEnd.toISOString();
-        bookingUpdate.booking_end_time = `${String(rEnd.getUTCHours()).padStart(2, '0')}:${String(rEnd.getUTCMinutes()).padStart(2, '0')}:00`;
+        bookingUpdate.booking_end_time = `${endResolved.endCoreHHmm}:00`;
 
         if (body.processing_time_blocks !== undefined) {
           const procChk = validateProcessingTimeBlocks(
@@ -1211,6 +1203,10 @@ export async function PATCH(
           }
           bookingUpdate.processing_time_blocks = procChk.normalized ?? [];
         }
+      }
+
+      if (isAppointment && (body as { service_variant_id?: unknown }).service_variant_id !== undefined) {
+        bookingUpdate.service_variant_id = (body as { service_variant_id?: string | null }).service_variant_id;
       }
 
       if (!isAppointment && tableRescheduleServiceId && tableModifyEngineInput) {

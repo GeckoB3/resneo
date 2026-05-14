@@ -254,7 +254,13 @@ export async function PATCH(request: NextRequest) {
 
     if (error) {
       if (error.code === '23505') {
-        return NextResponse.json({ error: 'Slug already in use' }, { status: 409 });
+        return NextResponse.json(
+          {
+            error:
+              'That booking page address is already taken by another venue. Choose a different slug (lowercase letters, numbers, and hyphens only).',
+          },
+          { status: 409 },
+        );
       }
       console.error('PATCH /api/venue failed:', error);
       return NextResponse.json({ error: 'Failed to update venue' }, { status: 500 });

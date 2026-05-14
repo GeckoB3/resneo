@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -19,7 +19,7 @@ import {
   inferBookingRowModel,
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
-import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
@@ -81,6 +81,10 @@ export interface BookingRow {
   service_item_id?: string | null;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
+  /** Wall-clock end of bookable segment; drives staff appointment modify duration. */
+  booking_end_time?: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown | null;
   booking_model?: string | null;
   service_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
@@ -144,6 +148,19 @@ const BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD: ReadonlySet<BookingModel> = new 
   'resource_booking',
 ]);
 
+function guestMessageSuccessCaption(channel: GuestMessageChannel): string {
+  switch (channel) {
+    case 'email':
+      return 'Email sent to the guest.';
+    case 'sms':
+      return 'SMS sent to the guest.';
+    case 'both':
+      return 'Message sent by email and/or SMS (where contact details exist).';
+    default:
+      return 'Message sent.';
+  }
+}
+
 export function ExpandedBookingContent({
   booking,
   detail,
@@ -180,13 +197,17 @@ export function ExpandedBookingContent({
   draftMessage: string;
   sendingMessage: boolean;
   onMessageDraftChange: (value: string) => void;
-  onSendMessage: (channel: GuestMessageChannel) => void;
+  onSendMessage: (channel: GuestMessageChannel) => GuestMessageSendResult | Promise<GuestMessageSendResult>;
   onStatusAction: (status: BookingStatus) => void;
   onDetailUpdated: () => void;
   onRequestChangeTable?: () => void;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
+  const [guestMessageFeedback, setGuestMessageFeedback] = useState<{
+    tone: 'success' | 'error' | 'warning';
+    text: string;
+  } | null>(null);
   const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
@@ -216,6 +237,46 @@ export function ExpandedBookingContent({
       cancelled = true;
     };
   }, [booking.group_booking_id, booking.id]);
+
+  useEffect(() => {
+    setGuestMessageFeedback(null);
+  }, [guestMessageChannel]);
+
+  useEffect(() => {
+    if (!guestMessageFeedback) return;
+    if (guestMessageFeedback.tone === 'error') return;
+    if (draftMessage.trim().length === 0) return;
+    setGuestMessageFeedback(null);
+  }, [draftMessage, guestMessageFeedback]);
+
+  useEffect(() => {
+    if (!guestMessageFeedback || guestMessageFeedback.tone === 'error') return;
+    const t = window.setTimeout(() => {
+      setGuestMessageFeedback((cur) => (cur?.tone === 'error' ? cur : null));
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [guestMessageFeedback]);
+
+  const handleSendGuestMessage = useCallback(async () => {
+    setGuestMessageFeedback(null);
+    try {
+      const result = await Promise.resolve(onSendMessage(guestMessageChannel));
+      if (result.ok) {
+        setGuestMessageFeedback({
+          tone: result.warning ? 'warning' : 'success',
+          text: result.warning ?? guestMessageSuccessCaption(guestMessageChannel),
+        });
+      } else {
+        setGuestMessageFeedback({ tone: 'error', text: result.error });
+      }
+    } catch (e) {
+      console.error('[ExpandedBookingContent] guest message send', e);
+      setGuestMessageFeedback({
+        tone: 'error',
+        text: e instanceof Error ? e.message : 'Something went wrong while sending.',
+      });
+    }
+  }, [guestMessageChannel, onSendMessage]);
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
@@ -857,7 +918,9 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 disabled={sendingMessage || draftMessage.trim().length === 0}
-                onClick={() => onSendMessage(guestMessageChannel)}
+                onClick={() => {
+                  void handleSendGuestMessage();
+                }}
                 className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:py-1.5"
                 aria-busy={sendingMessage}
               >
@@ -871,6 +934,21 @@ export function ExpandedBookingContent({
               </button>
             </div>
           </div>
+          {guestMessageFeedback ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className={`mt-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${
+                guestMessageFeedback.tone === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : guestMessageFeedback.tone === 'warning'
+                    ? 'border-amber-200 bg-amber-50 text-amber-950'
+                    : 'border-red-200 bg-red-50 text-red-800'
+              }`}
+            >
+              {guestMessageFeedback.text}
+            </p>
+          ) : null}
         </div>
       </details>
 

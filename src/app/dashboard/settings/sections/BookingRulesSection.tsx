@@ -8,6 +8,7 @@ import type { VenueSettings, BookingRulesSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 const restaurantSchema = z.object({
   min_party_size: z.number().int().min(1).max(20),
@@ -61,12 +62,14 @@ export function BookingRulesSection({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...rules, ...data }),
     });
+    const body = await readResponseJson<{ error?: string; booking_rules?: BookingRulesSettings }>(res);
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error ?? 'Failed to save');
+      throw new Error(body.error ?? 'Failed to save');
     }
-    const { booking_rules } = await res.json();
-    onUpdate({ booking_rules });
+    if (!body.booking_rules) {
+      throw new Error('Failed to save');
+    }
+    onUpdate({ booking_rules: body.booking_rules });
   }, [onUpdate, rules]);
 
   if (isAppointment) {

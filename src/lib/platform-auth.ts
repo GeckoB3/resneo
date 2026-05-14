@@ -1,7 +1,14 @@
 import type { User } from '@supabase/supabase-js';
 
-const PLATFORM_ROLE_KEY = 'platform_role';
-const PLATFORM_ROLE_VALUE = 'superuser';
+export const PLATFORM_ROLE_KEY = 'platform_role';
+export const PLATFORM_ROLE_VALUE = 'superuser';
+
+/** Set via admin API when a superuser is provisioned through the platform UI (see `platform_superusers`). */
+export const PLATFORM_SUPERUSER_REGISTERED_KEY = 'platform_superuser_registered';
+
+function hasRegisteredSuperuserFlag(appMetadata: Record<string, unknown> | undefined): boolean {
+  return appMetadata?.[PLATFORM_SUPERUSER_REGISTERED_KEY] === true;
+}
 
 /**
  * Comma-separated lowercase emails that are allowed to access the platform dashboard.
@@ -23,7 +30,8 @@ function getAllowedEmails(): Set<string> {
  */
 /**
  * True when the JWT has `platform_role: superuser` (no email allowlist).
- * Use for client-side default redirects; middleware and `isPlatformSuperuser` still enforce the allowlist.
+ * Use for client-side default redirects; middleware and `isPlatformSuperuser` still enforce the allowlist
+ * or `platform_superuser_registered` flag.
  */
 export function hasPlatformSuperuserJwtRole(user: User | null | undefined): boolean {
   if (!user) return false;
@@ -37,11 +45,12 @@ export function isPlatformSuperuser(user: User | null | undefined): boolean {
   const meta = user.app_metadata ?? {};
   if (meta[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
 
-  const allowed = getAllowedEmails();
-  if (allowed.size === 0) return false;
-
   const email = (user.email ?? '').toLowerCase().trim();
-  return allowed.has(email);
+  const allowed = getAllowedEmails();
+  if (allowed.has(email)) return true;
+  if (hasRegisteredSuperuserFlag(meta as Record<string, unknown>)) return true;
+
+  return false;
 }
 
 /**
@@ -54,8 +63,7 @@ export function isPlatformRoleInJwt(
 ): boolean {
   if (!appMetadata || appMetadata[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
 
-  const allowed = getAllowedEmails();
-  if (allowed.size === 0) return false;
-
-  return allowed.has((email ?? '').toLowerCase().trim());
+  const em = (email ?? '').toLowerCase().trim();
+  if (getAllowedEmails().has(em)) return true;
+  return hasRegisteredSuperuserFlag(appMetadata);
 }

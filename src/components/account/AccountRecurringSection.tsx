@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 interface RecRow {
   id: string;
@@ -91,15 +92,21 @@ export function AccountRecurringSection() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Recurring class reservations</h1>
-      <p className="text-sm text-slate-600">
-        Standing rules are processed by a nightly cron; concrete bookings are not created automatically yet — see{' '}
-        <code className="rounded bg-slate-100 px-1">last_error</code> on rows.
-      </p>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Recurring class reservations"
+        subtitle={
+          <>
+            Standing rules are processed by a nightly cron; concrete bookings are not created automatically yet — see{' '}
+            <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-800">last_error</code>{' '}
+            on rows.
+          </>
+        }
+      />
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your rules</h2>
         {rows.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">None yet.</p>
@@ -119,7 +126,7 @@ export function AccountRecurringSection() {
         )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">New rule (stub)</h2>
         {catalog.venues.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">No active class types found.</p>

@@ -8,6 +8,7 @@ import {
   bookingExpandAccordionDetailsClass,
   bookingExpandAccordionSummaryClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 /** Max depth of BookingDetailPanel opened from nested “Detail” (guest history), including the root panel. */
 export const BOOKING_DETAIL_MAX_STACK_DEPTH = 8;
@@ -145,15 +146,14 @@ export function GuestBookingsForGuestAccordion({
           guest_history: '1',
         });
         const res = await fetch(`/api/venue/bookings/list?${qs.toString()}`);
+        const payload = await readResponseJson<{ error?: string; bookings?: GuestBookingHistoryRow[] }>(res);
         if (!res.ok) {
-          const j = (await res.json().catch(() => ({}))) as { error?: string };
           if (!cancelled) {
-            setFetchError(typeof j.error === 'string' ? j.error : 'Could not load bookings');
+            setFetchError(typeof payload.error === 'string' ? payload.error : 'Could not load bookings');
             setRows([]);
           }
           return;
         }
-        const payload = (await res.json()) as { bookings?: GuestBookingHistoryRow[] };
         const list = (payload.bookings ?? []).filter((b) => b && typeof b.id === 'string');
         if (!cancelled) {
           setRows(list);

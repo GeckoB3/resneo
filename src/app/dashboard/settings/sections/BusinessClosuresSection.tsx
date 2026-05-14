@@ -9,6 +9,7 @@ import {
   type ExceptionDayValue,
 } from '@/app/dashboard/resource-timeline/ResourceExceptionsCalendar';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 type BlockType = 'closed' | 'amended_hours' | 'reduced_capacity' | 'special_event';
 
@@ -334,15 +335,17 @@ function UnifiedBlocksEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      const data = await readResponseJson<{ error?: string; block?: Block }>(res);
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to save');
       }
-      const data = await res.json();
+      if (!data.block) {
+        throw new Error('Failed to save');
+      }
       if (editingId) {
-        setBlocks((prev) => prev.map((b) => (b.id === editingId ? data.block : b)));
+        setBlocks((prev) => prev.map((b) => (b.id === editingId ? data.block! : b)));
       } else {
-        setBlocks((prev) => [...prev, data.block]);
+        setBlocks((prev) => [...prev, data.block!]);
       }
       cancelEdit();
     } catch (err) {

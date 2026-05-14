@@ -18,6 +18,7 @@ import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
   fetchAppointmentInput,
+  validateAppointmentCustomInterval,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
@@ -509,6 +510,11 @@ async function handleAppointmentAvailability(
   }
 
   const variantId = searchParams.get('variant_id');
+  const durationParam = searchParams.get('duration_minutes');
+  const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
+  if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
+    return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
+  }
   if (variantId && serviceId) {
     const variant = await loadActiveVariantForService({
       admin: supabase,
@@ -533,6 +539,24 @@ async function handleAppointmentAvailability(
     : DEFAULT_ENTITY_BOOKING_WINDOW;
   attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
   const result = computeAppointmentAvailability(input);
+  if (customDurationMinutes != null && serviceId) {
+    result.practitioners = result.practitioners.map((practitioner) => ({
+      ...practitioner,
+      slots: practitioner.slots.filter((slot) => {
+        if (slot.service_id !== serviceId) return true;
+        const startMin = toMinutes(slot.start_time);
+        const endMinutes = startMin + customDurationMinutes;
+        const endHHmm = `${String(Math.floor((endMinutes % (24 * 60)) / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+        return validateAppointmentCustomInterval(
+          input,
+          practitioner.id,
+          serviceId,
+          slot.start_time,
+          endHHmm,
+        ).ok;
+      }),
+    }));
+  }
 
   return NextResponse.json({ date, venue_id: venueId, ...result });
 }

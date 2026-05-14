@@ -120,6 +120,15 @@ export async function PATCH(request: Request) {
       .eq('id', staff.venue_id);
 
     if (updateError) {
+      if (updateError.code === '23505') {
+        return NextResponse.json(
+          {
+            error:
+              'That booking page address is already taken by another venue. Choose a different slug (lowercase letters, numbers, and hyphens only).',
+          },
+          { status: 409 },
+        );
+      }
       return NextResponse.json(
         { error: 'Failed to update: ' + updateError.message },
         { status: 500 }

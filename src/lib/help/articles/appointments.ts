@@ -1,456 +1,782 @@
 import type { HelpCategory } from '../types';
+import {
+  APPOINTMENTS_LIGHT_PRICE,
+  APPOINTMENTS_PLUS_PRICE,
+  APPOINTMENTS_PRO_PRICE,
+  SMS_LIGHT_GBP_PER_MESSAGE,
+  SMS_OVERAGE_GBP_PER_MESSAGE,
+} from '@/lib/pricing-constants';
 
 export const appointmentsCategory: HelpCategory = {
   slug: 'appointments',
   title: 'Appointments plan',
   description:
-    'Pro, Plus, and Light: calendars, services, availability, classes, events, resources, and imports.',
+    'Everything you need for Appointments Light, Plus, and Pro: calendars, services, availability, the appointment calendar, classes, events, resources, team access, payments, communications, reports, import, and your public booking experience.',
   plan: 'appointments',
   articles: [
     {
       slug: 'overview',
-      title: 'Appointments Pro, Plus and Light',
-      description: 'Limits, SMS billing differences, and what unified scheduling means in practice.',
-      tags: ['pro', 'plus', 'light', 'limits'],
+      helpSection: 'plans',
+      title: 'Appointments Light, Plus, and Pro',
+      description:
+        'How unified scheduling fits together, what each tier includes, how the sidebar labels change, and where to manage your subscription.',
+      tags: ['plans', 'tiers', 'sms', 'navigation', 'limits'],
       content: `
-# Appointments plans compared
+# Welcome to your Appointments plan
 
-## Tiers
+You run **unified scheduling**: one place to manage **bookable calendars** (often one column per person or room), your **service catalogue**, **availability**, and—when you turn them on—**classes**, **ticketed events**, and **bookable resources**. The articles below walk you through each area in plain language.
 
-- **Appointments Pro**: a high practical limit on active bookable calendars and staff seats for growing businesses.
-- **Appointments Plus**: up to **5** active calendars and **5** staff seats.
-- **Appointments Light**: **1** active calendar column and **1** staff login. **SMS** is usually metered (pay as you go) with stricter defaults. Watch any banners in **Communications** and **Plan**.
+**What this covers:** how tiers differ, how the left menu adapts to your venue, and where to turn booking models on or off.
 
-## Product shape
+:::help-figure tier-compare
 
-**Appointments** venues use **unified scheduling**: several **calendar columns** (often one per person or room) share one **Services** and **Calendar** experience. Older data may still appear in the same screens; you do not need to manage a separate “legacy” product area.
+## Compare the three tiers
 
-## Navigation labels
+| | **Light** | **Plus** | **Pro** |
+| --- | --- | --- | --- |
+| **Monthly price (guide)** | From £${APPOINTMENTS_LIGHT_PRICE}/month | £${APPOINTMENTS_PLUS_PRICE}/month | £${APPOINTMENTS_PRO_PRICE}/month |
+| **Bookable calendars** | 1 | Up to 5 | Unlimited |
+| **Team logins** | 1 | Up to 5 | Unlimited |
+| **SMS bundle** | None included; each SMS is pay-as-you-go (currently about **${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p** each) | **300** included per month | **800** included per month |
+| **After your SMS bundle** (Plus / Pro) | — | Overage billed at about **${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p** per message | Same overage rate |
 
-When you only run appointments (no extra models), the sidebar may say **Appointments** and **New Appointment** instead of **Bookings** / **New Booking**.
+Exact prices and SMS wording appear in **Settings → Plan**. If **Add calendar** or **invite staff** disappears, you have reached your tier cap—either deactivate something you no longer need or upgrade.
 
-## Upgrades
+## What “unified scheduling” means day to day
 
-Use **Settings → Plan** to change tier where the product allows it. Calendar and staff limits update as soon as the new tier is active. If **Add calendar** or invites disappear, you are likely at your new cap.
+- **Calendar Availability** is where admins build **calendars** and everyone sets **weekly hours**, **breaks**, and **days off**.
+- **Services** holds your appointment catalogue (durations, buffers, deposits, optional **variants** such as “45 min / 60 min”).
+- **Appointment Calendar** is the live grid for moving and opening bookings when your venue is calendar-eligible.
+- **Appointments** (or **Bookings**) is the high-volume list: filters, search, export, bulk messaging.
+
+If you also enable **classes**, **events**, or **resources**, guests see matching tabs on your public page and you get matching items in the sidebar **below Contacts**.
+
+## Sidebar labels that change with your setup
+
+:::help-figure sidebar-appointments
+
+- On **Appointments-style** venues with **only** schedule-backed models (no extra “Bookings” mix), the list link reads **Appointments** and the action reads **New Appointment**. As soon as you enable additional booking types (for example tables plus appointments), those labels become **Bookings** and **New Booking** so the menu stays accurate.
+- **Reports** and full **Settings** (venue-wide) are **admin only**. Staff still see **Account** for their own profile and password.
+
+## Turning booking types on or off
+
+Admins: open **Settings → Profile** and find **Booking models** (which booking types appear on your public page and in the sidebar). Enable only what you sell (**Appointments & services**, **Classes**, **Ticketed events**, **Resources**). Save, then check the sidebar and public tabs—you can come back any time you launch a new line of business.
+
+:::help-figure booking-models
+
+## A sensible setup order
+
+1. Turn on only the booking models you are ready to sell.
+2. Create or check the **calendars** those models will use.
+3. Add the matching catalogue items: services, class types, events, or resources.
+4. Test your public booking page as a guest before sharing the link.
+
+## Where to go next
+
+- New venue checklist: [Getting started](/help/getting-started/setup-checklist)
+- Stripe, sessions, and venue profile: [Settings](/help/settings/overview)
+- When something looks wrong: [Troubleshooting](/help/troubleshooting/access-issues)
 `.trim(),
     },
     {
       slug: 'calendar-setup',
-      title: 'Creating your bookable calendars',
-      description: 'Calendar Availability → Calendars tab, services assignment, entitlements, and Plus/Light caps.',
-      tags: ['calendars', 'columns', 'entitlements'],
+      helpSection: 'setup',
+      title: 'Creating and assigning bookable calendars',
+      description:
+        'Use the Calendars tab to add columns, assign services and other models, respect plan limits, and understand what staff see first.',
+      tags: ['calendars', 'columns', 'entitlements', 'admin'],
       content: `
-# Bookable calendars (columns)
+# Bookable calendars (your columns)
 
-Open **Calendar Availability** (\`/dashboard/calendar-availability\`) as an admin and use the **Calendars** tab.
+**Who can do this:** admins manage the full **Calendars** matrix; staff usually work from **Availability** for their own hours (see [Working hours](/help/appointments/working-hours)).
 
-## What you create
+**What this covers:** adding a calendar, linking services (and optional class, event, or resource rows), and staying within your plan limits.
 
-Each **calendar** is a bookable column on your **Appointment Calendar**. Many businesses use one column per staff member or per room; choose a layout that matches how you work.
+:::help-figure availability-tabs
 
-## Assign services
+## Open the right screen
 
-Link **appointment services** (and **class types**, **resources**, or **events** if you use them) to the right calendar so availability and new bookings stay consistent.
+1. Sign in as an **admin**.
+2. Go to **Calendar Availability** (\`/dashboard/calendar-availability\`).
+3. Start on the **Calendars** tab.
 
-## Limits
+## What each calendar represents
 
-**Plus** and **Light** enforce a **maximum** number of active calendars. The app uses **entitlement** checks: if **Add calendar** is disabled, upgrade the plan or **deactivate** a calendar you no longer need.
+Each active calendar becomes a **column** on the **Appointment Calendar** and a **who / where** dimension for online booking. Typical patterns:
 
-## Staff view
+- One calendar per practitioner.
+- One calendar per room or chair bank.
+- A blend of people and rooms—whatever matches how you operate.
 
-Staff may default to the **Availability** tab for their own hours, while admins manage the full **Calendars** matrix.
+:::help-figure calendar-columns
+
+## Assign what can be booked
+
+Still on **Calendars**, attach:
+
+- **Appointment services** guests can pick online or staff can pick on the phone.
+- **Class types**, **experience events**, or **resources** when those models are enabled—so generated sessions inherit the correct column.
+
+If something should not appear online yet, fix it here before publishing changes.
+
+## Plan limits and entitlements
+
+**Light** allows **one** active calendar; **Plus** allows **up to five**; **Pro** is effectively **unlimited**. The product enforces this when you click **Add calendar**. If the button is disabled:
+
+- Deactivate a calendar you no longer sell, **or**
+- Upgrade under **Settings → Plan**.
+
+## Naming, order, and housekeeping
+
+Give calendars clear names (guests may infer who they are visiting). Admins can drag the **grip** on each calendar row to change the left-to-right order on the staff calendar; on smaller screens use the move buttons. Deactivate instead of deleting when you need history to stay intact.
+
+Each calendar row can also show:
+
+- A **plan pill** such as **3 / 5 on plan** or **Unlimited calendars**.
+- Assigned **Services**, **Classes**, **Resources**, and **Events**.
+- A public calendar link when the calendar has its own slug.
+- Configuration alerts if resources share a column in a way that could create conflicts.
+
+## Staff experience
+
+Linked staff members may open **Calendar Availability** directly on **Availability** for their own template. They cannot add venue-wide calendars unless they are admins—if someone is blocked, promote them or perform the change yourself.
 `.trim(),
     },
     {
       slug: 'services',
-      title: 'Building your service catalogue',
-      description: 'Services page: duration, price, deposits, per-service windows, colours, and staff overrides.',
-      tags: ['services', 'catalogue', 'pricing'],
+      helpSection: 'setup',
+      title: 'Building your appointment service catalogue',
+      description:
+        'Durations, buffers, variants, deposits, booking windows, custom availability, staff overrides, and Stripe readiness.',
+      tags: ['services', 'catalogue', 'stripe', 'variants'],
       content: `
 # Appointment services
 
-Go to **Services** (\`/dashboard/appointment-services\`).
+Open **Services** (\`/dashboard/appointment-services\`). This catalogue powers the public flow, staff bookings, and reporting.
 
-## Each service
+**What this covers:** the main fields on each service, how variants work, when overrides help, and how Stripe Connect fits in.
 
-Configure **duration**, **buffer**, **price**, **deposit**, **payment requirement** (none, deposit, or full payment), **colour**, **active** flag, and **sort order**.
+:::help-figure service-row
 
-## Booking windows
+## Core fields everyone should set
 
-Set **per-service** advance booking range, **minimum notice**, **cancellation notice**, and **same-day** rules where applicable so different services (for example a quick trim vs a colour) can behave differently.
+- **Name & description** – guest-facing clarity beats clever marketing jargon.
+- **Duration** – drives slot length on the calendar.
+- **Buffer / processing** – quiet time before or after the appointment so you are not double-booked back-to-back.
+- **Price & deposits** – optional; pair with **payment requirement** (none, deposit, or full payment online).
+- **Colour** – helps teams scan the calendar quickly.
+- **Active** – toggles visibility without deleting history.
+- **Sort order** – controls the order guests see in long lists.
+
+## Booking windows (per service)
+
+Fine-tune **how far ahead** guests may book, **minimum notice**, **cancellation notice**, and whether **same-day** bookings are allowed. Heavy services can require more notice than quick add-ons—set each service the way you run the diary in real life.
+
+## Variants (sub-options)
+
+When a service offers multiple lengths or styles (for example “Cut & blow dry” vs “Cut only”), add **variants**. Guests must pick a variant before times appear, which keeps availability accurate.
+
+## Link services to calendars
+
+After saving the service, make sure it is offered on the right calendars. Admins can link a service to any active team calendar; staff can only link or adjust services on calendars they manage. On the service card, linked calendars appear as small pills so you can quickly see who offers the service.
 
 ## Custom availability
 
-Some services need **non-standard hours**. Use the **custom availability** editor on the service when your usual template hours are not enough.
+Use the **custom availability** editor when a service is only offered on certain days or windows that do not match your usual template. The calendar will honour those exceptions after you save.
 
 ## Staff overrides
 
-Allow or block **per-staff** customisation (name, description, duration, buffer, price, deposit, colour) and resolve conflicts with the **override** modal.
+Allow selected team members to advertise their own duration, price, or description. When two sources disagree, the app walks you through an **override** modal so you know which values guests will see.
 
-## Stripe
+## Stripe Connect
 
-If you charge online, finish **Stripe Connect** first. The app warns when a service expects payment but Connect is not complete.
+Online payments require a completed **Stripe Connect** onboarding (**Settings → Payments**). If Connect is incomplete, the product warns you when a service expects card payments—finish Connect before promoting those services online.
+
+## Hygiene tips
+
+- Start with a small set of live services; duplicate rows when you add seasonal menus.
+- Align cancellation copy with what you promise in **Communications** templates (see [Communications](/help/appointments/communications)).
 `.trim(),
     },
     {
       slug: 'working-hours',
-      title: 'Working hours, breaks and closures',
-      description: 'Calendar Availability tabs: availability, breaks, days off, and venue opening context.',
-      tags: ['hours', 'breaks', 'leave', 'closures'],
+      helpSection: 'setup',
+      title: 'Working hours, breaks, and closures',
+      description:
+        'Use Calendar Availability tabs for weekly templates, breaks, and days off, alongside venue-wide business hours and opening exceptions.',
+      tags: ['hours', 'breaks', 'closures', 'venue'],
       content: `
-# Working hours and closures
+# Keep availability trustworthy
 
-Use **Calendar Availability** tabs:
+Guests only see slots when **three layers** agree: the venue is open, the calendar is working, and the specific service rules allow the time.
 
-## Availability
+**What this covers:** what each **Calendar Availability** tab does for guests, and how **Settings → Business hours** sets the venue-wide frame.
 
-Set **weekly templates** per calendar with the working-hours editor.
+:::help-figure availability-tabs
 
-## Breaks
+## Calendars tab (context)
 
-Add **break patterns** so online slots respect lunch breaks or gaps between clients.
+You already create calendars here. Hours you set on other tabs apply **per calendar**, so each practitioner or room can differ.
+
+## Availability tab
+
+Build **weekly templates** with open and close times. This is the baseline grid the appointment engine uses before breaks or days off.
+
+Tips:
+
+- Align calendar hours with what you advertise publicly unless you intentionally allow wider practitioner hours.
+- When a staff member works fewer days, remove those weekdays rather than leaving zero-length rows.
+
+## Breaks tab
+
+Add recurring **break patterns** (lunch, tidy-up blocks, handovers). Online booking respects these automatically.
 
 ## Days off / closures
 
-Mark **leave** or closed days per calendar so you are not bookable when you are not working.
+Mark **leave** or one-off closures per calendar. Combine with **Closures** on the venue **Business hours** card when the whole site shuts (see [Settings](/help/settings/overview)).
 
-## Venue context
+## Venue-wide context
 
-**Settings → Business hours** sets venue-wide opening. Calendar hours should usually **fit inside** what you advertise to the public unless you deliberately allow wider practitioner hours.
+Under **Settings → Business hours** you set the venue’s advertised opening footprint and **opening exceptions** (bank holidays, private hires). Calendar templates should usually sit **inside** those windows so guests are never offered impossible times.
 
-## Exceptions
+## After you save
 
-Use **opening exceptions** next to business hours for bank holidays or one-off late openings that affect the whole venue.
+Give the public booking page a quick try whenever you change hours—small mistakes (AM/PM, timezone) are easier to catch before guests do.
+
+## Roles
+
+Any staff linked to a calendar can maintain their own availability if you grant it; only admins should edit calendars they do not personally work in unless you have agreed an internal process.
 `.trim(),
     },
     {
       slug: 'appointment-calendar',
+      helpSection: 'operations',
       title: 'Using the Appointment Calendar',
-      description: 'Day/week/month views, filters, staff booking modal, and detail sheets.',
-      tags: ['calendar', 'dnd', 'booking'],
+      description:
+        'Switch views, filter columns, create staff bookings, drag appointments when allowed, and open rich detail sheets.',
+      tags: ['calendar', 'grid', 'drag', 'filters'],
       content: `
-# Appointment Calendar
+# The Appointment Calendar in practice
 
-Open **Appointment Calendar** (\`/dashboard/calendar\`).
+Open **Appointment Calendar** (\`/dashboard/calendar\`) whenever your venue is **schedule-calendar eligible** (appointments, classes, events, or resources are active). Pure table venues without those models use other tools—this article assumes you see the grid.
 
-## Views
+**What this covers:** views and filters, creating bookings, when drag-and-drop is allowed, and how the detail sheet keeps payments and messages in one place.
 
-Switch **day**, **week**, or **month** to match how you plan. The grid respects venue context and your configured **grid hours**.
+:::help-figure calendar-columns
 
-## Columns
+## Choose the right zoom
 
-Each **bookable calendar** appears as a column. Use the **column filter** to hide calendars you do not need. **Mine** shortcuts appear when the signed-in user manages specific calendars.
+- **Day** – front-desk mode; scan every column minute by minute.
+- **Week** – planning who is in building-wide.
+- **Month** – big-picture capacity; drill into a day when needed.
 
-## Drag and drop
+Use the **View** dropdown in the toolbar to switch between these modes. The date control, **Filter**, **Refresh**, **New appointment**, and **Walk-in** actions stay in the same toolbar so your team does not have to relearn the page in each view.
 
-Move appointments and blocks when your role allows. The interface validates each move; read the message if a slot is not allowed.
+## Columns and filters
 
-## Create bookings
+Each **bookable calendar** is a column. Use the **column filter** to hide rooms you do not need right now. **Mine** shortcuts appear when the signed-in user manages specific calendars—perfect on a tablet at reception.
 
-Use the **staff booking** flow from a slot to add appointments for guests or walk-ins.
+## Create or move work
+
+- Click a slot to launch the **staff booking** flow for walk-ins or phone bookings.
+- **Drag and drop** when your role allows it; the app validates each move. If something is rejected, read the inline message—it usually means the destination violates buffers, closures, or double-booking rules.
 
 ## Detail sheets
 
-Open **appointments**, **class instances**, or **event instances** from the grid to see payments, messages, attendance, and status in one place.
+Selecting an item opens its detail sheet: payments, messages, attendance (for classes), and status history stay together so you are not jumping between modules.
+
+## Relationship to the list
+
+Use **Appointments** / **Bookings** when you need filters, CSV export, or bulk messaging; use the **Appointment Calendar** when spatial context matters. Both stay in sync via live updates—watch the connection indicator and tap **refresh** if you lose sync on flaky Wi-Fi.
+
+## Roles
+
+Every staff member who can see the grid should know your internal rules for dragging bookings that already paid online—when in doubt, edit from the detail sheet so financial records stay tidy.
 `.trim(),
     },
     {
       slug: 'managing-appointments',
-      title: 'Finding, modifying and cancelling appointments',
-      description: 'Bookings dashboard filters, status changes, CSV export, and bulk messaging.',
-      tags: ['bookings', 'status', 'csv'],
+      helpSection: 'operations',
+      title: 'Managing the appointments list',
+      description:
+        'Filters, statuses, confirmations, walk-ins, CSV export, bulk email and SMS, and staying in sync with live updates.',
+      tags: ['bookings', 'csv', 'bulk', 'filters'],
       content: `
-# Managing appointments (list)
+# The high-volume appointments workspace
 
-The **Bookings** page for unified venues is built for **high-volume** appointment work.
+The **Appointments** (or **Bookings**) page is tuned for busy reception teams: filter fast, act in bulk, and export when finance needs a spreadsheet.
 
-## Filters
+**What this covers:** the toolbar (filters, search, export), statuses and row actions, and how bulk messaging skips guests who are missing email or phone.
 
-Filter by **status**, **calendar** (column), **service**, **booking model** when you run extra types, **search** (name, phone, email, id), and **time-of-day** windows on a day.
+:::help-figure list-toolbar
 
-## Actions
+## Filters that actually save time
 
-Expand rows, change **status**, **confirm** bookings, open the **detail sheet**, create **new** or **walk-in** bookings, and export **CSV** for a custom date range.
+Combine tools such as:
+
+- **Status** – focus on requests awaiting confirmation, arrivals, or cancels.
+- **Calendar / column** – isolate one practitioner or room.
+- **Service** – when you run many catalogue lines.
+- **Booking model** – if you enabled classes, events, or resources alongside appointments.
+- **Search** – match name, phone, email, or internal IDs when someone is on the phone.
+- **Time-of-day window** – useful on packed Saturdays.
+
+The toolbar also has a **View** menu: **Day**, **Week**, **Month**, and **Custom** date range. Use **Custom** before exporting a payroll, campaign, or finance period.
+
+## Row actions
+
+Expand a row to see the full story without losing your place. From here you can:
+
+- Update **status** or **confirm** a tentative booking.
+- Open the **detail sheet** for payments or notes.
+- Launch **edit** flows when policies allow changes.
+
+## Walk-ins and new bookings
+
+Use **New appointment** / **New booking** for planned entries and the **Walk-in** shortcut when someone is already at the desk. Both respect the same service rules as online guests.
+
+## Export appointments
+
+Choose a date range, export **CSV**, and hand the file to finance or external CRM tools. Exports reflect the filters you applied so you can slice a single practitioner or service before downloading.
 
 ## Bulk messaging
 
-Select multiple bookings and send **email**, **SMS**, or **both**. The tool skips guests who are missing the channel you picked (for example no mobile number for SMS).
+Select multiple rows to send **email**, **SMS**, or **both**. The tool automatically skips guests missing the channel you picked (for example no mobile number for SMS). Always double-check the recipient count before confirming.
 
-## Live updates
+## Live updates and polling
 
-Watch the connection indicator. If sync drops, **refresh** before editing on another device so you do not clash with a colleague.
+The toolbar shows whether you are **live** via realtime sync. If the banner indicates reconnecting, pause destructive edits until you are synced or press **refresh**—two colleagues editing blindly can cause clashes.
+
+## Contacts integration
+
+Need to edit a guest profile or add tags? Open **Contacts** (\`/dashboard/contacts\`) from the sidebar; the list view links neatly back to booking history across models.
 `.trim(),
     },
     {
       slug: 'classes',
-      title: 'Setting up and managing classes',
-      description: 'Class types, timetable, instances, capacity, payments, and check-in.',
-      tags: ['classes', 'timetable'],
+      helpSection: 'operations',
+      title: 'Classes and timetables',
+      description:
+        'Enable the class model, define class types, generate instances, manage capacity, take payments, and check guests in.',
+      tags: ['classes', 'timetable', 'roster'],
       content: `
-# Classes
+# Classes (when the model is enabled)
 
-Open **Classes** (\`/dashboard/class-timetable\`) when the **class** model is enabled.
+Turn on **Classes** under **Settings → Profile → Booking models**, then open **Classes** (\`/dashboard/class-timetable\`) from the sidebar (just under **Contacts**).
 
-## Class types
+**What this covers:** class types, weekly patterns, generated instances, and attendance.
 
-Define **name**, **description**, **duration**, **capacity**, **price**, **colour**, **instructor calendar**, **payment requirement** (none, deposit, or full), deposit amounts, and **booking window** fields (advance days, minimum notice, cancellation notice, same-day toggle).
+## Class types (the template)
 
-## Timetable
+:::help-figure schedule-models
 
-Add **weekly** patterns with start time, **recurrence interval**, and optional **end date** or caps on how many sessions to generate.
+Each class type captures:
 
-## Instances
+- **Marketing copy** – name and description shown online.
+- **Schedule basics** – duration, default capacity, colour on the calendar.
+- **Instructor calendar** – which column owns generated sessions.
+- **Commercial rules** – price, deposit settings, and **payment requirement** (none, deposit, or full payment).
+- **Booking windows** – advance days, minimum notice, cancellation notice, same-day toggle.
 
-Browse generated **instances**, **cancel** one-off sessions, set **capacity overrides**, and view **attendees**.
+Spend time here once; timetable rows inherit these defaults.
 
-## Check-in and export
+## Weekly timetable
 
-Mark **attendance**, use **CSV** helpers for rosters, and watch **Stripe** warnings when money is due online.
+Add **weekly patterns** with start time, **recurrence interval**, and optional **end dates** or caps on how many sessions to generate ahead. The system materialises concrete **instances** your team can see on the **Appointment Calendar**.
 
-## Limits
+## Instance lifecycle
 
-Calendar **entitlement** still applies: each class type must sit on a bookable calendar your plan allows.
+Browse generated sessions to:
+
+- **Cancel** a single date without deleting the whole series.
+- Apply **capacity overrides** when a room changes size.
+- Review **attendees** as bookings arrive.
+
+## Check-in, attendance, and CSV
+
+Mark attendance for operational confidence and export rosters to CSV when partners need a headcount. If payments are due online, watch for Stripe warnings on unpaid rows—handle them before guests arrive when your policy requires prepayment.
+
+## Calendar entitlements
+
+Each class type must reference a **bookable calendar** your plan still allows. If you downgrade tiers, revisit class assignments so nothing points at a deactivated column.
+
+## Roles
+
+**Admins** configure types and timetables; **staff** can help with check-in depending on your internal policy. Everyone should know who adjusts capacities mid-season.
 `.trim(),
     },
     {
       slug: 'events',
-      title: 'Creating and selling event tickets',
-      description: 'Experience events, ticket types, scheduling modes, and attendee CSV.',
-      tags: ['events', 'tickets'],
+      helpSection: 'operations',
+      title: 'Ticketed events',
+      description:
+        'Experience events, ticket tiers, flexible scheduling modes, attendee management, and CSV exports for the door team.',
+      tags: ['events', 'tickets', 'capacity'],
       content: `
-# Events
+# Ticketed events
 
-Open **Events** (\`/dashboard/event-manager\`) when **ticketed events** are enabled.
+Enable **Ticketed events** under **Settings → Profile → Booking models**, then open **Events** (\`/dashboard/event-manager\`).
 
-## Event setup
+**What this covers:** structuring an event, multiple ticket types, flexible scheduling, and attendee management.
 
-Create **experience events** with description, **start**, **capacity**, optional **image**, and assign the event to a **calendar column** for scheduling.
+## Create the experience
 
-## Ticket types
+:::help-figure schedule-models
 
-Add **ticket tiers** with **price** and optional **per-tier capacity**.
+Start with an **experience event**: marketing description, hero imagery (when you use it), overall **capacity**, and the **calendar column** that owns the runtime schedule. Guests browse these like any other tab on your public page.
+
+## Ticket types (tiers)
+
+Add one or more **ticket types** with independent prices and optional per-tier capacities—perfect for “General admission” vs “VIP”, or adult vs child pricing.
 
 ## Scheduling modes
 
-Choose a **single** date, **weekly recurrence**, or paste a **custom list of dates**. The app can parse text lists for tours, festivals, or irregular runs.
+- **Single date** – launches, dinners, one-night shows.
+- **Weekly recurrence** – regular tours or supper clubs.
+- **Custom date lists** – paste irregular runs (festivals, multi-city tours). The parser saves hours versus manual entry.
 
 ## Booking rules
 
-Control advance booking, minimum notice, cancellation notice, same-day booking, and whether you require **deposit** or **full payment** online.
+Mirror how you sell elsewhere: advance booking windows, minimum notice, cancellation notice, same-day controls, and whether you require **deposit** or **full payment** online. Consistency with your **Communications** templates avoids guest disputes.
 
-## Attendees
+## Attendees and door operations
 
-Track **status**, **check-in**, **cancellations**, and download **CSV** for door staff or finance.
+Track **status**, **check-in**, and **cancellations** from the event workspace. Download **CSV** for door staff or finance reconciliation.
 
-## Search and detail
+## Search and detail panels
 
-Use **search** and the **detail panel** when you run many events at once.
+When dozens of events are live, use search and the **detail panel** to jump between runs without losing context.
+
+## Stripe reminders
+
+Card-present rules still apply: Connect must be healthy before you demand online settlement. Test a ticket purchase after major edits.
 `.trim(),
     },
     {
       slug: 'resources',
-      title: 'Resources and facility booking',
-      description: 'Resource timeline, slot intervals, durations, and public resource flow.',
-      tags: ['resources', 'facilities'],
+      helpSection: 'operations',
+      title: 'Resources and facilities',
+      description:
+        'Define bookable assets, manage the resource timeline, understand the guest journey, and pause resources safely.',
+      tags: ['resources', 'facilities', 'timeline'],
       content: `
-# Resources
+# Resource booking
 
-Enable **resource booking** to open **Resources** (\`/dashboard/resource-timeline\`).
+Enable **Resources** under **Settings → Profile → Booking models**, then open **Resources** (\`/dashboard/resource-timeline\`).
 
-## What resources are
+**What this covers:** what counts as a resource, how staff use the timeline, and what guests see when they book online.
 
-Bookable **facilities** or **equipment** (rooms, courts, studios) with **slot interval**, **durations**, **pricing**, and **payment** rules.
+## What a resource is
 
-## Timeline
+:::help-figure schedule-models
 
-Staff manage occupancy from the **resource timeline** view.
+Think courts, treatment rooms, hot desks, or equipment bundles. Each resource stores:
 
-## Public booking
+- **Slot interval** – the grid granularity (for example 30 minutes).
+- **Allowed durations** – multiples guests can pick.
+- **Pricing & payment rules** – aligned with Stripe Connect like other models.
 
-Guests choose a **resource**, **month**, **duration**, then a **slot**, enter details, and pay online when required. The same **Stripe Connect** rules apply as for services.
+## Staff timeline
 
-## Maintenance
+The **resource timeline** shows occupancy across the day. Use it to spot gaps, move bookings (when permitted), or answer phone enquiries without opening the public site.
 
-**Deactivate** resources you temporarily remove from sale so they disappear from public lists immediately.
+## Public booking flow
+
+Guests choose a **resource**, browse a **month**, pick a **duration**, then select a **slot** that respects buffers and closures. Card payments run through Stripe when your rules require them.
+
+## Maintenance mode
+
+**Deactivate** a resource to remove it from public lists immediately—useful during refurbishments or when equipment is out for repair. Existing bookings remain visible historically; handle them according to your policy.
+
+## Calendar columns
+
+Resources still rely on **bookable calendars** created in **Calendar Availability**. If a resource disappears from sale, verify it is both active **and** attached to a live calendar.
+
+## Reporting
+
+Resource revenue rolls up into **Reports** alongside other models so you can compare demand drivers in one date range.
 `.trim(),
     },
     {
       slug: 'team-management',
-      title: 'Inviting staff and managing access',
-      description: 'Roles, calendar assignment, plan staff caps, password reset, and session timeout.',
-      tags: ['staff', 'roles', 'invite'],
+      helpSection: 'setup',
+      title: 'Team access, roles, and calendar links',
+      description:
+        'Invite admins and staff, assign calendars, respect plan staff caps, reset passwords, and configure session timeout for shared devices.',
+      tags: ['staff', 'roles', 'security', 'invites'],
       content: `
-# Team management
+# Build a safe team workspace
 
-Admins: **Settings → Staff**.
+Admins manage people under **Settings → Staff**. Staff without admin rights still get **Account** for their personal details.
 
-## Invites
+**What this covers:** inviting people, linking calendars, and how staff caps on your plan behave.
 
-Send invites with **email**, **name**, and **role** (**admin** or **staff**). Link staff to **bookable calendars** they should work in (resource-type columns may be filtered out of assignable lists where that applies).
+## Invite flow
+
+:::help-figure team-access
+
+1. Click **Add User**.
+2. Enter **email**, **name**, and **role** (**admin** or **staff**).
+3. Link the person to the **bookable calendars** they should manage. Those links control “mine” filters and availability shortcuts.
+
+Invites expire like any email link—use **Resend** if someone loses it.
 
 ## Plan caps
 
-**Plus** and **Light** enforce a **maximum staff** count. The add button hides when you are at the limit.
+**Light** allows **one** staff login, **Plus** allows **up to five**, **Pro** is unlimited. When you reach the cap the **Add** button disappears—upgrade or remove inactive accounts.
 
-## Lifecycle
+## Day-two operations
 
-**Resend** invites, **promote or demote** roles, **reset passwords** for others, and **remove** users who leave.
+- **Promote / demote** roles when someone changes jobs.
+- **Reset passwords** for colleagues who are locked out (admins only).
+- **Remove** users who leave—calendar assignments clean up automatically.
 
 ## Session timeout
 
-Set **venue session timeout** for shared reception tablets so idle devices lock sooner.
+Configure **venue session timeout** under **Settings** for tablets at reception so idle devices lock quickly on shared hardware.
 
-## Staff experience
+## What staff cannot see
 
-Non-admins opening **Settings** only see **Account** for their own details. They cannot change venue-wide policies.
+Non-admins do **not** get **Reports**, **Data import**, or full venue **Settings** tabs—they manage bookings and personal account details only. If someone needs billing access, promote them thoughtfully.
+
+## Support
+
+If a staff member is stuck, they can still use **Support** from the sidebar footer to reach your internal escalation path.
 `.trim(),
     },
     {
       slug: 'deposits',
-      title: 'Taking deposits and full payments',
-      description: 'Service-level payment requirements, Stripe Connect, and guest checkout.',
-      tags: ['deposits', 'stripe', 'full payment'],
+      helpSection: 'setup',
+      title: 'Deposits, full payments, and refunds',
+      description:
+        'Stripe Connect, per-service rules, guest checkout, staff-created bookings, and keeping cancellation policy consistent.',
+      tags: ['stripe', 'payments', 'deposits', 'refunds'],
       content: `
-# Deposits and full payments (appointments)
+# Get paid the way you promise
 
-## Requirements
+ReserveNI never holds your funds—card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
 
-1. **Stripe Connect** complete (**Settings → Payments**).
-2. Each **service** (or class, event, or resource entry) sets **payment requirement** the way you intend.
-3. **Communications** templates for deposit **request**, **confirmation**, and **reminder** if you rely on automation.
+**What this covers:** a short go-live checklist, staff-created bookings when payment is required, and keeping messages aligned with your policy.
+
+## Go-live checklist
+
+:::help-figure payments-flow
+
+1. Finish **Stripe Connect** onboarding (**Settings → Payments**).
+2. For each **service**, **class type**, **event**, or **resource**, choose the correct **payment requirement** (none, deposit, or full payment).
+3. Review **Communications** templates for deposit **requests**, **confirmations**, and **reminders** so wording matches your legal policy.
 
 ## Guest checkout
 
-Public flows show **Stripe** whenever money is due before confirmation.
+Public flows automatically launch **Stripe** whenever money is required **before** confirmation. Guests see card fields hosted by Stripe (never custom card inputs).
 
-## Staff bookings
+## Staff-created bookings
 
-Staff-created bookings follow the same rules: if the product expects online payment, collect card details through the normal flow.
+Phone and walk-in bookings follow the same payment rules. If the catalogue expects online payment, collect card details through the guided flow so ledgers stay consistent.
 
-## Refunds
+## Confirm or cancel links
 
-Match **cancellation** windows on services, classes, and events to what you promise in email and SMS so guests know what to expect.
+Automated messages may include **confirm or cancel** links (for example \`/confirm/{bookingId}/{token}\`). Guests should understand deposit implications before they tap—mirror that language in your templates.
+
+## Refunds and disputes
+
+Cancellation windows live on each catalogue row. When you change a window, update email/SMS templates the same day so support teams quote the correct policy.
+
+## Troubleshooting payments
+
+Start with [Troubleshooting — Stripe](/help/troubleshooting/stripe-issues) if Connect is disconnected or payments fail mid-checkout—most issues are incomplete onboarding or expired cards.
 `.trim(),
     },
     {
       slug: 'communications',
-      title: 'Automated reminders and confirmations',
-      description: 'Appointments lane, message types, SMS allowance, and previews.',
-      tags: ['sms', 'email', 'reminders'],
+      helpSection: 'growth',
+      title: 'Automated messages and template lanes',
+      description:
+        'Appointments vs table lanes, message types, SMS allowances, previews, and when staff can still send manual messages.',
+      tags: ['sms', 'email', 'templates', 'reminders'],
       content: `
-# Communications (appointments lane)
+# Communications that match how you sell
 
-**Settings → Communications** loads **policies** and **templates** for automated messages.
+Open **Settings → Communications** as an admin. You will see **policy** switches and **template** editors with merge fields.
 
-## Lane
+**What this covers:** choosing the right template lane, SMS allowances by tier, and using previews before you go live.
 
-**Appointments & other** covers appointments, classes, events, and resources. Table venues get a separate **Table bookings** lane when that applies.
+:::help-figure comms-lanes
 
-## Message catalogue
+## Pick the correct lane
 
-Typical types include **confirmation**, **deposit** flows, **confirm or cancel** prompts, **pre-visit reminder**, **modification**, **cancellation**, **auto-cancel**, **no-show**, **post-visit thank you**, and **custom** broadcast messages.
+- **Appointments & other** covers appointments, classes, events, and resources—the bulk of Appointments-plan venues live here.
+- **Table bookings** only appears when your venue also runs **table reservations**. Keep table wording separate so merge fields stay accurate.
 
-## Channels
+## Message types you will touch most
 
-Turn **email** and **SMS** on or off per message where the settings allow. Use **preview** with merge fields to check wording.
+Typical automated types include **confirmation**, **deposit request**, **confirm or cancel**, **pre-visit reminder**, **modification**, **cancellation**, **auto-cancel**, **no-show**, **post-visit thank you**, plus **custom** broadcasts for campaigns.
 
-## SMS billing
+Toggle **email** and **SMS** per message when the controls allow it—some regulatory templates require both channels to stay on.
 
-**Plan** shows included messages vs overage. On **Light**, you may need a **saved card** before SMS can send. Follow any in-app banners.
+## SMS allowances
 
-## Operational sends
+**Plus** and **Pro** include monthly SMS bundles (300 / 800). **Light** has **no** included SMS—each message is pay-as-you-go and you may need a saved card before SMS can send. Watch any red **banner** inside Communications or Plan for billing prompts.
 
-Staff can still send **one-off** or **bulk** messages from booking screens when policy and contact data allow it.
+## Previews
+
+Use **preview** with sample merge data to catch awkward phrasing before guests see it. Remember previews are static—always send a real test booking if you changed something critical.
+
+## Manual and bulk sends
+
+Operational teams can still send **one-off** or **bulk** messages from booking screens when policy and contact details allow—automation does not replace human judgement for VIPs or incidents.
+
+## Related reading
+
+- Stripe and billing context: [Settings](/help/settings/overview)
+- Guest-facing issues: [Troubleshooting](/help/troubleshooting/access-issues)
 `.trim(),
     },
     {
       slug: 'reports',
-      title: 'Reports, appointment insights and data export',
-      description: 'Team & services charts, no-show series, CSVs, and full export.',
-      tags: ['reports', 'analytics', 'csv'],
+      helpSection: 'growth',
+      title: 'Reports, exports, and the Clients view',
+      description:
+        'Admin-only analytics, date ranges, appointment-focused charts, full booking exports, and how Contacts complements reports.',
+      tags: ['reports', 'analytics', 'csv', 'admin'],
       content: `
-# Reports (appointments)
+# Understand performance at a glance
 
-**Reports** is **admin-only**.
+**Reports** (\`/dashboard/reports\`) is **admin-only**. If you do not see it, ask an admin to upgrade your role or share exports manually.
 
-## Date range
+**What this covers:** the widgets that matter most for appointment-heavy venues and how CSV exports fit finance workflows.
 
-Pick a **date range** and apply. Most charts follow that window.
+:::help-figure reports-dashboard
 
-## Highlights for appointments
+## Date range first
 
-- **Summary** tiles for volume, clients, and channel mix.
-- **By booking type** when you run more than one model.
-- **Team, services, and channels** when available: who performed work, which services sell, and whether demand comes from online, phone, or the widget.
-- **No-show** and **cancellation** views with **CSV** downloads.
+Pick a **start** and **end** date, then **Apply**. Most charts and tables respect that window, so align it with your payroll or marketing cadence.
 
-## Data export
+## Highlights for appointment businesses
 
-Download **all bookings** and **all guests** from the export section for backups or spreadsheets.
+- **Summary tiles** – volume, revenue mix, and channel split (online vs phone vs widget).
+- **By booking type** – when you run multiple models, see which line drives growth.
+- **Team & services** – who performs work and which catalogue items sell.
+- **No-shows & cancellations** – download CSV slices for stand-ups.
 
-## Clients tab
+## Full exports
 
-Edit guest details in depth, use **tags**, and review **history** across models. Use the **Guests** shortcut route if your sidebar includes it.
+Use **Export bookings** and **Export guests** sections for spreadsheet backups or data science projects. These respect your permissions and can be large—run them off-peak if your browser feels sluggish.
+
+## Clients tab and Contacts
+
+Inside Reports, the **Clients** tab summarises guest value. For deep profile edits, tags, or cross-model history, jump to **Contacts** (\`/dashboard/contacts\`)—the CRM view stays in sync with the same guest records.
+
+## Hygiene
+
+Exports contain personal data—store them securely and delete local copies when finished. Admins should rotate who can download full history as staff change roles.
 `.trim(),
     },
     {
       slug: 'data-import',
+      helpSection: 'growth',
       title: 'Importing clients and bookings',
-      description: 'Import hub, platforms, validate, review, undo window, and report CSV.',
-      tags: ['import', 'csv', 'migration'],
+      description:
+        'Start from Settings, walk through upload, mapping, validation, review, execute, and know how the 24-hour undo window works.',
+      tags: ['import', 'csv', 'migration', 'admin'],
       content: `
-# Data import
+# Bring historical data forward
 
-**Data Import** (\`/dashboard/import\`) is **admin-only**.
+**Who can import:** venue **admins** only. Staff should send files to an admin to protect data quality.
 
-## Flow
+**What this covers:** where to open the importer, each step in the wizard, and why **Undo** is different from deleting an import session.
+
+:::help-figure import-flow
+
+## Where to start
+
+1. Open **Settings** (\`/dashboard/settings\`).
+2. Choose the **Data import** tab.
+3. Click **Open Data Import**—this jumps to \`/dashboard/import\` with the right permissions.
+
+## Step-by-step flow
 
 1. **Start** a new import session.
-2. **Upload** a CSV exported from your previous booking system. The mapping step works regardless of which platform the export came from.
-3. **Map** columns to ReserveNI fields.
-4. **Validate** and fix errors before you commit.
-5. **Review** counts (clients, bookings, skipped, updated).
-6. **Execute** the import.
+2. **Upload** the CSV export from your previous system (any platform is fine as long as columns are consistent).
+3. **Map** columns to ReserveNI fields—save mapping presets when you expect repeat uploads.
+4. **Validate** to catch missing emails, impossible dates, or duplicates.
+5. **Review** counts: new clients, new bookings, skipped rows, updates to existing profiles.
+6. **Execute** when you are confident.
 
-## After import
+## After import completes
 
-- Sessions show **status** and timestamps.
-- A **report CSV** is available for audit.
-- **Undo** exists for a limited time. **Deleting** a session does **not** automatically remove rows that already imported; use **Undo** for that.
+- Download the **report CSV** for audit trails.
+- Use **Undo** within **24 hours** if something looks wrong—this actually rolls back imported rows.
+- **Deleting** a session from the hub **does not** remove committed rows; only **Undo** (inside the window) does.
 
-## Hygiene
+## Hygiene tips
 
-Remove duplicate guests in your source file where you can. The mapper is strict on required fields to protect live data.
+- Deduplicate guests in your source file when possible.
+- Run a small pilot file before importing tens of thousands of lines.
+- Communicate downtime to staff if you import during business hours—realtime views may flicker briefly.
+
+## Need help?
+
+If validation errors feel cryptic, copy the exact message (and row references if shown), then use [Import troubleshooting](/help/troubleshooting/import-issues) or escalate to your admin with that text.
 `.trim(),
     },
     {
       slug: 'booking-widget',
-      title: 'Embedding your booking page',
-      description: 'iframe URL, accent colour, tab query param, resize script, and QR.',
-      tags: ['embed', 'widget', 'iframe', 'qr'],
+      helpSection: 'growth',
+      title: 'Your booking page, embed, and QR code',
+      description:
+        'Find widget settings under Profile, build an iframe snippet, add accent colour and tab deep links, include resize.js, and understand QR behaviour.',
+      tags: ['embed', 'widget', 'iframe', 'qr', 'marketing'],
       content: `
-# Booking widget & QR
+# Meet guests wherever they browse
 
-Visit **Settings → Widget** as an admin.
+You have three related surfaces:
 
-## iframe snippet
+1. **Hosted booking page** at \`/book/{your-venue-slug}\` (responsive, great for social links).
+2. **Embeddable widget** at \`/embed/{your-venue-slug}\` for iframes inside your own website.
+3. **QR codes** for posters—usually pointing at the hosted page so guests get the full layout.
 
-The snippet points to \`/embed/{venueSlug}\` with optional:
+**What this covers:** where to copy the embed snippet, useful URL parameters, and how widget bookings show up in reports.
 
-- \`?accent=RRGGBB\` (no \`#\`) to tint buttons.
-- \`?tab=appointments\` | \`tables\` | \`events\` | \`classes\` | \`resources\` to open a specific tab when the venue supports it.
+:::help-figure embed-vs-book
 
-## resize.js
+:::help-figure widget-settings
 
-Include the hosted **resize** script so the iframe **height** grows as guests change steps. Without it, embeds may clip or scroll awkwardly inside your site.
+:::help-figure public-tabs
 
-## QR code
+## Where the controls live
 
-The QR opens your **public** \`/book/{slug}\` page (not the embed URL) so print collateral uses the full responsive layout.
+1. Sign in as an **admin**.
+2. Open **Settings → Profile**.
+3. Scroll to **Widget, embed & QR code** (same page hosts the iframe snippet, accent colour picker, and QR download).
+
+Legacy menu entries redirect here automatically.
+
+## iframe snippet checklist
+
+- Copy the **iframe** HTML ReserveNI generates for you.
+- Optional query params:
+  - \`?accent=RRGGBB\` (hex **without** the hash) to tint buttons to match your brand.
+  - \`?tab=appointments\` | \`tables\` | \`events\` | \`classes\` | \`resources\` to open a specific tab when the venue exposes that model.
+- Include the hosted **resize.js** script so the iframe height tracks each step of the flow. Without it, embeds often clip or double-scroll inside your CMS.
+
+## QR codes
+
+The QR generator points at the **hosted** booking page so printed collateral benefits from responsive layout. If you intentionally want embed mode, swap the URL manually—but test on a real phone first.
 
 ## Analytics
 
-Widget bookings record **source = widget** so you can compare channels in **Reports**.
+Widget bookings record **source = widget** so **Reports** can compare marketing channels. Hosted page visits without the embed still count under their respective channel rules.
+
+## Marketing ideas
+
+- Drop the hosted link in Instagram bios or Google Business Profiles.
+- Embed the iframe on your “Book now” page to keep traffic on your domain while checkout still runs securely inside ReserveNI.
+
+## Related articles
+
+- Payments and deposits: [Deposits](/help/appointments/deposits)
+- Communications after booking: [Communications](/help/appointments/communications)
 `.trim(),
     },
   ],

@@ -2,17 +2,26 @@
 
 import Link from 'next/link';
 import { useId, useMemo, useRef, useState } from 'react';
-import { searchHelpArticles } from '@/lib/help/search-index';
+import { createHelpSearchFuse, searchHelpArticlesWithFuse } from '@/lib/help/search-index';
+import type { HelpSearchDoc } from '@/lib/help/types';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
-export function HelpSearch({ className = '' }: { className?: string }) {
+export function HelpSearch({
+  className = '',
+  searchDocs,
+}: {
+  className?: string;
+  searchDocs: HelpSearchDoc[];
+}) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputId = useId();
   const listboxId = `${inputId}-results`;
 
-  const results = useMemo(() => searchHelpArticles(query, 8), [query]);
+  const fuse = useMemo(() => createHelpSearchFuse(searchDocs), [searchDocs]);
+
+  const results = useMemo(() => searchHelpArticlesWithFuse(fuse, query, 8), [fuse, query]);
 
   const showPanel = open && query.trim().length >= 2;
   useDismissibleLayer({

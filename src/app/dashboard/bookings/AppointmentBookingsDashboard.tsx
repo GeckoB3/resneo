@@ -18,6 +18,7 @@ import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
+import { readResponseJson } from '@/lib/http/read-response-json';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
@@ -41,7 +42,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
-import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -258,6 +259,30 @@ function filterRegistryAppointments(
   );
 }
 
+function timeToMinutesHHMM(t: string): number {
+  const [hh, mm] = t.slice(0, 5).split(':').map(Number);
+  return (hh ?? 0) * 60 + (mm ?? 0);
+}
+
+/**
+ * Collapsed list bar should match the slot wall times (and expanded detail), not only the catalogue default.
+ * Aligns with practitioner grid `bookingDurationMinutes`: `booking_end_time` wins when present.
+ */
+function registryAppointmentDurationMinutes(
+  b: RegistryAppointment,
+  serviceDefaultMinutes: number | null,
+): number | null {
+  const endRaw = b.booking_end_time;
+  if (typeof endRaw === 'string' && endRaw.trim().length >= 5) {
+    const startM = timeToMinutesHHMM(b.booking_time);
+    let endM = timeToMinutesHHMM(endRaw);
+    if (endM <= startM) endM += 24 * 60;
+    const span = endM - startM;
+    return span > 0 ? span : null;
+  }
+  return serviceDefaultMinutes;
+}
+
 function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
   return {
     id: b.id,
@@ -287,6 +312,9 @@ function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
     resource_id: b.resource_id,
     event_session_id: b.event_session_id,
     service_item_id: b.service_item_id,
+    booking_end_time: b.booking_end_time,
+    service_variant_id: b.service_variant_id ?? null,
+    processing_time_blocks: b.processing_time_blocks ?? null,
     inferred_booking_model: inferRegistryModel(b),
     booking_model: b.booking_model,
   };
@@ -537,12 +565,11 @@ export function AppointmentBookingsDashboard({
         }
         if (filterGuestId) params.set('guest', filterGuestId);
         const res = await fetch(`/api/venue/bookings/list?${params}`);
+        const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
         if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          setError((json as { error?: string }).error ?? 'Failed to load appointments');
+          setError(data.error ?? 'Failed to load appointments');
           return;
         }
-        const data = await res.json();
         const raw = (data.bookings ?? []) as RegistryAppointment[];
         let visible = raw.filter((b) =>
           venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
@@ -902,12 +929,11 @@ export function AppointmentBookingsDashboard({
     try {
       const params = new URLSearchParams({ from: csvFrom, to: csvTo });
       const res = await fetch(`/api/venue/bookings/list?${params}`);
+      const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        setError((json as { error?: string }).error ?? 'Failed to load appointments for export');
+        setError(data.error ?? 'Failed to load appointments for export');
         return;
       }
-      const data = await res.json();
       const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) =>
         venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
       );
@@ -1039,9 +1065,11 @@ export function AppointmentBookingsDashboard({
   );
 
   const sendGuestMessage = useCallback(
-    async (bookingId: string, message: string, channel: GuestMessageChannel) => {
+    async (bookingId: string, message: string, channel: GuestMessageChannel): Promise<GuestMessageSendResult> => {
       const trimmed = message.trim();
-      if (!trimmed) return;
+      if (!trimmed) {
+        return { ok: false, error: 'Message cannot be empty.' };
+      }
       setSendingMessageIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
       try {
         const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
@@ -1057,7 +1085,19 @@ export function AppointmentBookingsDashboard({
         if (!res.ok || !payload.success) {
           const issues = payload.errors?.join('; ') || payload.error || 'Could not send message';
           addToast(issues, 'error');
-          return;
+          return { ok: false, error: issues };
+        }
+        if (payload.errors && payload.errors.length > 0) {
+          const w = payload.errors.join('; ');
+          setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          setDetailById((prev) => {
+            const next = { ...prev };
+            delete next[bookingId];
+            return next;
+          });
+          void loadBookingDetail(bookingId, true);
+          addToast(`Sent with issues — ${w}`, 'error');
+          return { ok: true, warning: `Sent with issues: ${w}` };
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
         setDetailById((prev) => {
@@ -1067,8 +1107,10 @@ export function AppointmentBookingsDashboard({
         });
         void loadBookingDetail(bookingId, true);
         addToast('Message sent', 'success');
+        return { ok: true };
       } catch {
         addToast('Could not send message', 'error');
+        return { ok: false, error: 'Could not send message.' };
       } finally {
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
@@ -1181,7 +1223,7 @@ export function AppointmentBookingsDashboard({
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
     const showConfirm = canShowConfirmBookingAttendanceAction(b);
     const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
-    const duration = svc?.duration_minutes ?? null;
+    const duration = registryAppointmentDurationMinutes(b, svc?.duration_minutes ?? null);
     const priceDisplay =
       b.deposit_amount_pence != null
         ? formatMoneyPence(b.deposit_amount_pence, sym)
@@ -1407,7 +1449,7 @@ export function AppointmentBookingsDashboard({
               draftMessage={draftMessage}
               sendingMessage={sendingMessage}
               onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
-              onSendMessage={(channel) => { void sendGuestMessage(b.id, draftMessage, channel); }}
+              onSendMessage={(channel) => sendGuestMessage(b.id, draftMessage, channel)}
               onStatusAction={(status) => { void updateRowStatus(b.id, status); }}
               onDetailUpdated={() => {
                 setDetailById((prev) => {

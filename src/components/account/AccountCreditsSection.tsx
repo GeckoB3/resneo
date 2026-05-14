@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 interface BalanceRow {
   id: string;
@@ -176,14 +177,15 @@ export function AccountCreditsSection() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Class credits</h1>
-      <p className="text-sm text-slate-600">
-        Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled).
-      </p>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Class credits"
+        subtitle="Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled)."
+      />
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Balances</h2>
         {balances.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
@@ -201,14 +203,14 @@ export function AccountCreditsSection() {
         )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
         <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
         <BuyPackPicker catalog={purchaseCatalog} onBuy={(v, p) => void startPurchase(v, p)} />
       </div>
 
       {purchase ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Complete payment</h2>
           <Elements
             stripe={stripeForAccount(purchase.stripe_account_id)}
@@ -223,7 +225,7 @@ export function AccountCreditsSection() {
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Recent ledger</h2>
         {ledger.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No activity yet.</p>

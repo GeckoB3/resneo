@@ -39,6 +39,7 @@ export function appointmentCalendarUrl(
   year: number,
   month: number,
   variantId?: string | null,
+  durationMinutes?: number | null,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -48,6 +49,9 @@ export function appointmentCalendarUrl(
   });
   if (variantId) {
     params.set('variant_id', variantId);
+  }
+  if (durationMinutes != null) {
+    params.set('duration_minutes', String(durationMinutes));
   }
   if (audience === 'public') {
     params.set('venue_id', venueId);
@@ -62,9 +66,11 @@ export function appointmentCalendarCacheKey(
   year: number,
   month: number,
   variantId?: string | null,
+  durationMinutes?: number | null,
 ): string {
   const v = variantId ? `:${variantId}` : '';
-  return `${practitionerId}:${serviceId}${v}:${year}:${month}`;
+  const d = durationMinutes != null ? `:${durationMinutes}m` : '';
+  return `${practitionerId}:${serviceId}${v}${d}:${year}:${month}`;
 }
 
 export function validateAppointmentSlotUrl(): string {

@@ -1,9 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getAdjacentArticles, getArticle, getCategoryBySlug, getAllHelpPaths } from '@/lib/help/navigation';
-import { HelpBreadcrumb } from '@/components/help/HelpBreadcrumb';
+import { AppointmentsHelpArticleBody } from '@/components/help/AppointmentsHelpArticleBody';
 import { HelpArticleContent } from '@/components/help/HelpArticleContent';
+import { HelpBreadcrumb } from '@/components/help/HelpBreadcrumb';
+import { isHelpCategorySlugVisible } from '@/lib/help/filter-help-for-audience';
+import { getCachedHelpAudienceContext } from '@/lib/help/help-audience-context';
+import { getAdjacentArticles, getArticle, getCategoryBySlug, getAllHelpPaths } from '@/lib/help/navigation';
+import { resolveArticleMarkdown } from '@/lib/help/resolve-article-markdown';
 export function generateStaticParams() {
   return getAllHelpPaths().map(({ category, article }) => ({ category, article }));
 }
@@ -28,16 +32,38 @@ export default async function HelpArticlePage({ params }: { params: Promise<{ ca
   const art = getArticle(categorySlug, articleSlug);
   if (!cat || !art) notFound();
 
+  const audienceContext = await getCachedHelpAudienceContext();
+  if (!isHelpCategorySlugVisible(audienceContext, categorySlug)) {
+    notFound();
+  }
+
+  const articleMarkdown = resolveArticleMarkdown(art, audienceContext);
+
   const { prev, next } = getAdjacentArticles(categorySlug, articleSlug);
+  const isAppointments = categorySlug === 'appointments';
+  const isGettingStarted = categorySlug === 'getting-started';
+  const wideArticle = isAppointments || isGettingStarted;
 
   return (
-    <article className="mx-auto max-w-3xl">
+    <article
+      className={`${isGettingStarted ? 'getting-started-help-article ' : ''}mx-auto ${wideArticle ? 'max-w-4xl' : 'max-w-3xl'}`}
+    >
       <HelpBreadcrumb categoryTitle={cat.title} categorySlug={cat.slug} articleTitle={art.title} />
       <h1 className="text-3xl font-bold text-slate-900">{art.title}</h1>
       <p className="mt-2 text-lg text-slate-600">{art.description}</p>
 
-      <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <HelpArticleContent markdown={art.content} />
+      <div
+        className={
+          isGettingStarted
+            ? 'mt-8 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-white via-white to-emerald-50/25 p-6 shadow-md shadow-slate-900/5 ring-1 ring-slate-100 sm:p-8'
+            : 'mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8'
+        }
+      >
+        {isAppointments ? (
+          <AppointmentsHelpArticleBody markdown={articleMarkdown} />
+        ) : (
+          <HelpArticleContent markdown={articleMarkdown} />
+        )}
       </div>
 
       <nav className="mt-10 flex flex-col gap-3 border-t border-slate-200 pt-8 sm:flex-row sm:justify-between" aria-label="Article pagination">

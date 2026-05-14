@@ -15,6 +15,7 @@ import type { VenueTable, TableShape, TableType } from '@/types/table-management
 import { computeGridPositions, getTableDimensions, TABLE_TYPES } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 interface Props {
   tables: VenueTable[];
@@ -210,13 +211,12 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(nextRows.map((t) => ({ id: t.id, sort_order: t.sort_order }))),
         });
+        const json = await readResponseJson<{ error?: string; tables?: VenueTable[] }>(res);
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setReorderError((data as { error?: string }).error ?? 'Failed to update table order');
+          setReorderError(json.error ?? 'Failed to update table order');
           setOrderedIds(previousIds);
           return;
         }
-        const json = (await res.json()) as { tables?: VenueTable[] };
         const returned = json.tables;
         if (returned && returned.length > 0) {
           const map = new Map(returned.map((t) => [t.id, t]));

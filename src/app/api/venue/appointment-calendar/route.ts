@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
     const yearParam = searchParams.get('year');
     const monthParam = searchParams.get('month');
     const variantId = searchParams.get('variant_id');
+    const durationParam = searchParams.get('duration_minutes');
 
     if (!practitionerId || !serviceId) {
       return NextResponse.json(
@@ -43,6 +44,10 @@ export async function GET(request: NextRequest) {
     }
     if (Number.isNaN(month) || month < 1 || month > 12) {
       return NextResponse.json({ error: 'Invalid month (1–12)' }, { status: 400 });
+    }
+    const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
+    if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
+      return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
@@ -76,7 +81,7 @@ export async function GET(request: NextRequest) {
       serviceId,
       year,
       month,
-      { audience: 'staff', variantOverride },
+      { audience: 'staff', variantOverride, customDurationMinutes },
     );
 
     return NextResponse.json(

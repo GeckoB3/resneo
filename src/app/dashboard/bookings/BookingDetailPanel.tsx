@@ -18,7 +18,7 @@ import type { BookingNotesVariant } from '@/components/booking/BookingNotesEdita
 import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
-import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -842,6 +842,9 @@ export function BookingDetailPanel({
                 calendar_id: d.calendar_id,
                 appointment_service_id: d.appointment_service_id,
                 service_item_id: d.service_item_id,
+                booking_end_time: d.booking_end_time ?? null,
+                service_variant_id: d.service_variant_id ?? null,
+                processing_time_blocks: d.processing_time_blocks ?? null,
                 experience_event_id: d.experience_event_id,
                 class_instance_id: d.class_instance_id,
                 resource_id: d.resource_id,
@@ -855,7 +858,7 @@ export function BookingDetailPanel({
               draftMessage=""
               sendingMessage={false}
               onMessageDraftChange={() => {}}
-              onSendMessage={() => {}}
+              onSendMessage={async (_channel): Promise<GuestMessageSendResult> => ({ ok: true })}
               onStatusAction={() => {}}
               onDetailUpdated={() => {}}
             />
@@ -902,6 +905,9 @@ export function BookingDetailPanel({
       calendar_id: d.calendar_id,
       appointment_service_id: d.appointment_service_id,
       service_item_id: d.service_item_id,
+      booking_end_time: d.booking_end_time ?? null,
+      service_variant_id: d.service_variant_id ?? null,
+      processing_time_blocks: d.processing_time_blocks ?? null,
       experience_event_id: d.experience_event_id,
       class_instance_id: d.class_instance_id,
       resource_id: d.resource_id,
@@ -976,31 +982,42 @@ export function BookingDetailPanel({
               draftMessage={customMessage}
               sendingMessage={actionLoading}
               onMessageDraftChange={setCustomMessage}
-              onSendMessage={(channel) => {
-                void (async () => {
-                  setActionLoading(true);
-                  try {
-                    const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ message: customMessage, channel }),
-                    });
-                    const payload = (await res.json().catch(() => ({}))) as {
-                      success?: boolean;
-                      error?: string;
-                      errors?: string[];
-                    };
-                    if (!res.ok || !payload.success) {
-                      setError(payload.errors?.join('; ') ?? payload.error ?? 'Failed to send message');
-                      return;
-                    }
-                    setError(payload.errors?.length ? `Partially sent - ${payload.errors.join('; ')}` : null);
+              onSendMessage={async (channel): Promise<GuestMessageSendResult> => {
+                setActionLoading(true);
+                try {
+                  const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: customMessage, channel }),
+                  });
+                  const payload = (await res.json().catch(() => ({}))) as {
+                    success?: boolean;
+                    error?: string;
+                    errors?: string[];
+                  };
+                  if (!res.ok || !payload.success) {
+                    const errMsg = payload.errors?.join('; ') ?? payload.error ?? 'Failed to send message';
+                    setError(errMsg);
+                    return { ok: false, error: errMsg };
+                  }
+                  if (payload.errors?.length) {
+                    const w = payload.errors.join('; ');
+                    setError(null);
                     setCustomMessage('');
                     await load();
-                  } finally {
-                    setActionLoading(false);
+                    return { ok: true, warning: `Sent with issues: ${w}` };
                   }
-                })();
+                  setError(null);
+                  setCustomMessage('');
+                  await load();
+                  return { ok: true };
+                } catch {
+                  const errMsg = 'Failed to send message.';
+                  setError(errMsg);
+                  return { ok: false, error: errMsg };
+                } finally {
+                  setActionLoading(false);
+                }
               }}
               onStatusAction={(status) => {
                 if (status === 'No-Show' && !canMarkNoShowForSlot(d.booking_date, d.booking_time?.slice(0, 5) ?? '12:00', 0)) {
@@ -1855,6 +1872,9 @@ export function BookingDetailPanel({
                     service_item_id: d.service_item_id,
                     practitioner_id: d.practitioner_id,
                     appointment_service_id: d.appointment_service_id,
+                    booking_end_time: d.booking_end_time ?? null,
+                    service_variant_id: d.service_variant_id ?? null,
+                    processing_time_blocks: d.processing_time_blocks ?? null,
                     area_id: d.area_id,
                     table_assignments: assignedTables.length > 0 ? assignedTables : d.table_assignments,
                   }}

@@ -16,6 +16,8 @@ export function SuperSidebar({ email }: Props) {
 
   const navItems = [
     { href: '/super', label: 'Overview' },
+    { href: '/super/users', label: 'Superusers' },
+    { href: '/super/subscribers', label: 'Subscribers' },
     { href: '/super/support-audit', label: 'Support audit' },
   ];
 

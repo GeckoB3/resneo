@@ -25,6 +25,7 @@ import {
   bookingStatusVisualForKey,
 } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
+import { readResponseJson } from '@/lib/http/read-response-json';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -53,7 +54,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
-import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
@@ -90,6 +91,8 @@ interface BookingRow {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   client_arrived_at?: string | null;
@@ -743,12 +746,11 @@ export function BookingsDashboard({
       if (!ids && serviceFilterIds.length > 0) params.set('service', serviceFilterIds.join(','));
       if (!ids && calendarFilter !== 'all') params.set('calendar', calendarFilter);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
+      const data = await readResponseJson<{ error?: string; bookings?: BookingRow[] }>(res);
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        setError(json.error ?? 'Failed to load reservations');
+        setError(data.error ?? 'Failed to load reservations');
         return;
       }
-      const data = await res.json();
       const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
       const loaded: BookingRow[] = data.bookings ?? [];
       const next = !ids && opt?.excludeAttendanceConfirmed
@@ -984,34 +986,46 @@ export function BookingsDashboard({
     }
   }, [bookings, fetchBookings, addToast]);
 
-  const sendMessageToBooking = useCallback(async (bookingId: string, message: string, channel: GuestMessageChannel = 'both') => {
-    const trimmedMessage = message.trim();
-    if (trimmedMessage.length === 0) return;
-    setSendingMessageIds((prev) => [...prev, bookingId]);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmedMessage, channel }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
-        error?: string;
-        errors?: string[];
-      };
-      if (!res.ok || !payload.success) {
-        const detail =
-          (payload.errors && payload.errors.length > 0
-            ? payload.errors.join('; ')
-            : payload.error) ?? 'Failed to send message.';
-        setError(detail);
-        addToast(detail, 'error');
-      } else {
-        if (payload.errors && payload.errors.length > 0) {
-          addToast(`Sent with issues — ${payload.errors.join('; ')}`, 'error');
-        } else {
-          addToast('Message sent', 'success');
+  const sendMessageToBooking = useCallback(
+    async (bookingId: string, message: string, channel: GuestMessageChannel = 'both'): Promise<GuestMessageSendResult> => {
+      const trimmedMessage = message.trim();
+      if (trimmedMessage.length === 0) {
+        return { ok: false, error: 'Message cannot be empty.' };
+      }
+      setSendingMessageIds((prev) => [...prev, bookingId]);
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmedMessage, channel }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+          errors?: string[];
+        };
+        if (!res.ok || !payload.success) {
+          const detail =
+            (payload.errors && payload.errors.length > 0
+              ? payload.errors.join('; ')
+              : payload.error) ?? 'Failed to send message.';
+          setError(detail);
+          addToast(detail, 'error');
+          return { ok: false, error: detail };
         }
+        if (payload.errors && payload.errors.length > 0) {
+          const w = payload.errors.join('; ');
+          addToast(`Sent with issues — ${w}`, 'error');
+          setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          setDetailById((prev) => {
+            const next = { ...prev };
+            delete next[bookingId];
+            return next;
+          });
+          void loadBookingDetail(bookingId, true);
+          return { ok: true, warning: `Sent with issues: ${w}` };
+        }
+        addToast('Message sent', 'success');
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
         setDetailById((prev) => {
           const next = { ...prev };
@@ -1019,14 +1033,18 @@ export function BookingsDashboard({
           return next;
         });
         void loadBookingDetail(bookingId, true);
+        return { ok: true };
+      } catch {
+        const msg = 'Failed to send message.';
+        setError(msg);
+        addToast(msg, 'error');
+        return { ok: false, error: msg };
+      } finally {
+        setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
-    } catch {
-      setError('Failed to send message.');
-      addToast('Failed to send message.', 'error');
-    } finally {
-      setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
-    }
-  }, [addToast, loadBookingDetail]);
+    },
+    [addToast, loadBookingDetail],
+  );
 
   const executeBulkNoShow = useCallback(async () => {
     const previousMap = new Map(bookings.map((b) => [b.id, b.status]));
@@ -2205,7 +2223,7 @@ function BookingsAccordionList({
   guestHistoryRevisionById: Record<string, number>;
   onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
   onToggleExpand: (id: string) => void;
-  onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => void;
+  onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => Promise<GuestMessageSendResult>;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
   showAreaBadge?: boolean;
@@ -2474,7 +2492,7 @@ function BookingsAccordionList({
                     draftMessage={draftMessage}
                     sendingMessage={sendingMessage}
                     onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}
-                    onSendMessage={(ch) => { void onSendMessage(booking.id, draftMessage, ch); }}
+                    onSendMessage={(ch) => onSendMessage(booking.id, draftMessage, ch)}
                     onStatusAction={(status) => { onStatusAction(booking, status); }}
                     onDetailUpdated={() => onDetailUpdated(booking.id)}
                     onRequestChangeTable={isTableBooking && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}

@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
-import { sanitizeMagicLinkNextPath } from '@/lib/safe-auth-redirect';
+import { buildMagicLinkConfirmNextQuery } from '@/lib/safe-auth-redirect';
 import { z } from 'zod';
 
 const schema = z.object({
   email: z.string().email(),
   /**
-   * Path to redirect to after `/auth/confirm` verifies the token, e.g.
-   * `/auth/callback` or `/auth/callback?next=%2Fdashboard`. Must be a
-   * same-origin path (starts with `/`). Defaults to `/auth/callback`.
+   * Post-login destination path (e.g. `/account`, `/dashboard`) or a full
+   * `/auth/callback?next=…` value. Must start with `/`. Defaults to `/auth/callback`.
    */
   next: z.string().startsWith('/').optional(),
 });
@@ -22,10 +21,11 @@ const schema = z.object({
  * Supabase's default noreply@mail.app.supabase.io. Uses `generateLink` + `/auth/confirm`
  * (server-side OTP verification) — the same flow as staff invites.
  *
- * If SendGrid is not configured, returns `{ fallback: true }` so the client can fall
- * back to the browser-side `signInWithOtp` (which still works with PKCE).
+ * If SendGrid is not configured, or link generation / email send fails, returns `{ fallback: true }`
+ * so the client can fall back to `signInWithOtp` (PKCE + Supabase email).
  *
- * Security: always returns success to avoid revealing whether an email is registered.
+ * Security: on success paths that do not fall back, still returns a generic shape where appropriate
+ * to avoid revealing whether an email is registered (see generateLink failure handling below).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, next } = parsed.data;
-    const nextPath = sanitizeMagicLinkNextPath(next);
+    const nextPath = buildMagicLinkConfirmNextQuery(next);
     const normalisedEmail = email.trim().toLowerCase();
 
     if (!process.env.SENDGRID_API_KEY?.trim()) {
@@ -45,15 +45,19 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const baseUrl = getStaffAuthBaseUrl(request);
+    const redirectTo = `${baseUrl}/auth/callback`;
 
     const { data: genData, error: linkErr } = await admin.auth.admin.generateLink({
       type: 'magiclink',
       email: normalisedEmail,
+      options: {
+        redirectTo,
+      },
     });
 
     if (linkErr || !genData) {
       console.error('[send-magic-link] generateLink:', linkErr?.message ?? 'no data');
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ fallback: true });
     }
 
     const hashedToken =
@@ -61,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     if (!hashedToken) {
       console.error('[send-magic-link] generateLink returned no hashed_token');
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ fallback: true });
     }
 
     const confirmUrl =
@@ -95,6 +99,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (err) {
       console.error('[send-magic-link] sendEmail:', err instanceof Error ? err.message : err);
+      return NextResponse.json({ fallback: true });
     }
 
     return NextResponse.json({ ok: true });

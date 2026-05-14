@@ -154,10 +154,10 @@ function SetPasswordContent() {
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/venue/staff/change-password', {
+      const res = await fetch('/api/account/password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_password: password }),
+        body: JSON.stringify({ password }),
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -242,8 +242,13 @@ function SetPasswordContent() {
           </Link>
           <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Create your password</h1>
           <p className="mt-2 text-center text-sm text-slate-500">
-            Use this page after you open the invitation or sign-in link from your email. Choose a password to access your
-            venue dashboard; you can change it later under Settings.
+            Use this page after you open the invitation or sign-in link from your email. Choose a password for your
+            Reserve NI account — then you can sign in with email and password from the login page, or continue using magic
+            links. You can change your password anytime under{' '}
+            <Link href="/account/security#password" className="font-medium text-brand-700 hover:underline">
+              My account → Security
+            </Link>
+            .
           </p>
         </div>
 

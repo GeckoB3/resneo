@@ -1,4 +1,5 @@
 import type { HelpArticle, HelpCategory, HelpPlanFilter, HelpSearchDoc } from './types';
+import { stripHelpFigureMarkers } from './split-markdown-figures';
 import { gettingStartedCategory } from './articles/getting-started';
 import { restaurantCategory } from './articles/restaurant';
 import { appointmentsCategory } from './articles/appointments';
@@ -46,9 +47,9 @@ export function categoriesForPlanFilter(filter: HelpPlanFilter | 'all'): HelpCat
   return HELP_CATEGORIES.filter((c) => c.plan === 'all' || c.plan === filter);
 }
 
-export function buildSearchDocs(): HelpSearchDoc[] {
+export function buildSearchDocsFromCategories(categories: HelpCategory[]): HelpSearchDoc[] {
   const docs: HelpSearchDoc[] = [];
-  for (const cat of HELP_CATEGORIES) {
+  for (const cat of categories) {
     for (const art of cat.articles) {
       docs.push({
         id: `${cat.slug}/${art.slug}`,
@@ -59,11 +60,15 @@ export function buildSearchDocs(): HelpSearchDoc[] {
         title: art.title,
         description: art.description,
         tagsText: (art.tags ?? []).join(' '),
-        content: art.content,
+        content: stripHelpFigureMarkers(art.content),
       });
     }
   }
   return docs;
+}
+
+export function buildSearchDocs(): HelpSearchDoc[] {
+  return buildSearchDocsFromCategories(HELP_CATEGORIES);
 }
 
 export function getAdjacentArticles(

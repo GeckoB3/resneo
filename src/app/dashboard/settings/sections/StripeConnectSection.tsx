@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 interface StripeConnectSectionProps {
   stripeAccountId: string | null;
@@ -106,12 +107,12 @@ export function StripeConnectSection({
     async function fetchStatus() {
       try {
         const res = await fetch('/api/venue/stripe-connect');
+        const body = await readResponseJson<StripeStatus & { error?: string }>(res);
         if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
           if (!cancelled) setState({ kind: 'error', message: body.error ?? 'Failed to load status' });
           return;
         }
-        const data: StripeStatus = await res.json();
+        const data = body;
         if (cancelled) return;
 
         if (data.charges_enabled && data.details_submitted) {
@@ -147,14 +148,18 @@ export function StripeConnectSection({
             : {},
         ),
       });
+      const body = await readResponseJson<{ error?: string; url?: string }>(res);
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         setState({ kind: 'error', message: body.error ?? 'Failed to start onboarding' });
         setRedirecting(false);
         return;
       }
-      const { url } = await res.json();
-      window.location.href = url;
+      if (!body.url) {
+        setState({ kind: 'error', message: 'Failed to start onboarding' });
+        setRedirecting(false);
+        return;
+      }
+      window.location.href = body.url;
     } catch {
       setState({ kind: 'error', message: 'Network error. Please try again.' });
       setRedirecting(false);

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountBookingById } from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 type PageProps = { params: Promise<{ bookingId: string }> };
 
@@ -44,18 +45,35 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   const dateHeading = formatLongWeekdayDate(booking.booking_date, displayTz);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <div>
-        <Link href="/account/bookings" className="text-sm font-medium text-brand-700 hover:underline">
+        <Link
+          href="/account/bookings"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 transition-colors hover:text-brand-800"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
           Back to bookings
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">{booking.venue?.name ?? 'Booking details'}</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {bookingModelShortLabel(booking.booking_model)} booking · {booking.status}
-        </p>
+        <div className="mt-5">
+          <PageHeader
+            eyebrow="Bookings"
+            title={booking.venue?.name ?? 'Booking details'}
+            subtitle={`${bookingModelShortLabel(booking.booking_model)} booking · ${booking.status}`}
+            actions={
+              <a
+                href={booking.manage_booking_link}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+              >
+                Manage booking
+              </a>
+            }
+          />
+        </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7">
         <dl className="grid gap-4 sm:grid-cols-2">
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</dt>
@@ -98,12 +116,6 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         </dl>
       </div>
 
-      <a
-        href={booking.manage_booking_link}
-        className="inline-flex rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-      >
-        Manage this booking
-      </a>
     </div>
   );
 }

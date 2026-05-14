@@ -5,6 +5,7 @@ import type { VenueSettings, OpeningHoursSettings, OpeningHoursDaySettings } fro
 import { BusinessClosuresSection } from './BusinessClosuresSection';
 import { OpeningHoursControl } from '@/components/scheduling/OpeningHoursControl';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 const DAYS: { key: string; label: string }[] = [
   { key: '0', label: 'Sunday' },
@@ -60,12 +61,14 @@ export function OpeningHoursSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(local),
       });
+      const body = await readResponseJson<{ error?: string; opening_hours?: OpeningHoursSettings }>(res);
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? 'Failed to save');
+        throw new Error(body.error ?? 'Failed to save');
       }
-      const { opening_hours } = await res.json();
-      onUpdate({ opening_hours });
+      if (!body.opening_hours) {
+        throw new Error('Failed to save');
+      }
+      onUpdate({ opening_hours: body.opening_hours });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {

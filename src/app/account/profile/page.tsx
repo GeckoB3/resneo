@@ -1,7 +1,9 @@
+import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountSafeGuests } from '@/lib/account/account-bookings';
 import { ProfileClient } from './ProfileClient';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 type ProfileRow = {
   display_name: string | null;
@@ -19,8 +21,11 @@ export default async function AccountProfilePage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) {
+    redirect('/login?redirectTo=/account/profile');
+  }
 
-  const { data: profileData } = await supabase.from('user_profiles').select('*').eq('id', user!.id).maybeSingle();
+  const { data: profileData } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
   const profile = (profileData ?? {
     display_name: null,
     first_name: null,
@@ -37,7 +42,7 @@ export default async function AccountProfilePage() {
     supabase
       .from('user_devices')
       .select('id, platform, device_name, last_seen_at, created_at')
-      .eq('user_id', user!.id)
+      .eq('user_id', user.id)
       .order('last_seen_at', { ascending: false }),
   ]);
 
@@ -49,14 +54,14 @@ export default async function AccountProfilePage() {
   const venueMap = new Map((venues ?? []).map((v) => [v.id, v.name]));
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Profile &amp; preferences</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Manage your ReserveNI identity, notification settings, venue marketing consent, and devices.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Profile & preferences"
+        subtitle="Update your contact details, how you sign in, notification settings, venue marketing consent, and registered devices."
+      />
       <ProfileClient
+        initialEmail={user.email ?? ''}
         initialProfile={profile}
         marketingRelationships={relationships.map((r) => ({
           id: r.id,

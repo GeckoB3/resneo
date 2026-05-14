@@ -11,6 +11,8 @@ export interface RegistryAppointment {
   booking_date: string;
   booking_time: string;
   booking_end_time: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown | null;
   party_size: number;
   status: string;
   source: string;

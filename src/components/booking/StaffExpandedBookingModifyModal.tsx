@@ -1,18 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import {
   ModifyTableBookingModal,
   expandedRowToEditSnapshot,
 } from '@/components/booking/ModifyTableBookingModal';
-import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
+import { StaffAppointmentModifyForm } from '@/components/booking/StaffAppointmentModifyForm';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import type { CountryCode } from 'libphonenumber-js';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
-import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
-import type { VenuePublic } from '@/components/booking/types';
 
 /** Same subset as ExpandedBookingContent + fields needed for appointment modify */
 export interface StaffExpandedBookingModifySource {
@@ -42,6 +40,10 @@ export interface StaffExpandedBookingModifySource {
   appointment_service_id?: string | null;
   area_id?: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
+  /** Wall-clock end of bookable segment (HH:mm:ss or HH:mm); used for staff modify duration. */
+  booking_end_time?: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown | null;
 }
 
 export interface StaffExpandedBookingModifyDetailLite {
@@ -265,32 +267,6 @@ export function StaffExpandedBookingModifyModal({
   detail: StaffExpandedBookingModifyDetailLite | undefined;
 }) {
   const branch = useMemo(() => inferModifyBranch(booking), [booking]);
-  const [venue, setVenue] = useState<VenuePublic | null>(null);
-  const [venueLoadError, setVenueLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || branch !== 'appointment' || venue) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch('/api/venue');
-        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        if (!res.ok) {
-          if (!cancelled) setVenueLoadError(typeof data.error === 'string' ? data.error : 'Could not load venue');
-          return;
-        }
-        if (!cancelled) {
-          setVenue(mapApiVenueToVenuePublic(data));
-          setVenueLoadError(null);
-        }
-      } catch {
-        if (!cancelled) setVenueLoadError('Could not load venue');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [branch, open, venue]);
 
   if (!open) return null;
 
@@ -369,42 +345,16 @@ export function StaffExpandedBookingModifyModal({
         </div>
         <div className="min-h-0 overflow-y-auto px-5 py-4">
           {branch === 'appointment' ? (
-            venueLoadError ? (
-              <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{venueLoadError}</p>
-            ) : !venue ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-              </div>
-            ) : !practitionerId || !serviceId ? (
+            !practitionerId || !serviceId ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 This appointment is missing calendar or service data, so it cannot be modified here.
               </p>
             ) : (
-              <AppointmentBookingFlow
-                venue={venue}
-                bookingAudience="staff"
-                staffBookingSource="phone"
-                initialDate={booking.booking_date}
-                initialTime={booking.booking_time.slice(0, 5)}
-                preselectedPractitionerId={practitionerId}
-                onBookingCreated={onSaved}
-                editBooking={{
-                  id: booking.id,
-                  booking_date: booking.booking_date,
-                  booking_time: booking.booking_time,
-                  party_size: booking.party_size,
-                  practitioner_id: practitionerId,
-                  service_id: serviceId,
-                  guest_first_name:
-                    detail?.guest?.first_name ?? booking.guest_first_name ?? booking.guest_name.split(/\s+/)[0] ?? '',
-                  guest_last_name:
-                    detail?.guest?.last_name ??
-                    booking.guest_last_name ??
-                    booking.guest_name.split(/\s+/).slice(1).join(' ') ??
-                    '',
-                  guest_email: detail?.guest?.email ?? booking.guest_email ?? '',
-                  guest_phone: detail?.guest?.phone ?? booking.guest_phone ?? '',
-                }}
+              <StaffAppointmentModifyForm
+                bookingId={booking.id}
+                booking={booking}
+                onSaved={onSaved}
+                onClose={onClose}
               />
             )
           ) : (

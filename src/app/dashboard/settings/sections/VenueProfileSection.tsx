@@ -13,6 +13,17 @@ import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
+import { readResponseJson } from '@/lib/http/read-response-json';
+
+const BOOKING_SLUG_TAKEN_MESSAGE =
+  'That booking page address is already taken by another venue. Choose a different slug (letters, numbers, and hyphens only).';
+
+class SlugConflictError extends Error {
+  constructor() {
+    super(BOOKING_SLUG_TAKEN_MESSAGE);
+    this.name = 'SlugConflictError';
+  }
+}
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -104,15 +115,30 @@ export function VenueProfileSection({
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverRemoving, setCoverRemoving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
+  /** Proactive slug check (GET /api/venue/slug-available); avoids double-reading any `Response`. */
+  type SlugHint = 'idle' | 'checking' | 'current' | 'available' | 'taken';
+  const [slugHint, setSlugHint] = useState<SlugHint>('idle');
   const { integerProps } = useNumericField();
   const int = integerProps();
   const { report } = useSettingsSave();
   const lastSavedFingerprint = useRef<string | null>(null);
+  /** When set, autosave skips while the form payload matches this fingerprint (avoids repeat PATCH after slug conflict). */
+  const slugConflictFingerprintRef = useRef<string | null>(null);
   const venueIdRef = useRef<string | null>(null);
 
   const parsedAddr = parseAddress(venue.address);
 
-  const { register, control, formState: { errors }, setValue, watch, getValues, reset } = useForm<ProfileForm>({
+  const {
+    register,
+    control,
+    formState: { errors },
+    setValue,
+    watch,
+    getValues,
+    reset,
+    setError,
+    clearErrors,
+  } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       name: venue.name ?? '',
@@ -133,6 +159,7 @@ export function VenueProfileSection({
   });
 
   const nameValue = watch('name');
+  const slugInput = watch('slug');
   const watched = useWatch({ control });
 
   const handleNameBlur = useCallback(() => {
@@ -147,57 +174,67 @@ export function VenueProfileSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildRequestBody(data)),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error((j as { error?: string }).error ?? 'Failed to save');
-      }
-      const updated = (await res.json()) as {
-        name: string;
-        slug: string;
-        address: string | null;
-        phone: string | null;
-        email: string | null;
+      const body = await readResponseJson<{
+        error?: string;
+        name?: string;
+        slug?: string;
+        address?: string | null;
+        phone?: string | null;
+        email?: string | null;
         reply_to_email?: string | null;
-        website_url: string | null;
-        cuisine_type: string | null;
-        price_band: string | null;
-        no_show_grace_minutes: number;
-        kitchen_email: string | null;
-        timezone: string;
-      };
-      setValue('website_url', updated.website_url ?? '');
-      setValue('name', updated.name);
-      setValue('slug', updated.slug);
-      setValue('email', updated.email ?? '');
-      setValue('phone', updated.phone ?? '');
-      setValue('cuisine_type', updated.cuisine_type ?? '');
-      setValue('price_band', updated.price_band ?? '');
-      setValue('no_show_grace_minutes', updated.no_show_grace_minutes ?? 15);
-      setValue('kitchen_email', updated.kitchen_email ?? '');
-      setValue('timezone', updated.timezone ?? data.timezone);
-      const addr = parseAddress(updated.address);
+        website_url?: string | null;
+        cuisine_type?: string | null;
+        price_band?: string | null;
+        no_show_grace_minutes?: number;
+        kitchen_email?: string | null;
+        timezone?: string;
+      }>(res);
+      if (!res.ok) {
+        const apiError = body.error ?? 'Failed to save';
+        if (res.status === 409 && /slug/i.test(apiError)) {
+          throw new SlugConflictError();
+        }
+        throw new Error(apiError);
+      }
+      if (typeof body.name !== 'string' || typeof body.slug !== 'string') {
+        console.error('[VenueProfileSection] PATCH /api/venue: unexpected JSON shape', body);
+        throw new Error('Unexpected response from server. Please refresh and try again.');
+      }
+      const { name: savedName, slug: savedSlug, ...savedFields } = body;
+      setValue('website_url', savedFields.website_url ?? '');
+      setValue('name', savedName);
+      setValue('slug', savedSlug);
+      setValue('email', savedFields.email ?? '');
+      setValue('phone', savedFields.phone ?? '');
+      setValue('cuisine_type', savedFields.cuisine_type ?? '');
+      setValue('price_band', savedFields.price_band ?? '');
+      setValue('no_show_grace_minutes', savedFields.no_show_grace_minutes ?? 15);
+      setValue('kitchen_email', savedFields.kitchen_email ?? '');
+      setValue('timezone', savedFields.timezone ?? data.timezone);
+      const addr = parseAddress(savedFields.address ?? null);
       setValue('address_name', addr.name);
       setValue('address_street', addr.street);
       setValue('address_town', addr.town);
       setValue('address_postcode', addr.postcode);
       onUpdate({
-        name: updated.name,
-        slug: updated.slug,
-        address: updated.address ?? null,
-        phone: updated.phone ?? null,
-        email: updated.email ?? null,
-        reply_to_email: updated.reply_to_email ?? updated.email ?? null,
-        website_url: updated.website_url ?? null,
-        cuisine_type: updated.cuisine_type ?? null,
-        price_band: updated.price_band ?? null,
-        no_show_grace_minutes: updated.no_show_grace_minutes ?? 15,
-        kitchen_email: updated.kitchen_email ?? null,
-        timezone: updated.timezone ?? venue.timezone,
+        name: savedName,
+        slug: savedSlug,
+        address: savedFields.address ?? null,
+        phone: savedFields.phone ?? null,
+        email: savedFields.email ?? null,
+        reply_to_email: savedFields.reply_to_email ?? savedFields.email ?? null,
+        website_url: savedFields.website_url ?? null,
+        cuisine_type: savedFields.cuisine_type ?? null,
+        price_band: savedFields.price_band ?? null,
+        no_show_grace_minutes: savedFields.no_show_grace_minutes ?? 15,
+        kitchen_email: savedFields.kitchen_email ?? null,
+        timezone: savedFields.timezone ?? venue.timezone,
       });
       const synced = profileSchema.safeParse(getValues());
       if (synced.success) {
         lastSavedFingerprint.current = payloadFingerprint(synced.data);
       }
+      slugConflictFingerprintRef.current = null;
     },
     [onUpdate, setValue, venue.timezone, getValues],
   );
@@ -209,6 +246,9 @@ export function VenueProfileSection({
     }
     if (venueIdRef.current === venue.id) return;
     venueIdRef.current = venue.id;
+    slugConflictFingerprintRef.current = null;
+    setSlugHint('idle');
+    clearErrors('slug');
     const pa = parseAddress(venue.address);
     reset({
       name: venue.name ?? '',
@@ -230,7 +270,7 @@ export function VenueProfileSection({
     if (parsed.success) {
       lastSavedFingerprint.current = payloadFingerprint(parsed.data);
     }
-  }, [venue.id, venue, reset, getValues]);
+  }, [venue.id, venue, reset, getValues, clearErrors]);
 
   useLayoutEffect(() => {
     const parsed = profileSchema.safeParse(getValues());
@@ -241,18 +281,87 @@ export function VenueProfileSection({
   }, []);
 
   useEffect(() => {
+    const subscription = watch((_, info) => {
+      if (info?.name === 'slug') {
+        clearErrors('slug');
+        slugConflictFingerprintRef.current = null;
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [watch, clearErrors]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setSlugHint('idle');
+      return;
+    }
+    const norm = slugInput.trim().toLowerCase();
+    const saved = (venue.slug ?? '').trim().toLowerCase();
+    if (!norm) {
+      setSlugHint('idle');
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(norm) || norm.length > 100) {
+      setSlugHint('idle');
+      return;
+    }
+    if (norm === saved) {
+      setSlugHint('current');
+      return;
+    }
+
+    const ac = new AbortController();
+    setSlugHint('checking');
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/venue/slug-available?slug=${encodeURIComponent(norm)}`, {
+          signal: ac.signal,
+        });
+        const data = await readResponseJson<{ available?: boolean }>(res);
+        if (ac.signal.aborted) return;
+        if (!res.ok) {
+          setSlugHint('idle');
+          return;
+        }
+        setSlugHint(data.available ? 'available' : 'taken');
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+        if (!ac.signal.aborted) setSlugHint('idle');
+      }
+    }, 420);
+    return () => {
+      window.clearTimeout(timer);
+      ac.abort();
+    };
+  }, [slugInput, isAdmin, venue.slug]);
+
+  useEffect(() => {
     if (!isAdmin) return;
     const timer = window.setTimeout(() => {
       const parsed = profileSchema.safeParse(getValues());
       if (!parsed.success) return;
+      const normSlug = parsed.data.slug.trim().toLowerCase();
+      const savedSlug = (venue.slug ?? '').trim().toLowerCase();
+      if (normSlug !== savedSlug && slugHint === 'taken') {
+        return;
+      }
       const next = payloadFingerprint(parsed.data);
       if (next === lastSavedFingerprint.current) return;
+      if (slugConflictFingerprintRef.current !== null && next === slugConflictFingerprintRef.current) {
+        return;
+      }
       void (async () => {
         report({ status: 'saving', message: null });
         try {
           await persistProfile(parsed.data);
           report({ status: 'saved', message: 'Venue profile saved.' });
         } catch (err) {
+          if (err instanceof SlugConflictError) {
+            slugConflictFingerprintRef.current = next;
+            setError('slug', { type: 'server', message: err.message });
+            report({ status: 'error', message: err.message });
+            return;
+          }
           report({
             status: 'error',
             message: err instanceof Error ? err.message : 'Failed to save profile',
@@ -261,7 +370,7 @@ export function VenueProfileSection({
       })();
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [watched, isAdmin, persistProfile, report, getValues]);
+  }, [watched, isAdmin, persistProfile, report, getValues, setError, slugHint, venue.slug]);
 
   const onLogoChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,18 +383,23 @@ export function VenueProfileSection({
       form.append('file', file);
       try {
         const res = await fetch('/api/venue/logo', { method: 'POST', body: form });
+        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
         if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error((j as { error?: string }).error ?? 'Upload failed');
+          throw new Error(uploadJson.error ?? 'Upload failed');
         }
-        const { url } = await res.json();
+        if (!uploadJson.url) {
+          throw new Error('Upload failed');
+        }
         const patchRes = await fetch('/api/venue', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logo_url: url }),
+          body: JSON.stringify({ logo_url: uploadJson.url }),
         });
-        if (!patchRes.ok) throw new Error('Failed to update logo URL');
-        onUpdate({ logo_url: url });
+        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
+        if (!patchRes.ok) {
+          throw new Error(patchJson.error ?? 'Failed to update logo URL');
+        }
+        onUpdate({ logo_url: uploadJson.url });
         report({ status: 'saved', message: 'Logo updated.' });
       } catch (err) {
         setLogoError(err instanceof Error ? err.message : 'Upload failed');
@@ -312,7 +426,8 @@ export function VenueProfileSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ logo_url: null }),
       });
-      if (!res.ok) throw new Error('Failed to remove logo');
+      const body = await readResponseJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? 'Failed to remove logo');
       onUpdate({ logo_url: null });
       report({ status: 'saved', message: 'Logo removed.' });
     } catch (err) {
@@ -337,18 +452,23 @@ export function VenueProfileSection({
       form.append('file', file);
       try {
         const res = await fetch('/api/venue/cover', { method: 'POST', body: form });
+        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
         if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error((j as { error?: string }).error ?? 'Upload failed');
+          throw new Error(uploadJson.error ?? 'Upload failed');
         }
-        const { url } = await res.json();
+        if (!uploadJson.url) {
+          throw new Error('Upload failed');
+        }
         const patchRes = await fetch('/api/venue', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cover_photo_url: url }),
+          body: JSON.stringify({ cover_photo_url: uploadJson.url }),
         });
-        if (!patchRes.ok) throw new Error('Failed to update cover URL');
-        onUpdate({ cover_photo_url: url });
+        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
+        if (!patchRes.ok) {
+          throw new Error(patchJson.error ?? 'Failed to update cover URL');
+        }
+        onUpdate({ cover_photo_url: uploadJson.url });
         report({ status: 'saved', message: 'Cover photo updated.' });
       } catch (err) {
         setCoverError(err instanceof Error ? err.message : 'Upload failed');
@@ -375,7 +495,8 @@ export function VenueProfileSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cover_photo_url: null }),
       });
-      if (!res.ok) throw new Error('Failed to remove cover photo');
+      const body = await readResponseJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? 'Failed to remove cover photo');
       onUpdate({ cover_photo_url: null });
       report({ status: 'saved', message: 'Cover photo removed.' });
     } catch (err) {
@@ -516,9 +637,30 @@ export function VenueProfileSection({
             <label htmlFor="slug" className="mb-1 block text-sm font-medium text-slate-700">
               Slug (URL)
             </label>
-            <input id="slug" {...register('slug')} disabled={!isAdmin} className={inputClass} placeholder="my-venue" />
+            <input
+              id="slug"
+              {...register('slug')}
+              disabled={!isAdmin}
+              className={`${inputClass}${errors.slug ? ' border-red-300 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+              placeholder="my-venue"
+              aria-invalid={errors.slug ? true : undefined}
+            />
             <p className="mt-1 text-xs text-slate-500">Used in booking URL: /book/[slug]</p>
             {errors.slug && <p className="mt-1 text-sm text-red-600">{errors.slug.message}</p>}
+            {!errors.slug && isAdmin && slugHint === 'checking' && (
+              <p className="mt-1 text-xs text-slate-500">Checking whether this address is available…</p>
+            )}
+            {!errors.slug && isAdmin && slugHint === 'current' && (
+              <p className="mt-1 text-xs text-emerald-700">This is your current public booking page address.</p>
+            )}
+            {!errors.slug && isAdmin && slugHint === 'available' && (
+              <p className="mt-1 text-xs text-emerald-700">This booking page address is available.</p>
+            )}
+            {!errors.slug && isAdmin && slugHint === 'taken' && (
+              <p className="mt-1 text-xs text-amber-800">
+                This address is already in use. Choose a different slug before it can be saved.
+              </p>
+            )}
           </div>
           <fieldset>
             <legend className="mb-2 block text-sm font-medium text-slate-700">Address</legend>

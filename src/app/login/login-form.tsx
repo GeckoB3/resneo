@@ -20,13 +20,10 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
     ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)
     : (typeof window !== 'undefined' ? window.location.origin : '');
-  const callbackUrl = redirectTo
-    ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
-    : `${siteOrigin}/auth/callback`;
-  /** Path-only version of callbackUrl for the /api/auth/send-magic-link API route. */
-  const callbackPath = redirectTo
-    ? `/auth/callback?next=${encodeURIComponent(redirectTo)}`
-    : '/auth/callback';
+  const callbackUrl =
+    redirectTo?.trim()
+      ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo.trim())}`
+      : `${siteOrigin}/auth/callback`;
   const passwordSetupCallbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(SET_PASSWORD_PATH)}`;
 
   async function handlePasswordSubmit(e: React.FormEvent) {
@@ -51,30 +48,42 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setLoading(true);
 
     try {
+      const trimmedEmail = email.trim();
       const res = await fetch('/api/auth/send-magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), next: callbackPath }),
+        body: JSON.stringify({
+          email: trimmedEmail,
+          ...(redirectTo?.trim() ? { next: redirectTo.trim() } : {}),
+        }),
       });
 
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; fallback?: boolean; error?: string };
+
+      if (!res.ok) {
+        setError(json.error ?? 'Could not send magic link. Please try again.');
+        return;
+      }
+
+      if (res.ok && json.fallback) {
+        const { error: err } = await supabase.auth.signInWithOtp({
+          email: trimmedEmail,
+          options: { emailRedirectTo: callbackUrl },
+        });
+        if (err) {
+          setError(err.message);
+          return;
+        }
+        setSent(true);
+        return;
+      }
 
       if (res.ok && json.ok) {
         setSent(true);
         return;
       }
 
-      if (json.fallback) {
-        const { error: err } = await supabase.auth.signInWithOtp({
-          email: email.trim(),
-          options: { emailRedirectTo: callbackUrl },
-        });
-        if (err) { setError(err.message); return; }
-        setSent(true);
-        return;
-      }
-
-      setError(json.error ?? 'Could not send magic link. Please try again.');
+      setError('Could not send magic link. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -159,7 +168,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           </div>
         </form>
       ) : (
-        <form onSubmit={handleMagicSubmit} className="space-y-4">
+        <form onSubmit={(e) => void handleMagicSubmit(e)} className="space-y-4">
           <div>
             <label htmlFor="magic-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
             <input id="magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@example.com" className={inputClass} />

@@ -20,6 +20,7 @@ import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
   resolveEngineBookingProcessingBlocks,
+  validateAppointmentCustomInterval,
   type AppointmentBooking,
   type AppointmentEngineInput,
   type PractitionerCalendarBlockedRange,
@@ -296,6 +297,8 @@ export interface ComputeAppointmentMonthOptions {
    * service before evaluating slots. The calendar then accurately reflects what fits.
    */
   variantOverride?: ServiceVariant | null;
+  /** Staff-only per-booking duration override; filters dates by fitting this custom interval. */
+  customDurationMinutes?: number | null;
 }
 
 /**
@@ -379,7 +382,20 @@ export async function computeAppointmentAvailableDatesInMonth(
     attachVenueClockToAppointmentInput(input, venueClockRow, bookingWindow);
     const out = computeAppointmentAvailability(input);
     const practitioner = out.practitioners.find((p) => p.id === practitionerId);
-    if (practitioner?.slots.some((slot) => slot.service_id === serviceId)) {
+    const hasSlot = practitioner?.slots.some((slot) => {
+      if (slot.service_id !== serviceId) return false;
+      if (options.customDurationMinutes == null) return true;
+      const startMin = timeToMinutes(slot.start_time);
+      const endHHmm = `${pad2(Math.floor(((startMin + options.customDurationMinutes) % (24 * 60)) / 60))}:${pad2((startMin + options.customDurationMinutes) % 60)}`;
+      return validateAppointmentCustomInterval(
+        input,
+        practitionerId,
+        serviceId,
+        slot.start_time,
+        endHHmm,
+      ).ok;
+    });
+    if (hasSlot) {
       availableDates.push(date);
     }
   }

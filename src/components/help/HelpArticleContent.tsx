@@ -32,6 +32,12 @@ export function HelpArticleContent({ markdown }: { markdown: string }) {
         'blockquote',
         'hr',
         'br',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
       ],
       allowedAttributes: {
         a: ['href', 'target', 'rel'],

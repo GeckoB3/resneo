@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import type { VenueSettings, AvailabilityConfigSettings, FixedIntervalsSettings, NamedSittingsSettings, NamedSittingSettings } from '../types';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 const DAYS = [
   { key: '0', label: 'Sun' },
@@ -58,12 +59,14 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(local),
       });
+      const body = await readResponseJson<{ error?: string; availability_config?: AvailabilityConfigSettings }>(res);
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? 'Failed to save');
+        throw new Error(body.error ?? 'Failed to save');
       }
-      const { availability_config } = await res.json();
-      onUpdate({ availability_config });
+      if (!body.availability_config) {
+        throw new Error('Failed to save');
+      }
+      onUpdate({ availability_config: body.availability_config });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {

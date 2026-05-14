@@ -34,9 +34,36 @@ export function sanitizeMagicLinkNextPath(raw: string | null | undefined): strin
     next.startsWith('/account?') ||
     next.startsWith('/account/') ||
     next === '/auth/choose-destination' ||
-    next.startsWith('/auth/choose-destination?')
+    next.startsWith('/auth/choose-destination?') ||
+    next === '/super' ||
+    next.startsWith('/super?') ||
+    next.startsWith('/super/')
   ) {
     return next;
   }
   return DEFAULT_MAGIC_LINK_NEXT;
+}
+
+/**
+ * Normalises the `next` field for POST /api/auth/send-magic-link.
+ * Clients should send the final post-login path (e.g. `/account`); this wraps it as
+ * `/auth/callback?next=…` when needed so `/auth/confirm` receives a single, correctly encoded
+ * redirect target (avoids double-encoding when the client already passed `/auth/callback?next=…`).
+ */
+export function buildMagicLinkConfirmNextQuery(raw: string | null | undefined): string {
+  if (!raw || typeof raw !== 'string' || !raw.trim()) {
+    return DEFAULT_MAGIC_LINK_NEXT;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+    return DEFAULT_MAGIC_LINK_NEXT;
+  }
+  if (trimmed === DEFAULT_MAGIC_LINK_NEXT || trimmed.startsWith(`${DEFAULT_MAGIC_LINK_NEXT}?`)) {
+    return sanitizeMagicLinkNextPath(trimmed);
+  }
+  const dest = sanitizeMagicLinkNextPath(trimmed);
+  if (dest === DEFAULT_MAGIC_LINK_NEXT || dest.startsWith(`${DEFAULT_MAGIC_LINK_NEXT}?`)) {
+    return dest;
+  }
+  return `${DEFAULT_MAGIC_LINK_NEXT}?next=${encodeURIComponent(dest)}`;
 }

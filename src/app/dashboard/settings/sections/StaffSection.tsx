@@ -8,6 +8,7 @@ import { planDisplayName } from '@/lib/pricing-constants';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 interface StaffSectionProps {
   venueId: string;
@@ -202,14 +203,19 @@ export function StaffSection({
           ...(createRole === 'staff' && createCalendarIds.length > 0 ? { calendar_ids: createCalendarIds } : {}),
         }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? 'Failed to send invite');
-      }
-      const { staff: newMember, invite_email_sent: inviteSent } = await res.json() as {
-        staff: StaffMember;
+      const body = await readResponseJson<{
+        error?: string;
+        staff?: StaffMember;
         invite_email_sent?: boolean;
-      };
+      }>(res);
+      if (!res.ok) {
+        throw new Error(body.error ?? 'Failed to send invite');
+      }
+      if (!body.staff) {
+        throw new Error('Failed to send invite');
+      }
+      const newMember = body.staff;
+      const inviteSent = body.invite_email_sent;
       setStaff((prev) => [...prev, newMember]);
       setCreateEmail('');
       setCreateName('');
@@ -258,15 +264,15 @@ export function StaffSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ calendar_ids: calendarIds }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(typeof j.error === 'string' ? j.error : 'Failed to update calendar assignments');
-      }
-      const data = (await res.json()) as {
+      const data = await readResponseJson<{
+        error?: string;
         linked_calendar_ids?: string[];
         linked_practitioner_id: string | null;
         linked_practitioner_name: string | null;
-      };
+      }>(res);
+      if (!res.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : 'Failed to update calendar assignments');
+      }
       setStaff((prev) =>
         prev.map((s) =>
           s.id === member.id

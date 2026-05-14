@@ -16,6 +16,7 @@ type SetupStepKey = keyof Omit<
   | 'enabled_models'
   | 'onboarding_completed'
   | 'pricing_tier'
+  | 'setup_checklist_dismissed'
 >;
 
 interface Step {
@@ -171,6 +172,16 @@ function writeDismissedToStorage(venueId: string): void {
   }
 }
 
+async function persistDismissToServer(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/venue/setup-checklist-dismiss', { method: 'POST' });
+    return res.ok;
+  } catch (e) {
+    console.error('[SetupChecklist] persist dismiss to server failed:', e);
+    return false;
+  }
+}
+
 function getSteps(status: SetupStatus): Step[] {
   const model = status.booking_model;
   const enabledModels = status.enabled_models;
@@ -225,7 +236,9 @@ export function SetupChecklist({
   const [status, setStatus] = useState<SetupStatus | null>(() =>
     disableClientSetupFetch ? setupStatusFromServer ?? null : null,
   );
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() =>
+    Boolean(setupStatusFromServer?.setup_checklist_dismissed),
+  );
 
   useEffect(() => {
     if (disableClientSetupFetch) {
@@ -235,13 +248,18 @@ export function SetupChecklist({
           setDismissed(true);
           return;
         }
-        if (readDismissedFromStorage(venueId)) {
+        const legacyLocal = readDismissedFromStorage(venueId);
+        if (legacyLocal && !data.setup_checklist_dismissed) {
+          void persistDismissToServer();
+        }
+        if (data.setup_checklist_dismissed || legacyLocal) {
           setDismissed(true);
           return;
         }
         setStatus(data);
         if (isSetupComplete(data)) {
           writeDismissedToStorage(venueId);
+          void persistDismissToServer();
           setDismissed(true);
         }
       });
@@ -249,10 +267,6 @@ export function SetupChecklist({
     }
 
     const id = requestAnimationFrame(() => {
-      if (readDismissedFromStorage(venueId)) {
-        setDismissed(true);
-        return;
-      }
       fetch('/api/venue/setup-status')
         .then((r) => (r.ok ? r.json() : null))
         .then((data: SetupStatus | null) => {
@@ -261,9 +275,18 @@ export function SetupChecklist({
             setDismissed(true);
             return;
           }
+          const legacyLocal = readDismissedFromStorage(venueId);
+          if (legacyLocal && !data.setup_checklist_dismissed) {
+            void persistDismissToServer();
+          }
+          if (data.setup_checklist_dismissed || legacyLocal) {
+            setDismissed(true);
+            return;
+          }
           setStatus(data);
           if (isSetupComplete(data)) {
             writeDismissedToStorage(venueId);
+            void persistDismissToServer();
             setDismissed(true);
           }
         })
@@ -279,6 +302,11 @@ export function SetupChecklist({
   function dismiss() {
     writeDismissedToStorage(venueId);
     setDismissed(true);
+    void persistDismissToServer().then((ok) => {
+      if (!ok) {
+        console.error('[SetupChecklist] Dismiss saved locally only; server persist failed.', { venueId });
+      }
+    });
   }
 
   if (dismissed || !status) return null;

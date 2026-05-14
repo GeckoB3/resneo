@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 interface EnrollmentRow {
   id: string;
@@ -215,16 +216,16 @@ export function AccountCoursesSection() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Courses</h1>
-      <p className="text-sm text-slate-600">
-        Enroll in free course packages instantly, or pay for paid courses with your card (processed on the venue&apos;s
-        Stripe account).
-      </p>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Courses"
+        subtitle="Enroll in free course packages instantly, or pay for paid courses with your card (processed on the venue’s Stripe account)."
+      />
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Enrollments</h2>
         {enrollments.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">None yet.</p>
@@ -243,7 +244,7 @@ export function AccountCoursesSection() {
         <p className="text-sm text-slate-500">No published course packages yet.</p>
       ) : (
         <>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Venue</h2>
             <label className="mt-3 block text-xs text-slate-600">
               <select
@@ -264,7 +265,7 @@ export function AccountCoursesSection() {
             </label>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Free course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 text-xs text-slate-600">
@@ -296,7 +297,7 @@ export function AccountCoursesSection() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Paid course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 text-xs text-slate-600">

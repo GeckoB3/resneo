@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 interface MembershipRow {
   id: string;
@@ -110,13 +111,16 @@ export function AccountMembershipsSection() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Memberships</h1>
-      <p className="text-sm text-slate-600">Subscriptions bill on each venue&apos;s Stripe Connect account.</p>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Memberships"
+        subtitle="Subscriptions bill on each venue’s Stripe Connect account."
+      />
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your memberships</h2>
         {memberships.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">None yet.</p>
@@ -147,7 +151,7 @@ export function AccountMembershipsSection() {
         )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Start membership (Stripe Checkout)</h2>
         <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
         {purchaseCatalog.venues.length === 0 ? (

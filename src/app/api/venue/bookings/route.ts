@@ -17,6 +17,7 @@ import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
   computeAppointmentAvailability,
+  validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -45,6 +46,13 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+
+function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
+  const [startH, startM] = startHHmm.split(':').map(Number);
+  const end = new Date(Date.UTC(2000, 0, 1, startH ?? 0, startM ?? 0, 0));
+  end.setUTCMinutes(end.getUTCMinutes() + durationMinutes);
+  return `${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
+}
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -76,8 +84,8 @@ const phoneBookingSchema = z.object({
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   source: z.enum(['phone', 'walk-in']).optional(),
   area_id: z.string().uuid().optional(),
-  /** Override venue-derived cover time for table reservations (minutes at the table). */
-  duration_minutes: z.number().int().min(15).max(300).optional(),
+  /** One-off duration override for staff-created table or appointment bookings. */
+  duration_minutes: z.number().int().min(15).max(14 * 60).optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -106,6 +114,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Invalid request', details: parsed.error.flatten() },
         { status: 400 }
+      );
+    }
+
+    const isAppointmentCreateRequest = Boolean(parsed.data.practitioner_id && parsed.data.appointment_service_id);
+    const isTableCreateRequest = !isAppointmentCreateRequest &&
+      !parsed.data.experience_event_id &&
+      !parsed.data.class_instance_id &&
+      !parsed.data.resource_id;
+    if (parsed.data.duration_minutes != null && isTableCreateRequest && parsed.data.duration_minutes > 300) {
+      return NextResponse.json(
+        { error: 'duration_minutes must be an integer between 15 and 300' },
+        { status: 400 },
       );
     }
 
@@ -159,11 +179,8 @@ export async function POST(request: NextRequest) {
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
-    const isStaffAppointmentBooking = Boolean(
-      parsed.data.practitioner_id && parsed.data.appointment_service_id,
-    );
     if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
-      if (isStaffAppointmentBooking && !phoneRaw && !staffWalkIn) {
+      if (isAppointmentCreateRequest && !phoneRaw && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
       }
       if (phoneRaw) {
@@ -767,12 +784,11 @@ export async function POST(request: NextRequest) {
 
     // --- Model B: Practitioner / calendar appointment ---
     // Primary USE/practitioner venues, OR restaurant + appointments secondary (unified_scheduling in enabled_models).
-    const hasAppointmentAnchorIds = Boolean(parsed.data.practitioner_id && parsed.data.appointment_service_id);
     const supportsStaffAppointmentCreate =
       isUnifiedSchedulingVenue(venueMode.bookingModel) ||
       venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
 
-    if (supportsStaffAppointmentCreate && hasAppointmentAnchorIds) {
+    if (supportsStaffAppointmentCreate && isAppointmentCreateRequest) {
       const practitioner_id = parsed.data.practitioner_id as string;
       const appointment_service_id = parsed.data.appointment_service_id as string;
 
@@ -810,15 +826,31 @@ export async function POST(request: NextRequest) {
       let matchingSlot: { duration_minutes: number; start_time: string; service_id: string } | null = null;
 
       if (!staffWalkIn) {
-        const availResult = computeAppointmentAvailability(appointmentInput);
-        const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
-        matchingSlot =
-          practitionerSlots?.slots.find(
-            (s) => s.start_time === timeStr && s.service_id === appointment_service_id,
-          ) ?? null;
+        if (parsed.data.duration_minutes != null) {
+          const intervalCheck = validateAppointmentCustomInterval(
+            appointmentInput,
+            practitioner_id,
+            appointment_service_id,
+            timeStr,
+            endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
+          );
+          if (!intervalCheck.ok) {
+            return NextResponse.json(
+              { error: intervalCheck.reason ?? 'Selected time is not available for this practitioner and service' },
+              { status: 409 },
+            );
+          }
+        } else {
+          const availResult = computeAppointmentAvailability(appointmentInput);
+          const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
+          matchingSlot =
+            practitionerSlots?.slots.find(
+              (s) => s.start_time === timeStr && s.service_id === appointment_service_id,
+            ) ?? null;
 
-        if (!matchingSlot) {
-          return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
+          if (!matchingSlot) {
+            return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
+          }
         }
       }
 
@@ -827,6 +859,26 @@ export async function POST(request: NextRequest) {
         (row) => row.practitioner_id === practitioner_id && row.service_id === appointment_service_id,
       );
       const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      if (!svc) {
+        return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
+      }
+      if (staffWalkIn && parsed.data.duration_minutes != null) {
+        const intervalCheck = validateAppointmentCustomInterval(
+          appointmentInput,
+          practitioner_id,
+          appointment_service_id,
+          timeStr,
+          endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
+          undefined,
+          { allowBookingOverlap: true },
+        );
+        if (!intervalCheck.ok) {
+          return NextResponse.json(
+            { error: intervalCheck.reason ?? 'Selected time is not available for this practitioner and service' },
+            { status: 409 },
+          );
+        }
+      }
       const practRow = appointmentInput.practitioners.find((p) => p.id === practitioner_id);
       const apptEmailExtras = {
         email_variant: 'appointment' as const,
@@ -836,7 +888,7 @@ export async function POST(request: NextRequest) {
           svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
       };
       const durationMins =
-        svc?.duration_minutes ?? matchingSlot?.duration_minutes ?? 30;
+        parsed.data.duration_minutes ?? svc.duration_minutes ?? matchingSlot?.duration_minutes ?? 30;
       const [y, mo, d] = booking_date.split('-').map(Number);
       const timeParts = timeForDb.split(':').map(Number);
       const hh = timeParts[0] ?? 0;
@@ -1056,7 +1108,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (isUnifiedSchedulingVenue(venueMode.bookingModel) && !hasAppointmentAnchorIds) {
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel) && !isAppointmentCreateRequest) {
       return NextResponse.json(
         { error: 'practitioner_id and appointment_service_id are required for appointment bookings' },
         { status: 400 },

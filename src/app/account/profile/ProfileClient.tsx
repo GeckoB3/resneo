@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type Profile = {
   display_name: string | null;
@@ -29,16 +30,26 @@ type Device = {
   created_at: string;
 };
 
+const inputClass =
+  'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/80';
+
+const sectionClass =
+  'rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7';
+
 export function ProfileClient({
+  initialEmail,
   initialProfile,
   marketingRelationships,
   devices,
 }: {
+  initialEmail: string;
   initialProfile: Profile;
   marketingRelationships: MarketingRelationship[];
   devices: Device[];
 }) {
+  const router = useRouter();
   const [profile, setProfile] = useState(initialProfile);
+  const [email, setEmail] = useState(initialEmail);
   const [marketing, setMarketing] = useState(marketingRelationships);
   const [knownDevices, setKnownDevices] = useState(devices);
   const [message, setMessage] = useState<string | null>(null);
@@ -54,6 +65,16 @@ export function ProfileClient({
   }, [profile.notification_preferences]);
 
   async function saveProfile() {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError('Email is required for your account.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
     setError(null);
@@ -61,15 +82,32 @@ export function ProfileClient({
       const res = await fetch('/api/account/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
+        body: JSON.stringify({
+          ...profile,
+          email: trimmedEmail,
+        }),
       });
-      const body = (await res.json()) as { error?: string; profile?: Profile };
+      const body = (await res.json()) as {
+        error?: string;
+        profile?: Profile;
+        user?: { email?: string | null };
+        notice?: string | null;
+        email_error?: string | null;
+      };
       if (!res.ok || !body.profile) {
         setError(body.error ?? 'Failed to save profile');
         return;
       }
       setProfile(body.profile);
-      setMessage('Profile saved.');
+      if (body.user?.email != null) setEmail(body.user.email);
+      if (body.email_error) {
+        setError(body.email_error);
+        setMessage(body.notice ?? 'Profile saved.');
+      } else {
+        const parts = [body.notice, 'Profile saved.'].filter(Boolean);
+        setMessage(parts.join(' '));
+      }
+      router.refresh();
     } catch {
       setError('Network error');
     } finally {
@@ -130,45 +168,111 @@ export function ProfileClient({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-medium text-slate-900">Profile</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-700">
-            Display name
+    <div className="space-y-8">
+      <section className={sectionClass}>
+        <h2 className="text-lg font-semibold text-slate-900">Contact details</h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          Your name and phone are stored on your ReserveNI profile and used when venues see your account. Email is your
+          sign-in address; changing it may require confirmation from your new inbox.
+        </p>
+        <div className="mt-6 grid gap-5 sm:grid-cols-2">
+          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-first-name">
+            First name
             <input
-              value={profile.display_name ?? ''}
-              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              id="profile-first-name"
+              name="first_name"
+              autoComplete="given-name"
+              value={profile.first_name ?? ''}
+              onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))}
+              className={inputClass}
             />
           </label>
-          <label className="block text-sm font-medium text-slate-700">
-            Phone
+          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-last-name">
+            Surname
             <input
+              id="profile-last-name"
+              name="last_name"
+              autoComplete="family-name"
+              value={profile.last_name ?? ''}
+              onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))}
+              className={inputClass}
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-email">
+            Email
+            <input
+              id="profile-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={inputClass}
+            />
+            <span className="mt-1.5 block text-xs text-slate-500">
+              This updates your login email in our authentication system. If you change it, check both inboxes until you
+              confirm.
+            </span>
+          </label>
+          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-phone">
+            Phone number
+            <input
+              id="profile-phone"
+              name="phone"
+              type="tel"
+              autoComplete="tel"
               value={profile.phone ?? ''}
               onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className={inputClass}
+              placeholder="e.g. 07700 900000"
             />
           </label>
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-display-name">
+            Preferred display name{' '}
+            <span className="font-normal text-slate-500">(optional)</span>
+            <input
+              id="profile-display-name"
+              name="display_name"
+              autoComplete="nickname"
+              value={profile.display_name ?? ''}
+              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
+              className={inputClass}
+              placeholder="How we greet you in the app"
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className={sectionClass}>
+        <h2 className="text-lg font-semibold text-slate-900">Regional &amp; login</h2>
+        <p className="mt-1 text-sm text-slate-600">Locale and timezone affect how dates and times are shown to you.</p>
+        <div className="mt-6 grid gap-5 sm:grid-cols-2">
+          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-locale">
             Locale
             <input
+              id="profile-locale"
+              name="locale"
               value={profile.locale}
               onChange={(e) => setProfile((p) => ({ ...p, locale: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className={inputClass}
             />
           </label>
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-timezone">
             Timezone
             <input
+              id="profile-timezone"
+              name="timezone"
               value={profile.timezone}
               onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className={inputClass}
+              placeholder="Europe/London"
             />
           </label>
-          <label className="block text-sm font-medium text-slate-700 sm:col-span-2">
+          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-login-dest">
             Default destination after login
             <select
+              id="profile-login-dest"
+              name="default_login_destination"
               value={profile.default_login_destination ?? 'ask'}
               onChange={(e) =>
                 setProfile((p) => ({
@@ -176,7 +280,7 @@ export function ProfileClient({
                   default_login_destination: e.target.value as Profile['default_login_destination'],
                 }))
               }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className={inputClass}
             >
               <option value="ask">Ask when needed</option>
               <option value="account">Account</option>
@@ -186,61 +290,63 @@ export function ProfileClient({
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-medium text-slate-900">Notification preferences</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          These apply to your <span className="font-medium">ReserveNI account</span> (booking confirmations from the
-          platform, security notices, optional product updates). Use <span className="font-medium">Venue marketing</span>{' '}
-          below for promotional email per venue you have booked with.
+      <section className={sectionClass}>
+        <h2 className="text-lg font-semibold text-slate-900">Notification preferences</h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          These apply to your <span className="font-medium text-slate-800">ReserveNI account</span> (booking confirmations
+          from the platform, security notices, optional product updates). Use{' '}
+          <span className="font-medium text-slate-800">Venue marketing</span> below for promotional email per venue you
+          have booked with.
         </p>
-        <div className="mt-4 space-y-3 text-sm text-slate-700">
-          <label className="flex items-start gap-3">
+        <div className="mt-5 space-y-4 text-sm text-slate-700">
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             <input
               type="checkbox"
               checked={prefs.operational_email}
               onChange={(e) => updateNotificationPreference('operational_email', e.target.checked)}
-              className="mt-1"
+              className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span>
               Operational emails: booking confirmations and reminders sent by ReserveNI, plus security notices for your
               account.
             </span>
           </label>
-          <label className="flex items-start gap-3">
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             <input
               type="checkbox"
               checked={prefs.marketing_email}
               onChange={(e) => updateNotificationPreference('marketing_email', e.target.checked)}
-              className="mt-1"
+              className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span>ReserveNI product updates and platform news (not venue-specific promotions).</span>
           </label>
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-medium text-slate-900">Venue marketing consent</h2>
-        <p className="mt-2 text-sm text-slate-600">
+      <section className={sectionClass}>
+        <h2 className="text-lg font-semibold text-slate-900">Venue marketing consent</h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
           Each venue you have booked with may send marketing separately. Toggling here updates that venue&apos;s guest
           record only; it does not change your account-level operational email setting above.
         </p>
         {marketing.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-600">No linked venue relationships yet.</p>
+          <p className="mt-4 text-sm text-slate-600">No linked venue relationships yet.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-slate-200">
+          <ul className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-100">
             {marketing.map((row) => (
-              <li key={row.id} className="flex items-center justify-between gap-4 py-3">
-                <div>
-                  <p className="font-medium text-slate-900">{row.venueName}</p>
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-5">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{row.venueName}</p>
                   <p className="text-xs text-slate-500">
                     {row.marketing_consent_at ? `Consented ${row.marketing_consent_at.slice(0, 10)}` : 'No consent recorded'}
                   </p>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
+                <label className="flex shrink-0 items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={row.marketing_consent}
                     onChange={(e) => void updateMarketing(row.id, e.target.checked)}
+                    className="size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                   />
                   Marketing emails
                 </label>
@@ -250,25 +356,28 @@ export function ProfileClient({
         )}
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-medium text-slate-900">Devices</h2>
+      <section className={sectionClass}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Devices</h2>
+            <p className="mt-1 text-sm text-slate-600">Browsers you have registered for account security.</p>
+          </div>
           <button
             type="button"
             onClick={() => void registerThisDevice()}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50"
           >
             Register this browser
           </button>
         </div>
         {knownDevices.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-600">No devices registered yet.</p>
+          <p className="mt-4 text-sm text-slate-600">No devices registered yet.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-slate-200">
+          <ul className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-100">
             {knownDevices.map((device) => (
-              <li key={device.id} className="flex items-center justify-between gap-4 py-3">
+              <li key={device.id} className="flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-5">
                 <div>
-                  <p className="font-medium text-slate-900">{device.device_name || device.platform}</p>
+                  <p className="font-semibold text-slate-900">{device.device_name || device.platform}</p>
                   <p className="text-xs text-slate-500">
                     Last seen {device.last_seen_at ? device.last_seen_at.slice(0, 10) : device.created_at.slice(0, 10)}
                   </p>
@@ -276,7 +385,7 @@ export function ProfileClient({
                 <button
                   type="button"
                   onClick={() => void removeDevice(device.id)}
-                  className="text-sm font-medium text-red-700 hover:underline"
+                  className="text-sm font-semibold text-red-700 transition-colors hover:text-red-800"
                 >
                   Remove
                 </button>
@@ -286,16 +395,28 @@ export function ProfileClient({
         )}
       </section>
 
-      {message ? <p className="text-sm text-green-800">{message}</p> : null}
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      <button
-        type="button"
-        disabled={saving}
-        onClick={() => void saveProfile()}
-        className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-      >
-        {saving ? 'Saving...' : 'Save changes'}
-      </button>
+      <div className="flex flex-col gap-4 border-t border-slate-200/80 pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-2">
+          {message ? (
+            <p className="rounded-xl border border-emerald-200/80 bg-emerald-50/90 px-4 py-2.5 text-sm font-medium text-emerald-900">
+              {message}
+            </p>
+          ) : null}
+          {error ? (
+            <p className="rounded-xl border border-red-200/80 bg-red-50/90 px-4 py-2.5 text-sm font-medium text-red-800">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void saveProfile()}
+          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+        >
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
     </div>
   );
 }

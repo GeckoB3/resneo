@@ -7,6 +7,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { readResponseJson } from '@/lib/http/read-response-json';
 
 interface StaffProfileRow {
   id: string;
@@ -47,11 +48,14 @@ export function StaffPersonalSettingsSection({
     setLoadError(null);
     try {
       const res = await fetch('/api/venue/staff/me');
+      const body = await readResponseJson<{ error?: string; staff?: StaffProfileRow }>(res);
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? 'Failed to load your profile');
+        throw new Error(body.error ?? 'Failed to load your profile');
       }
-      const { staff: row } = (await res.json()) as { staff: StaffProfileRow };
+      if (!body.staff) {
+        throw new Error('Failed to load your profile');
+      }
+      const row = body.staff;
       setProfile(row);
       setName(row.name ?? '');
       setEmail(row.email);
@@ -91,11 +95,14 @@ export function StaffPersonalSettingsSection({
             phone: phoneE164 ?? '',
           }),
         });
+        const body = await readResponseJson<{ error?: string; staff?: StaffProfileRow }>(res);
         if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(j.error ?? 'Could not save profile');
+          throw new Error(body.error ?? 'Could not save profile');
         }
-        const { staff: row } = (await res.json()) as { staff: StaffProfileRow };
+        if (!body.staff) {
+          throw new Error('Could not save profile');
+        }
+        const row = body.staff;
         setProfile(row);
         setName(row.name ?? '');
         setEmail(row.email);

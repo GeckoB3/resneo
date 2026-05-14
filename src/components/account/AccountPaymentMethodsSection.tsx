@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 function SetupForm({ clientSecret, stripeAccountId: _stripeAccountId, onComplete }: { clientSecret: string; stripeAccountId: string; onComplete: () => void }) {
   const stripe = useStripe();
@@ -108,15 +109,15 @@ export function AccountPaymentMethodsSection() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Payment methods</h1>
-      <p className="text-sm text-slate-600">
-        Cards are saved per venue on that venue&apos;s Stripe Connect account (not platform-wide). Only venues where you
-        have class credits, courses, or memberships appear below.
-      </p>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Payment methods"
+        subtitle="Cards are saved per venue on that venue’s Stripe Connect account (not platform-wide). Only venues where you have class credits, courses, or memberships appear below."
+      />
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <label className="text-sm font-medium text-slate-800">Venue</label>
         <select
           className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -141,7 +142,7 @@ export function AccountPaymentMethodsSection() {
       </div>
 
       {venueId ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Saved cards</h2>
           {methods.length === 0 ? (
             <p className="mt-2 text-sm text-slate-500">No saved cards for this venue yet.</p>
@@ -165,7 +166,7 @@ export function AccountPaymentMethodsSection() {
       ) : null}
 
       {setup ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Add card</h2>
           <Elements stripe={stripeForAccount(setup.stripe_account_id)} options={{ clientSecret: setup.client_secret, appearance: { theme: 'stripe' } }}>
             <SetupForm

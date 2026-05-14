@@ -8,6 +8,7 @@ import {
   parseAccountBookingFilter,
   type AccountBookingFilter,
 } from '@/lib/account/account-booking-filters';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 export default async function AccountBookingsPage({
   searchParams,
@@ -33,17 +34,21 @@ export default async function AccountBookingsPage({
   ];
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold text-slate-900">Your bookings</h1>
-      <div className="flex flex-wrap gap-2 text-sm">
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Account"
+        title="Your bookings"
+        subtitle="Reservations and visits linked to your account. Open a booking for details or use the venue manage link where available."
+      />
+      <div className="flex flex-wrap gap-2">
         {tabs.map((t) => (
           <Link
             key={t.id}
             href={t.id === 'all' ? '/account/bookings' : `/account/bookings?filter=${t.id}`}
             className={
               filter === t.id
-                ? 'rounded-full bg-brand-600 px-3 py-1 font-semibold text-white'
-                : 'rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 hover:bg-slate-50'
+                ? 'rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-brand-600/25'
+                : 'rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-900/5 transition-colors hover:border-slate-300 hover:bg-slate-50'
             }
           >
             {t.label}
@@ -55,7 +60,7 @@ export default async function AccountBookingsPage({
       ) : displayItems.length === 0 ? (
         <p className="text-slate-600">No bookings in this view.</p>
       ) : (
-        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
+        <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
           {displayItems.map((item) =>
             item.kind === 'group' ? (
               <li key={item.group_booking_id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">

@@ -11,6 +11,8 @@ import {
 } from '@/lib/booking/active-models';
 
 export interface SetupStatus {
+  /** True when this staff row has dismissed the dashboard checklist (X) or it was recorded on completion. */
+  setup_checklist_dismissed: boolean;
   onboarding_completed: boolean;
   pricing_tier: string | null;
   profile_complete: boolean;
@@ -143,7 +145,18 @@ export async function computeSetupStatus(staff: VenueStaff): Promise<SetupStatus
 
   const firstBookingMade = (bookingCount ?? 0) > 0;
 
+  const { data: staffDismissRow } = await staff.db
+    .from('staff')
+    .select('dashboard_setup_checklist_dismissed_at')
+    .eq('id', staff.id)
+    .maybeSingle();
+
+  const setupChecklistDismissed =
+    (staffDismissRow as { dashboard_setup_checklist_dismissed_at?: string | null } | null)
+      ?.dashboard_setup_checklist_dismissed_at != null;
+
   return {
+    setup_checklist_dismissed: setupChecklistDismissed,
     onboarding_completed: (venue as { onboarding_completed?: boolean }).onboarding_completed === true,
     pricing_tier: ((venue as { pricing_tier?: string | null }).pricing_tier ?? null) as string | null,
     profile_complete: profileComplete,

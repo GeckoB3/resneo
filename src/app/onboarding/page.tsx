@@ -1521,7 +1521,18 @@ export default function OnboardingPage() {
             onboarding_step: nextStep,
           }),
         });
-        if (!res.ok) throw new Error('Failed to save profile');
+        const resBody = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          const apiErr = resBody.error ?? 'Failed to save profile';
+          if (res.status === 409 && /slug/i.test(apiErr)) {
+            setError(
+              'That booking page address is already taken (it is generated from your business name). Change your business name slightly—for example add your town or a distinguishing word—then try again.',
+            );
+            setSaving(false);
+            return;
+          }
+          throw new Error(apiErr);
+        }
         setVenue((prev) =>
           prev
             ? {

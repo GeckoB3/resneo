@@ -2,6 +2,8 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import { createClient } from '@/lib/supabase/browser';
 
 /**
  * Customer "email me a fresh sign-in link" page (uses branded `/api/auth/send-magic-link`).
@@ -18,18 +20,40 @@ function AuthMagicContent() {
   async function sendMagicLink(targetEmail: string) {
     setStatus('sending');
     try {
+      const trimmed = targetEmail.trim();
       const res = await fetch('/api/auth/send-magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: targetEmail.trim(),
-          next: `/auth/callback?next=${encodeURIComponent(redirect)}`,
+          email: trimmed,
+          next: redirect.startsWith('/') ? redirect : '/account/bookings',
         }),
       });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; fallback?: boolean; error?: string };
+
       if (!res.ok) {
         setStatus('error');
         return;
       }
+
+      const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
+        ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)
+        : (typeof window !== 'undefined' ? window.location.origin : '');
+      const dest = redirect.startsWith('/') ? redirect : '/account/bookings';
+      const callbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(dest)}`;
+
+      if (json.fallback) {
+        const supabase = createClient();
+        const { error } = await supabase.auth.signInWithOtp({
+          email: trimmed,
+          options: { emailRedirectTo: callbackUrl },
+        });
+        if (error) {
+          setStatus('error');
+          return;
+        }
+      }
+
       setStatus('sent');
     } catch {
       setStatus('error');

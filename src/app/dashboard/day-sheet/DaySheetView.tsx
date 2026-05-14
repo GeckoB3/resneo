@@ -48,7 +48,7 @@ import {
 } from '@/lib/table-management/next-bookings-slot';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap } from '@/components/table-tracking/TableSelector';
-import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -726,9 +726,11 @@ export function DaySheetView({
   );
 
   const sendMessageToBooking = useCallback(
-    async (bookingId: string, message: string, channel: GuestMessageChannel = 'both') => {
+    async (bookingId: string, message: string, channel: GuestMessageChannel = 'both'): Promise<GuestMessageSendResult> => {
       const trimmedMessage = message.trim();
-      if (trimmedMessage.length === 0) return;
+      if (trimmedMessage.length === 0) {
+        return { ok: false, error: 'Message cannot be empty.' };
+      }
       setSendingMessageIds((prev) => [...prev, bookingId]);
       try {
         const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
@@ -742,18 +744,27 @@ export function DaySheetView({
           errors?: string[];
         };
         if (!res.ok || !payload.success) {
-          addToast(payload.error ?? 'Failed to send message.', 'error');
-          return;
+          const detail =
+            (payload.errors && payload.errors.length > 0
+              ? payload.errors.join('; ')
+              : payload.error) ?? 'Failed to send message.';
+          addToast(detail, 'error');
+          return { ok: false, error: detail };
         }
         if (payload.errors && payload.errors.length > 0) {
-          addToast(`Sent with issues - ${payload.errors.join('; ')}`, 'error');
-        } else {
-          addToast('Message sent', 'success');
+          const w = payload.errors.join('; ');
+          addToast(`Sent with issues - ${w}`, 'error');
+          setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          handleDetailUpdated(bookingId);
+          return { ok: true, warning: `Sent with issues: ${w}` };
         }
+        addToast('Message sent', 'success');
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
         handleDetailUpdated(bookingId);
+        return { ok: true };
       } catch {
         addToast('Failed to send message.', 'error');
+        return { ok: false, error: 'Failed to send message.' };
       } finally {
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
@@ -1543,7 +1554,7 @@ export function DaySheetView({
                               draftMessage={messageDraftById[b.id] ?? ''}
                               sendingMessage={sendingMessageIds.includes(b.id)}
                               onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
-                              onSendMessage={(channel) => { void sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel); }}
+                              onSendMessage={(channel) => sendMessageToBooking(b.id, messageDraftById[b.id] ?? '', channel)}
                               onStatusAction={(status) => { requestStatusChange(b, status); }}
                               onDetailUpdated={() => handleDetailUpdated(b.id)}
                               onRequestChangeTable={isTableBooking && !tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 ? () => {

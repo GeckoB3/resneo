@@ -131,6 +131,28 @@ function formatDayHeader(date: string): string {
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
+function wallClockMinutes(hhmm: string): number {
+  const [h, m] = hhmm.slice(0, 5).split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+/** Prefer wall-clock start/end (staff-adjusted slot) over the service catalogue default. */
+function appointmentRegistryDurationMinutes(
+  bookingTime: string,
+  bookingEndTime: string | null | undefined,
+  serviceDurationMinutes: number | null,
+): number | null {
+  const startHm = bookingTime.slice(0, 5);
+  const endRaw = bookingEndTime?.trim();
+  const endHm = endRaw ? endRaw.slice(0, 5) : null;
+  if (endHm && /^\d{2}:\d{2}$/.test(endHm)) {
+    let delta = wallClockMinutes(endHm) - wallClockMinutes(startHm);
+    if (delta <= 0) delta += 24 * 60;
+    return Math.max(15, delta);
+  }
+  return serviceDurationMinutes;
+}
+
 function statusLabelForCsv(status: string): string {
   if (status === 'Seated') return 'Started';
   if (status === 'No-Show') return 'No show';
@@ -1199,7 +1221,11 @@ export function AppointmentBookingsDashboard({
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
     const showConfirm = canShowConfirmBookingAttendanceAction(b);
     const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
-    const duration = svc?.duration_minutes ?? null;
+    const duration = appointmentRegistryDurationMinutes(
+      b.booking_time,
+      b.booking_end_time,
+      svc?.duration_minutes ?? null,
+    );
     const priceDisplay =
       b.deposit_amount_pence != null
         ? formatMoneyPence(b.deposit_amount_pence, sym)

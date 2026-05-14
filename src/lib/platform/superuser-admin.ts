@@ -42,7 +42,10 @@ function stripSuperuserAppMetadata(prev: Record<string, unknown> | undefined): R
   return next;
 }
 
-export async function listActivePlatformSuperusers(admin: SupabaseClient): Promise<PlatformSuperuserRow[]> {
+export async function listActivePlatformSuperusers(
+  admin: SupabaseClient,
+  options?: { sessionSuperuserUserId?: string },
+): Promise<PlatformSuperuserRow[]> {
   const { data: rows, error } = await admin
     .from('platform_superusers')
     .select('user_id, email, created_at, created_by')
@@ -71,6 +74,27 @@ export async function listActivePlatformSuperusers(admin: SupabaseClient): Promi
       email_confirmed_at: u.email_confirmed_at ?? null,
     });
   }
+
+  const sid = options?.sessionSuperuserUserId?.trim();
+  if (sid && !out.some((row) => row.user_id === sid)) {
+    const { data: uwrap, error: ue } = await admin.auth.admin.getUserById(sid);
+    if (!ue && uwrap.user) {
+      const u = uwrap.user;
+      const email = (u.email ?? '').toLowerCase().trim();
+      if (email) {
+        out.push({
+          user_id: sid,
+          email,
+          created_at: u.created_at ?? new Date().toISOString(),
+          created_by: null,
+          last_sign_in_at: u.last_sign_in_at ?? null,
+          email_confirmed_at: u.email_confirmed_at ?? null,
+        });
+      }
+    }
+  }
+
+  out.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
   return out;
 }
 

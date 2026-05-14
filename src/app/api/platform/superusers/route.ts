@@ -52,7 +52,7 @@ export async function GET() {
     }
 
     const admin = getSupabaseAdminClient();
-    const users = await listActivePlatformSuperusers(admin);
+    const users = await listActivePlatformSuperusers(admin, { sessionSuperuserUserId: user.id });
     return NextResponse.json({ users });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unexpected error';

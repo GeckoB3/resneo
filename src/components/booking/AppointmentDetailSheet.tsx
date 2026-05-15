@@ -23,6 +23,7 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import { BOOKING_START_PRIMARY_BUTTON_CLASSES } from '@/lib/table-management/booking-status-visual';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
@@ -958,7 +959,11 @@ export function AppointmentDetailSheet({
                       type="button"
                       disabled={busy}
                       onClick={() => void setStatus(primary.target)}
-                      className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 ${
+                        primary.label === 'Seat' && !isTableReservationBooking(detail)
+                          ? BOOKING_START_PRIMARY_BUTTON_CLASSES
+                          : 'border border-transparent bg-brand-600 hover:bg-brand-700'
+                      }`}
                     >
                       {primary.label === 'Seat'
                         ? (isTableReservationBooking(detail) ? 'Seat' : 'Start')

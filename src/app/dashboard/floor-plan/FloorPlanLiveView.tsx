@@ -21,6 +21,7 @@ import {
   isBookingStatus,
   isDestructiveBookingStatus,
   isRevertTransition,
+  isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { BookingActionMenu, type BookingActionMenuBooking } from '@/components/table-management/BookingActionMenu';
@@ -1135,6 +1136,10 @@ export function FloorPlanLiveView({
     const partySize = booking?.party_size ?? '?';
     const time = booking?.start_time?.slice(0, 5) ?? '';
     if (isRevertTransition(currentStatus, newStatus)) {
+      if (isBookingInstantRevertTransition(currentStatus, newStatus, true)) {
+        void handleBookingStatusChange(bookingId, currentStatus, newStatus);
+        return;
+      }
       const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
       setConfirmDialog({
         title: revertAction?.label ?? `Revert to ${newStatus}`,

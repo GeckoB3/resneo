@@ -3,28 +3,107 @@
 import { useMemo, useRef, useState } from 'react';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
-interface Column {
+export interface CalendarColumnOption {
   id: string;
   name: string;
 }
 
-interface Props {
-  columns: Column[];
+export interface CalendarColumnsChecklistProps {
+  columns: CalendarColumnOption[];
   /** Bookable calendars this staff user manages — used for “Mine” labels. */
   myCalendarIds: string[];
   /** `null` = all calendars; otherwise visible column ids (non-empty subset). */
   value: string[] | null;
   onChange: (next: string[] | null) => void;
+  /** Max height class for the scroll area (popover vs standalone dropdown). */
+  maxHeightClass?: string;
 }
 
-function orderIdsLikeColumns(columns: Column[], ids: Set<string>): string[] {
+function orderIdsLikeColumns(columns: CalendarColumnOption[], ids: Set<string>): string[] {
   return columns.filter((c) => ids.has(c.id)).map((c) => c.id);
 }
 
 /**
- * “All calendars” or any combination of team calendar columns (unified scheduling grid).
+ * Checkbox list: “All calendars” or any non-empty subset of columns (embedded in toolbar filter popover).
  */
-export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange }: Props) {
+export function CalendarColumnsChecklist({
+  columns,
+  myCalendarIds,
+  value,
+  onChange,
+  maxHeightClass = 'max-h-60',
+}: CalendarColumnsChecklistProps) {
+  const isAll = value === null;
+
+  if (columns.length === 0) {
+    return (
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+        No calendars
+      </p>
+    );
+  }
+
+  return (
+    <div role="group" aria-label="Calendars to show" className="space-y-1">
+      <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
+        <input
+          type="checkbox"
+          className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          checked={isAll}
+          onChange={(e) => {
+            if (e.target.checked) onChange(null);
+            else onChange(columns.map((c) => c.id));
+          }}
+        />
+        <span className="font-medium">All calendars</span>
+      </label>
+      <div className="border-t border-slate-100" />
+      <div className={`${maxHeightClass} space-y-0.5 overflow-y-auto pr-1`}>
+        {columns.map((col) => {
+          const mine = myCalendarIds.includes(col.id);
+          const label =
+            mine && myCalendarIds.length === 1
+              ? col.name
+              : mine
+                ? `Mine — ${col.name}`
+                : col.name;
+          const checked = isAll || (value !== null && value.includes(col.id));
+          return (
+            <label
+              key={col.id}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm ${
+                isAll ? 'text-slate-400' : 'text-slate-800'
+              }`}
+            >
+              <input
+                type="checkbox"
+                disabled={isAll}
+                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
+                checked={checked}
+                onChange={(e) => {
+                  if (isAll) return;
+                  const next = new Set(value ?? []);
+                  if (e.target.checked) next.add(col.id);
+                  else next.delete(col.id);
+                  const ordered = orderIdsLikeColumns(columns, next);
+                  if (ordered.length === 0) return;
+                  if (ordered.length === columns.length) onChange(null);
+                  else onChange(ordered);
+                }}
+              />
+              <span className="truncate">{label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Standalone dropdown: “All calendars” or any combination of team calendar columns.
+ */
+export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange }: CalendarColumnsChecklistProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -37,8 +116,6 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
     }
     return `${value.length} calendars`;
   }, [value, columns]);
-
-  const isAll = value === null;
 
   useDismissibleLayer({
     open,
@@ -83,57 +160,7 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
           role="listbox"
           aria-multiselectable
         >
-          <label className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-slate-800">
-            <input
-              type="checkbox"
-              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-              checked={isAll}
-              onChange={(e) => {
-                if (e.target.checked) onChange(null);
-                else onChange(columns.map((c) => c.id));
-              }}
-            />
-            <span className="font-medium">All calendars</span>
-          </label>
-          <div className="my-1 border-t border-slate-100" />
-          <div className="max-h-60 space-y-0.5 overflow-y-auto pr-1">
-            {columns.map((col) => {
-              const mine = myCalendarIds.includes(col.id);
-              const label =
-                mine && myCalendarIds.length === 1
-                  ? col.name
-                  : mine
-                    ? `Mine — ${col.name}`
-                    : col.name;
-              const checked = isAll || (value !== null && value.includes(col.id));
-              return (
-                <label
-                  key={col.id}
-                  className={`flex cursor-pointer items-center gap-2 rounded-md py-1.5 pl-0.5 text-sm ${
-                    isAll ? 'text-slate-400' : 'text-slate-800'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    disabled={isAll}
-                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
-                    checked={checked}
-                    onChange={(e) => {
-                      if (isAll) return;
-                      const next = new Set(value ?? []);
-                      if (e.target.checked) next.add(col.id);
-                      else next.delete(col.id);
-                      const ordered = orderIdsLikeColumns(columns, next);
-                      if (ordered.length === 0) return;
-                      if (ordered.length === columns.length) onChange(null);
-                      else onChange(ordered);
-                    }}
-                  />
-                  <span>{label}</span>
-                </label>
-              );
-            })}
-          </div>
+          <CalendarColumnsChecklist columns={columns} myCalendarIds={myCalendarIds} value={value} onChange={onChange} />
         </div>
       )}
     </div>

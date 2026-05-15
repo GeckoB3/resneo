@@ -1747,8 +1747,11 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => {
+                const serviceVariants = catalogVariantsForServiceId(catalogStaff, svc.id);
+                const serviceHasVariants = serviceVariants.length > 0;
                 const displayedDuration = staffDurationOverrides[svc.id] ?? svc.duration_minutes;
                 const durationIsCustom = displayedDuration !== svc.duration_minutes;
+                const showStaffServiceDurationAdjuster = isStaff && !isEdit && !serviceHasVariants;
                 return (
                   <div key={svc.id} className="relative">
                     <button
@@ -1759,14 +1762,7 @@ export function AppointmentBookingFlow({
                         setSelectedVariantId(null);
                         setDurationPopoverServiceId(null);
                         /** Hop to the variant picker first when this service offers sub-options. */
-                        const variantsForSvc = (() => {
-                          for (const p of catalogStaff) {
-                            const offer = p.services.find((s) => s.id === svc.id);
-                            if (offer?.variants && offer.variants.length > 0) return offer.variants;
-                          }
-                          return [];
-                        })();
-                        if (variantsForSvc.length > 0) {
+                        if (serviceVariants.length > 0) {
                           setStep('variant');
                           return;
                         }
@@ -1798,7 +1794,7 @@ export function AppointmentBookingFlow({
                           ) : null}
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
-                          {isStaff && !isEdit ? (
+                          {showStaffServiceDurationAdjuster ? (
                             <span
                               className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
                                 durationIsCustom
@@ -1818,7 +1814,7 @@ export function AppointmentBookingFlow({
                         </div>
                       </div>
                     </button>
-                    {isStaff && !isEdit ? (
+                    {showStaffServiceDurationAdjuster ? (
                       <button
                         type="button"
                         onClick={(event) => {
@@ -1830,7 +1826,7 @@ export function AppointmentBookingFlow({
                         aria-label={`Change duration for ${svc.name}`}
                       />
                     ) : null}
-                    {isStaff && !isEdit && durationPopoverServiceId === svc.id ? (
+                    {showStaffServiceDurationAdjuster && durationPopoverServiceId === svc.id ? (
                       <div
                         className="absolute left-4 top-[calc(100%-0.25rem)] z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
                         onClick={(event) => event.stopPropagation()}

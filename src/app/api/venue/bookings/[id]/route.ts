@@ -255,12 +255,18 @@ export async function PATCH(
         staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       };
-      // Mirror the full handler: promote Booked → Confirmed on confirm,
-      // and revert Confirmed → Booked on cancel (when guest has not also confirmed).
+      // Mirror the full handler: promote Booked → Confirmed on confirm; turning off
+      // clears guest + staff attendance for pre-arrival states and reverts Confirmed → Booked.
       if (on && currentStatus === 'Booked') {
         attPayload.status = 'Confirmed';
-      } else if (!on && currentStatus === 'Confirmed' && !booking.guest_attendance_confirmed_at) {
-        attPayload.status = 'Booked';
+      } else if (
+        !on &&
+        (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
+      ) {
+        attPayload.guest_attendance_confirmed_at = null;
+        if (currentStatus === 'Confirmed') {
+          attPayload.status = 'Booked';
+        }
       }
       const { error: attErr } = await staff.db
         .from('bookings')
@@ -664,10 +670,11 @@ export async function PATCH(
         if (newStatus === 'Confirmed' && booking.status !== 'Confirmed') {
           statusPayload.staff_attendance_confirmed_at = new Date().toISOString();
         }
-        // Reverting away from `Confirmed` clears the staff attendance timestamp
-        // (mirror of the staff_attendance_confirmed=false path below).
+        // Reverting away from `Confirmed` clears both attendance timestamps so the
+        // booking is unconfirmed regardless of whether the guest or staff confirmed.
         if (booking.status === 'Confirmed' && newStatus === 'Booked') {
           statusPayload.staff_attendance_confirmed_at = null;
+          statusPayload.guest_attendance_confirmed_at = null;
         }
         if (newStatus === 'Completed') {
           const parsedDepartedTime =
@@ -784,18 +791,18 @@ export async function PATCH(
       };
       // Tie the timestamp to the lifecycle status:
       //   on=true,  status=Booked    → promote to Confirmed
-      //   on=false, status=Confirmed → revert to Booked (only if the guest
-      //                               hasn't independently confirmed)
-      // Other statuses (Seated, Completed, Cancelled, No-Show) keep the
-      // attendance timestamp as a passive audit field without altering status.
+      //   on=false, Pending/Booked/Confirmed → clear guest + staff attendance markers;
+      //            if Confirmed, revert to Booked (staff or guest may have confirmed)
       if (on && currentStatus === 'Booked') {
         updatePayload.status = 'Confirmed';
       } else if (
         !on &&
-        currentStatus === 'Confirmed' &&
-        !booking.guest_attendance_confirmed_at
+        (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
       ) {
-        updatePayload.status = 'Booked';
+        updatePayload.guest_attendance_confirmed_at = null;
+        if (currentStatus === 'Confirmed') {
+          updatePayload.status = 'Booked';
+        }
       }
 
       await staff.db

@@ -17,11 +17,15 @@ import {
   canTransitionBookingStatus,
   isDestructiveBookingStatus,
   isRevertTransition,
+  isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import {
   BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
   BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON,
+  BOOKING_ATTENDANCE_UNDO_SPINNER,
+  BOOKING_START_PRIMARY_BUTTON_CLASSES,
   bookingStatusVisualForKey,
 } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
@@ -1127,6 +1131,10 @@ export function BookingsDashboard({
       tableStyle ? `cover${booking.party_size === 1 ? '' : 's'}` : `person${booking.party_size === 1 ? '' : 's'}`
     }`;
     if (isRevertTransition(booking.status, nextStatus)) {
+      if (isBookingInstantRevertTransition(booking.status, nextStatus, tableStyle)) {
+        void updateBookingStatus(booking.id, nextStatus);
+        return;
+      }
       const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
       const confirmLabel =
         booking.status === 'Seated' && (nextStatus === 'Booked' || nextStatus === 'Confirmed') && !tableStyle
@@ -2430,25 +2438,25 @@ function BookingsAccordionList({
                           type="button"
                           disabled={confirmAttendanceLoadingId === booking.id}
                           onClick={() => onCancelStaffAttendanceConfirmation(booking.id)}
-                          className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60 sm:min-w-[9.5rem] sm:px-2.5 sm:text-xs"
-                          aria-label={`Cancel staff attendance confirmation for ${booking.guest_name}`}
+                          className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[9.5rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON}`}
+                          aria-label={`Undo confirm for ${booking.guest_name}`}
                           aria-busy={confirmAttendanceLoadingId === booking.id}
                         >
                           {confirmAttendanceLoadingId === booking.id ? (
                             <span
-                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                              className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`}
                               aria-hidden
                             />
                           ) : null}
                           <span className="sm:hidden">Undo</span>
-                          <span className="hidden sm:inline">Cancel confirmation</span>
+                          <span className="hidden sm:inline">Undo confirm</span>
                         </button>
                       )}
                       {action && (
                         <button
                           type="button"
                           onClick={() => onStatusAction(booking, action.target)}
-                          className="inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg bg-brand-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 active:bg-brand-800 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs"
+                          className={`inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs ${primaryLabel === 'Start' ? BOOKING_START_PRIMARY_BUTTON_CLASSES : 'border border-transparent bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500/40 active:bg-brand-800'}`}
                           aria-label={`${primaryLabel ?? action.label} booking for ${booking.guest_name}`}
                         >
                           {primaryLabel}

@@ -2,9 +2,8 @@
  * Shared booking status colours for dashboard surfaces (table timeline, bookings list, detail).
  * Palette matches `dashboard/table-grid` timeline blocks.
  *
- * Lifecycle colours use the booking `status` field only — e.g. **Booked** stays blue even when
- * attendance is confirmed. Staff/guest **attendance confirmed** is a separate affordance (purple
- * pill and confirm buttons), not a tint on the Booked state.
+ * **Booked** uses accent `#93C5FD`; **Confirmed** uses accent `#1E40AF` (darker blue). Lists and grids
+ * may still tint some `Booked` rows using Confirmed visuals when attendance is flagged.
  */
 export interface BookingStatusVisual {
   /** Timeline / drag overlay — includes left accent border. */
@@ -31,16 +30,16 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     listBorderLeft: 'border-l-[#3B82F6]',
   },
   Booked: {
-    timeline: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#3B82F6] text-[#1E40AF]',
-    pill: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E40AF]',
-    dot: 'bg-[#3B82F6]',
-    listBorderLeft: 'border-l-[#3B82F6]',
+    timeline: 'bg-[#EFF6FF] border-[#BFDBFE] border-l-[#93C5FD] text-[#1E3A8A]',
+    pill: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#1E3A8A]',
+    dot: 'bg-[#93C5FD]',
+    listBorderLeft: 'border-l-[#93C5FD]',
   },
   Confirmed: {
-    timeline: 'bg-[#FAF5FF] border-[#E9D5FF] border-l-[#9333EA] text-[#581C87]',
-    pill: 'border-[#E9D5FF] bg-[#FAF5FF] text-[#581C87]',
-    dot: 'bg-[#9333EA]',
-    listBorderLeft: 'border-l-[#9333EA]',
+    timeline: 'bg-[#DBEAFE] border-[#93C5FD] border-l-[#1E40AF] text-[#1E3A8A]',
+    pill: 'border-[#93C5FD] bg-[#DBEAFE] text-[#1E3A8A]',
+    dot: 'bg-[#1E40AF]',
+    listBorderLeft: 'border-l-[#1E40AF]',
   },
   Seated: {
     timeline: 'bg-[#ECFDF5] border-[#A7F3D0] border-l-[#059669] text-[#065F46]',
@@ -85,10 +84,19 @@ export function bookingStatusVisualForKey(statusKey: string): BookingStatusVisua
   return BOOKING_STATUS_VISUAL_MAP[statusKey] ?? DEFAULT_BOOKING_STATUS_VISUAL;
 }
 
-/** Solid CTA — staff confirm booking attendance (matches Confirmed purple, not Booked blue). */
+/** Solid CTA — matches Confirmed accent (`#1E40AF`). */
 export const BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON =
-  'border border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus:ring-violet-400/40';
+  'border border-[#1E40AF] bg-[#1E40AF] text-white shadow-sm hover:bg-[#1E3A8A] focus:ring-[#1E40AF]/35';
 
-/** Spinner on violet confirm buttons */
-export const BOOKING_ATTENDANCE_CONFIRM_SPINNER =
-  'border-violet-300/50 border-t-white';
+/** Spinner on solid confirm buttons */
+export const BOOKING_ATTENDANCE_CONFIRM_SPINNER = 'border-white/35 border-t-white';
+
+/** Outline — undo attendance confirmation (paired with {@link BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}). */
+export const BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON =
+  'border border-[#1E40AF] bg-white text-[#1E40AF] shadow-sm hover:bg-[#EFF6FF] focus:ring-[#1E40AF]/35';
+
+export const BOOKING_ATTENDANCE_UNDO_SPINNER = 'border-[#1E40AF]/30 border-t-[#1E40AF]';
+
+/** Non-table primary “Start” (→ Seated); matches Walk-in toolbar (`OperationsWorkspaceToolbar` / `ViewToolbar`). */
+export const BOOKING_START_PRIMARY_BUTTON_CLASSES =
+  'border border-transparent bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus:ring-emerald-400/40 active:bg-emerald-800';

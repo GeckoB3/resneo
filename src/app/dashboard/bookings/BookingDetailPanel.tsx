@@ -7,8 +7,10 @@ import {
   canMarkNoShowForSlot,
   isDestructiveBookingStatus,
   isRevertTransition,
+  isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import { BOOKING_START_PRIMARY_BUTTON_CLASSES } from '@/lib/table-management/booking-status-visual';
 import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
@@ -525,10 +527,13 @@ export function BookingDetailPanel({
   }, [confirmDialog, isPopover, onClose, nestedBookingOpen]);
 
   const executeStatusChange = useCallback(async (newStatus: BookingStatus) => {
-    if (!detail) return;
-    const previous = detail.status as BookingStatus;
+    const snapshot = detail ?? optimisticDetail;
+    if (!snapshot) return;
+    const previous = snapshot.status as BookingStatus;
     setActionLoading(true);
-    setDetail((prev) => prev ? { ...prev, status: newStatus } : prev);
+    if (detail) {
+      setDetail((prev) => (prev ? { ...prev, status: newStatus } : prev));
+    }
     try {
       if (onStatusChange) {
         await onStatusChange(bookingId, previous, newStatus);
@@ -541,7 +546,9 @@ export function BookingDetailPanel({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           setError(j.error ?? 'Failed');
-          setDetail((prev) => prev ? { ...prev, status: previous } : prev);
+          if (detail) {
+            setDetail((prev) => (prev ? { ...prev, status: previous } : prev));
+          }
           return;
         }
       }
@@ -551,9 +558,13 @@ export function BookingDetailPanel({
     } catch (err) {
       console.error('Booking detail status update failed:', err);
       setError('Failed to update booking status');
-      setDetail((prev) => prev ? { ...prev, status: previous } : prev);
-    } finally { setActionLoading(false); }
-  }, [bookingId, detail, load, onStatusChange, onUpdated]);
+      if (detail) {
+        setDetail((prev) => (prev ? { ...prev, status: previous } : prev));
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }, [bookingId, detail, load, optimisticDetail, onStatusChange, onUpdated]);
 
   const executePermanentDelete = useCallback(async () => {
     setActionLoading(true);
@@ -606,8 +617,12 @@ export function BookingDetailPanel({
     const currentStatus = detail.status as BookingStatus;
     const revert = isRevertTransition(currentStatus, newStatus);
     if (revert) {
-      const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
       const tableStyle = isTableStyleBookingDetail(detail, isAppointment);
+      if (isBookingInstantRevertTransition(currentStatus, newStatus, tableStyle)) {
+        void executeStatusChange(newStatus);
+        return;
+      }
+      const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
       const confirmLabel =
         currentStatus === 'Seated' && newStatus === 'Booked' && !tableStyle
           ? 'Undo Start'
@@ -776,6 +791,14 @@ export function BookingDetailPanel({
     !bookingStyleIsTable
       ? 'Undo Start'
       : statusRevertAction?.label;
+  const forwardActionVariant = (
+    status: BookingStatus,
+  ): 'primary' | 'primary-start' | 'danger' | 'outline-danger' => {
+    if (status === 'Cancelled') return 'outline-danger';
+    if (status === 'No-Show') return 'danger';
+    if (status === 'Seated' && !bookingStyleIsTable) return 'primary-start';
+    return 'primary';
+  };
   const confirmationSentAt = d.communications.find(
     (comm) =>
       comm.message_type === 'booking_confirmation_email' ||
@@ -1338,7 +1361,7 @@ export function BookingDetailPanel({
                     key={status}
                     onClick={() => updateStatus(status)}
                     disabled={actionLoading || !isHydrated}
-                    variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
+                    variant={forwardActionVariant(status)}
                   >
                     {forwardLabel(status)}
                   </ActionButton>
@@ -1371,7 +1394,7 @@ export function BookingDetailPanel({
                       key={status}
                       onClick={() => updateStatus(status)}
                       disabled={actionLoading || !isHydrated}
-                      variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
+                      variant={forwardActionVariant(status)}
                     >
                       {forwardLabel(status)}
                     </ActionButton>
@@ -2114,11 +2137,12 @@ function DepositRefundBanner({ depositStatus, depositAmount, cancellationDeadlin
 function ActionButton({ onClick, disabled, variant, children }: {
   onClick: () => void;
   disabled: boolean;
-  variant: 'primary' | 'danger' | 'outline-danger' | 'secondary';
+  variant: 'primary' | 'primary-start' | 'danger' | 'outline-danger' | 'secondary';
   children: React.ReactNode;
 }) {
   const styles = {
     primary: 'bg-brand-600 text-white hover:bg-brand-700',
+    'primary-start': BOOKING_START_PRIMARY_BUTTON_CLASSES,
     danger: 'bg-red-600 text-white hover:bg-red-700',
     'outline-danger': 'border border-red-200 text-red-600 hover:bg-red-50',
     secondary: 'border border-slate-300 text-slate-700 hover:bg-slate-100',

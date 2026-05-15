@@ -17,10 +17,8 @@ export function showDepositPendingPill(row: BookingStaffIndicatorInput): boolean
 }
 
 /**
- * True when the booking has reached the `Confirmed` lifecycle status (guest
- * confirmed via reminder link, or staff manually confirmed). For backwards
- * compatibility with rows from before the dedicated `Confirmed` status existed,
- * this also returns true if either attendance timestamp is set.
+ * True when attendance is considered confirmed: lifecycle `Confirmed`, or either
+ * attendance timestamp is set (guest link or staff confirm).
  */
 export function isAttendanceConfirmed(row: BookingStaffIndicatorInput): boolean {
   if (row.status === 'Confirmed') return true;
@@ -66,26 +64,20 @@ export function attendanceConfirmationSources(row: BookingStaffIndicatorInput): 
   };
 }
 
-/** Staff "Confirm Booking" (attendance) — same rules as dashboard booking lists. */
+/** Staff “Confirm booking” when attendance is not yet confirmed by anyone (guest or staff). */
 export function canShowConfirmBookingAttendanceAction(
   row: BookingStaffIndicatorInput & { source?: string | null; status: string },
 ): boolean {
   if (row.source === 'walk-in') return false;
-  if (Boolean(row.staff_attendance_confirmed_at?.trim())) return false;
-  /** Lifecycle already `Confirmed`; use Cancel confirmation / status actions instead. */
-  if (row.status === 'Confirmed') return false;
-  return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
+  if (isAttendanceConfirmed(row)) return false;
+  return !['Cancelled', 'No-Show', 'Completed', 'Seated'].includes(row.status);
 }
 
+/** Show staff control to undo attendance confirmation (via `staff_attendance_confirmed: false` PATCH). */
 export function canShowCancelStaffAttendanceConfirmationAction(
   row: BookingStaffIndicatorInput & { source?: string | null; status: string },
 ): boolean {
   if (row.source === 'walk-in') return false;
-  /** Show only when staff manually confirmed (timestamp set or status is Confirmed via staff path). */
-  const staffConfirmed = Boolean(row.staff_attendance_confirmed_at?.trim());
-  const guestConfirmed = Boolean(row.guest_attendance_confirmed_at?.trim());
-  /** If status is Confirmed but no guest timestamp, treat as staff-confirmed for revert UX. */
-  const inferStaff = row.status === 'Confirmed' && !guestConfirmed;
-  if (!staffConfirmed && !inferStaff) return false;
-  return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
+  if (!isAttendanceConfirmed(row)) return false;
+  return !['Cancelled', 'No-Show', 'Completed', 'Seated'].includes(row.status);
 }

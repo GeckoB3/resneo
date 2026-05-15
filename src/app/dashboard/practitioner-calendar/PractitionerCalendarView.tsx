@@ -33,12 +33,17 @@ import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
 import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
+import { CalendarColumnsChecklist } from '@/app/dashboard/practitioner-calendar/CalendarColumnsFilter';
 import {
   BookingDetailPanel,
   type BookingDetailPanelSnapshot,
 } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
+import {
+  EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE,
+  EXP_BOOKING_ST_FOCUS,
+} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -68,6 +73,7 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import { BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
@@ -313,7 +319,7 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
 
 /**
  * Staff calendar booking blocks — product palette (`accent` = 3px left stripe; fill/text/border are light tints).
- * Booked #3B82F6 · Confirmed #0D9488 · Arrived #F59E0B · Started #22C55E · Completed #6B7280 · No show #FEF2F2 · Cancelled #6B7280
+ * Booked accent #93C5FD · Confirmed accent #1E40AF · Arrived #F59E0B · Started #22C55E · Completed #6B7280 · No show #FEF2F2 · Cancelled #6B7280
  */
 interface BookingBlockPalette {
   bg: string;
@@ -324,15 +330,15 @@ interface BookingBlockPalette {
 
 const BOOKING_PALETTE_BOOKED: BookingBlockPalette = {
   bg: '#EFF6FF',
-  text: '#1E40AF',
+  text: '#1E3A8A',
   border: '#BFDBFE',
-  accent: '#3B82F6',
+  accent: '#93C5FD',
 };
 const BOOKING_PALETTE_CONFIRMED: BookingBlockPalette = {
-  bg: '#F0FDFA',
-  text: '#134E4A',
-  border: '#99F6E4',
-  accent: '#0D9488',
+  bg: '#DBEAFE',
+  text: '#1E3A8A',
+  border: '#93C5FD',
+  accent: '#1E40AF',
 };
 const BOOKING_PALETTE_ARRIVED_WAITING: BookingBlockPalette = {
   bg: '#FFFBEB',
@@ -821,6 +827,11 @@ function bookingHasArrivalToggleInRightColumn(b: Booking): boolean {
   return b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed';
 }
 
+/** Started (Seated) rows show Undo start then Complete — short bars may omit Undo start like arrival toggles. */
+function bookingShowsSeatedUndoInRightColumn(b: Booking): boolean {
+  return b.status === 'Seated';
+}
+
 /** Per-row height for the single-column action stack. */
 const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
 /** Overlap lanes stack every action vertically in one narrow strip — delay compact/smaller typography slightly vs the padded wide strip. */
@@ -944,6 +955,7 @@ function collectBookingRightColumnActionNodes({
   compact,
   narrow = false,
   omitArrivalActions = false,
+  omitSeatedUndoActions = false,
 }: {
   b: Booking;
   busy: boolean;
@@ -955,6 +967,8 @@ function collectBookingRightColumnActionNodes({
   narrow?: boolean;
   /** Hide Arrived / Clear so Confirm or Start stays readable on very short booking bars. */
   omitArrivalActions?: boolean;
+  /** Hide Undo start so Complete stays readable on very short booking bars (mirrors omission of arrival toggle). */
+  omitSeatedUndoActions?: boolean;
 }): ReactElement[] {
   if (b.status === 'Cancelled' || b.status === 'No-Show') return [];
 
@@ -974,7 +988,7 @@ function collectBookingRightColumnActionNodes({
         disabled={busy}
         style={textStyle}
         onClick={() => onStatus(b.id, 'Seated')}
-        className={`${baseClass} rounded-lg bg-amber-50 font-medium text-amber-900 shadow-sm ring-1 ring-amber-200/80 transition hover:bg-amber-100 disabled:opacity-50`}
+        className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
       >
         Reopen
       </button>,
@@ -1035,26 +1049,29 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={textStyle}
           onClick={() => onStatus(b.id, 'Seated')}
-          className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
+          className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
         >
           Start
         </button>,
       );
     }
     if (b.status === 'Seated') {
-      out.push(
-        <button
-          key="undo-start"
-          type="button"
-          disabled={busy}
-          style={textStyle}
-          onClick={() => onStatus(b.id, 'Booked')}
-          className={`${baseClass} rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
-          title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
-        >
-          {narrow ? 'Undo' : 'Undo start'}
-        </button>,
-      );
+      if (!omitSeatedUndoActions) {
+        out.push(
+          <button
+            key="undo-start"
+            type="button"
+            disabled={busy}
+            style={textStyle}
+            onClick={() => onStatus(b.id, 'Booked')}
+            aria-label="Undo start"
+            className={`${baseClass} rounded-lg font-semibold transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+            title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
+          >
+            {narrow ? 'Undo' : 'Undo start'}
+          </button>,
+        );
+      }
       out.push(
         <button
           key="complete"
@@ -1062,7 +1079,7 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={textStyle}
           onClick={() => onStatus(b.id, 'Completed')}
-          className={`${baseClass} rounded-lg bg-[#22C55E] font-semibold text-white shadow-sm shadow-emerald-900/20 transition hover:bg-[#16A34A] disabled:opacity-50`}
+            className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
         >
           Complete
         </button>,
@@ -1110,7 +1127,13 @@ function CalendarBookingRightColumn({
     bookingHasArrivalToggleInRightColumn(b) &&
     fullActionCount > 1;
 
-  const effectiveActionCount = omitArrivalActions ? fullActionCount - 1 : fullActionCount;
+  const omitSeatedUndoActions =
+    layoutIfAllActions.compact &&
+    bookingShowsSeatedUndoInRightColumn(b) &&
+    fullActionCount > 1;
+
+  const effectiveActionCount =
+    fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
   const layout = bookingRightColumnLayout(blockHeightPx, effectiveActionCount, layoutOptions);
 
   /** Do not OR in `narrow`: that forced compact typography/padding whenever lanes overlapped, so buttons shrunk below wide-lane sizing for the same `blockHeightPx`. */
@@ -1153,6 +1176,7 @@ function CalendarBookingRightColumn({
     compact,
     narrow,
     omitArrivalActions,
+    omitSeatedUndoActions,
   });
 
   return (
@@ -2768,67 +2792,13 @@ export function PractitionerCalendarView({
     <div className="space-y-4">
       <div>
         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Calendars</p>
-        {columnPractitioners.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-            No calendars
-          </p>
-        ) : (
-          <div className="space-y-1">
-            <button
-              type="button"
-              onClick={() => setVisibleCalendarIdsState(null)}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
-                calendarFilterIds === null
-                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
-                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <span>All calendars</span>
-              {calendarFilterIds === null ? <span className="text-xs">Selected</span> : null}
-            </button>
-            <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
-              {columnPractitioners.map((col) => {
-                const mine = myCalendarIds.includes(col.id);
-                const label =
-                  mine && myCalendarIds.length === 1
-                    ? col.name
-                    : mine
-                      ? `Mine - ${col.name}`
-                      : col.name;
-                const checked = calendarFilterIds !== null && calendarFilterIds.includes(col.id);
-                return (
-                  <button
-                    key={col.id}
-                    type="button"
-                    onClick={() => {
-                      const current = new Set(calendarFilterIds ?? []);
-                      if (calendarFilterIds === null) {
-                        setVisibleCalendarIdsState([col.id]);
-                        return;
-                      }
-                      if (checked) current.delete(col.id);
-                      else current.add(col.id);
-                      const ordered = columnPractitioners
-                        .filter((p) => current.has(p.id))
-                        .map((p) => p.id);
-                      setVisibleCalendarIdsState(
-                        ordered.length === 0 || ordered.length === columnPractitioners.length ? null : ordered,
-                      );
-                    }}
-                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
-                      checked
-                        ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200'
-                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="truncate">{label}</span>
-                    {checked ? <span className="text-xs">Selected</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <CalendarColumnsChecklist
+          columns={columnPractitioners.map((p) => ({ id: p.id, name: p.name }))}
+          myCalendarIds={myCalendarIds}
+          value={visibleCalendarIdsState}
+          onChange={setVisibleCalendarIdsState}
+          maxHeightClass="max-h-56"
+        />
       </div>
 
       <div>

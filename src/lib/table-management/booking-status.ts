@@ -57,7 +57,40 @@ export function isRevertTransition(from: BookingStatus | string, to: BookingStat
   return BOOKING_REVERT_ACTIONS[from]?.target === to;
 }
 
-export const BOOKING_DESTRUCTIVE_STATUSES: BookingStatus[] = ['No-Show', 'Cancelled', 'Completed'];
+/**
+ * Undo confirm (`Confirmed` → `Booked`) and Undo start (`Seated` → `Booked`, non-table only):
+ * skip an extra confirmation step before applying the transition.
+ * Table unseat (`Seated` → `Booked`) keeps confirmation when `bookingIsTableReservation`.
+ */
+export function isUndoConfirmOrUndoStartInstantRevert(
+  fromStatus: BookingStatus | string,
+  toStatus: BookingStatus | string,
+  bookingIsTableReservation: boolean,
+): boolean {
+  if (!isBookingStatus(fromStatus) || !isBookingStatus(toStatus)) return false;
+  if (fromStatus === 'Confirmed' && toStatus === 'Booked') return true;
+  return fromStatus === 'Seated' && toStatus === 'Booked' && !bookingIsTableReservation;
+}
+
+/**
+ * Reverts applied immediately without an extra modal (expanded panel, dashboards, timeline).
+ * Includes Reopen (`Completed` → `Seated`) and {@link isUndoConfirmOrUndoStartInstantRevert}.
+ */
+export function isBookingInstantRevertTransition(
+  fromStatus: BookingStatus | string,
+  toStatus: BookingStatus | string,
+  bookingIsTableReservation: boolean,
+): boolean {
+  if (!isBookingStatus(fromStatus) || !isBookingStatus(toStatus)) return false;
+  if (fromStatus === 'Completed' && toStatus === 'Seated') return true;
+  return isUndoConfirmOrUndoStartInstantRevert(fromStatus, toStatus, bookingIsTableReservation);
+}
+
+/** Statuses that warrant an explicit staff confirm (cancel / no-show). Excludes `Completed` — routine end-of-visit. */
+export const BOOKING_DESTRUCTIVE_STATUSES: BookingStatus[] = ['No-Show', 'Cancelled'];
+
+/** Closed-out rows (dimmed UI); includes completed visits. */
+export const BOOKING_TERMINAL_STATUSES: BookingStatus[] = ['Completed', 'No-Show', 'Cancelled'];
 
 export function isBookingStatus(value: string): value is BookingStatus {
   return (BOOKING_STATUSES as readonly string[]).includes(value);
@@ -73,6 +106,10 @@ export function canTransitionBookingStatus(
 
 export function isDestructiveBookingStatus(status: BookingStatus | string): boolean {
   return isBookingStatus(status) && BOOKING_DESTRUCTIVE_STATUSES.includes(status);
+}
+
+export function isTerminalBookingStatus(status: BookingStatus | string): boolean {
+  return isBookingStatus(status) && BOOKING_TERMINAL_STATUSES.includes(status);
 }
 
 export function canMarkNoShowForSlot(

@@ -110,7 +110,7 @@ describe('canShowConfirmBookingAttendanceAction', () => {
     ).toBe(false);
   });
 
-  it('true when guest confirmed but staff has not (status Booked)', () => {
+  it('false when guest already confirmed attendance (lifecycle Booked)', () => {
     expect(
       canShowConfirmBookingAttendanceAction({
         status: 'Booked',
@@ -118,7 +118,18 @@ describe('canShowConfirmBookingAttendanceAction', () => {
         guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
         staff_attendance_confirmed_at: null,
       }),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('false when seated', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Seated',
+        source: 'booking_page',
+        guest_attendance_confirmed_at: null,
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(false);
   });
 
   it('false when lifecycle status is Confirmed', () => {
@@ -144,7 +155,18 @@ describe('canShowCancelStaffAttendanceConfirmationAction', () => {
     ).toBe(true);
   });
 
-  it('false when status is Booked and no staff timestamp', () => {
+  it('true when guest confirmed only (lifecycle Booked) — PATCH undo clears both', () => {
+    expect(
+      canShowCancelStaffAttendanceConfirmationAction({
+        status: 'Booked',
+        source: 'booking_page',
+        staff_attendance_confirmed_at: null,
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('false when Booked/Pending with no confirmations', () => {
     expect(
       canShowCancelStaffAttendanceConfirmationAction({
         status: 'Booked',
@@ -154,13 +176,24 @@ describe('canShowCancelStaffAttendanceConfirmationAction', () => {
     ).toBe(false);
   });
 
-  it('false when guest confirmed (not staff) — show guest revert UX, not staff', () => {
+  it('true when guest confirmed only and lifecycle Confirmed', () => {
     expect(
       canShowCancelStaffAttendanceConfirmationAction({
         status: 'Confirmed',
         source: 'booking_page',
         staff_attendance_confirmed_at: null,
         guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('false when seated', () => {
+    expect(
+      canShowCancelStaffAttendanceConfirmationAction({
+        status: 'Seated',
+        source: 'booking_page',
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+        staff_attendance_confirmed_at: null,
       }),
     ).toBe(false);
   });

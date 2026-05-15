@@ -33,6 +33,8 @@ import {
 import {
   BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
   BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON,
+  BOOKING_ATTENDANCE_UNDO_SPINNER,
   bookingStatusVisualForKey,
 } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
@@ -1270,18 +1272,18 @@ export function AppointmentBookingsDashboard({
                 type="button"
                 disabled={confirmAttendanceLoadingId === b.id}
                 onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-60 sm:min-w-[5.5rem] sm:px-2.5 sm:text-xs"
-                aria-label={`Cancel staff attendance confirmation for ${b.guest_name}`}
+                className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[5.5rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON}`}
+                aria-label={`Undo confirm for ${b.guest_name}`}
                 aria-busy={confirmAttendanceLoadingId === b.id}
               >
                 {confirmAttendanceLoadingId === b.id ? (
                   <span
-                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
+                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`}
                     aria-hidden
                   />
                 ) : null}
                 <span className="sm:hidden">Undo</span>
-                <span className="hidden sm:inline">Unconfirm</span>
+                <span className="hidden sm:inline">Undo confirm</span>
               </button>
             )}
           </div>

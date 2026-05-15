@@ -12,6 +12,8 @@ import {
   canTransitionBookingStatus,
   isDestructiveBookingStatus,
   isRevertTransition,
+  isTerminalBookingStatus,
+  isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
@@ -32,14 +34,18 @@ import {
   isTableReservationBooking,
 } from '@/lib/booking/infer-booking-row-model';
 import {
-  canShowConfirmBookingAttendanceAction,
   canShowCancelStaffAttendanceConfirmationAction,
+  canShowConfirmBookingAttendanceAction,
+  isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import {
   BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
   BOOKING_ATTENDANCE_CONFIRM_SPINNER,
+  BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON,
+  BOOKING_ATTENDANCE_UNDO_SPINNER,
+  BOOKING_START_PRIMARY_BUTTON_CLASSES,
   bookingStatusVisualForKey,
 } from '@/lib/table-management/booking-status-visual';
 import {
@@ -288,7 +294,8 @@ function depositBadge(status: string, amountPence: number | null) {
 }
 
 /**
- * Confirm Booking when no attendance yet; Cancel confirmation clears staff timestamp when set.
+ * Confirm attendance when nobody has confirmed yet; “undo” clears guest + staff
+ * attendance markers (same PATCH as bookings dashboard lists).
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
   status: string;
@@ -304,7 +311,7 @@ function canShowDaySheetStaffAttendanceToggle(b: {
   );
 }
 
-const isTerminal = isDestructiveBookingStatus;
+const isTerminal = isTerminalBookingStatus;
 
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -773,13 +780,13 @@ export function DaySheetView({
   );
 
   const patchStaffAttendance = useCallback(
-    async (bookingId: string, hasStaffAttendance: boolean) => {
+    async (bookingId: string, unifiedAttendanceConfirmed: boolean) => {
       setStaffAttendanceLoadingId(bookingId);
       try {
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ staff_attendance_confirmed: !hasStaffAttendance }),
+          body: JSON.stringify({ staff_attendance_confirmed: !unifiedAttendanceConfirmed }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
@@ -902,6 +909,10 @@ export function DaySheetView({
         tableStyle ? `cover${booking.party_size === 1 ? '' : 's'}` : `person${booking.party_size === 1 ? '' : 's'}`
       }`;
       if (isRevertTransition(booking.status, nextStatus)) {
+        if (isBookingInstantRevertTransition(booking.status, nextStatus, tableStyle)) {
+          void changeStatus(booking.id, nextStatus);
+          return;
+        }
         const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
         const confirmLabel =
           booking.status === 'Seated' && (nextStatus === 'Booked' || nextStatus === 'Confirmed') && !tableStyle
@@ -1455,7 +1466,7 @@ export function DaySheetView({
                                 e.stopPropagation();
                                 requestStatusChange(b, primaryAction.target);
                               }}
-                              className="inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg bg-brand-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 active:bg-brand-800 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs print:hidden"
+                              className={`inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs print:hidden ${primaryLabel === 'Start' ? BOOKING_START_PRIMARY_BUTTON_CLASSES : 'border border-transparent bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500/40 active:bg-brand-800'}`}
                               aria-label={`${primaryLabel ?? primaryAction.label} booking for ${b.guest_name}`}
                               aria-busy={actionLoading === b.id}
                             >
@@ -1500,22 +1511,22 @@ export function DaySheetView({
                               disabled={staffAttendanceLoadingId === b.id}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at));
+                                void patchStaffAttendance(b.id, isAttendanceConfirmed(b));
                               }}
-                              className={`${b.staff_attendance_confirmed_at ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-400/30' : BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON} inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs print:hidden`}
-                              aria-label={`${b.staff_attendance_confirmed_at ? 'Cancel staff attendance confirmation' : 'Confirm attendance'} for ${b.guest_name}`}
+                              className={`${isAttendanceConfirmed(b) ? BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON : BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON} inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs print:hidden`}
+                              aria-label={`${isAttendanceConfirmed(b) ? 'Undo confirm' : 'Confirm attendance'} for ${b.guest_name}`}
                               aria-busy={staffAttendanceLoadingId === b.id}
                             >
                               {staffAttendanceLoadingId === b.id ? (
                                 <span
-                                  className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${b.staff_attendance_confirmed_at ? 'border-slate-400/30 border-t-slate-600' : BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
+                                  className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${isAttendanceConfirmed(b) ? BOOKING_ATTENDANCE_UNDO_SPINNER : BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                                   aria-hidden
                                 />
                               ) : null}
-                              {b.staff_attendance_confirmed_at ? (
+                              {isAttendanceConfirmed(b) ? (
                                 <>
                                   <span className="sm:hidden">Undo</span>
-                                  <span className="hidden sm:inline">Cancel confirmation</span>
+                                  <span className="hidden sm:inline">Undo confirm</span>
                                 </>
                               ) : (
                                 <>

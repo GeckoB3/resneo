@@ -9,10 +9,18 @@ import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import {
+  CRON_COMMS_TOLERANCE_MS,
+  bookingCivilDatesForPostVisitWindow,
+  bookingCivilDatesForReminderWindow,
+  msSinceBookingStartUtc,
+  msUntilBookingStartUtc,
+} from '@/lib/cron/comms-timing';
 
-const TOLERANCE_MS = 15 * 60 * 1000;
-const BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(first_name, last_name, email, phone)';
+const BOOKING_SELECT_BASE =
+  'id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(first_name, last_name, email, phone)';
+const BOOKING_SELECT_WITH_SUPPRESS =
+  'id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(first_name, last_name, email, phone)';
 
 export interface UnifiedCommsResults {
   unified_reminder_1: number;
@@ -26,22 +34,6 @@ export interface SecondaryModelCommsResults {
   cde_reminder_2: number;
   cde_post_visit: number;
   errors: number;
-}
-
-function toVenueLocal(date: Date, tz: string): Date {
-  const localeStr = date.toLocaleString('en-GB', { timeZone: tz });
-  const [datePart, timePart] = localeStr.split(', ');
-  const [d, m, y] = datePart!.split('/').map(Number);
-  const [h, min, s] = timePart!.split(':').map(Number);
-  return new Date(y!, m! - 1, d!, h!, min!, s!);
-}
-
-function localDateStr(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function bookingLocalMs(bookingDate: string, bookingTime: string): number {
-  return new Date(`${bookingDate}T${bookingTime}`).getTime();
 }
 
 function normalizeBookings(rows: unknown[]): BookingRow[] {
@@ -58,10 +50,52 @@ function normalizeBookings(rows: unknown[]): BookingRow[] {
   });
 }
 
+async function fetchCronBookings(opts: {
+  supabase: SupabaseClient;
+  venueId: string;
+  dates: string[];
+  statuses: string[];
+}): Promise<BookingRow[]> {
+  const buildQuery = (select: string) => {
+    const query = opts.supabase
+      .from('bookings')
+      .select(select)
+      .eq('venue_id', opts.venueId)
+      .in('booking_date', opts.dates);
+
+    if (opts.statuses.length === 1) {
+      return query.eq('status', opts.statuses[0]!);
+    }
+    return query.in('status', opts.statuses);
+  };
+
+  const result = await buildQuery(BOOKING_SELECT_WITH_SUPPRESS);
+  if (!result.error) {
+    return normalizeBookings(result.data ?? []);
+  }
+
+  const errorText = `${result.error.message ?? ''} ${result.error.details ?? ''}`.toLowerCase();
+  if (!errorText.includes('suppress_import_comms')) {
+    throw result.error;
+  }
+
+  console.warn(
+    '[scheduled-comms] bookings.suppress_import_comms not available; retrying without import suppression column',
+  );
+  const fallback = await buildQuery(BOOKING_SELECT_BASE);
+  if (fallback.error) {
+    throw fallback.error;
+  }
+  return normalizeBookings(fallback.data ?? []);
+}
+
 function deriveBookingModel(
   row: BookingRow,
   venuePrimaryModel: string | null | undefined,
 ): BookingModel {
+  if (row.booking_model && typeof row.booking_model === 'string') {
+    return row.booking_model as BookingModel;
+  }
   if (row.experience_event_id) return 'event_ticket';
   if (row.class_instance_id) return 'class_session';
   if (row.resource_id) return 'resource_booking';
@@ -69,6 +103,29 @@ function deriveBookingModel(
     return 'practitioner_appointment';
   }
   return 'unified_scheduling';
+}
+
+function isUnifiedAppointmentBookingRow(row: BookingRow): boolean {
+  return row.booking_model === 'unified_scheduling' || row.booking_model === 'practitioner_appointment';
+}
+
+function modelListIncludes(raw: unknown, model: BookingModel): boolean {
+  return Array.isArray(raw) && raw.includes(model);
+}
+
+function venueSupportsUnifiedSchedulingComms(venue: {
+  booking_model?: string | null;
+  enabled_models?: unknown;
+  active_booking_models?: unknown;
+}): boolean {
+  if (venue.booking_model === 'practitioner_appointment' || venue.booking_model === 'unified_scheduling') {
+    return true;
+  }
+  return (
+    modelListIncludes(venue.enabled_models, 'unified_scheduling') ||
+    modelListIncludes(venue.active_booking_models, 'unified_scheduling') ||
+    modelListIncludes(venue.active_booking_models, 'practitioner_appointment')
+  );
 }
 
 function buildBookingData(
@@ -114,32 +171,32 @@ async function runLaneReminder(opts: {
   if (!policy.enabled || policy.hoursBefore == null) return;
 
   const tz = opts.venue.timezone ?? 'Europe/London';
-  const nowLocal = toVenueLocal(new Date(), tz);
-  const nowLocalMs = nowLocal.getTime();
+  const nowMs = Date.now();
   const targetMs = policy.hoursBefore * 60 * 60 * 1000;
-  const windowStart = new Date(nowLocalMs + targetMs - TOLERANCE_MS);
-  const windowEnd = new Date(nowLocalMs + targetMs + TOLERANCE_MS);
-  const startDate = localDateStr(windowStart);
-  const endDate = localDateStr(windowEnd);
-  const dates = [startDate];
-  if (endDate !== startDate) dates.push(endDate);
+  const dates = bookingCivilDatesForReminderWindow({
+    venueTimeZone: tz,
+    hoursBefore: policy.hoursBefore,
+    toleranceMs: CRON_COMMS_TOLERANCE_MS,
+    nowMs,
+  });
 
-  const { data } = await opts.supabase
-    .from('bookings')
-    .select(BOOKING_SELECT)
-    .eq('venue_id', opts.venue.id)
-    .in('booking_date', dates)
-    .in('status', ['Pending', 'Booked', 'Confirmed']);
+  const rows = await fetchCronBookings({
+    supabase: opts.supabase,
+    venueId: opts.venue.id,
+    dates,
+    statuses: ['Pending', 'Booked', 'Confirmed'],
+  });
 
   const venueData = venueRowToEmailData(opts.venue);
-  for (const row of normalizeBookings(data ?? [])) {
+  for (const row of rows) {
     try {
       if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
+      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row)) continue;
 
-      const delta = bookingLocalMs(row.booking_date, row.booking_time) - nowLocalMs;
-      if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) {
+      const delta = msUntilBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
+      if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
         continue;
       }
 
@@ -225,32 +282,32 @@ async function runLanePostVisit(opts: {
   }
 
   const tz = opts.venue.timezone ?? 'Europe/London';
-  const nowLocal = toVenueLocal(new Date(), tz);
-  const nowLocalMs = nowLocal.getTime();
+  const nowMs = Date.now();
   const targetMs = policy.hoursAfter * 60 * 60 * 1000;
-  const windowStart = new Date(nowLocalMs - targetMs - TOLERANCE_MS);
-  const windowEnd = new Date(nowLocalMs - targetMs + TOLERANCE_MS);
-  const startDate = localDateStr(windowStart);
-  const endDate = localDateStr(windowEnd);
-  const dates = [startDate];
-  if (endDate !== startDate) dates.push(endDate);
+  const dates = bookingCivilDatesForPostVisitWindow({
+    venueTimeZone: tz,
+    hoursAfter: policy.hoursAfter,
+    toleranceMs: CRON_COMMS_TOLERANCE_MS,
+    nowMs,
+  });
 
-  const { data } = await opts.supabase
-    .from('bookings')
-    .select(BOOKING_SELECT)
-    .eq('venue_id', opts.venue.id)
-    .in('booking_date', dates)
-    .eq('status', 'Completed');
+  const rows = await fetchCronBookings({
+    supabase: opts.supabase,
+    venueId: opts.venue.id,
+    dates,
+    statuses: ['Completed'],
+  });
 
   const venueData = venueRowToEmailData(opts.venue);
-  for (const row of normalizeBookings(data ?? [])) {
+  for (const row of rows) {
     try {
       if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
+      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row)) continue;
 
-      const delta = nowLocalMs - bookingLocalMs(row.booking_date, row.booking_time);
-      if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) {
+      const delta = msSinceBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
+      if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
         continue;
       }
 
@@ -289,10 +346,11 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email')
-    .in('booking_model', ['unified_scheduling', 'practitioner_appointment']);
+    .select('id, name, address, phone, timezone, booking_model, enabled_models, active_booking_models, email, reply_to_email');
 
   for (const venue of venues ?? []) {
+    if (!venueSupportsUnifiedSchedulingComms(venue)) continue;
+
     await runLaneReminder({
       supabase,
       venue,

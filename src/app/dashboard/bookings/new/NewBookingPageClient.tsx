@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ToastProvider } from '@/components/ui/Toast';
 import {
   StaffSurfaceBookingStack,
@@ -14,6 +14,11 @@ import {
   staffBookingSurfaceTabIdToQueryParam,
   type StaffBookingSurfaceTabId,
 } from '@/lib/booking/staff-booking-modal-options';
+import {
+  discardStaffRebookBootstrapCaches,
+  hydrateStaffRebookBootstrapOnce,
+  type StaffRebookBootstrapPayloadV1,
+} from '@/lib/booking/staff-rebook-bootstrap';
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -33,6 +38,8 @@ export function NewBookingPageClient({
   enabledModels?: BookingModel[];
 }) {
   const router = useRouter();
+  const routerRef = useRef(router);
+
   const searchParams = useSearchParams();
 
   const surfaceTabs = useMemo(
@@ -53,14 +60,51 @@ export function NewBookingPageClient({
   /** When `?tab=` is absent, remember last choice so we do not fight controlled URL sync. */
   const [persistedTab, setPersistedTab] = useState<StaffBookingSurfaceTabId | null>(null);
 
+  const staffRebookFromSession = useMemo(() => hydrateStaffRebookBootstrapOnce(), []);
+
+  useLayoutEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  useLayoutEffect(() => {
+    if (!staffRebookFromSession) return;
+    if (!surfaceTabs.some((t) => t.id === staffRebookFromSession.surface)) return;
+    const desiredParam = staffBookingSurfaceTabIdToQueryParam(staffRebookFromSession.surface);
+    const raw = searchParams.get('tab');
+    if ((raw ?? '').trim().toLowerCase() === desiredParam.toLowerCase()) {
+      return;
+    }
+    routerRef.current.replace(`/dashboard/bookings/new?tab=${desiredParam}`, { scroll: false });
+  }, [staffRebookFromSession, surfaceTabs, searchParams]);
+
   const activeTab = useMemo(() => {
+    /**
+     * If we have a rebook bootstrap but `parseStaffBookingSurfaceTabIdFromQuery` has not hydrated yet
+     * (`tabFromQuery === null`), keep the appointment/table surface stable so stacks are not remounted.
+     */
+    if (
+      staffRebookFromSession &&
+      surfaceTabs.some((t) => t.id === staffRebookFromSession.surface)
+    ) {
+      const wantSurface = staffRebookFromSession.surface;
+      if (tabFromQuery == null) return wantSurface;
+    }
+
     if (tabFromQuery) return tabFromQuery;
     const candidate = persistedTab ?? defaultTab;
     if (surfaceTabs.some((t) => t.id === candidate)) return candidate;
     return defaultTab;
-  }, [tabFromQuery, persistedTab, surfaceTabs, defaultTab]);
+  }, [staffRebookFromSession, surfaceTabs, tabFromQuery, persistedTab, defaultTab]);
+
+  const staffRebookBootstrap = useMemo((): StaffRebookBootstrapPayloadV1 | null => {
+    if (!staffRebookFromSession) return null;
+    if (!surfaceTabs.some((t) => t.id === staffRebookFromSession.surface)) return null;
+    if (staffRebookFromSession.surface !== activeTab) return null;
+    return staffRebookFromSession;
+  }, [staffRebookFromSession, surfaceTabs, activeTab]);
 
   const onDone = useCallback(() => {
+    discardStaffRebookBootstrapCaches();
     void router.push('/dashboard/bookings');
   }, [router]);
 
@@ -93,6 +137,7 @@ export function NewBookingPageClient({
             activeTab={activeTab}
             onActiveTabChange={handleTabChange}
             bookingIntent="new"
+            staffRebookBootstrap={staffRebookBootstrap}
           />
         </div>
       </ToastProvider>

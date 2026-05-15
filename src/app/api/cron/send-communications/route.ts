@@ -8,10 +8,22 @@ import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
-import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
+import {
+  getVenueCommunicationPolicies,
+  inferCommunicationLaneFromBookingModel,
+  type VenueCommunicationPolicies,
+} from '@/lib/communications/policies';
+import type { BookingModel } from '@/types/booking-models';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import {
+  CRON_COMMS_TOLERANCE_MS,
+  bookingCivilDatesForPostVisitWindow,
+  bookingCivilDatesForReminderWindow,
+  msSinceBookingStartUtc,
+  msUntilBookingStartUtc,
+} from '@/lib/cron/comms-timing';
 
 export async function GET(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
@@ -78,24 +90,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ ok: true, ...results });
 }
 
-function toVenueLocal(date: Date, tz: string): Date {
-  const localeStr = date.toLocaleString('en-GB', { timeZone: tz });
-  const [datePart, timePart] = localeStr.split(', ');
-  const [d, m, y] = datePart!.split('/').map(Number);
-  const [h, min, s] = timePart!.split(':').map(Number);
-  return new Date(y!, m! - 1, d!, h!, min!, s!);
-}
-
-function localDateStr(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function bookingLocalMs(bookingDate: string, bookingTime: string): number {
-  return new Date(`${bookingDate}T${bookingTime}`).getTime();
-}
-
 const BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(first_name, last_name, email, phone)';
+  'id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(first_name, last_name, email, phone)';
 
 function normalizeBookings(rows: unknown[]): BookingRow[] {
   return rows.map((entry) => {
@@ -112,6 +108,7 @@ function normalizeBookings(rows: unknown[]): BookingRow[] {
 }
 
 function buildBookingData(row: BookingRow): BookingEmailData {
+  const bm = row.booking_model;
   return {
     id: row.id,
     guest_name: formatGuestDisplayName(row.guest?.first_name, row.guest?.last_name),
@@ -125,7 +122,54 @@ function buildBookingData(row: BookingRow): BookingEmailData {
     deposit_amount_pence: row.deposit_amount_pence,
     deposit_status: row.deposit_status,
     refund_cutoff: row.cancellation_deadline,
+    ...(bm ? { booking_model: bm as BookingModel } : {}),
   };
+}
+
+function isTableBookingRow(row: BookingRow): boolean {
+  return (row.booking_model ?? 'table_reservation') === 'table_reservation';
+}
+
+/** Civil dates that might contain bookings needing this reminder, across both comms lanes (hybrid venues). */
+function unionReminderCivilDates(opts: {
+  policies: VenueCommunicationPolicies;
+  messageKey: 'confirm_or_cancel_prompt' | 'pre_visit_reminder';
+  venueTimeZone: string;
+  toleranceMs: number;
+  nowMs: number;
+}): string[] | null {
+  const set = new Set<string>();
+  for (const lane of ['table', 'appointments_other'] as const) {
+    const policy = opts.policies[lane][opts.messageKey];
+    if (!policy.enabled || policy.hoursBefore == null) continue;
+    bookingCivilDatesForReminderWindow({
+      venueTimeZone: opts.venueTimeZone,
+      hoursBefore: policy.hoursBefore,
+      toleranceMs: opts.toleranceMs,
+      nowMs: opts.nowMs,
+    }).forEach((d) => set.add(d));
+  }
+  return set.size === 0 ? null : [...set];
+}
+
+function unionPostVisitCivilDates(opts: {
+  policies: VenueCommunicationPolicies;
+  venueTimeZone: string;
+  toleranceMs: number;
+  nowMs: number;
+}): string[] | null {
+  const set = new Set<string>();
+  for (const lane of ['table', 'appointments_other'] as const) {
+    const policy = opts.policies[lane].post_visit_thankyou;
+    if (!policy.enabled || policy.hoursAfter == null || !policy.channels.includes('email')) continue;
+    bookingCivilDatesForPostVisitWindow({
+      venueTimeZone: opts.venueTimeZone,
+      hoursAfter: policy.hoursAfter,
+      toleranceMs: opts.toleranceMs,
+      nowMs: opts.nowMs,
+    }).forEach((d) => set.add(d));
+  }
+  return set.size === 0 ? null : [...set];
 }
 
 async function sendConfirmOrCancelPrompts(results: {
@@ -147,20 +191,17 @@ async function sendConfirmOrCancelPrompts(results: {
       }
 
       const policies = await getVenueCommunicationPolicies(venue.id);
-      const policy = policies.table.confirm_or_cancel_prompt;
-      if (!policy.enabled || policy.hoursBefore == null) continue;
-
       const tz = venue.timezone ?? 'Europe/London';
-      const nowLocal = toVenueLocal(now, tz);
-      const nowLocalMs = nowLocal.getTime();
-      const toleranceMs = 15 * 60 * 1000;
-      const targetMs = policy.hoursBefore * 60 * 60 * 1000;
-      const windowStart = new Date(nowLocalMs + targetMs - toleranceMs);
-      const windowEnd = new Date(nowLocalMs + targetMs + toleranceMs);
-      const startDate = localDateStr(windowStart);
-      const endDate = localDateStr(windowEnd);
-      const dates = [startDate];
-      if (endDate !== startDate) dates.push(endDate);
+      const nowMs = now.getTime();
+      const toleranceMs = CRON_COMMS_TOLERANCE_MS;
+      const dates = unionReminderCivilDates({
+        policies,
+        messageKey: 'confirm_or_cancel_prompt',
+        venueTimeZone: tz,
+        toleranceMs,
+        nowMs,
+      });
+      if (!dates?.length) continue;
 
       const { data: bookings } = await supabase
         .from('bookings')
@@ -175,14 +216,22 @@ async function sendConfirmOrCancelPrompts(results: {
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
+          if (!isTableBookingRow(bookingRow)) continue;
 
-          const delta = bookingLocalMs(
+          const lane = inferCommunicationLaneFromBookingModel(
+            bookingRow.booking_model ?? (venue as { booking_model?: string }).booking_model,
+          );
+          const policy = policies[lane].confirm_or_cancel_prompt;
+          if (!policy.enabled || policy.hoursBefore == null) continue;
+
+          const targetMs = policy.hoursBefore * 60 * 60 * 1000;
+          const delta = msUntilBookingStartUtc(
             bookingRow.booking_date,
             bookingRow.booking_time,
-          ) - nowLocalMs;
-          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) {
-            continue;
-          }
+            tz,
+            nowMs,
+          );
+          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) continue;
 
           let booking = buildBookingData(bookingRow);
           const [manageLink, confirmLink] = await Promise.all([
@@ -261,20 +310,17 @@ async function sendPreVisitReminders(results: {
       }
 
       const policies = await getVenueCommunicationPolicies(venue.id);
-      const policy = policies.table.pre_visit_reminder;
-      if (!policy.enabled || policy.hoursBefore == null) continue;
-
       const tz = venue.timezone ?? 'Europe/London';
-      const nowLocal = toVenueLocal(now, tz);
-      const nowLocalMs = nowLocal.getTime();
-      const toleranceMs = 15 * 60 * 1000;
-      const targetMs = policy.hoursBefore * 60 * 60 * 1000;
-      const windowStart = new Date(nowLocalMs + targetMs - toleranceMs);
-      const windowEnd = new Date(nowLocalMs + targetMs + toleranceMs);
-      const startDate = localDateStr(windowStart);
-      const endDate = localDateStr(windowEnd);
-      const dates = [startDate];
-      if (endDate !== startDate) dates.push(endDate);
+      const nowMs = now.getTime();
+      const toleranceMs = CRON_COMMS_TOLERANCE_MS;
+      const dates = unionReminderCivilDates({
+        policies,
+        messageKey: 'pre_visit_reminder',
+        venueTimeZone: tz,
+        toleranceMs,
+        nowMs,
+      });
+      if (!dates?.length) continue;
 
       const { data: bookings } = await supabase
         .from('bookings')
@@ -289,14 +335,22 @@ async function sendPreVisitReminders(results: {
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
+          if (!isTableBookingRow(bookingRow)) continue;
 
-          const delta = bookingLocalMs(
+          const lane = inferCommunicationLaneFromBookingModel(
+            bookingRow.booking_model ?? (venue as { booking_model?: string }).booking_model,
+          );
+          const policy = policies[lane].pre_visit_reminder;
+          if (!policy.enabled || policy.hoursBefore == null) continue;
+
+          const targetMs = policy.hoursBefore * 60 * 60 * 1000;
+          const delta = msUntilBookingStartUtc(
             bookingRow.booking_date,
             bookingRow.booking_time,
-          ) - nowLocalMs;
-          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) {
-            continue;
-          }
+            tz,
+            nowMs,
+          );
+          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) continue;
 
           let booking = buildBookingData(bookingRow);
           const [manageLinkPv, confirmLinkPv] = await Promise.all([
@@ -371,22 +425,16 @@ async function sendPostVisitThankYous(results: {
       }
 
       const policies = await getVenueCommunicationPolicies(venue.id);
-      const policy = policies.table.post_visit_thankyou;
-      if (!policy.enabled || policy.hoursAfter == null || !policy.channels.includes('email')) {
-        continue;
-      }
-
       const tz = venue.timezone ?? 'Europe/London';
-      const nowLocal = toVenueLocal(now, tz);
-      const nowLocalMs = nowLocal.getTime();
-      const toleranceMs = 15 * 60 * 1000;
-      const targetMs = policy.hoursAfter * 60 * 60 * 1000;
-      const windowStart = new Date(nowLocalMs - targetMs - toleranceMs);
-      const windowEnd = new Date(nowLocalMs - targetMs + toleranceMs);
-      const startDate = localDateStr(windowStart);
-      const endDate = localDateStr(windowEnd);
-      const dates = [startDate];
-      if (endDate !== startDate) dates.push(endDate);
+      const nowMs = now.getTime();
+      const toleranceMs = CRON_COMMS_TOLERANCE_MS;
+      const dates = unionPostVisitCivilDates({
+        policies,
+        venueTimeZone: tz,
+        toleranceMs,
+        nowMs,
+      });
+      if (!dates?.length) continue;
 
       const { data: bookings } = await supabase
         .from('bookings')
@@ -401,14 +449,24 @@ async function sendPostVisitThankYous(results: {
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
+          if (!isTableBookingRow(bookingRow)) continue;
 
-          const delta = nowLocalMs - bookingLocalMs(
-            bookingRow.booking_date,
-            bookingRow.booking_time,
+          const lane = inferCommunicationLaneFromBookingModel(
+            bookingRow.booking_model ?? (venue as { booking_model?: string }).booking_model,
           );
-          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) {
+          const policy = policies[lane].post_visit_thankyou;
+          if (!policy.enabled || policy.hoursAfter == null || !policy.channels.includes('email')) {
             continue;
           }
+
+          const targetMs = policy.hoursAfter * 60 * 60 * 1000;
+          const delta = msSinceBookingStartUtc(
+            bookingRow.booking_date,
+            bookingRow.booking_time,
+            tz,
+            nowMs,
+          );
+          if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) continue;
 
           let booking = buildBookingData(bookingRow);
           booking.manage_booking_link = await createOrGetBookingShortLink({

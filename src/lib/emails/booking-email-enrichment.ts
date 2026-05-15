@@ -18,6 +18,7 @@ function priceDisplayFromPence(pricePence: number | null | undefined): string | 
 }
 
 type BookingAnchorRow = {
+  booking_model: string | null;
   practitioner_id: string | null;
   appointment_service_id: string | null;
   calendar_id: string | null;
@@ -122,7 +123,7 @@ export async function enrichBookingEmailForAppointment(
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label',
+      'booking_model, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -247,6 +248,7 @@ export async function enrichBookingEmailForAppointment(
 
   return {
     ...base,
+    booking_model: (anchor.booking_model as BookingEmailData['booking_model']) ?? base.booking_model,
     email_variant: 'appointment',
     practitioner_name: practitionerName,
     appointment_service_name: serviceName,

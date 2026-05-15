@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -32,10 +32,28 @@ import {
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import {
+  EXP_BOOKING_AMBER_ATTN,
+  EXP_BOOKING_ATTEND,
+  EXP_BOOKING_DANGER,
+  EXP_BOOKING_DANGER_ROSE,
+  EXP_BOOKING_ICO,
+  EXP_BOOKING_NEUTRAL,
+  EXP_BOOKING_NEUTRAL_PROMINENT,
+  EXP_BOOKING_PRIMARY,
+  EXP_BOOKING_REVERT,
+  EXP_BOOKING_SOFT,
+  EXP_BOOKING_SPIN_AM,
+  EXP_BOOKING_SPIN_NA,
+  NO_EXTRA_ENABLED_BOOKING_MODELS,
+} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
+import {
   BOOKING_DETAIL_MAX_STACK_DEPTH,
   GuestBookingsForGuestAccordion,
   type GuestHistoryRelatedBookingPayload,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { buildStaffRebookBootstrapFromBookingSource } from '@/lib/booking/staff-rebook-from-booking-source';
+import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
@@ -43,10 +61,8 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import {
-  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
-  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
-} from '@/lib/table-management/booking-status-visual';
+import { BOOKING_ATTENDANCE_CONFIRM_SPINNER } from '@/lib/table-management/booking-status-visual';
+import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 
 export interface BookingRow {
   id: string;
@@ -179,6 +195,8 @@ export function ExpandedBookingContent({
   guestHistoryListRefresh = 0,
   onOpenRelatedGuestBooking,
   relatedBookingsStackDepth = 0,
+  venueStaffBookingModel,
+  venueStaffEnabledBookingModels,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -201,6 +219,9 @@ export function ExpandedBookingContent({
   onStatusAction: (status: BookingStatus) => void;
   onDetailUpdated: () => void;
   onRequestChangeTable?: () => void;
+  /** Venue primary + enabled models for staff “New booking” default tab (falls back to this row’s inferred model). */
+  venueStaffBookingModel?: BookingModel;
+  venueStaffEnabledBookingModels?: BookingModel[];
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
@@ -209,6 +230,9 @@ export function ExpandedBookingContent({
     text: string;
   } | null>(null);
   const [modifyBookingOpen, setModifyBookingOpen] = useState(false);
+  const [staffBookingModal, setStaffBookingModal] = useState<
+    null | { mode: 'new' | 'rebook'; bootstrap: StaffRebookBootstrapPayloadV1 }
+  >(null);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
@@ -285,6 +309,53 @@ export function ExpandedBookingContent({
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
   const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
 
+  const staffNewBookingPrimary = venueStaffBookingModel ?? inferredBookingModel;
+  const staffNewBookingEnabledModels = useMemo(
+    () => venueStaffEnabledBookingModels ?? [],
+    [venueStaffEnabledBookingModels],
+  );
+
+  const staffNewBookingDefaultSurfaceTab = useMemo(
+    () => defaultStaffBookingSurfaceTab(staffNewBookingPrimary, staffNewBookingEnabledModels),
+    [staffNewBookingPrimary, staffNewBookingEnabledModels],
+  );
+
+  const staffNewBookingGuestContacts = useMemo<StaffRebookGuestPrefill>(
+    () => ({
+      firstName: detail?.guest?.first_name ?? booking.guest_first_name ?? undefined,
+      lastName: detail?.guest?.last_name ?? booking.guest_last_name ?? undefined,
+      email: detail?.guest?.email ?? booking.guest_email,
+      phone: detail?.guest?.phone ?? booking.guest_phone,
+      dietaryNotes: booking.dietary_notes,
+      occasion: booking.occasion,
+      specialRequests: detail?.special_requests ?? null,
+      internalNotes: detail?.internal_notes ?? null,
+      customerProfileNotes: detail?.guest?.customer_profile_notes ?? null,
+    }),
+    [
+      booking.dietary_notes,
+      booking.guest_email,
+      booking.guest_first_name,
+      booking.guest_last_name,
+      booking.guest_phone,
+      booking.occasion,
+      detail?.guest?.customer_profile_notes,
+      detail?.guest?.email,
+      detail?.guest?.first_name,
+      detail?.guest?.last_name,
+      detail?.guest?.phone,
+      detail?.internal_notes,
+      detail?.special_requests,
+    ],
+  );
+
+  const rebookGuestPrefill = staffNewBookingGuestContacts;
+
+  const canExpandStaffRebook = useMemo(
+    () => buildStaffRebookBootstrapFromBookingSource(booking, staffNewBookingGuestContacts) !== null,
+    [booking, staffNewBookingGuestContacts],
+  );
+
   if (detailLoading) {
     return (
       <div id={`booking-expand-${booking.id}`} className="mt-2 animate-pulse space-y-2.5 px-1 pb-3" onClick={(e) => e.stopPropagation()}>
@@ -326,6 +397,7 @@ export function ExpandedBookingContent({
   const confirmationSentAt = detail?.communications.find(
     (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
   )?.created_at;
+
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
     setInlineActionError(null);
@@ -388,7 +460,10 @@ export function ExpandedBookingContent({
 
   const canCancel = canTransitionBookingStatus(booking.status, 'Cancelled');
   const canNoShow = canTransitionBookingStatus(booking.status, 'No-Show');
-  const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+  const revertFromBookingStatus = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+  /** Suppress rarely-used Booked → Pending (“Mark pending”) in this dense inline bar. */
+  const revertAction =
+    revertFromBookingStatus?.target === 'Pending' ? undefined : revertFromBookingStatus;
   const forwardPrimaryLabel = (target: BookingStatus, defaultLabel: string) => {
     if (target === 'Seated' && !tableStyle) return 'Start';
     return defaultLabel;
@@ -589,23 +664,20 @@ export function ExpandedBookingContent({
 
       {/* Actions bar */}
       <div className={bookingExpandActionsBarClass}>
-        <div className="px-2 py-1.5 sm:px-3">
-          <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+        <div className="rounded-b-xl bg-gradient-to-b from-white to-slate-50/40 px-2 py-2 sm:px-3 sm:py-2.5">
+          <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
             {forwardActions.map((action) => (
               <button
                 key={action.target}
                 type="button"
                 onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md bg-brand-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 sm:text-[11px]"
+                className={EXP_BOOKING_PRIMARY}
               >
                 {(action.target === 'Confirmed' || action.target === 'Booked') && (
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                 )}
                 {action.target === 'Seated' && tableStyle && (
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
-                )}
-                {action.target === 'Seated' && !tableStyle && (
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
+                  <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
                 )}
                 {forwardPrimaryLabel(action.target, action.label)}
               </button>
@@ -616,15 +688,15 @@ export function ExpandedBookingContent({
                 type="button"
                 disabled={inlineActionLoading !== null}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: true }, 'staff-attendance')}
-                className={`inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold shadow-sm transition-colors focus:outline-none focus:ring-2 disabled:opacity-60 sm:text-[11px] ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+                className={EXP_BOOKING_ATTEND}
               >
                 {inlineActionLoading === 'staff-attendance' ? (
                   <span
-                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
+                    className={`${EXP_BOOKING_ICO} animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
                     aria-hidden
                   />
                 ) : null}
-                Confirm Booking
+                Confirm
               </button>
             ) : null}
 
@@ -633,13 +705,10 @@ export function ExpandedBookingContent({
                 type="button"
                 disabled={inlineActionLoading !== null}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-cancel')}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 sm:text-[11px]"
+                className={EXP_BOOKING_NEUTRAL}
               >
                 {inlineActionLoading === 'staff-attendance-cancel' ? (
-                  <span
-                    className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
-                    aria-hidden
-                  />
+                  <span className={EXP_BOOKING_SPIN_NA} aria-hidden />
                 ) : null}
                 Cancel confirmation
               </button>
@@ -651,13 +720,10 @@ export function ExpandedBookingContent({
                   type="button"
                   disabled={inlineActionLoading !== null}
                   onClick={() => void patchBookingQuick({ client_arrived: true }, 'client-arrived')}
-                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border-2 border-[#F59E0B] bg-[#F59E0B]/20 px-2 py-0.5 text-[10px] font-semibold text-amber-950 shadow-sm transition-colors hover:bg-[#F59E0B]/30 disabled:opacity-60 sm:text-[11px]"
+                  className={EXP_BOOKING_AMBER_ATTN}
                 >
                   {inlineActionLoading === 'client-arrived' ? (
-                    <span
-                      className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-600/30 border-t-amber-800"
-                      aria-hidden
-                    />
+                    <span className={EXP_BOOKING_SPIN_AM} aria-hidden />
                   ) : null}
                   Arrived
                 </button>
@@ -666,13 +732,10 @@ export function ExpandedBookingContent({
                   type="button"
                   disabled={inlineActionLoading !== null}
                   onClick={() => void patchBookingQuick({ client_arrived: false }, 'client-arrived-clear')}
-                  className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 sm:text-[11px]"
+                  className={EXP_BOOKING_SOFT}
                 >
                   {inlineActionLoading === 'client-arrived-clear' ? (
-                    <span
-                      className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-400/30 border-t-slate-600"
-                      aria-hidden
-                    />
+                    <span className={EXP_BOOKING_SPIN_NA} aria-hidden />
                   ) : null}
                   Clear
                 </button>
@@ -680,11 +743,7 @@ export function ExpandedBookingContent({
             ) : null}
 
             {onRequestChangeTable && (
-              <button
-                type="button"
-                onClick={onRequestChangeTable}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:text-[11px]"
-              >
+              <button type="button" onClick={onRequestChangeTable} className={EXP_BOOKING_NEUTRAL}>
                 Change table
               </button>
             )}
@@ -693,14 +752,51 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 sm:text-[11px]"
+                className={EXP_BOOKING_REVERT}
               >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
+                <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
                 {revertButtonLabel()}
               </button>
             )}
 
-            <div className="min-w-1.5 flex-1" />
+            <button
+              type="button"
+              aria-label="New booking"
+              onClick={() => {
+                setStaffBookingModal({
+                  mode: 'new',
+                  bootstrap: {
+                    v: 1,
+                    surface: staffNewBookingDefaultSurfaceTab,
+                    guest: staffNewBookingGuestContacts,
+                  },
+                });
+                setShowMessageBox(false);
+                setModifyBookingOpen(false);
+              }}
+              className={EXP_BOOKING_NEUTRAL_PROMINENT}
+            >
+              <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New
+            </button>
+
+            {canExpandStaffRebook && (
+              <button
+                type="button"
+                onClick={() => {
+                  const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill);
+                  if (!payload) return;
+                  setStaffBookingModal({ mode: 'rebook', bootstrap: payload });
+                  setShowMessageBox(false);
+                  setModifyBookingOpen(false);
+                }}
+                className={EXP_BOOKING_NEUTRAL_PROMINENT}
+              >
+                Rebook
+              </button>
+            )}
 
             {canStaffModifyBooking && (
               <button
@@ -709,9 +805,8 @@ export function ExpandedBookingContent({
                   setModifyBookingOpen(true);
                   setShowMessageBox(false);
                 }}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 sm:text-[11px]"
+                className={EXP_BOOKING_NEUTRAL_PROMINENT}
               >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" /></svg>
                 Modify
               </button>
             )}
@@ -720,7 +815,7 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => handleStatusClick('Cancelled', 'Cancel Booking')}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-red-600 transition-colors hover:border-red-100 hover:bg-red-50 sm:text-[11px]"
+                className={EXP_BOOKING_DANGER}
               >
                 Cancel
               </button>
@@ -729,7 +824,7 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => handleStatusClick('No-Show', 'Mark No-Show')}
-                className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-rose-600 transition-colors hover:border-rose-100 hover:bg-rose-50 sm:text-[11px]"
+                className={EXP_BOOKING_DANGER_ROSE}
               >
                 No-Show
               </button>
@@ -814,9 +909,6 @@ export function ExpandedBookingContent({
               onSaved={onDetailUpdated}
             />
             <div className="border-t border-slate-100 pt-2">
-              <div className="mb-2">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Booking notes</p>
-              </div>
               {booking.occasion ? (
                 <div className="mb-2">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
@@ -852,6 +944,8 @@ export function ExpandedBookingContent({
               onOpenRelatedGuestBooking?.(payload);
             }}
             listRefreshKey={guestHistoryListRefresh}
+            rebookGuestPrefill={rebookGuestPrefill}
+            onStaffBookingCreated={onDetailUpdated}
           />
         </div>
       ) : null}
@@ -907,11 +1001,11 @@ export function ExpandedBookingContent({
                 disabled={sendingMessage}
               />
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center sm:gap-1.5">
               <button
                 type="button"
                 onClick={() => setShowMessageBox(false)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
+                className="rounded-lg border border-slate-200 bg-white px-[11px] py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
               >
                 Cancel
               </button>
@@ -961,18 +1055,18 @@ export function ExpandedBookingContent({
           </svg>
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1">
             {booking.deposit_status !== 'Paid' && booking.deposit_status !== 'Refunded' ? (
               <>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Send payment link</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Waive</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Record cash</button>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Send payment link</button>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Waive</button>
+                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Record cash</button>
               </>
             ) : null}
             {booking.deposit_status === 'Paid' ? (
-              <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Refund deposit</button>
+              <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Refund deposit</button>
             ) : null}
-            <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Resend confirmation</button>
+            <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Resend confirmation</button>
           </div>
           {detail?.cancellation_deadline ? (
             <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(detail.cancellation_deadline)}</p>
@@ -1114,18 +1208,18 @@ export function ExpandedBookingContent({
               Confirm {confirmAction.label.toLowerCase()} for {guestName}
               {' '}({booking.party_size} {tableStyle ? `cover${booking.party_size !== 1 ? 's' : ''}` : `person${booking.party_size !== 1 ? 's' : ''}`}) at {booking.booking_time.slice(0, 5)}?
             </p>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex gap-1.5">
               <button
                 type="button"
                 onClick={() => { onStatusAction(confirmAction.status); setConfirmAction(null); }}
-                className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
+                className="rounded-xl bg-red-600 px-[15px] py-2 text-xs font-semibold text-white hover:bg-red-700"
               >
                 {confirmAction.label}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmAction(null)}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 bg-white px-[15px] py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
               >
                 Keep as is
               </button>
@@ -1164,6 +1258,25 @@ export function ExpandedBookingContent({
           }
         />
       )}
+
+      {staffBookingModal ? (
+        <StaffSurfaceBookingModal
+          open
+          heading={staffBookingModal.mode === 'rebook' ? 'Rebook' : undefined}
+          onClose={() => setStaffBookingModal(null)}
+          onCreated={() => {
+            setStaffBookingModal(null);
+            onDetailUpdated();
+          }}
+          venueId={venueId}
+          currency={venueCurrency ?? 'GBP'}
+          bookingModel={venueStaffBookingModel ?? inferBookingRowModel(booking)}
+          enabledModels={venueStaffEnabledBookingModels ?? NO_EXTRA_ENABLED_BOOKING_MODELS}
+          intent="new"
+          advancedMode={tableManagementEnabled}
+          staffRebookBootstrap={staffBookingModal.bootstrap}
+        />
+      ) : null}
     </div>
   );
 }

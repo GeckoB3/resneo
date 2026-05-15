@@ -706,6 +706,7 @@ export async function PATCH(
               guest_phone: guestRow.phone ?? null,
               booking_date: booking.booking_date,
               booking_time: bookingTime,
+              booking_model: booking.booking_model,
               party_size: booking.party_size,
             };
             const venueEmailData = { name: venueRow.name, address: venueRow.address ?? undefined };

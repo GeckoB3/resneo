@@ -21,7 +21,6 @@ import type {
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import {
   DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
-  DEFAULT_APPOINTMENT_SERVICE_VARIANT_ROW,
   DEFAULT_STAFF_MAY_CUSTOMIZE,
   type AppointmentServiceFormValues,
 } from '@/components/dashboard/appointment-services/appointment-service-form-values';
@@ -145,8 +144,6 @@ export function AppointmentServicesView({
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
-  /** Admins editing variants: base duration/price fields are hidden; options carry those values. */
-  const usesVariants = isAdmin && form.variants.length > 0;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkSavingKey, setLinkSavingKey] = useState<string | null>(null);

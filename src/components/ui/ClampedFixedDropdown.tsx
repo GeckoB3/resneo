@@ -30,6 +30,7 @@ export function ClampedFixedDropdown({
   id,
   onDismiss,
   ignoreDismissIf,
+  containInnerScroll = false,
   'aria-label': ariaLabel,
 }: {
   open: boolean;
@@ -46,6 +47,11 @@ export function ClampedFixedDropdown({
   onDismiss?: () => void;
   /** Targets inside nested portaled panels (still inside this dropdown logically) won't dismiss */
   ignoreDismissIf?: (target: EventTarget | null) => boolean;
+  /**
+   * When true, the panel root does not scroll; children should use a flex column with a
+   * `flex-1 min-h-0 overflow-y-auto` region so headers/footers stay visible inside maxHeight.
+   */
+  containInnerScroll?: boolean;
   'aria-label'?: string;
 }) {
   const [style, setStyle] = useState<CSSProperties>({});
@@ -71,18 +77,29 @@ export function ClampedFixedDropdown({
           ? anchorEl.getBoundingClientRect()
           : undefined;
       const { width: vw, height: vh } = getViewportBounds();
+      const base = computeAnchoredDropdownStyle({
+        triggerRect: rect,
+        verticalAnchorRect:
+          verticalAnchorRect != null ? { top: verticalAnchorRect.top, bottom: verticalAnchorRect.bottom } : undefined,
+        horizontalCenter,
+        viewportWidth: vw,
+        viewportHeight: vh,
+        maxWidthPx,
+        gapPx,
+        align,
+      });
       setStyle(
-        computeAnchoredDropdownStyle({
-          triggerRect: rect,
-          verticalAnchorRect:
-            verticalAnchorRect != null ? { top: verticalAnchorRect.top, bottom: verticalAnchorRect.bottom } : undefined,
-          horizontalCenter,
-          viewportWidth: vw,
-          viewportHeight: vh,
-          maxWidthPx,
-          gapPx,
-          align,
-        }),
+        containInnerScroll
+          ? {
+              ...base,
+              overflow: 'hidden',
+              overflowY: 'hidden',
+              overflowX: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+            }
+          : base,
       );
     };
 
@@ -97,7 +114,7 @@ export function ClampedFixedDropdown({
       window.visualViewport?.removeEventListener('resize', update);
       window.visualViewport?.removeEventListener('scroll', update);
     };
-  }, [horizontalCenter, gapPx, open, align, maxWidthPx, triggerRef, verticalAnchorRef]);
+  }, [horizontalCenter, gapPx, open, align, maxWidthPx, triggerRef, verticalAnchorRef, containInnerScroll]);
 
   if (!open || typeof document === 'undefined') return null;
 

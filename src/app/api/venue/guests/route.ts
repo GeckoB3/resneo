@@ -60,7 +60,7 @@ function shapeGuestListRow(
 
 /**
  * GET /api/venue/guests - paginated guest list (venue staff).
- * Query: search, tags, sort, filter (all|identified|anonymous), segment, date_from, date_to,
+ * Query: search, tags, sort, filter (all|identified|anonymous), segment, segment_tag, date_from, date_to,
  * marketing, last_staff_id, last_service_kind, last_service_id, legacy `status`, page, limit.
  */
 export async function GET(request: NextRequest) {
@@ -91,6 +91,52 @@ export async function GET(request: NextRequest) {
       monthStart,
       params.legacy_status,
     );
+
+    if (params.segment === 'tag' && !params.segment_tag) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_tag: true },
+      });
+    }
+
+    if (params.segment === 'last_staff' && !params.last_staff_id) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_staff: true },
+      });
+    }
+    if (
+      params.segment === 'last_service' &&
+      (!params.last_service_kind || !params.last_service_id)
+    ) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_service: true },
+      });
+    }
+
+    if (params.segment === 'visit' && bounds.from === null && bounds.to === null) {
+      return NextResponse.json({
+        guests: [],
+        total: 0,
+        page,
+        limit,
+        total_count: 0,
+        meta: { segment_needs_visit_dates: true },
+      });
+    }
 
     const buildBaseGuestQuery = () => {
       let query = staff.db
@@ -279,30 +325,6 @@ export async function GET(request: NextRequest) {
         limit,
         total_count: total,
         meta: { upcoming_window_capped: orderedRaw.length > 500 },
-      });
-    }
-
-    if (params.segment === 'last_staff' && !params.last_staff_id) {
-      return NextResponse.json({
-        guests: [],
-        total: 0,
-        page,
-        limit,
-        total_count: 0,
-        meta: { segment_needs_staff: true },
-      });
-    }
-    if (
-      params.segment === 'last_service' &&
-      (!params.last_service_kind || !params.last_service_id)
-    ) {
-      return NextResponse.json({
-        guests: [],
-        total: 0,
-        page,
-        limit,
-        total_count: 0,
-        meta: { segment_needs_service: true },
       });
     }
 

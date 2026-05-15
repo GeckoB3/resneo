@@ -113,6 +113,8 @@ interface DetailsStepProps {
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
   audience?: 'public' | 'staff' | 'staff_walk_in';
   initialDetails?: Partial<GuestDetails>;
+  /** Staff bootstrap from guest-history “Rebook” (session). */
+  initialAppointmentComments?: string;
   submitLabel?: string;
   hideAppointmentRequestField?: boolean;
 }
@@ -136,6 +138,7 @@ export function DetailsStep({
   payAtVenuePaymentRequirement,
   audience = 'public',
   initialDetails,
+  initialAppointmentComments,
   submitLabel,
   hideAppointmentRequestField = false,
 }: DetailsStepProps) {
@@ -165,7 +168,8 @@ export function DetailsStep({
       phone: initialDetails?.phone ?? '',
       dietary_notes: initialDetails?.dietary_notes ?? '',
       occasion: initialDetails?.occasion ?? '',
-      comments_requests: initialDetails?.dietary_notes ?? '',
+      comments_requests:
+        (initialAppointmentComments?.trim() ? initialAppointmentComments : initialDetails?.dietary_notes) ?? '',
       acceptTerms: false,
       marketingConsent: true,
     },

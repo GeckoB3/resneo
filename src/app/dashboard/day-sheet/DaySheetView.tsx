@@ -1519,8 +1519,7 @@ export function DaySheetView({
                                 </>
                               ) : (
                                 <>
-                                  <span className="sm:hidden">Confirm</span>
-                                  <span className="hidden sm:inline">Confirm Booking</span>
+                                  Confirm
                                 </>
                               )}
                             </button>
@@ -1561,6 +1560,8 @@ export function DaySheetView({
                                 setChangeTableBookingId(b.id);
                                 setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
                               } : undefined}
+                              venueStaffBookingModel={bookingModel}
+                              venueStaffEnabledBookingModels={enabledModels}
                             />
                           </div>
                         )}

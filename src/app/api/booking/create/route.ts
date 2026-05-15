@@ -748,6 +748,7 @@ async function handleNonTableBooking(
 
     appointmentEmailExtras = {
       email_variant: 'appointment',
+      booking_model: 'unified_scheduling',
       practitioner_name: (calRow as { name?: string } | null)?.name ?? null,
       appointment_service_name: svcName,
       appointment_price_display: priceDisplay,
@@ -826,6 +827,7 @@ async function handleNonTableBooking(
     const practRow = input.practitioners.find((p) => p.id === practitioner_id);
     appointmentEmailExtras = {
       email_variant: 'appointment',
+      booking_model: 'unified_scheduling',
       practitioner_name: practRow?.name ?? null,
       appointment_service_name: svc?.name ?? null,
       appointment_price_display:

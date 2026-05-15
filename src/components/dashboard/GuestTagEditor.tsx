@@ -20,9 +20,17 @@ export interface GuestTagEditorProps {
   venueId: string;
   onTagsChange: (next: string[]) => Promise<void>;
   disabled?: boolean;
+  /** When the parent already renders a section heading (e.g. Contact detail panel). */
+  hideSectionLabel?: boolean;
 }
 
-export function GuestTagEditor({ tags, venueId: _venueId, onTagsChange, disabled }: GuestTagEditorProps) {
+export function GuestTagEditor({
+  tags,
+  venueId: _venueId,
+  onTagsChange,
+  disabled,
+  hideSectionLabel = false,
+}: GuestTagEditorProps) {
   const [input, setInput] = useState('');
   const [venueTags, setVenueTags] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
@@ -101,7 +109,9 @@ export function GuestTagEditor({ tags, venueId: _venueId, onTagsChange, disabled
 
   return (
     <div ref={wrapRef} className="space-y-1.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Tags</p>
+      {!hideSectionLabel && (
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Tags</p>
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         {tags.map((tag, i) => (
           <span

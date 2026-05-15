@@ -1885,6 +1885,8 @@ export function BookingsDashboard({
           onConfirmBookingAttendance={confirmBookingAttendance}
           onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
           onPrefetchBookingDetail={prefetchBookingDetail}
+          venueStaffBookingModel={primaryBookingModel}
+          venueStaffEnabledBookingModels={enabledModels}
         />
       ) : (
         <div className="space-y-4">
@@ -1936,6 +1938,8 @@ export function BookingsDashboard({
                 onConfirmBookingAttendance={confirmBookingAttendance}
                 onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
                 onPrefetchBookingDetail={prefetchBookingDetail}
+                venueStaffBookingModel={primaryBookingModel}
+                venueStaffEnabledBookingModels={enabledModels}
               />
             </div>
           ))}
@@ -2204,6 +2208,8 @@ function BookingsAccordionList({
   onConfirmBookingAttendance,
   onCancelStaffAttendanceConfirmation,
   onPrefetchBookingDetail,
+  venueStaffBookingModel,
+  venueStaffEnabledBookingModels,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -2231,6 +2237,8 @@ function BookingsAccordionList({
   onConfirmBookingAttendance: (bookingId: string) => void;
   onCancelStaffAttendanceConfirmation: (bookingId: string) => void;
   onPrefetchBookingDetail?: (bookingId: string) => void;
+  venueStaffBookingModel: BookingModel;
+  venueStaffEnabledBookingModels: BookingModel[];
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -2414,8 +2422,7 @@ function BookingsAccordionList({
                               aria-hidden
                             />
                           ) : null}
-                          <span className="sm:hidden">Confirm</span>
-                          <span className="hidden sm:inline">Confirm Booking</span>
+                          Confirm
                         </button>
                       )}
                       {showAttendanceCancel && (
@@ -2496,6 +2503,8 @@ function BookingsAccordionList({
                     onStatusAction={(status) => { onStatusAction(booking, status); }}
                     onDetailUpdated={() => onDetailUpdated(booking.id)}
                     onRequestChangeTable={isTableBooking && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
+                    venueStaffBookingModel={venueStaffBookingModel}
+                    venueStaffEnabledBookingModels={venueStaffEnabledBookingModels}
                   />
                 </div>
               )}

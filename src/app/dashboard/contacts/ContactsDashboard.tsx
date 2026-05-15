@@ -12,10 +12,11 @@ import {
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
-import type { VenueTerminology } from '@/types/booking-models';
-import type { CustomClientFieldDefinition, GuestDetailResponse, GuestListRow } from '@/types/contacts';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import type { CustomClientFieldDefinition, GuestDetailGuest, GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import { CONTACTS_SEGMENT_OPTIONS, CONTACTS_SORT_OPTIONS } from '@/lib/guests/contacts-constants';
 import type { ContactsMarketingFilter, ContactsSegment, LastServiceKind } from '@/lib/guests/guest-contacts-list';
+import { MAX_GUEST_TAG_LENGTH, normaliseSegmentTagFilter } from '@/lib/guests/tags';
 import { formatNextBookingSummary, formatRelativeVisitDate } from '@/lib/guests/contact-formatting';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -28,16 +29,48 @@ import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetai
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { useToast } from '@/components/ui/Toast';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 
 export type { GuestListRow } from '@/types/contacts';
 
-const CONTACT_SHOW_OPTIONS: Array<{ value: 'identified' | 'all' | 'anonymous'; label: string }> = [
-  { value: 'identified', label: 'With contact (CRM)' },
-  { value: 'all', label: 'All except walk-ins' },
-  { value: 'anonymous', label: 'Walk-ins only' },
+function mergeGuestDetailFromSavedGuest(prev: GuestDetailResponse, saved: GuestDetailGuest): GuestDetailResponse {
+  return {
+    ...prev,
+    guest: {
+      ...prev.guest,
+      ...saved,
+      tags: Array.isArray(saved.tags) ? saved.tags : prev.guest.tags,
+    },
+  };
+}
+
+const CONTACT_SHOW_OPTIONS: Array<{ value: 'identified' | 'all' | 'anonymous'; label: string; hint: string }> = [
+  {
+    value: 'identified',
+    label: 'Saved contact details',
+    hint: 'People with a name plus email or phone you can reach.',
+  },
+  {
+    value: 'all',
+    label: 'All identified guests',
+    hint: 'Everyone we can recognise. Anonymous walk-ins stay hidden.',
+  },
+  {
+    value: 'anonymous',
+    label: 'Walk-ins only',
+    hint: 'Guests without saved contact details (useful for reviewing anonymous visits).',
+  },
 ];
+
+const CONTACTS_FILTER_DATE_INPUT_CLASS =
+  'w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
+
+const CONTACTS_FILTER_SELECT_CLASS =
+  'w-full rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
 
 const CONTACTS_TOOLBAR_SUMMARY_STUB: ViewToolbarSummary = {
   total_covers_booked: 0,
@@ -65,6 +98,19 @@ function isoDateToday(): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 }
 
+function contactInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) {
+    const w = parts[0]!;
+    return w.length <= 2 ? w.toUpperCase() : (w.slice(0, 2).toUpperCase());
+  }
+  return `${parts[0]!.charAt(0)}${parts[parts.length - 1]!.charAt(0)}`.toUpperCase();
+}
+
+/** Matches primary dashboard actions (`bg-brand-600` — e.g. New Booking). */
+const CONTACT_AVATAR_CLASSES = 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-100/90';
+
 function ContactRow({
   row: g,
   displayNameStr,
@@ -87,95 +133,138 @@ function ContactRow({
   const nextAppt = formatNextBookingSummary(g.next_booking_date, g.next_booking_time);
   const tags = g.tags ?? [];
   const MAX_TAGS = 3;
+  const initials = contactInitials(displayNameStr);
 
   return (
-      <div className="flex min-h-[2.25rem] min-w-0 items-center gap-1.5 sm:min-h-[2.5rem] sm:gap-2">
-        {/* Checkbox */}
-        <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelected()}
-            aria-label={`Select ${displayNameStr}`}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600"
-          />
-        </div>
-
-        {/* Main info row — wraps naturally */}
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[12px] sm:text-[13px]">
-            {/* Name — always visible, anchors the row */}
-            <span className={`shrink-0 max-w-[10rem] truncate font-semibold text-slate-900 sm:max-w-[13rem] lg:max-w-[10rem] xl:max-w-[13rem] ${isAnonRow ? 'italic text-slate-500' : ''}`}>
-              {displayNameStr}
-            </span>
-
-            {/* Phone — always show if available */}
-            {phone ? (
-              <>
-                <span className="shrink-0 text-slate-300" aria-hidden>·</span>
-                <span className="shrink-0 tabular-nums text-slate-600">{phone}</span>
-              </>
-            ) : null}
-
-            {/* Email — hidden on xs, visible sm+ */}
-            {email ? (
-              <>
-                <span className="hidden shrink-0 text-slate-300 sm:inline" aria-hidden>·</span>
-                <span className="hidden min-w-0 max-w-[12rem] truncate text-slate-500 sm:inline lg:max-w-[9rem] xl:max-w-[12rem]">{email}</span>
-              </>
-            ) : null}
-
-            {/* Separator */}
-            <span className="shrink-0 text-slate-300" aria-hidden>·</span>
-
-            {/* Visits */}
-            <span className="shrink-0 tabular-nums text-slate-600" title={visitsLabel}>
-              {g.visit_count}v
-              {g.no_show_count > 0 ? <span className="ml-0.5 font-medium text-red-500">{` · ${g.no_show_count} NS`}</span> : null}
-            </span>
-
-            {/* Last visit — hidden on xs */}
-            {g.last_visit_date ? (
-              <>
-                <span className="hidden shrink-0 text-slate-300 sm:inline" aria-hidden>·</span>
-                <span className="hidden shrink-0 text-slate-500 sm:inline">{formatRelativeVisitDate(g.last_visit_date)}</span>
-              </>
-            ) : null}
-
-            {/* Next appointment pill — always show if exists */}
-            {nextAppt ? (
-              <Pill variant="info" size="sm" className="shrink-0">
-                {nextAppt}
-              </Pill>
-            ) : null}
-
-            {/* Tags — show up to MAX_TAGS, collapse rest */}
-            {tags.slice(0, MAX_TAGS).map((t) => (
-              <Pill key={t} variant="neutral" size="sm" className="hidden shrink-0 max-w-[7rem] truncate sm:inline-flex">
-                {t}
-              </Pill>
-            ))}
-            {/* On mobile show just first tag if no appt */}
-            {!nextAppt && tags.length > 0 ? (
-              <Pill variant="neutral" size="sm" className="shrink-0 max-w-[7rem] truncate sm:hidden">
-                {tags[0]}
-              </Pill>
-            ) : null}
-            {tags.length > MAX_TAGS ? (
-              <span className="hidden shrink-0 text-[11px] tabular-nums text-slate-400 sm:inline">+{tags.length - MAX_TAGS}</span>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Chevron */}
-        <svg
-          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden
+    <div className="flex min-w-0 items-start gap-2 sm:gap-2.5">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex shrink-0 items-center gap-2"
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelected()}
+          aria-label={`Select ${displayNameStr}`}
+          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+        />
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[10px] font-semibold tracking-tight ${CONTACT_AVATAR_CLASSES}`}
+          aria-hidden
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-        </svg>
+          {initials}
+        </div>
       </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <h3
+              className={`truncate text-sm font-semibold leading-tight text-slate-900 ${
+                isAnonRow ? 'italic text-slate-500' : ''
+              }`}
+            >
+              {displayNameStr}
+            </h3>
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0 text-[11px] leading-tight text-slate-500">
+              {phone ? (
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1 tabular-nums text-slate-600">
+                  <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.163-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+                  </svg>
+                  <span className="truncate">{phone}</span>
+                </span>
+              ) : null}
+              {phone && email ? <span className="hidden text-slate-300 sm:inline" aria-hidden>·</span> : null}
+              {email ? (
+                <span className="inline-flex min-w-0 max-w-[min(100%,14rem)] items-center gap-1 sm:max-w-[18rem]">
+                  <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                  </svg>
+                  <span className="min-w-0 truncate">{email}</span>
+                </span>
+              ) : null}
+              {!phone && !email ? (
+                <span className="text-slate-400">No contact details</span>
+              ) : null}
+            </div>
+          </div>
+          <svg
+            className={`mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? 'rotate-180 text-brand-600' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+            aria-hidden
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </div>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span
+            className="inline-flex items-center rounded-md border border-slate-200/80 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-700"
+            title={visitsLabel}
+          >
+            {g.visit_count} visits
+            {g.no_show_count > 0 ? (
+              <span className="ml-1 font-semibold text-red-600">{g.no_show_count} NS</span>
+            ) : null}
+          </span>
+          {g.last_visit_date ? (
+            <span className="inline-flex items-center rounded-md border border-slate-200/80 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+              {formatRelativeVisitDate(g.last_visit_date)}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-md border border-dashed border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
+              No visits
+            </span>
+          )}
+          {nextAppt ? (
+            <Pill variant="info" size="sm" className="max-w-[11rem] truncate leading-tight">
+              {nextAppt}
+            </Pill>
+          ) : null}
+          {tags.slice(0, MAX_TAGS).map((t) => (
+            <Pill key={t} variant="neutral" size="sm" className="max-w-[6.5rem] truncate leading-tight">
+              {t}
+            </Pill>
+          ))}
+          {tags.length > MAX_TAGS ? (
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500">
+              +{tags.length - MAX_TAGS}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
+}
+
+function ContactsFilterSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-sm ring-1 ring-slate-900/[0.02] sm:p-3.5">
+      <div className="mb-2.5">
+        <h3 className="text-[13px] font-semibold tracking-tight text-slate-900">{title}</h3>
+        {hint ? <p className="mt-1 text-xs leading-relaxed text-slate-600">{hint}</p> : null}
+      </div>
+      <div className="space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function filterChoiceClass(active: boolean): string {
+  return active
+    ? 'border-brand-300 bg-brand-50 text-brand-950 ring-2 ring-brand-200/80 shadow-sm'
+    : 'border-slate-200 bg-slate-50/40 text-slate-800 hover:border-slate-300 hover:bg-white';
 }
 
 function ContactsToolbarOptionPopover({
@@ -183,6 +272,7 @@ function ContactsToolbarOptionPopover({
   triggerRef,
   triggerText,
   panelHeading,
+  panelSubtitle,
   open,
   onDismiss,
   onTriggerClick,
@@ -190,12 +280,16 @@ function ContactsToolbarOptionPopover({
   panelId,
   triggerAriaLabel,
   maxWidthPx = 320,
+  layout = 'compact',
+  footer,
   children,
 }: {
   toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>;
   triggerRef: RefObject<HTMLButtonElement | null>;
   triggerText: string;
   panelHeading: string;
+  /** Shown below the heading when {@link layout} is `rich`. */
+  panelSubtitle?: string;
   open: boolean;
   onDismiss: () => void;
   onTriggerClick: () => void;
@@ -203,6 +297,8 @@ function ContactsToolbarOptionPopover({
   panelId: string;
   triggerAriaLabel: string;
   maxWidthPx?: number;
+  layout?: 'compact' | 'rich';
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const emphasize = open || isDirty;
@@ -239,11 +335,29 @@ function ContactsToolbarOptionPopover({
         maxWidthPx={maxWidthPx}
         id={panelId}
         onDismiss={onDismiss}
+        containInnerScroll={layout === 'rich'}
         aria-label={panelHeading}
-        className="animate-fade-in z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+        className={`animate-fade-in z-50 rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 ${
+          layout === 'rich' ? 'min-h-0 overflow-hidden p-0' : 'overflow-hidden p-1.5'
+        }`}
       >
-        <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{panelHeading}</p>
-        <div className="space-y-0.5">{children}</div>
+        {layout === 'rich' ? (
+          <>
+            <div className="shrink-0 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white px-4 py-3 sm:px-4">
+              <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">{panelHeading}</h2>
+              {panelSubtitle ? <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{panelSubtitle}</p> : null}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 pb-4 sm:px-4">{children}</div>
+            {footer ? (
+              <div className="shrink-0 border-t border-slate-100 bg-slate-50/90 px-3 py-3 sm:px-4">{footer}</div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{panelHeading}</p>
+            <div className="space-y-0.5">{children}</div>
+          </>
+        )}
       </ClampedFixedDropdown>
     </div>
   );
@@ -252,17 +366,25 @@ function ContactsToolbarOptionPopover({
 export function ContactsDashboard({
   venueId,
   currency,
+  tableManagementEnabled,
   terminology,
   appointmentDashboardExperience,
   isAdmin,
   usesUnifiedServices,
+  venueBookingModel,
+  venueEnabledBookingModels,
+  venueTimezone,
 }: {
   venueId: string;
   currency: string;
+  tableManagementEnabled: boolean;
   terminology: VenueTerminology;
   appointmentDashboardExperience: boolean;
   isAdmin: boolean;
   usesUnifiedServices: boolean;
+  venueBookingModel: BookingModel;
+  venueEnabledBookingModels: BookingModel[];
+  venueTimezone: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -272,7 +394,6 @@ export function ContactsDashboard({
   const clientLower = clientWord.toLowerCase();
   const bookingWord = terminology.booking;
   const visitsLabel = isAppointment ? `${bookingWord}s (lifecycle)` : 'Visits';
-  const currencySymbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '£';
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -280,6 +401,7 @@ export function ContactsDashboard({
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<'identified' | 'all' | 'anonymous'>('identified');
   const [segment, setSegment] = useState<ContactsSegment>('all');
+  const [segmentTag, setSegmentTag] = useState('');
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [marketing, setMarketing] = useState<ContactsMarketingFilter>('subscribed');
@@ -307,6 +429,11 @@ export function ContactsDashboard({
   const [eraseLoadingId, setEraseLoadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
+    bookingId: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -315,6 +442,11 @@ export function ContactsDashboard({
   const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
   const pageSizeTriggerRef = useRef<HTMLButtonElement>(null);
   const contactsToolbarPanelsId = useId();
+  const segmentTagDatalistId = useId();
+
+  const normalisedSegmentTagFilter = useMemo(() => normaliseSegmentTagFilter(segmentTag), [segmentTag]);
+  const tagSegmentNeedsInput = segment === 'tag' && !normalisedSegmentTagFilter;
+  const visitSegmentNeedsDates = segment === 'visit' && !dateFrom && !dateTo;
 
   useEffect(() => {
     try {
@@ -384,7 +516,20 @@ export function ContactsDashboard({
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [page, limit, debouncedSearch, filter, segment, tagFilter, dateFrom, dateTo, marketing, lastStaffId, lastServiceId]);
+  }, [
+    page,
+    limit,
+    debouncedSearch,
+    filter,
+    segment,
+    segmentTag,
+    tagFilter,
+    dateFrom,
+    dateTo,
+    marketing,
+    lastStaffId,
+    lastServiceId,
+  ]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -421,6 +566,9 @@ export function ContactsDashboard({
         params.set('last_service_kind', lastServiceKind);
         params.set('last_service_id', lastServiceId);
       }
+      if (segment === 'tag' && normalisedSegmentTagFilter) {
+        params.set('segment_tag', normalisedSegmentTagFilter);
+      }
       const res = await fetch(`/api/venue/guests?${params}`);
       const data = (await res.json()) as {
         guests?: GuestListRow[];
@@ -452,6 +600,7 @@ export function ContactsDashboard({
     lastStaffId,
     lastServiceId,
     lastServiceKind,
+    normalisedSegmentTagFilter,
   ]);
 
   useEffect(() => {
@@ -595,8 +744,8 @@ export function ContactsDashboard({
     setPage(0);
   }, []);
 
-  const onSaveGuestDetails = useCallback(async () => {
-    if (!detail) return;
+  const onSaveGuestDetails = useCallback(async (): Promise<boolean> => {
+    if (!detail) return false;
     setEditSaving(true);
     setEditError(null);
     try {
@@ -610,14 +759,25 @@ export function ContactsDashboard({
           phone: editPhone.trim(),
         }),
       });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      const j = (await res.json().catch(() => ({}))) as { error?: string; guest?: GuestDetailGuest };
       if (!res.ok) {
         throw new Error(typeof j.error === 'string' ? j.error : 'Save failed');
       }
-      await loadDetail(detail.guest.id);
+      if (!j.guest || j.guest.id !== detail.guest.id) {
+        console.error('PATCH /api/venue/guests/[id] returned unexpected guest payload');
+        await loadDetail(detail.guest.id);
+      } else {
+        setDetail((prev) => (prev && prev.guest.id === j.guest!.id ? mergeGuestDetailFromSavedGuest(prev, j.guest!) : prev));
+        setEditFirstName(j.guest.first_name ?? '');
+        setEditLastName(j.guest.last_name ?? '');
+        setEditEmail(j.guest.email ?? '');
+        setEditPhone(j.guest.phone ?? '');
+      }
       await loadList();
+      return true;
     } catch (e) {
       setEditError(e instanceof Error ? e.message : 'Save failed');
+      return false;
     } finally {
       setEditSaving(false);
     }
@@ -651,6 +811,9 @@ export function ContactsDashboard({
         if (segment === 'last_service' && lastServiceId) {
           params.set('last_service_kind', lastServiceKind);
           params.set('last_service_id', lastServiceId);
+        }
+        if (segment === 'tag' && normalisedSegmentTagFilter) {
+          params.set('segment_tag', normalisedSegmentTagFilter);
         }
         const res = await fetch(`/api/venue/guests?${params}`);
         const data = (await res.json()) as { guests?: GuestListRow[]; error?: string };
@@ -724,14 +887,11 @@ export function ContactsDashboard({
     debouncedSearch,
     tagFilter,
     currency,
+    normalisedSegmentTagFilter,
   ]);
 
-  const onEraseGuest = useCallback(
-    async (guestId: string) => {
-      const ok = window.confirm(
-        `Erase personal data for this ${clientLower}? Bookings are kept but contact details are removed. This cannot be undone.`,
-      );
-      if (!ok) return;
+  const eraseGuestData = useCallback(
+    async (guestId: string): Promise<boolean> => {
       setEraseLoadingId(guestId);
       setError(null);
       try {
@@ -747,13 +907,15 @@ export function ContactsDashboard({
         setExpandedGuestId(null);
         setDetail(null);
         await loadList();
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Erase failed');
+        return false;
       } finally {
         setEraseLoadingId(null);
       }
     },
-    [clientLower, loadList],
+    [loadList],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
@@ -774,13 +936,21 @@ export function ContactsDashboard({
   };
 
   const emptyTitle =
-    !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
-      ? `No ${clientLower}s yet`
-      : 'No matches';
+    tagSegmentNeedsInput && !loading
+      ? 'Choose a tag'
+      : visitSegmentNeedsDates && !loading
+        ? 'Choose visit dates'
+        : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
+          ? `No ${clientLower}s yet`
+          : 'No matches';
   const emptyDescription =
-    !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
-      ? `No ${clientLower}s yet. They’ll appear here automatically as ${bookingWord.toLowerCase()}s come in.`
-      : 'No clients match your search. Try another filter or search.';
+    tagSegmentNeedsInput && !loading
+      ? 'Open Filters, choose Filter by tag under Smart lists, then pick a suggestion or type a tag.'
+      : visitSegmentNeedsDates && !loading
+        ? 'Under Smart lists, pick By last visit and set a starting date, an ending date, or both. Only contacts with a last visit in that range are shown.'
+        : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
+          ? `No ${clientLower}s yet. They’ll appear here automatically as ${bookingWord.toLowerCase()}s come in.`
+          : 'No clients match your search. Try another filter or search.';
 
   const toolbarDatePlaceholder = isoDateToday();
 
@@ -800,7 +970,11 @@ export function ContactsDashboard({
         {segment !== 'all' ? (
           <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
             <span className="font-normal text-slate-500">Filter</span>
-            <span>{CONTACTS_SEGMENT_OPTIONS.find((o) => o.value === segment)?.label ?? segment}</span>
+            <span className="max-w-full min-w-0 break-words">
+              {segment === 'tag' && segmentTag.trim()
+                ? `Tag: ${segmentTag.trim()}`
+                : CONTACTS_SEGMENT_OPTIONS.find((o) => o.value === segment)?.label ?? segment}
+            </span>
           </span>
         ) : null}
         {filter !== 'identified' ? (
@@ -827,7 +1001,7 @@ export function ContactsDashboard({
         ) : null}
       </div>
     ),
-    [totalCount, page, totalPages, segment, filter, debouncedSearch, tagFilter.length],
+    [totalCount, page, totalPages, segment, segmentTag, filter, debouncedSearch, tagFilter.length],
   );
 
   const selectRowClass = (selected: boolean) =>
@@ -835,35 +1009,73 @@ export function ContactsDashboard({
       ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200'
       : 'text-slate-800 hover:bg-slate-50';
 
+  const contactsFilterPopoverDirty = useMemo(() => {
+    const scopeDirty = filter !== 'identified';
+    const segmentDirty = segment !== 'all';
+    const datesDirty = Boolean(dateFrom || dateTo);
+    const staffDirty = Boolean(lastStaffId);
+    const serviceDirty = Boolean(lastServiceId);
+    const marketingChoiceDirty = segment === 'marketing' && marketing !== 'subscribed';
+    return scopeDirty || segmentDirty || datesDirty || staffDirty || serviceDirty || marketingChoiceDirty;
+  }, [filter, segment, dateFrom, dateTo, lastStaffId, lastServiceId, marketing]);
+
+  const resetContactsDirectoryFilters = useCallback(() => {
+    setFilter('identified');
+    setSegment('all');
+    setSegmentTag('');
+    setDateFrom(null);
+    setDateTo(null);
+    setLastStaffId(null);
+    setLastServiceId(null);
+    setMarketing('subscribed');
+    setPage(0);
+  }, []);
+
   const contactsToolbarTools = useCallback(
     (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
       <>
         <ContactsToolbarOptionPopover
           toolbarPanelAnchorRef={toolbarPanelAnchorRef}
           triggerRef={filterTriggerRef}
-          triggerText="Filter"
-          panelHeading="Filter contacts"
+          triggerText={contactsFilterPopoverDirty ? 'Filters (active)' : 'Filters'}
+          panelHeading="Filters"
+          panelSubtitle="Choose who appears in the list first, then optionally narrow further with a smart list or dates. Results update as soon as you tap an option."
+          layout="rich"
           open={filterPopoverKind === 'filter'}
           onDismiss={() => setFilterPopoverKind('none')}
           onTriggerClick={() =>
             setFilterPopoverKind((k) => (k === 'filter' ? 'none' : 'filter'))
           }
-          isDirty={
-            filter !== 'identified' ||
-            segment !== 'all' ||
-            Boolean(dateFrom) ||
-            Boolean(dateTo)
-          }
+          isDirty={contactsFilterPopoverDirty}
           panelId={`${contactsToolbarPanelsId}-filter`}
-          triggerAriaLabel="Filter contacts directory"
-          maxWidthPx={400}
+          triggerAriaLabel="Open directory filters"
+          maxWidthPx={440}
+          footer={
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                disabled={!contactsFilterPopoverDirty}
+                onClick={() => resetContactsDirectoryFilters()}
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+              >
+                Clear filters
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterPopoverKind('none')}
+                className="min-h-10 w-full rounded-lg bg-brand-600 px-4 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-brand-700 sm:w-auto"
+              >
+                Done
+              </button>
+            </div>
+          }
         >
-          <div className="max-h-[70vh] space-y-3 overflow-y-auto px-0.5 pb-1">
-            <div>
-              <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Directory scope
-              </p>
-              <div role="radiogroup" aria-label="List scope" className="space-y-0.5">
+          <div className="space-y-3">
+            <ContactsFilterSection
+              title="Who to include"
+              hint="Start here. This controls whether walk-ins appear alongside people you can message."
+            >
+              <div role="radiogroup" aria-label="Who to include" className="space-y-2">
                 {CONTACT_SHOW_OPTIONS.map((o) => (
                   <button
                     key={o.value}
@@ -874,19 +1086,20 @@ export function ContactsDashboard({
                       setFilter(o.value);
                       setPage(0);
                     }}
-                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(filter === o.value)}`}
+                    className={`flex w-full flex-col rounded-xl border px-3 py-2 text-left transition-colors ${filterChoiceClass(filter === o.value)}`}
                   >
-                    {o.label}
+                    <span className="text-sm font-semibold">{o.label}</span>
+                    <span className="mt-0.5 text-[11px] font-normal leading-snug text-slate-600">{o.hint}</span>
                   </button>
                 ))}
               </div>
-            </div>
+            </ContactsFilterSection>
 
-            <div className="border-t border-slate-100 pt-2">
-              <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Rule
-              </p>
-              <div role="radiogroup" aria-label="Contact filter" className="space-y-0.5">
+            <ContactsFilterSection
+              title="Smart lists"
+              hint="Optional extras on top of Who to include. Pick Everyone if you only need the scope above."
+            >
+              <div role="radiogroup" aria-label="Smart list filters" className="space-y-2">
                 {CONTACTS_SEGMENT_OPTIONS.map((o) => (
                   <button
                     key={o.value}
@@ -899,34 +1112,66 @@ export function ContactsDashboard({
                       setPage(0);
                       if (next !== 'last_staff') setLastStaffId(null);
                       if (next !== 'last_service') setLastServiceId(null);
-                      if (next === 'all' || next === 'vip') {
+                      if (next !== 'tag') setSegmentTag('');
+                      if (next === 'all' || next === 'tag') {
                         setDateFrom(null);
                         setDateTo(null);
                       }
                     }}
-                    className={`flex w-full flex-col items-stretch rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(segment === o.value)}`}
+                    className={`flex w-full flex-col rounded-xl border px-3 py-2 text-left transition-colors ${filterChoiceClass(segment === o.value)}`}
                   >
-                    <span>{o.label}</span>
+                    <span className="text-sm font-semibold">{o.label}</span>
                     {o.description ? (
-                      <span className="mt-0.5 text-[11px] font-normal leading-snug text-slate-500">
-                        {o.description}
-                      </span>
+                      <span className="mt-0.5 text-[11px] font-normal leading-snug text-slate-600">{o.description}</span>
                     ) : null}
                   </button>
                 ))}
               </div>
-            </div>
+            </ContactsFilterSection>
+
+            {segment === 'tag' ? (
+              <ContactsFilterSection
+                title="Tag"
+                hint="Suggestions come from tags already used at your venue. You can type any tag; matching ignores capital letters."
+              >
+                <label className="block text-xs font-semibold text-slate-700">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Search tag</span>
+                  <input
+                    type="text"
+                    list={segmentTagDatalistId}
+                    value={segmentTag}
+                    maxLength={MAX_GUEST_TAG_LENGTH}
+                    onChange={(e) => {
+                      setSegmentTag(e.target.value);
+                      setPage(0);
+                    }}
+                    placeholder="e.g. vip, regular"
+                    className={CONTACTS_FILTER_DATE_INPUT_CLASS}
+                    autoComplete="off"
+                  />
+                  <datalist id={segmentTagDatalistId}>
+                    {venueTags.map((t) => (
+                      <option key={t} value={t} />
+                    ))}
+                  </datalist>
+                </label>
+              </ContactsFilterSection>
+            ) : null}
 
             {segment === 'new' || segment === 'upcoming' || segment === 'visit' ? (
-              <div className="border-t border-slate-100 pt-2">
-                <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Date range
-                </p>
-                <div className="grid grid-cols-2 gap-2 px-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      From
-                    </span>
+              <ContactsFilterSection
+                title="Dates"
+                hint={
+                  segment === 'new'
+                    ? 'Leave both blank to include anyone added from the start of this month through today.'
+                    : segment === 'upcoming'
+                      ? 'Leave both blank to search from today up to one year ahead.'
+                      : 'Set at least one date. We only include contacts whose last visit falls in this range (through today).'
+                }
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Starting</span>
                     <input
                       type="date"
                       value={dateFrom ?? ''}
@@ -934,13 +1179,11 @@ export function ContactsDashboard({
                         setDateFrom(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      To
-                    </span>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Ending</span>
                     <input
                       type="date"
                       value={dateTo ?? ''}
@@ -948,26 +1191,19 @@ export function ContactsDashboard({
                         setDateTo(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
                 </div>
-                <p className="mt-1.5 px-2 text-[11px] leading-snug text-slate-500">
-                  {segment === 'new'
-                    ? 'Leave blank to use this calendar month through today.'
-                    : segment === 'upcoming'
-                      ? 'Leave blank to use today through one year ahead.'
-                      : 'Match last visit date. Leave both blank to include all contacts (no visit filter).'}
-                </p>
-              </div>
+              </ContactsFilterSection>
             ) : null}
 
             {segment === 'marketing' ? (
-              <div className="border-t border-slate-100 pt-2">
-                <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Consent
-                </p>
-                <div role="radiogroup" aria-label="Marketing consent" className="space-y-0.5 px-0.5">
+              <ContactsFilterSection
+                title="Marketing consent"
+                hint="Choose whether they are currently subscribed. Dates below look at when consent was recorded."
+              >
+                <div role="radiogroup" aria-label="Marketing consent" className="space-y-2">
                   <button
                     type="button"
                     role="radio"
@@ -976,9 +1212,12 @@ export function ContactsDashboard({
                       setMarketing('subscribed');
                       setPage(0);
                     }}
-                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(marketing === 'subscribed')}`}
+                    className={`flex w-full flex-col rounded-xl border px-3 py-2 text-left transition-colors ${filterChoiceClass(marketing === 'subscribed')}`}
                   >
-                    Subscribed
+                    <span className="text-sm font-semibold">Subscribed</span>
+                    <span className="mt-0.5 text-[11px] leading-snug text-slate-600">
+                      Happy to hear from you by email or SMS where the venue allows it.
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -988,19 +1227,20 @@ export function ContactsDashboard({
                       setMarketing('not_subscribed');
                       setPage(0);
                     }}
-                    className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-semibold ${selectRowClass(marketing === 'not_subscribed')}`}
+                    className={`flex w-full flex-col rounded-xl border px-3 py-2 text-left transition-colors ${filterChoiceClass(marketing === 'not_subscribed')}`}
                   >
-                    Not subscribed
+                    <span className="text-sm font-semibold">Not subscribed</span>
+                    <span className="mt-0.5 text-[11px] leading-snug text-slate-600">
+                      Opted out or never gave marketing permission.
+                    </span>
                   </button>
                 </div>
-                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Consent recorded (optional)
+                <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  When consent was saved (optional)
                 </p>
-                <div className="grid grid-cols-2 gap-2 px-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      From
-                    </span>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Starting</span>
                     <input
                       type="date"
                       value={dateFrom ?? ''}
@@ -1008,13 +1248,11 @@ export function ContactsDashboard({
                         setDateFrom(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      To
-                    </span>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Ending</span>
                     <input
                       type="date"
                       value={dateTo ?? ''}
@@ -1022,28 +1260,29 @@ export function ContactsDashboard({
                         setDateTo(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
                 </div>
-              </div>
+              </ContactsFilterSection>
             ) : null}
 
             {segment === 'last_staff' ? (
-              <div className="border-t border-slate-100 pt-2">
-                <label className="block px-2">
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Staff column
-                  </span>
+              <ContactsFilterSection
+                title="Staff member"
+                hint="We match their most recent booking that is still on the calendar. Narrow dates if you only care about visits in a certain window."
+              >
+                <label className="block text-xs font-semibold text-slate-700">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Team member</span>
                   <select
                     value={lastStaffId ?? ''}
                     onChange={(e) => {
                       setLastStaffId(e.target.value ? e.target.value : null);
                       setPage(0);
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm"
+                    className={CONTACTS_FILTER_SELECT_CLASS}
                   >
-                    <option value="">Select…</option>
+                    <option value="">Choose someone…</option>
                     {rosterStaff.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -1051,14 +1290,12 @@ export function ContactsDashboard({
                     ))}
                   </select>
                 </label>
-                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Last appointment date (optional)
+                <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Booking date (optional)
                 </p>
-                <div className="grid grid-cols-2 gap-2 px-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      From
-                    </span>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Starting</span>
                     <input
                       type="date"
                       value={dateFrom ?? ''}
@@ -1066,13 +1303,11 @@ export function ContactsDashboard({
                         setDateFrom(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      To
-                    </span>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Ending</span>
                     <input
                       type="date"
                       value={dateTo ?? ''}
@@ -1080,28 +1315,29 @@ export function ContactsDashboard({
                         setDateTo(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
                 </div>
-              </div>
+              </ContactsFilterSection>
             ) : null}
 
             {segment === 'last_service' ? (
-              <div className="border-t border-slate-100 pt-2">
-                <label className="block px-2">
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Service
-                  </span>
+              <ContactsFilterSection
+                title="Service"
+                hint="Find people whose latest booking included this service. Add booking dates if you need a tighter window."
+              >
+                <label className="block text-xs font-semibold text-slate-700">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Service name</span>
                   <select
                     value={lastServiceId ?? ''}
                     onChange={(e) => {
                       setLastServiceId(e.target.value ? e.target.value : null);
                       setPage(0);
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm"
+                    className={CONTACTS_FILTER_SELECT_CLASS}
                   >
-                    <option value="">Select…</option>
+                    <option value="">Choose a service…</option>
                     {venueServices.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
@@ -1109,14 +1345,12 @@ export function ContactsDashboard({
                     ))}
                   </select>
                 </label>
-                <p className="mb-1.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Last appointment date (optional)
+                <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Booking date (optional)
                 </p>
-                <div className="grid grid-cols-2 gap-2 px-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      From
-                    </span>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Starting</span>
                     <input
                       type="date"
                       value={dateFrom ?? ''}
@@ -1124,13 +1358,11 @@ export function ContactsDashboard({
                         setDateFrom(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
-                  <label className="block text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      To
-                    </span>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Ending</span>
                     <input
                       type="date"
                       value={dateTo ?? ''}
@@ -1138,11 +1370,11 @@ export function ContactsDashboard({
                         setDateTo(e.target.value ? e.target.value : null);
                         setPage(0);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                      className={CONTACTS_FILTER_DATE_INPUT_CLASS}
                     />
                   </label>
                 </div>
-              </div>
+              </ContactsFilterSection>
             ) : null}
           </div>
         </ContactsToolbarOptionPopover>
@@ -1234,6 +1466,11 @@ export function ContactsDashboard({
       lastServiceId,
       rosterStaff,
       venueServices,
+      venueTags,
+      segmentTag,
+      segmentTagDatalistId,
+      contactsFilterPopoverDirty,
+      resetContactsDirectoryFilters,
     ],
   );
 
@@ -1315,21 +1552,25 @@ export function ContactsDashboard({
         </div>
 
         <SectionCard elevated className="min-w-0">
-          <SectionCard.Header eyebrow="Directory" title={`${clientWord} list`} />
+          <SectionCard.Header
+            eyebrow="Directory"
+            title={`${clientWord} list`}
+            description={`Tap a row to open the full profile. Bulk actions apply to checked ${clientLower}s on this page.`}
+          />
           <SectionCard.Body className="min-w-0 space-y-6">
           {venueTags.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by tags</p>
+            <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50/40 to-slate-50/80 p-4 shadow-sm ring-1 ring-slate-900/[0.03]">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Filter by tags</p>
               <div className="flex flex-wrap gap-2">
                 {venueTags.map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => toggleTagFilter(t)}
-                    className={`min-h-10 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`min-h-10 rounded-full px-3.5 py-2 text-sm font-medium shadow-sm transition-all ${
                       tagFilter.includes(t)
-                        ? 'bg-brand-600 text-white'
-                        : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+                        ? 'bg-brand-600 text-white shadow-md ring-2 ring-brand-400/35'
+                        : 'bg-white text-slate-600 ring-1 ring-slate-200/90 hover:bg-slate-50 hover:ring-slate-300'
                     }`}
                   >
                     {t}
@@ -1382,30 +1623,32 @@ export function ContactsDashboard({
           ) : (
             <div className="space-y-3">
               {/* Select-all bar */}
-              <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-1.5">
-                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200/90 bg-white/95 px-4 py-3 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.03] backdrop-blur-sm">
+                <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-medium text-slate-600 hover:text-slate-900">
                   <input
                     type="checkbox"
                     checked={guests.length > 0 && guests.every((g) => selectedIds.includes(g.id))}
                     onChange={() => togglePageSelection()}
                     aria-label="Select all on this page"
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                   />
-                  Select all
+                  Select all on page
                 </label>
-                <span className="text-[11px] font-medium text-slate-400">{guests.length} {guests.length === 1 ? clientLower : `${clientLower}s`}</span>
+                <span className="text-xs font-semibold tabular-nums text-slate-400">
+                  {guests.length} {guests.length === 1 ? clientLower : `${clientLower}s`}
+                </span>
               </div>
 
-              <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3" role="list" aria-label={`${clientWord} directory`}>
+              <div
+                className="flex flex-col gap-2 rounded-2xl bg-gradient-to-b from-slate-100/90 via-slate-50/50 to-white p-1.5 shadow-inner shadow-slate-900/[0.05] ring-1 ring-inset ring-slate-200/70 sm:gap-2.5 sm:p-2"
+                role="list"
+                aria-label={`${clientWord} directory`}
+              >
                 {guests.map((g) => {
                   const isAnonRow = filter === 'anonymous' || g.identifiability_tier === 'anonymous';
                   const expanded = expandedGuestId === g.id;
                   return (
-                    <div
-                      key={g.id}
-                      role="listitem"
-                      className="min-w-0"
-                    >
+                    <div key={g.id} role="listitem" className="min-w-0">
                       <div
                         role="button"
                         tabIndex={0}
@@ -1418,12 +1661,27 @@ export function ContactsDashboard({
                             toggleContactExpand(g.id);
                           }
                         }}
-                        className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 sm:px-3 sm:py-2 ${
+                        className={`group/contact relative cursor-pointer overflow-hidden rounded-xl border px-2.5 py-2 pl-3 shadow-sm shadow-slate-900/[0.04] transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 sm:px-3 sm:py-2 sm:pl-4 ${
+                          selectedIds.includes(g.id)
+                            ? 'border-brand-200 bg-gradient-to-br from-brand-50/90 via-white to-white'
+                            : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-md hover:shadow-slate-900/[0.06]'
+                        } ${
                           expanded
-                            ? 'border-brand-200 bg-brand-50/50 shadow-md ring-brand-900/12'
-                            : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'
+                            ? 'border-brand-300 ring-2 ring-brand-500/20 shadow-md shadow-brand-900/[0.05]'
+                            : ''
                         }`}
                       >
+                        {!expanded ? (
+                          <div
+                            className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-full bg-gradient-to-b from-brand-500 to-brand-600 opacity-0 transition-opacity duration-200 group-hover/contact:opacity-50"
+                            aria-hidden
+                          />
+                        ) : (
+                          <div
+                            className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-full bg-brand-600 opacity-100"
+                            aria-hidden
+                          />
+                        )}
                         <ContactRow
                           row={g}
                           displayNameStr={displayName(g)}
@@ -1434,13 +1692,14 @@ export function ContactsDashboard({
                           onToggleSelected={() => toggleSelected(g.id)}
                         />
                         {expanded ? (
-                          <div className="border-t border-slate-100/95 bg-slate-50/30">
+                          <div className="mt-3 border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white pt-2">
                             <ContactDetailPanel
                               id={`contact-expand-${g.id}`}
                               clientLower={clientLower}
                               bookingWord={bookingWord}
-                              currencySymbol={currencySymbol}
                               venueId={venueId}
+                              venueCurrency={currency}
+                              tableManagementEnabled={tableManagementEnabled}
                               isAdmin={isAdmin}
                               listRow={g}
                               selectedId={g.id}
@@ -1460,8 +1719,18 @@ export function ContactsDashboard({
                               loadDetail={loadDetail}
                               loadList={loadList}
                               eraseLoadingId={eraseLoadingId}
-                              onEraseGuest={onEraseGuest}
+                              onEraseGuest={eraseGuestData}
                               onOpenMerge={isAdmin ? () => setMergeOpen(true) : undefined}
+                              venueStaffBookingModel={venueBookingModel}
+                              venueStaffEnabledBookingModels={venueEnabledBookingModels}
+                              venueTimezone={venueTimezone}
+                              onOpenRelatedGuestBooking={(payload) => {
+                                setRelatedGuestHistoryBooking({
+                                  bookingId: payload.bookingId,
+                                  snapshot: payload.snapshot,
+                                  isAppointment: !isTableReservationBooking(payload.row),
+                                });
+                              }}
                             />
                           </div>
                         ) : null}
@@ -1471,16 +1740,18 @@ export function ContactsDashboard({
                 })}
               </div>
 
-              <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                <span className="text-[13px]">
-                  Page {page + 1} of {totalPages} · {totalCount} total
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <span className="text-sm font-medium tabular-nums text-slate-600">
+                  Page {page + 1} of {totalPages}
+                  <span className="mx-2 text-slate-300">·</span>
+                  <span className="text-slate-500">{totalCount} total</span>
                 </span>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     disabled={page <= 0}
                     onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    className="min-h-9 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
+                    className="min-h-10 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-40 sm:flex-none"
                   >
                     Previous
                   </button>
@@ -1488,7 +1759,7 @@ export function ContactsDashboard({
                     type="button"
                     disabled={page >= totalPages - 1}
                     onClick={() => setPage((p) => p + 1)}
-                    className="min-h-9 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
+                    className="min-h-10 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-40 sm:flex-none"
                   >
                     Next
                   </button>
@@ -1518,11 +1789,32 @@ export function ContactsDashboard({
       {mergeOpen && expandedGuestId && isAdmin ? (
         <MergeContactsModal
           targetGuestId={expandedGuestId}
+          clientLower={clientLower}
           onClose={() => setMergeOpen(false)}
           onMerged={() => {
             void loadDetail(expandedGuestId);
             void loadList();
             setMergeOpen(false);
+          }}
+        />
+      ) : null}
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={currency}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="popover"
+          anchor={null}
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            if (expandedGuestId) void loadDetail(expandedGuestId);
+            void loadList();
           }}
         />
       ) : null}

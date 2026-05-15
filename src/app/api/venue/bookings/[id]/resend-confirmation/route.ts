@@ -22,7 +22,7 @@ export async function POST(
 
   const { data: booking } = await admin
     .from('bookings')
-    .select('id, venue_id, guest_id, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, deposit_status, dietary_notes, special_requests')
+    .select('id, venue_id, guest_id, booking_model, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, deposit_status, dietary_notes, special_requests')
     .eq('id', id)
     .eq('venue_id', staff.venue_id)
     .maybeSingle();
@@ -72,6 +72,7 @@ export async function POST(
     deposit_amount_pence: booking.deposit_amount_pence ?? null,
     deposit_status: booking.deposit_status ?? null,
     manage_booking_link: manageBookingLink,
+    booking_model: booking.booking_model,
   };
   const enriched = await enrichBookingEmailForComms(admin, booking.id, basePayload);
   await sendBookingConfirmationNotifications(

@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         const { data: bRow } = await supabase
           .from('bookings')
           .select(
-            'id, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, source, guest_email',
+            'id, booking_model, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, source, guest_email',
           )
           .eq('id', bid)
           .maybeSingle();
@@ -185,6 +185,7 @@ export async function POST(request: NextRequest) {
           deposit_status: 'Paid' as const,
           refund_cutoff: bRow.cancellation_deadline ?? null,
           manage_booking_link: manageBookingLink,
+          booking_model: bRow.booking_model,
         };
 
         try {

@@ -302,6 +302,7 @@ export function WalkInModal({
     bookingTime,
     coverDurationDirty,
     coverDurationMinutes,
+    diningAreas.length,
     floorPlanViewAreaId,
     partySize,
     walkInSuggestInputKey,

@@ -18,6 +18,7 @@ import {
 } from '@/lib/booking/staff-booking-modal-options';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { BookingModel } from '@/types/booking-models';
+import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 
 export function staffSurfaceBookingWidthClass(
   surfaceTabs: StaffBookingSurfaceTab[],
@@ -53,10 +54,29 @@ export interface StaffSurfaceBookingStackProps {
   onActiveTabChange?: (id: StaffBookingSurfaceTabId) => void;
   /** Day sheet: show remaining covers banner on the table walk-in tab. */
   walkInRemainingCapacity?: number | null;
+  /** One-shot payload from guest history “Rebook” (session cleared by the new-booking page). */
+  staffRebookBootstrap?: StaffRebookBootstrapPayloadV1 | null;
+  /**
+   * First tab to show when the stack mounts — only applied if {@link StaffBookingSurfaceTabId}
+   * is exposed for this venue (e.g. calendar empty-slot flows prefer Appointment over Table default).
+   */
+  initialStaffSurfaceTabId?: StaffBookingSurfaceTabId;
 }
 
 function staffSurfacePropsKey(bookingModel: BookingModel, enabledModels: BookingModel[]): string {
   return `${bookingModel}:${[...enabledModels].sort().join(',')}`;
+}
+
+function resolveInitialStaffSurfaceTab(
+  bookingModel: BookingModel,
+  enabledModels: BookingModel[],
+  preferredTabId?: StaffBookingSurfaceTabId,
+): StaffBookingSurfaceTabId {
+  const tabs = getStaffBookingSurfaceTabs(bookingModel, enabledModels);
+  if (preferredTabId && tabs.some((t) => t.id === preferredTabId)) {
+    return preferredTabId;
+  }
+  return defaultStaffBookingSurfaceTab(bookingModel, enabledModels);
 }
 
 /**
@@ -84,6 +104,8 @@ function StaffSurfaceBookingStackInner({
   activeTab: controlledActiveTab,
   onActiveTabChange,
   walkInRemainingCapacity,
+  staffRebookBootstrap = null,
+  initialStaffSurfaceTabId,
 }: StaffSurfaceBookingStackProps) {
   const surfaceTabs = useMemo(
     () => getStaffBookingSurfaceTabs(bookingModel, enabledModels),
@@ -94,7 +116,7 @@ function StaffSurfaceBookingStackInner({
     typeof controlledActiveTab !== 'undefined' && typeof onActiveTabChange === 'function';
 
   const [internalTab, setInternalTab] = useState<StaffBookingSurfaceTabId>(() =>
-    defaultStaffBookingSurfaceTab(bookingModel, enabledModels),
+    resolveInitialStaffSurfaceTab(bookingModel, enabledModels, initialStaffSurfaceTabId),
   );
 
   const activeTab = isControlled ? controlledActiveTab! : internalTab;
@@ -185,6 +207,7 @@ function StaffSurfaceBookingStackInner({
             initialTime={initialTime}
             onCreated={onCreated}
             onClose={onClose}
+            staffRebookBootstrap={activeTab === 'table_reservation' ? staffRebookBootstrap : null}
           />
         );
       case 'unified_scheduling':
@@ -198,6 +221,7 @@ function StaffSurfaceBookingStackInner({
             initialDate={initialDate}
             initialTime={initialTime}
             preselectedPractitionerId={preselectedPractitionerId}
+            staffRebookBootstrap={activeTab === 'unified_scheduling' ? staffRebookBootstrap : null}
           />
         );
       case 'event_ticket':

@@ -208,42 +208,6 @@ export function PractitionerCalendarToolbar({
     </div>
   );
 
-  const timeRangePanel = (
-    <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Visible time range</p>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">From</span>
-          <select
-            value={startHour}
-            onChange={(e) => onTimeRangeChange(Number(e.target.value), endHour)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          >
-            {Array.from({ length: 23 }, (_, h) => h).map((h) => (
-              <option key={h} value={h} disabled={h >= endHour}>
-                {String(h).padStart(2, '0')}:00
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">Until</span>
-          <select
-            value={endHour}
-            onChange={(e) => onTimeRangeChange(startHour, Number(e.target.value))}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          >
-            {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
-              <option key={h} value={h} disabled={h <= startHour}>
-                {String(h).padStart(2, '0')}:00
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-    </div>
-  );
-
   return (
     <OperationsWorkspaceToolbar
       title="Calendar"
@@ -260,8 +224,6 @@ export function PractitionerCalendarToolbar({
       onNewBooking={onNewBooking}
       onWalkIn={onWalkIn}
       datePickerPanel={datePickerPanel}
-      timelinePanel={timeRangePanel}
-      timelineLabel={`${String(startHour).padStart(2, '0')}:00-${String(endHour).padStart(2, '0')}:00`}
       controlsPanel={controlsPanel}
       controlsLabel={controlsLabel}
       compact

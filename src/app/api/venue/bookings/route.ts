@@ -38,6 +38,7 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import type { BookingModel } from '@/types/booking-models';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import {
   isGuestBookingDateAllowed,
@@ -880,8 +881,18 @@ export async function POST(request: NextRequest) {
         }
       }
       const practRow = appointmentInput.practitioners.find((p) => p.id === practitioner_id);
+
+      /** Same storage as public POST /api/booking/create: USE rows use service_items + unified_calendars, not appointment_services. */
+      const useUnifiedAppointmentStorage =
+        venueMode.bookingModel === 'unified_scheduling' ||
+        venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
+      const appointmentBookingModel: BookingModel = useUnifiedAppointmentStorage
+        ? 'unified_scheduling'
+        : 'practitioner_appointment';
+
       const apptEmailExtras = {
         email_variant: 'appointment' as const,
+        booking_model: appointmentBookingModel,
         practitioner_name: practRow?.name ?? null,
         appointment_service_name: svc?.name ?? null,
         appointment_price_display:
@@ -898,11 +909,6 @@ export async function POST(request: NextRequest) {
       endDate.setMinutes(endDate.getMinutes() + durationMins);
       const estimatedEndTime = endDate.toISOString();
       const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;
-
-      /** Same storage as public POST /api/booking/create: USE rows use service_items + unified_calendars, not appointment_services. */
-      const useUnifiedAppointmentStorage =
-        venueMode.bookingModel === 'unified_scheduling' ||
-        venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
 
       const refundWindowHoursAppt = await resolveCancellationNoticeHoursForCreate({
         supabase: admin,
@@ -942,9 +948,7 @@ export async function POST(request: NextRequest) {
         booking_end_time: bookingEndTime,
         party_size: 1,
         /** Must not rely on DB default `table_reservation` — that requires area_id for multi-area venues. */
-        booking_model: useUnifiedAppointmentStorage
-          ? 'unified_scheduling'
-          : 'practitioner_appointment',
+        booking_model: appointmentBookingModel,
         status: requiresDeposit ? 'Pending' : 'Booked',
         source: bookingSource,
         created_by_staff_id: staff.id,
@@ -1018,6 +1022,7 @@ export async function POST(request: NextRequest) {
           guest_phone: guest.phone ?? null,
           booking_date,
           booking_time,
+          booking_model: appointmentBookingModel,
           party_size: 1,
           special_requests: special_requests ?? null,
           dietary_notes: dietary_notes ?? null,

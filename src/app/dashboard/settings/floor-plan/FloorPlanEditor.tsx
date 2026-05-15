@@ -1683,7 +1683,6 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         </p>
         <div className="space-y-1.5">
           {SHAPE_OPTIONS.map(({ shape, label }) => {
-            const isPolygon = shape === 'polygon';
             return (
               <button
                 key={shape}

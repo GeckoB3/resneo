@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
 import { readResponseJson } from '@/lib/http/read-response-json';
-import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
+import { formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
@@ -60,13 +60,6 @@ interface AppointmentService {
   duration_minutes: number;
   price_pence: number | null;
   colour?: string;
-}
-
-interface PractitionerServiceLink {
-  practitioner_id: string;
-  service_id: string;
-  custom_price_pence: number | null;
-  custom_duration_minutes: number | null;
 }
 
 interface StatusFilterOption {
@@ -129,19 +122,6 @@ function formatDateLabel(date: string, mode: ViewMode): string {
 function formatDayHeader(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
-}
-
-function statusLabelForCsv(status: string): string {
-  if (status === 'Seated') return 'Started';
-  if (status === 'No-Show') return 'No show';
-  return status;
-}
-
-function sourceLabelForCsv(source: string): string {
-  if (source === 'booking_page' || source === 'online') return 'Online';
-  if (source === 'walk-in') return 'Walk-in';
-  if (source === 'phone') return 'Phone';
-  return source;
 }
 
 function columnIdForRegistry(b: RegistryAppointment): string | null {
@@ -365,7 +345,6 @@ export function AppointmentBookingsDashboard({
   const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
-  const [practitionerServiceLinks, setPractitionerServiceLinks] = useState<PractitionerServiceLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -385,10 +364,6 @@ export function AppointmentBookingsDashboard({
   const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
-  const [csvModalOpen, setCsvModalOpen] = useState(false);
-  const [csvFrom, setCsvFrom] = useState(todayISO);
-  const [csvTo, setCsvTo] = useState(addDays(todayISO(), 30));
-  const [csvExporting, setCsvExporting] = useState(false);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
@@ -514,33 +489,11 @@ export function AppointmentBookingsDashboard({
   }, [viewMode, anchorDate, customFrom, customTo]);
 
   const invalidCustomRange = viewMode === 'custom' && customFrom > customTo;
-  const invalidCsvRange = csvFrom > csvTo;
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
   const practitionerMap = useMemo(
     () => new Map(practitioners.filter((p) => p.is_active).map((p) => [p.id, p])),
     [practitioners],
-  );
-
-  const linkPriceKey = useMemo(() => {
-    const m = new Map<string, PractitionerServiceLink>();
-    for (const l of practitionerServiceLinks) {
-      m.set(`${l.practitioner_id}:${l.service_id}`, l);
-    }
-    return m;
-  }, [practitionerServiceLinks]);
-
-  const effectivePricePence = useCallback(
-    (b: RegistryAppointment): number | null => {
-      const sid = serviceIdForRegistry(b);
-      if (!sid) return null;
-      const cid = columnIdForRegistry(b);
-      const link = cid ? linkPriceKey.get(`${cid}:${sid}`) : undefined;
-      const svc = serviceMap.get(sid);
-      if (link?.custom_price_pence != null) return link.custom_price_pence;
-      return svc?.price_pence ?? null;
-    },
-    [linkPriceKey, serviceMap],
   );
 
   const fetchBookings = useCallback(
@@ -658,12 +611,10 @@ export function AppointmentBookingsDashboard({
       .then((data) => {
         if (cancelled || !data) return;
         setServices(data.services ?? []);
-        setPractitionerServiceLinks(data.practitioner_services ?? []);
       })
       .catch(() => {
         if (!cancelled) {
           setServices([]);
-          setPractitionerServiceLinks([]);
         }
       });
     return () => {
@@ -913,84 +864,6 @@ export function AppointmentBookingsDashboard({
       const d = new Date(`${anchorDate}T12:00:00`);
       d.setMonth(d.getMonth() + direction);
       setAnchorDate(d.toISOString().slice(0, 10));
-    }
-  };
-
-  const openCsvModal = () => {
-    setCsvFrom(from);
-    setCsvTo(to);
-    setCsvModalOpen(true);
-  };
-
-  const runCsvExport = async () => {
-    if (invalidCsvRange) return;
-    setCsvExporting(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ from: csvFrom, to: csvTo });
-      const res = await fetch(`/api/venue/bookings/list?${params}`);
-      const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
-      if (!res.ok) {
-        setError(data.error ?? 'Failed to load appointments for export');
-        return;
-      }
-      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) =>
-        venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
-      );
-
-      const header = [
-        'Date',
-        'Time',
-        'Type',
-        'Booking ref (full)',
-        'Status',
-        'Source',
-        'Client',
-        'Phone',
-        'Email',
-        'Practitioner',
-        'Service',
-        'Service price',
-        'Deposit status',
-        'Deposit amount',
-        'Customer comments',
-        'Staff notes',
-      ];
-
-      const csvRows = rows.map((b) => {
-        const cid = columnIdForRegistry(b);
-        const sid = serviceIdForRegistry(b);
-        const prac = cid ? practitionerMap.get(cid)?.name ?? '' : '';
-        const svc =
-          b.booking_item_name?.trim() || (sid ? serviceMap.get(sid)?.name ?? '' : '');
-        const price = effectivePricePence(b);
-        return [
-          b.booking_date,
-          b.booking_time.slice(0, 5),
-          bookingModelShortLabel(inferRegistryModel(b)),
-          b.id,
-          statusLabelForCsv(b.status),
-          sourceLabelForCsv(b.source),
-          b.guest_name,
-          b.guest_phone ?? '',
-          b.guest_email ?? '',
-          prac,
-          svc,
-          formatMoneyPence(price, sym),
-          b.deposit_status,
-          b.deposit_amount_pence != null ? formatMoneyPence(b.deposit_amount_pence, sym) : '',
-          b.special_requests?.replace(/\r\n/g, '\n') ?? '',
-          b.internal_notes?.replace(/\r\n/g, '\n') ?? '',
-        ];
-      });
-
-      const csv = buildCsvFromRows(header, csvRows);
-      downloadCsvString(csv, `bookings_${csvFrom}_to_${csvTo}.csv`);
-      setCsvModalOpen(false);
-    } catch {
-      setError('Failed to export CSV');
-    } finally {
-      setCsvExporting(false);
     }
   };
 
@@ -1461,6 +1334,8 @@ export function AppointmentBookingsDashboard({
                 void fetchBookings({ silent: true });
                 void fetchBookingsForStats();
               }}
+              venueStaffBookingModel={primaryBookingModel}
+              venueStaffEnabledBookingModels={enabledModels}
             />
           </div>
         )}
@@ -1836,19 +1711,6 @@ export function AppointmentBookingsDashboard({
         datePickerPanel={appointmentDatePanel}
         searchActive={searchQuery.trim().length > 0}
         searchPanel={appointmentSearchPanel}
-        trailingActions={
-          <button
-            type="button"
-            onClick={openCsvModal}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
-            aria-label="Export appointments"
-          >
-            <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 12 12 16.5m0 0 4.5-4.5M12 16.5V3" />
-            </svg>
-            <span className="hidden sm:inline">Export</span>
-          </button>
-        }
       />
       <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
         <div
@@ -1906,70 +1768,6 @@ export function AppointmentBookingsDashboard({
                 {renderAppointmentCards(dayBookings, { nested: true, showSort: false })}
               </section>
             ))}
-        </div>
-      )}
-
-      {csvModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
-          role="presentation"
-          onClick={() => !csvExporting && setCsvModalOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="csv-export-title"
-            className="max-h-[min(90vh,100dvh)] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6 shadow-2xl sm:rounded-2xl sm:p-6 sm:pb-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="csv-export-title" className="text-lg font-semibold text-slate-900">
-              Export bookings (CSV)
-            </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Choose a date range. All booking statuses are included in the file.
-            </p>
-            <div className="mt-4 flex flex-col gap-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-slate-600">From</span>
-                <input
-                  type="date"
-                  value={csvFrom}
-                  onChange={(e) => setCsvFrom(e.target.value)}
-                  className="min-h-[44px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-slate-600">To</span>
-                <input
-                  type="date"
-                  value={csvTo}
-                  onChange={(e) => setCsvTo(e.target.value)}
-                  className="min-h-[44px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </label>
-              {invalidCsvRange && (
-                <p className="text-sm text-red-600">“From” must be on or before “To”.</p>
-              )}
-            </div>
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                disabled={csvExporting}
-                onClick={() => setCsvModalOpen(false)}
-                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={csvExporting || invalidCsvRange}
-                onClick={() => void runCsvExport()}
-                className="min-h-[44px] rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {csvExporting ? 'Preparing…' : 'Download CSV'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

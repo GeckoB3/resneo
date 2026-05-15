@@ -1,27 +1,26 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
+import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
-import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import type { BookingModel } from '@/types/booking-models';
 import type { GuestDetailResponse, GuestListRow } from '@/types/contacts';
 import {
   formatCalendarDayShort,
   formatNextBookingSummary,
   formatRelativeVisitDate,
 } from '@/lib/guests/contact-formatting';
-import { ContactCustomFieldsSection } from '@/components/dashboard/contacts/ContactCustomFieldsSection';
 import { ContactDocumentsSection } from '@/components/dashboard/contacts/ContactDocumentsSection';
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
-import { ContactTimelineSection } from '@/components/dashboard/contacts/ContactTimelineSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
+import { EraseGuestDataModal } from '@/components/dashboard/contacts/EraseGuestDataModal';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   bookingExpandAccordionBodyClass,
@@ -29,6 +28,16 @@ import {
   bookingExpandAccordionSummaryClass,
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import {
+  EXP_BOOKING_ICO,
+  EXP_BOOKING_NEUTRAL_PROMINENT,
+} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
+import {
+  GuestBookingsForGuestAccordion,
+  type GuestHistoryRelatedBookingPayload,
+} from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 
 const accordionChevron = (
   <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -49,8 +58,9 @@ export function ContactDetailPanel({
   id,
   clientLower,
   bookingWord,
-  currencySymbol,
   venueId,
+  venueCurrency = 'GBP',
+  tableManagementEnabled,
   isAdmin,
   listRow,
   selectedId,
@@ -72,12 +82,17 @@ export function ContactDetailPanel({
   eraseLoadingId,
   onEraseGuest,
   onOpenMerge,
+  venueStaffBookingModel,
+  venueStaffEnabledBookingModels,
+  venueTimezone,
+  onOpenRelatedGuestBooking,
 }: {
   id: string;
   clientLower: string;
   bookingWord: string;
-  currencySymbol: string;
   venueId: string;
+  venueCurrency?: string;
+  tableManagementEnabled: boolean;
   isAdmin: boolean;
   listRow: GuestListRow;
   selectedId: string;
@@ -93,21 +108,102 @@ export function ContactDetailPanel({
   editPhone: string;
   setEditPhone: (v: string) => void;
   editSaving: boolean;
-  onSaveGuestDetails: () => Promise<void>;
+  onSaveGuestDetails: () => Promise<boolean>;
   loadDetail: (guestId: string) => Promise<void>;
   loadList: () => Promise<void>;
   eraseLoadingId: string | null;
-  onEraseGuest: (guestId: string) => Promise<void>;
+  onEraseGuest: (guestId: string) => Promise<boolean>;
   onOpenMerge?: () => void;
+  venueStaffBookingModel: BookingModel;
+  venueStaffEnabledBookingModels: BookingModel[];
+  venueTimezone: string;
+  onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
 }) {
   const { addToast } = useToast();
+  const [newBookingModal, setNewBookingModal] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
+  const [newBookingModalEpoch, setNewBookingModalEpoch] = useState(0);
+
+  const staffNewBookingGuestContacts = useMemo((): StaffRebookGuestPrefill => {
+    const dg = detail?.guest;
+    const matches = Boolean(dg && dg.id === selectedId);
+    if (matches && dg) {
+      return {
+        firstName: dg.first_name ?? undefined,
+        lastName: dg.last_name ?? undefined,
+        email: dg.email,
+        phone: dg.phone,
+      };
+    }
+    return {
+      firstName: listRow.first_name ?? undefined,
+      lastName: listRow.last_name ?? undefined,
+      email: listRow.email,
+      phone: listRow.phone,
+    };
+  }, [
+    detail?.guest,
+    selectedId,
+    listRow.email,
+    listRow.first_name,
+    listRow.last_name,
+    listRow.phone,
+  ]);
+
+  const staffNewBookingDefaultSurfaceTab = useMemo(
+    () => defaultStaffBookingSurfaceTab(venueStaffBookingModel, venueStaffEnabledBookingModels),
+    [venueStaffBookingModel, venueStaffEnabledBookingModels],
+  );
+
+  const handleOpenNewBookingModal = useCallback(() => {
+    setNewBookingModalEpoch((e) => e + 1);
+    setNewBookingModal({
+      v: 1,
+      surface: staffNewBookingDefaultSurfaceTab,
+      guest: staffNewBookingGuestContacts,
+    });
+  }, [staffNewBookingDefaultSurfaceTab, staffNewBookingGuestContacts]);
+
+  const contactRebookGuestPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
+    const guest = detail?.guest;
+    if (!guest || guest.id !== selectedId) return undefined;
+    return {
+      firstName: guest.first_name ?? undefined,
+      lastName: guest.last_name ?? undefined,
+      email: guest.email,
+      phone: guest.phone,
+      customerProfileNotes: guest.customer_profile_notes,
+    };
+  }, [
+    detail?.guest,
+    selectedId,
+  ]);
+
+  const guestBookingsListRefreshKey = useMemo(() => {
+    const guest = detail?.guest;
+    if (!guest || guest.id !== selectedId || !detail) return 0;
+    const s = `${guest.updated_at}|${detail.booking_history.length}|${selectedId}`;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }, [detail, selectedId]);
+
   const [messageChannel, setMessageChannel] = useState<GuestMessageChannel>('both');
   const [messageDraft, setMessageDraft] = useState('');
   const [messageSending, setMessageSending] = useState(false);
+  const [eraseConfirmOpen, setEraseConfirmOpen] = useState(false);
+  const [contactDetailsEditing, setContactDetailsEditing] = useState(false);
+
+  const handleSaveContactDetails = useCallback(async () => {
+    const ok = await onSaveGuestDetails();
+    if (ok) setContactDetailsEditing(false);
+  }, [onSaveGuestDetails]);
 
   useEffect(() => {
     setMessageDraft('');
     setMessageChannel('both');
+    setNewBookingModal(null);
+    setEraseConfirmOpen(false);
+    setContactDetailsEditing(false);
   }, [selectedId]);
 
   if (detailLoading) {
@@ -143,21 +239,21 @@ export function ContactDetailPanel({
   const displayName = isAnonRow ? 'Anonymous' : formatGuestDisplayName(g.first_name, g.last_name);
   const email = g.email?.trim() || null;
   const phone = g.phone?.trim() || null;
+  const savedFirstName = (g.first_name ?? '').trim();
+  const savedLastName = (g.last_name ?? '').trim();
   const tags = g.tags ?? [];
   const nextVisitLabel = formatNextBookingSummary(listRow.next_booking_date, listRow.next_booking_time);
   const lastVisitRelative = g.last_visit_date ? formatRelativeVisitDate(g.last_visit_date) : null;
   const lastVisitCal = formatCalendarDayShort(g.last_visit_date ?? listRow.last_visit_date);
-  const activeFieldCount = (detail.custom_field_definitions ?? []).filter((d) => d.is_active).length;
   const marketingHint =
     g.marketing_opt_out ? 'Opted out' : g.marketing_consent ? 'Subscribed' : 'No consent';
-  const recordSummaryHint =
-    activeFieldCount === 0 ? marketingHint : `${marketingHint} · ${activeFieldCount} field${activeFieldCount === 1 ? '' : 's'}`;
-  const activitySummaryHint = `${detail.booking_history.length} in list`;
+  const recordSummaryHint = marketingHint;
   const inboxSummaryHint =
     `${detail.communications.length} message${detail.communications.length === 1 ? '' : 's'}`
     + (g.customer_profile_notes?.trim() ? ' · note on file' : '');
 
   return (
+    <>
     <div
       id={id}
       className="mt-1.5 flex flex-col gap-2.5 px-0.5 pb-2.5 sm:px-1"
@@ -219,34 +315,98 @@ export function ContactDetailPanel({
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">First name</p>
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-first`}
+                  value={editFirstName}
+                  onChange={(e) => setEditFirstName(e.target.value)}
+                  autoComplete="given-name"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : savedFirstName ? (
+                <p className="mt-0.5 min-h-8 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
+                  {savedFirstName}
+                </p>
+              ) : (
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Surname</p>
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-last`}
+                  value={editLastName}
+                  onChange={(e) => setEditLastName(e.target.value)}
+                  autoComplete="family-name"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : savedLastName ? (
+                <p className="mt-0.5 min-h-8 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
+                  {savedLastName}
+                </p>
+              ) : (
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
-              {email ? (
-                <a href={`mailto:${email}`} className="mt-0.5 block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-email`}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="Not provided"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-900 shadow-sm placeholder:font-normal placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : email ? (
+                <a
+                  href={`mailto:${email}`}
+                  className="mt-0.5 flex min-h-8 items-center hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
                   {email}
                 </a>
               ) : (
-                <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
+                <p className="mt-0.5 min-h-8 text-xs font-bold text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Phone</p>
-              {phone ? (
-                <a href={`tel:${phone}`} className="mt-0.5 block truncate text-xs font-bold text-slate-800 hover:text-brand-700">
+              {contactDetailsEditing ? (
+                <input
+                  id={`${id}-phone`}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Not provided"
+                  className="mt-0.5 min-h-8 w-full rounded-md border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold tabular-nums text-slate-900 shadow-sm placeholder:font-normal placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+                />
+              ) : phone ? (
+                <a
+                  href={`tel:${phone}`}
+                  className="mt-0.5 flex min-h-8 items-center whitespace-normal hyphens-auto break-words text-xs font-bold leading-snug tabular-nums text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
                   {phone}
                 </a>
               ) : (
-                <p className="mt-0.5 text-xs font-bold text-slate-400">Not provided</p>
+                <p className="mt-0.5 min-h-8 text-xs font-bold tabular-nums text-slate-400">Not provided</p>
               )}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+            <div className="min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Last visit</p>
-              <p className="mt-0.5 truncate text-xs font-bold text-slate-800" title={lastVisitRelative ?? undefined}>
+              <p className="mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]" title={lastVisitRelative ?? undefined}>
                 {g.last_visit_date || listRow.last_visit_date ? (
                   <>
                     <span className="sm:hidden">{lastVisitCal}</span>
-                    <span className="hidden cursor-help sm:inline">{lastVisitRelative ?? lastVisitCal}</span>
+                    <span className="hidden sm:inline">{lastVisitRelative ?? lastVisitCal}</span>
                   </>
                 ) : (
                   '—'
@@ -254,15 +414,37 @@ export function ContactDetailPanel({
               </p>
             </div>
             <div
-              className={`rounded-lg border px-2 py-1.5 ${
+              className={`min-w-[min(100%,12rem)] max-w-full flex-[1_1_12rem] rounded-lg border px-2 py-1.5 ${
                 nextVisitLabel ? 'border-sky-200 bg-sky-50/80' : 'border-slate-200 bg-slate-50/70'
               }`}
             >
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Next visit</p>
-              <p className={`mt-0.5 truncate text-xs font-bold ${nextVisitLabel ? 'text-sky-900' : 'text-slate-500'}`}>
+              <p className={`mt-0.5 hyphens-auto break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${nextVisitLabel ? 'text-sky-900' : 'text-slate-500'}`}>
                 {nextVisitLabel ?? 'None scheduled'}
               </p>
             </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {contactDetailsEditing ? (
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void handleSaveContactDetails()}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => setContactDetailsEditing(true)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Edit
+              </button>
+            )}
           </div>
 
           <div className="mt-2.5 border-t border-slate-100 pt-2.5">
@@ -271,6 +453,7 @@ export function ContactDetailPanel({
               <GuestTagEditor
                 tags={tags}
                 venueId={venueId}
+                hideSectionLabel
                 onTagsChange={async (next) => {
                   const res = await fetch(`/api/venue/guests/${g.id}`, {
                     method: 'PATCH',
@@ -289,7 +472,7 @@ export function ContactDetailPanel({
           </div>
 
           <div className="mt-2.5 border-t border-slate-100 pt-2.5">
-            <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Staff notes</p>
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Customer info</p>
             <div className="mt-1.5">
               <CustomerProfileNotesCard
                 embedded
@@ -305,18 +488,17 @@ export function ContactDetailPanel({
 
       <div className={bookingExpandActionsBarClass}>
         <div className="flex flex-wrap items-center gap-1.5 px-2 py-2 sm:px-3">
-          <Link
-            href="/dashboard/bookings/new"
-            className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md bg-brand-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 sm:text-[11px]"
+          <button
+            type="button"
+            aria-label={`New booking for this ${clientLower}`}
+            onClick={handleOpenNewBookingModal}
+            className={EXP_BOOKING_NEUTRAL_PROMINENT}
           >
-            New {bookingWord.toLowerCase()}
-          </Link>
-          <Link
-            href={`/dashboard/bookings?guest=${encodeURIComponent(g.id)}`}
-            className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:text-[11px]"
-          >
-            View {bookingWord.toLowerCase()}s
-          </Link>
+            <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New booking
+          </button>
           {isAdmin && onOpenMerge ? (
             <button
               type="button"
@@ -330,13 +512,27 @@ export function ContactDetailPanel({
             <button
               type="button"
               disabled={eraseLoadingId === g.id}
-              onClick={() => void onEraseGuest(g.id)}
+              onClick={() => setEraseConfirmOpen(true)}
               className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-semibold text-red-600 transition-colors hover:border-red-100 hover:bg-red-50 disabled:opacity-50 sm:text-[11px]"
             >
               {eraseLoadingId === g.id ? 'Erasing…' : 'Erase data'}
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="px-0 sm:px-0.5">
+        <GuestBookingsForGuestAccordion
+          guestId={g.id}
+          currentBookingId=""
+          guestDisplayNameForSnapshots={displayName}
+          venueTimeZone={venueTimezone}
+          canOpenNested={Boolean(onOpenRelatedGuestBooking)}
+          onOpenBookingDetail={onOpenRelatedGuestBooking}
+          listRefreshKey={guestBookingsListRefreshKey}
+          rebookGuestPrefill={contactRebookGuestPrefill}
+          onStaffBookingCreated={() => void loadDetail(g.id)}
+        />
       </div>
 
       <details className={bookingExpandAccordionDetailsClass}>
@@ -348,62 +544,8 @@ export function ContactDetailPanel({
           {accordionChevron}
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
-          <SubBlock title="Name & contact details">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor={`${id}-first`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">First name</label>
-                <input
-                  id={`${id}-first`}
-                  value={editFirstName}
-                  onChange={(e) => setEditFirstName(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label htmlFor={`${id}-last`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Surname</label>
-                <input
-                  id={`${id}-last`}
-                  value={editLastName}
-                  onChange={(e) => setEditLastName(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor={`${id}-email`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Email</label>
-                <input
-                  id={`${id}-email`}
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor={`${id}-phone`} className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Phone</label>
-                <input
-                  id={`${id}-phone`}
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={editSaving}
-              onClick={() => void onSaveGuestDetails()}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {editSaving ? 'Saving…' : 'Save changes'}
-            </button>
-          </SubBlock>
-
-          <SubBlock title="Marketing preferences" className="border-t border-slate-200/70 pt-4">
+          <SubBlock title="Marketing preferences">
             <ContactMarketingSection guestId={g.id} detail={detail} onUpdated={() => void loadDetail(g.id)} />
-          </SubBlock>
-
-          <SubBlock title="Custom fields" className="border-t border-slate-200/70 pt-4">
-            <ContactCustomFieldsSection guestId={g.id} detail={detail} onUpdated={() => void loadDetail(g.id)} />
           </SubBlock>
 
           <SubBlock title="Household" className="border-t border-slate-200/70 pt-4">
@@ -412,77 +554,6 @@ export function ContactDetailPanel({
 
           <SubBlock title="Documents" className="border-t border-slate-200/70 pt-4">
             <ContactDocumentsSection guestId={g.id} onChanged={() => void loadDetail(g.id)} />
-          </SubBlock>
-        </div>
-      </details>
-
-      <details className={bookingExpandAccordionDetailsClass}>
-        <summary className={bookingExpandAccordionSummaryClass}>
-          <span>
-            {bookingWord}
-            {' '}
-            history &amp; activity
-          </span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{activitySummaryHint}</span>
-          {accordionChevron}
-        </summary>
-        <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
-          <SubBlock title="At a glance">
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-              <StatTile label={`Total ${bookingWord.toLowerCase()}s`} value={String(detail.stats.total_bookings)} color="slate" />
-              <StatTile label="Cancellations" value={String(detail.stats.cancellations)} color="amber" />
-              <StatTile label="No-shows" value={String(detail.stats.no_shows)} color="amber" />
-              <StatTile
-                label="Deposits paid"
-                value={`${currencySymbol}${(detail.stats.total_deposit_pence_paid / 100).toFixed(2)}`}
-                color="emerald"
-              />
-              <StatTile
-                label="Since last visit"
-                value={detail.stats.days_since_last_visit != null ? `${detail.stats.days_since_last_visit}d` : '—'}
-                color="brand"
-              />
-              <StatTile label="Relationship" value={`${detail.stats.days_as_customer}d`} color="brand" />
-            </div>
-          </SubBlock>
-
-          <SubBlock
-            title={
-              <>
-                {bookingWord}
-                {' '}
-                history
-              </>
-            }
-            className="border-t border-slate-200/70 pt-4"
-          >
-            <ul className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100 bg-white">
-              {detail.booking_history.map((b) => (
-                <li key={b.id}>
-                  <Link
-                    href={`/dashboard/bookings?openBooking=${encodeURIComponent(b.id)}`}
-                    className="flex flex-col gap-0.5 px-2.5 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <span className="font-medium text-slate-900">
-                      {b.booking_date} {b.booking_time}
-                    </span>
-                    <span className="text-xs text-slate-600">
-                      <span className="font-medium text-slate-700">{b.kind_label}</span>
-                      {' · '}
-                      {b.detail_label} · {b.status}
-                      {b.deposit_status ? ` · deposit ${b.deposit_status}` : ''}
-                      {typeof b.deposit_amount_pence === 'number' && b.deposit_amount_pence > 0
-                        ? ` · ${currencySymbol}${(b.deposit_amount_pence / 100).toFixed(2)}`
-                        : ''}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </SubBlock>
-
-          <SubBlock title="Timeline" className="border-t border-slate-200/70 pt-4">
-            <ContactTimelineSection guestId={g.id} />
           </SubBlock>
         </div>
       </details>
@@ -577,5 +648,39 @@ export function ContactDetailPanel({
         </div>
       </details>
     </div>
+
+      {newBookingModal ? (
+        <StaffSurfaceBookingModal
+          open
+          onClose={() => setNewBookingModal(null)}
+          onCreated={() => {
+            setNewBookingModal(null);
+            void loadDetail(g.id);
+            void loadList();
+          }}
+          venueId={venueId}
+          currency={venueCurrency}
+          bookingModel={venueStaffBookingModel}
+          enabledModels={venueStaffEnabledBookingModels}
+          intent="new"
+          advancedMode={tableManagementEnabled}
+          staffRebookBootstrap={newBookingModal}
+          stackKey={newBookingModalEpoch}
+        />
+      ) : null}
+
+      <EraseGuestDataModal
+        open={eraseConfirmOpen}
+        guestDisplayName={displayName}
+        clientLower={clientLower}
+        bookingWordLower={bookingWord.toLowerCase()}
+        busy={eraseLoadingId === g.id}
+        onClose={() => {
+          if (eraseLoadingId === g.id) return;
+          setEraseConfirmOpen(false);
+        }}
+        onConfirmErase={() => onEraseGuest(g.id)}
+      />
+    </>
   );
 }

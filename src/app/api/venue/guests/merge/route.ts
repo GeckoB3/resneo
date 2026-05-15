@@ -14,10 +14,14 @@ const mergeSchema = z.object({
   source_guest_ids: z.array(z.string().uuid()).min(1).max(20),
   merged_profile: z
     .object({
-      name: z.string().min(1).max(200).optional(),
+      first_name: z.string().max(100).optional(),
+      last_name: z.string().max(100).optional(),
       email: z.string().email().max(255).optional().or(z.literal('')),
       phone: z.string().max(24).optional().or(z.literal('')),
       tags: z.array(z.string()).optional(),
+      customer_profile_notes: z.string().max(8000).nullable().optional(),
+      marketing_opt_out: z.boolean().optional(),
+      marketing_consent: z.boolean().optional(),
       custom_fields: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
@@ -72,7 +76,14 @@ export async function POST(request: NextRequest) {
 
     if (merged_profile) {
       const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (merged_profile.name !== undefined) profileUpdate.name = merged_profile.name.trim();
+      if (merged_profile.first_name !== undefined) {
+        const t = merged_profile.first_name.trim();
+        profileUpdate.first_name = t === '' ? null : t;
+      }
+      if (merged_profile.last_name !== undefined) {
+        const t = merged_profile.last_name.trim();
+        profileUpdate.last_name = t === '' ? null : t;
+      }
       if (merged_profile.email !== undefined) {
         const e = merged_profile.email.trim();
         profileUpdate.email = e === '' ? null : e.toLowerCase();
@@ -91,6 +102,17 @@ export async function POST(request: NextRequest) {
       }
       if (merged_profile.tags !== undefined) {
         profileUpdate.tags = normaliseGuestTagsInput(merged_profile.tags);
+      }
+      if (merged_profile.customer_profile_notes !== undefined) {
+        const n = merged_profile.customer_profile_notes;
+        profileUpdate.customer_profile_notes =
+          n === null ? null : typeof n === 'string' ? n.trim() || null : null;
+      }
+      if (merged_profile.marketing_opt_out !== undefined) {
+        profileUpdate.marketing_opt_out = merged_profile.marketing_opt_out;
+      }
+      if (merged_profile.marketing_consent !== undefined) {
+        profileUpdate.marketing_consent = merged_profile.marketing_consent;
       }
       if (merged_profile.custom_fields !== undefined) {
         const { data: defs, error: defErr } = await staff.db

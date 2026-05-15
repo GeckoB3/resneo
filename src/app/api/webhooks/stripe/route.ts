@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
           const { data: b } = await admin
             .from('bookings')
             .select(
-              'booking_date, booking_time, party_size, deposit_amount_pence, guest_email, source, cancellation_deadline',
+              'booking_model, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, source, cancellation_deadline',
             )
             .eq('id', bid)
             .maybeSingle();
@@ -186,6 +186,7 @@ export async function POST(request: NextRequest) {
             deposit_amount_pence: b.deposit_amount_pence ?? null,
             deposit_status: 'Paid' as const,
             manage_booking_link: manageBookingLink,
+            booking_model: b.booking_model,
           };
 
           const hasDeposit = Boolean(recipientEmail && b.deposit_amount_pence);

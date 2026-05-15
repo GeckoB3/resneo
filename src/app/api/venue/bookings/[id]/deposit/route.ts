@@ -103,6 +103,7 @@ export async function POST(
       guest_phone: guest.phone ?? null,
       booking_date: booking.booking_date as string,
       booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '',
+      booking_model: booking.booking_model,
       party_size: booking.party_size as number,
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
     },

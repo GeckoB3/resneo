@@ -2982,7 +2982,14 @@ export function PractitionerCalendarView({
             );
             setStaffBookingModal('new');
           }}
-          onWalkIn={() => setStaffBookingModal('walk-in')}
+          onWalkIn={() => {
+            setPrefillDate(viewMode === 'day' ? date : undefined);
+            setPrefillTime(undefined);
+            setPrefillPractitionerId(
+              calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
+            );
+            setStaffBookingModal('walk-in');
+          }}
           controlsPanel={calendarFilterPanel}
           controlsLabel={calendarControlsLabel}
           summaryContent={calendarSummaryContent}

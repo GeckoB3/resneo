@@ -207,8 +207,19 @@ function sanitizeNumber(
   opts?: { min?: number; max?: number },
 ): number | null {
   if (raw == null) return fallback;
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback;
-  let value = Math.round(raw);
+  let n: number;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    n = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '') return fallback;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return fallback;
+    n = parsed;
+  } else {
+    return fallback;
+  }
+  let value = Math.round(n);
   if (opts?.min != null) value = Math.max(opts.min, value);
   if (opts?.max != null) value = Math.min(opts.max, value);
   return value;

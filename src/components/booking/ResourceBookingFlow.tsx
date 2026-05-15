@@ -247,7 +247,7 @@ export function ResourceBookingFlow({
         const nextSet = await loadResourceCalendarMonth(selectedMeta.id, calendarMonth.year, calendarMonth.month);
         if (cancelled) return;
         setAvailableDates(nextSet);
-      } catch (e) {
+      } catch (_e) {
         if (cancelled) return;
         setAvailableDates(new Set());
         setError('Could not load availability for this month.');

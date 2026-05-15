@@ -26,6 +26,13 @@ export interface CommunicationSendResult {
   reason?: string;
 }
 
+interface CommunicationLogSnapshot {
+  id?: string;
+  status?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+}
+
 /** `guest_log`: insert communication_logs row with guest_id only (staff CRM). */
 export type LogMode = 'dedupe' | 'upsert' | 'guest_log';
 
@@ -51,6 +58,55 @@ async function insertPending(
   if (!error) return true;
   if (error.code === '23505') return false;
   throw error;
+}
+
+async function prepareDedupeLog(
+  ctx: CommunicationDeliveryContext,
+  channel: 'email' | 'sms',
+): Promise<{ ok: boolean; logRowId?: string; reason?: 'duplicate' }> {
+  const inserted = await insertPending(ctx, channel);
+  if (inserted) return { ok: true };
+
+  if (!ctx.bookingId) return { ok: false, reason: 'duplicate' };
+
+  const admin = getSupabaseAdminClient();
+  const { data, error } = await admin
+    .from('communication_logs')
+    .select('id, status, updated_at, created_at')
+    .eq('booking_id', ctx.bookingId)
+    .eq('message_type', ctx.messageType)
+    .eq('communication_lane', ctx.lane)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const row = data as CommunicationLogSnapshot | null;
+
+  if (row?.status === 'sent') return { ok: false, reason: 'duplicate' };
+
+  const touchedAt = row?.updated_at ?? row?.created_at ?? null;
+  const pendingAgeMs = touchedAt ? Date.now() - new Date(touchedAt).getTime() : Number.POSITIVE_INFINITY;
+  const stalePending = row?.status === 'pending' && pendingAgeMs > 10 * 60 * 1000;
+  const retryable = row?.status === 'failed' || stalePending;
+
+  if (!retryable) return { ok: false, reason: 'duplicate' };
+
+  if (row?.id) {
+    await admin
+      .from('communication_logs')
+      .update({
+        channel,
+        recipient: ctx.recipient,
+        status: 'pending',
+        sent_at: null,
+        error_message: null,
+        external_id: null,
+      })
+      .eq('id', row.id);
+    return { ok: true, logRowId: row.id };
+  }
+
+  return { ok: false, reason: 'duplicate' };
 }
 
 async function insertGuestLog(
@@ -149,7 +205,7 @@ async function prepareLog(
   ctx: CommunicationDeliveryContext,
   channel: 'email' | 'sms',
   mode: LogMode,
-): Promise<{ ok: boolean; logRowId?: string }> {
+): Promise<{ ok: boolean; logRowId?: string; reason?: 'duplicate' }> {
   if (mode === 'guest_log') {
     const logRowId = await insertGuestLog(ctx, channel);
     return {
@@ -158,8 +214,7 @@ async function prepareLog(
     };
   }
   if (mode === 'dedupe') {
-    const inserted = await insertPending(ctx, channel);
-    return { ok: inserted };
+    return prepareDedupeLog(ctx, channel);
   }
   await upsertPending(ctx, channel);
   return { ok: true };

@@ -44,7 +44,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   });
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
-  const [paymentComplete, setPaymentComplete] = useState(false);
+  const [_paymentComplete, setPaymentComplete] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

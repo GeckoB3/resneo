@@ -15,6 +15,8 @@ export interface CronBookingRow {
   id: string;
   venue_id: string;
   guest_id: string;
+  /** Row-level model; required for hybrid venues so cron picks the correct communications lane. */
+  booking_model?: string | null;
   guest_email: string | null;
   booking_date: string;
   booking_time: string;

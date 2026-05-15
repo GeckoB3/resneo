@@ -20,6 +20,7 @@ import {
 import type { BookingModel } from '@/types/booking-models';
 import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 import { SupportSessionControls } from '@/components/dashboard/SupportSessionControls';
+import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRebookBootstrapRouteCleanup';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -257,6 +258,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
+        <StaffRebookBootstrapRouteCleanup />
         <DashboardVenueBootstrapProvider value={venueBootstrap}>
           <DashboardSWRProvider>{children}</DashboardSWRProvider>
         </DashboardVenueBootstrapProvider>

@@ -12,7 +12,7 @@ export function CustomerProfileNotesCard({
   onSaved,
   /** When true, nest inside the guest contact card (top border, no separate panel frame). */
   embedded = false,
-  /** When true with `embedded`, omit the top rule — use when the parent block already separated this section. */
+  /** When true with `embedded`, omit the top rule and inner section title — parent already labels this block. */
   embeddedFlush = false,
 }: {
   guestId: string | null | undefined;
@@ -99,19 +99,47 @@ export function CustomerProfileNotesCard({
     setSaveError(null);
   };
 
+  const editButtonClassName =
+    'invisible inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 group-hover/field:visible';
+
+  const showFloatingEdit = embeddedFlush && canEdit && !editing;
+  const reserveSpaceForFloatingEdit = showFloatingEdit;
+
   return (
     <div className={rootClass}>
-      <div className={`group/field ${embedded ? 'px-0.5' : ''}`}>
-        <div className="mb-1 flex items-center justify-between">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Customer info</p>
-          {canEdit && !editing && (
+      <div className={`group/field ${embedded ? 'px-0.5' : ''} ${embeddedFlush ? 'relative' : ''}`}>
+        {!embeddedFlush ? (
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Customer info</p>
+            {canEdit && !editing && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditing(true);
+                }}
+                className={editButtonClassName}
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z"
+                  />
+                </svg>
+                Edit
+              </button>
+            )}
+          </div>
+        ) : (
+          showFloatingEdit && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 setEditing(true);
               }}
-              className="invisible inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 group-hover/field:visible"
+              className={`${editButtonClassName} absolute right-0 top-0 z-10`}
             >
               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path
@@ -122,8 +150,8 @@ export function CustomerProfileNotesCard({
               </svg>
               Edit
             </button>
-          )}
-        </div>
+          )
+        )}
 
         {editing && canEdit ? (
           <div>
@@ -203,10 +231,13 @@ export function CustomerProfileNotesCard({
             className={[
               'w-full rounded-lg border text-left transition-colors',
               'px-2.5 py-1.5 text-xs',
+              reserveSpaceForFloatingEdit ? 'pr-14' : '',
               hasValue
                 ? 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50/40'
                 : 'border-dashed border-slate-200 bg-slate-50/60 text-slate-400 italic hover:border-brand-300 hover:bg-brand-50/40',
-            ].join(' ')}
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
             {hasValue ? (
               <span className="whitespace-pre-wrap break-words leading-snug">{normalized}</span>

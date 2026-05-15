@@ -9,6 +9,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
+import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 /** YYYY-MM-DD in the browser's local calendar (matches guest BookingFlow / DateStep). */
@@ -119,6 +120,8 @@ export interface UnifiedBookingFormProps {
   /** Table booking: edit existing reservation instead of POST /api/venue/bookings. */
   editBookingId?: string;
   editSnapshot?: UnifiedBookingEditSnapshot;
+  /** Staff rebook-from-guest-history (table surface). Same payload shape as appointments; uses `table` + `guest`. */
+  staffRebookBootstrap?: StaffRebookBootstrapPayloadV1 | null;
 }
 
 export function UnifiedBookingForm({
@@ -132,6 +135,7 @@ export function UnifiedBookingForm({
   onClose,
   editBookingId,
   editSnapshot,
+  staffRebookBootstrap = null,
 }: UnifiedBookingFormProps) {
   const isEdit = Boolean(editBookingId && editSnapshot);
   const venueBootstrap = useDashboardVenueBootstrap();
@@ -170,8 +174,10 @@ export function UnifiedBookingForm({
   const [email, setEmail] = useState(() => editSnapshot?.guest_email ?? '');
   const [dietaryNotes, setDietaryNotes] = useState(() => editSnapshot?.dietary_notes ?? '');
   const [notes, setNotes] = useState(() => editSnapshot?.special_requests ?? '');
-  const [occasion, setOccasion] = useState(() => editSnapshot?.occasion ?? '');
-  const [internalNotes, setInternalNotes] = useState(() => editSnapshot?.internal_notes ?? '');
+  /** One-shot gate for applying `staffRebookBootstrap` table fields (session payload). */
+  const staffTableRebookAppliedRef = useRef(false);
+  /** Staff “New booking” from expanded row: guest contact only (no table / date / service). */
+  const staffGuestContactBootstrapAppliedRef = useRef(false);
 
   const [coverDurationMinutes, setCoverDurationMinutes] = useState(() =>
     editSnapshot ? suggestDurationFromEditSnapshot(editSnapshot) : 90,
@@ -249,6 +255,64 @@ export function UnifiedBookingForm({
       setStaffAreaId(editSnapshot.area_id);
     }
   }, [isEdit, editSnapshot, tableBookingPrefsReady, diningAreas, publicBookingAreaMode]);
+
+  useEffect(() => {
+    if (!staffRebookBootstrap?.table || isEdit) return;
+    if (staffTableRebookAppliedRef.current) return;
+    staffTableRebookAppliedRef.current = true;
+
+    const tbl = staffRebookBootstrap.table;
+    const guest = staffRebookBootstrap.guest ?? {};
+
+    setPartySize(tbl.partySize);
+    const cd = tbl.coverDurationMinutes;
+    if (typeof cd === 'number' && cd >= COVER_TIME_MIN && cd <= COVER_TIME_MAX) {
+      setCoverDurationMinutes(cd);
+      setCoverDurationDirty(true);
+    }
+
+    if (guest.firstName?.trim()) setFirstName(guest.firstName.trim());
+    if (guest.lastName?.trim()) setLastName(guest.lastName.trim());
+    if (typeof guest.email === 'string' && guest.email.trim()) setEmail(guest.email.trim());
+    if (typeof guest.phone === 'string' && guest.phone.trim()) setPhone(guest.phone.trim());
+    if (guest.dietaryNotes?.trim()) setDietaryNotes(guest.dietaryNotes.trim());
+    const noteParts: string[] = [];
+    if (guest.specialRequests?.trim()) noteParts.push(guest.specialRequests.trim());
+    if (guest.occasion?.trim()) noteParts.push(`Occasion: ${guest.occasion.trim()}`);
+    if (guest.internalNotes?.trim()) noteParts.push(`Staff note: ${guest.internalNotes.trim()}`);
+    if (guest.customerProfileNotes?.trim()) noteParts.push(`Guest profile note: ${guest.customerProfileNotes.trim()}`);
+    if (noteParts.length > 0) {
+      const block = noteParts.join('\n\n');
+      setNotes((prev) => {
+        const p = typeof prev === 'string' ? prev.trim() : '';
+        return p ? `${p}\n\n${block}` : block;
+      });
+    }
+
+    setOpenPanel('date');
+  }, [staffRebookBootstrap, isEdit]);
+
+  useEffect(() => {
+    const aid = staffRebookBootstrap?.table?.areaId;
+    if (!aid || !tableBookingPrefsReady || isEdit) return;
+    if (!diningAreas.some((a) => a.id === aid)) return;
+    setTableAssignmentAreaId(aid);
+    if (publicBookingAreaMode === 'manual') {
+      setStaffAreaId(aid);
+    }
+  }, [staffRebookBootstrap, tableBookingPrefsReady, diningAreas, publicBookingAreaMode, isEdit]);
+
+  useEffect(() => {
+    if (isEdit || !staffRebookBootstrap?.guest || staffRebookBootstrap.table) return;
+    if (staffGuestContactBootstrapAppliedRef.current) return;
+    staffGuestContactBootstrapAppliedRef.current = true;
+
+    const guest = staffRebookBootstrap.guest;
+    if (guest.firstName?.trim()) setFirstName(guest.firstName.trim());
+    if (guest.lastName?.trim()) setLastName(guest.lastName.trim());
+    if (typeof guest.email === 'string' && guest.email.trim()) setEmail(guest.email.trim());
+    if (typeof guest.phone === 'string' && guest.phone.trim()) setPhone(guest.phone.trim());
+  }, [staffRebookBootstrap, isEdit]);
 
   useEffect(() => {
     if (venueCurrencyProp != null) {

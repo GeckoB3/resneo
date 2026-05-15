@@ -20,6 +20,9 @@ export async function eraseGuestVenuePii(admin: SupabaseClient, venueId: string,
       special_requests: null,
       internal_notes: null,
       guest_email: null,
+      guest_phone: null,
+      guest_first_name: null,
+      guest_last_name: null,
       updated_at: new Date().toISOString(),
     })
     .eq('guest_id', guestId);
@@ -37,7 +40,8 @@ export async function eraseGuestVenuePii(admin: SupabaseClient, venueId: string,
   const { error: updErr } = await admin
     .from('guests')
     .update({
-      name: '[Erased]',
+      first_name: null,
+      last_name: null,
       email: null,
       phone: null,
       global_guest_hash: null,

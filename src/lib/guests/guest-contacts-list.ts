@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenueStaff } from '@/lib/venue-auth';
+import { normaliseSegmentTagFilter } from '@/lib/guests/tags';
 
 export const UPCOMING_BOOKING_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
@@ -15,7 +16,7 @@ export type ContactsSegment =
   | 'marketing'
   | 'last_staff'
   | 'last_service'
-  | 'vip';
+  | 'tag';
 
 export type ContactsMarketingFilter = 'subscribed' | 'not_subscribed';
 
@@ -28,6 +29,8 @@ export interface ParsedGuestListQuery {
   filter: 'all' | 'identified' | 'anonymous';
   /** Directory segment (replaces legacy `status` when `segment` query param is sent). */
   segment: ContactsSegment;
+  /** When `segment` is `tag`, filter guests whose `tags` contains this value (normalised). */
+  segment_tag: string | null;
   /** Inclusive YYYY-MM-DD (venue calendar interpretation for guest fields / booking_date). */
   date_from: string | null;
   date_to: string | null;
@@ -71,13 +74,13 @@ const SEGMENTS = new Set<ContactsSegment>([
   'marketing',
   'last_staff',
   'last_service',
-  'vip',
+  'tag',
 ]);
 const LEGACY_STATUS_MAP: Record<string, ContactsSegment> = {
   upcoming: 'upcoming',
   lapsed: 'visit',
   new_this_month: 'new',
-  vip: 'vip',
+  vip: 'tag',
   all: 'all',
 };
 
@@ -126,11 +129,19 @@ export function parseGuestListQuery(sp: URLSearchParams): ParsedGuestListQuery {
   const segmentRaw = sp.get('segment')?.trim().toLowerCase() ?? '';
   const legacyStatusRaw = (sp.get('status') ?? 'all').trim().toLowerCase();
 
+  let segment_tag = normaliseSegmentTagFilter(sp.get('segment_tag'));
+
   let segment: ContactsSegment = 'all';
-  if (segmentRaw && SEGMENTS.has(segmentRaw as ContactsSegment)) {
+  if (segmentRaw === 'vip') {
+    segment = 'tag';
+    if (!segment_tag) segment_tag = 'vip';
+  } else if (segmentRaw && SEGMENTS.has(segmentRaw as ContactsSegment)) {
     segment = segmentRaw as ContactsSegment;
   } else if (LEGACY_STATUS_MAP[legacyStatusRaw]) {
     segment = LEGACY_STATUS_MAP[legacyStatusRaw];
+    if (segment === 'tag' && legacyStatusRaw === 'vip' && !segment_tag) {
+      segment_tag = 'vip';
+    }
   }
 
   const date_from = parseOptionalISODate(sp.get('date_from'));
@@ -164,6 +175,7 @@ export function parseGuestListQuery(sp: URLSearchParams): ParsedGuestListQuery {
     sort,
     filter,
     segment,
+    segment_tag,
     date_from,
     date_to,
     marketing,
@@ -236,7 +248,7 @@ export function resolveContactsSegmentDates(
     }
     return { from: date_from, to: date_to };
   }
-  if (segment === 'marketing' || segment === 'last_staff' || segment === 'last_service') {
+  if (segment === 'marketing' || segment === 'last_staff' || segment === 'last_service' || segment === 'tag') {
     return { from: date_from, to: date_to };
   }
   return { from: null, to: null };
@@ -280,16 +292,19 @@ export function applyGuestsDirectorySegment<Self extends GuestFilterChain<Self>>
       return q.gte('created_at', `${from}T00:00:00`).lte('created_at', `${to}T23:59:59.999`);
     }
     case 'visit': {
+      // Past visits only: must have a recorded last_visit_date on or before venue "today".
+      let out: Self = q.not('last_visit_date', 'is', null).lte('last_visit_date', today) as Self;
       if (bounds.from && bounds.to) {
-        return q.not('last_visit_date', 'is', null).gte('last_visit_date', bounds.from).lte('last_visit_date', bounds.to);
+        out = out.gte('last_visit_date', bounds.from).lte('last_visit_date', bounds.to) as Self;
+        return out;
       }
       if (bounds.to) {
-        return q.not('last_visit_date', 'is', null).lte('last_visit_date', bounds.to);
+        return out.lte('last_visit_date', bounds.to) as Self;
       }
       if (bounds.from) {
-        return q.not('last_visit_date', 'is', null).gte('last_visit_date', bounds.from);
+        return out.gte('last_visit_date', bounds.from) as Self;
       }
-      return q;
+      return out;
     }
     case 'marketing': {
       let out: Self = q;
@@ -306,8 +321,11 @@ export function applyGuestsDirectorySegment<Self extends GuestFilterChain<Self>>
       }
       return out;
     }
-    case 'vip':
-      return q.contains('tags', ['vip']) as Self;
+    case 'tag': {
+      const t = params.segment_tag;
+      if (!t) return q;
+      return q.contains('tags', [t]) as Self;
+    }
     case 'upcoming':
     case 'last_staff':
     case 'last_service':

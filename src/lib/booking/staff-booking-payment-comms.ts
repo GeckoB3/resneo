@@ -103,6 +103,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
       guest_phone: guestPhone,
       booking_date,
       booking_time,
+      booking_model: emailExtras.booking_model,
       party_size,
       special_requests,
       dietary_notes,

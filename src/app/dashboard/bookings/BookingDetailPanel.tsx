@@ -32,11 +32,6 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import {
-  bookingExpandAccordionBodyClass,
-  bookingExpandAccordionDetailsClass,
-  bookingExpandAccordionSummaryClass,
-} from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 
 export type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
@@ -44,6 +39,7 @@ import {
   BOOKING_DETAIL_MAX_STACK_DEPTH,
   GuestBookingsForGuestAccordion,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
+import type { StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
 
 function displayBookingGuestName(
   guest: { first_name?: string | null; last_name?: string | null } | null | undefined,
@@ -362,6 +358,22 @@ export function BookingDetailPanel({
     }
     return Math.max(15, durationMins);
   }, [displayDetail]);
+
+  const guestHistoryRebookPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
+    const row = displayDetail;
+    if (!isHydrated || !row?.guest?.id) return undefined;
+    return {
+      firstName: row.guest.first_name ?? undefined,
+      lastName: row.guest.last_name ?? undefined,
+      email: row.guest.email,
+      phone: row.guest.phone,
+      dietaryNotes: row.dietary_notes,
+      occasion: row.occasion,
+      specialRequests: row.special_requests,
+      internalNotes: row.internal_notes,
+      customerProfileNotes: row.guest.customer_profile_notes,
+    };
+  }, [isHydrated, displayDetail]);
 
   const load = useCallback(async () => {
     const bookingPromise = fetch(`/api/venue/bookings/${bookingId}`);
@@ -1497,6 +1509,11 @@ export function BookingDetailPanel({
                     });
                   }}
                   listRefreshKey={guestHistoryListRefresh}
+                  rebookGuestPrefill={guestHistoryRebookPrefill}
+                  onStaffBookingCreated={() => {
+                    setGuestHistoryListRefresh((k) => k + 1);
+                    void load();
+                  }}
                 />
               </div>
             ) : null}

@@ -503,6 +503,7 @@ export async function POST(request: NextRequest) {
               deposit_status: 'Not Required',
               manage_booking_link: manageBookingLink,
               email_variant: 'appointment',
+              booking_model: 'unified_scheduling',
               group_appointments: groupAppointmentLines,
               practitioner_name: groupAppointmentLines[0]?.practitioner_name ?? null,
               appointment_service_name:

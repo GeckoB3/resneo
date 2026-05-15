@@ -177,6 +177,27 @@ export async function GET(request: NextRequest) {
         : { data: [] as { id: string; name: string }[] };
     const areaNameById = new Map((areaRows ?? []).map((a: { id: string; name: string }) => [a.id, a.name]));
 
+    const calendarIds = [
+      ...new Set(
+        rawRows
+          .map((r) => r.calendar_id as string | null | undefined)
+          .filter((cid): cid is string => typeof cid === 'string' && cid.trim() !== ''),
+      ),
+    ];
+    const calendarNameById = new Map<string, string>();
+    if (calendarIds.length > 0) {
+      const { data: calRows } = await staff.db
+        .from('unified_calendars')
+        .select('id, name')
+        .eq('venue_id', staff.venue_id)
+        .in('id', calendarIds);
+      for (const c of calRows ?? []) {
+        const row = c as { id: string; name?: string | null };
+        const label = typeof row.name === 'string' ? row.name.trim() : '';
+        if (label) calendarNameById.set(row.id, label);
+      }
+    }
+
     let bookings = rawRows.map((r) => {
       const guest = guestsMap.get(r.guest_id);
       const aid = r.area_id as string | null | undefined;
@@ -224,6 +245,10 @@ export async function GET(request: NextRequest) {
         service_id: r.service_id ?? null,
         practitioner_id: r.practitioner_id ?? null,
         calendar_id: r.calendar_id ?? null,
+        calendar_name:
+          typeof r.calendar_id === 'string' && r.calendar_id.trim() !== ''
+            ? calendarNameById.get(r.calendar_id) ?? null
+            : null,
         appointment_service_id: r.appointment_service_id ?? null,
         service_item_id: r.service_item_id ?? null,
         service_variant_id: r.service_variant_id ?? null,

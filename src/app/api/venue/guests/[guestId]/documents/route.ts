@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 
-const BUCKET = 'guest-documents';
-
 /**
  * GET /api/venue/guests/[guestId]/documents — list completed uploads for guest.
  */

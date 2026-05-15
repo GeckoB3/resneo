@@ -12,6 +12,7 @@ import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { EraseGuestDataModal } from '@/components/dashboard/contacts/EraseGuestDataModal';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -78,6 +79,7 @@ export function ClientsSection({
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [eraseLoadingId, setEraseLoadingId] = useState<string | null>(null);
+  const [eraseDialog, setEraseDialog] = useState<{ id: string; displayName: string } | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -169,8 +171,8 @@ export function ClientsSection({
     setPage(0);
   }, []);
 
-  const onSaveGuestDetails = useCallback(async () => {
-    if (!detail) return;
+  const onSaveGuestDetails = useCallback(async (): Promise<boolean> => {
+    if (!detail) return false;
     setEditSaving(true);
     setEditError(null);
     try {
@@ -191,8 +193,10 @@ export function ClientsSection({
       await loadDetail(detail.guest.id);
       await loadList();
       onReportsRefresh();
+      return true;
     } catch (e) {
       setEditError(e instanceof Error ? e.message : 'Save failed');
+      return false;
     } finally {
       setEditSaving(false);
     }
@@ -213,12 +217,8 @@ export function ClientsSection({
     downloadCsvString(buildCsvFromRows(headers, rows), `guest-${detail.guest.id}-bookings.csv`);
   }, [detail]);
 
-  const onEraseGuest = useCallback(
-    async (guestId: string) => {
-      const ok = window.confirm(
-        `Erase personal data for this ${clientLower}? Bookings are kept but contact details are removed. This cannot be undone.`,
-      );
-      if (!ok) return;
+  const performEraseGuest = useCallback(
+    async (guestId: string): Promise<boolean> => {
       setEraseLoadingId(guestId);
       setError(null);
       try {
@@ -235,13 +235,15 @@ export function ClientsSection({
         setDetail(null);
         await loadList();
         onReportsRefresh();
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Erase failed');
+        return false;
       } finally {
         setEraseLoadingId(null);
       }
     },
-    [clientLower, loadList, onReportsRefresh],
+    [loadList, onReportsRefresh],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
@@ -265,6 +267,7 @@ export function ClientsSection({
   };
 
   return (
+    <>
     <SectionCard elevated>
       <SectionCard.Header
         eyebrow="CRM"
@@ -459,7 +462,12 @@ export function ClientsSection({
                               <button
                                 type="button"
                                 disabled={eraseLoadingId === g.id}
-                                onClick={() => void onEraseGuest(g.id)}
+                                onClick={() =>
+                                  setEraseDialog({
+                                    id: g.id,
+                                    displayName: displayName(g),
+                                  })
+                                }
                                 className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
                               >
                                 {eraseLoadingId === g.id ? 'Erasing…' : 'Erase'}
@@ -617,6 +625,22 @@ export function ClientsSection({
       )}
       </SectionCard.Body>
     </SectionCard>
+    <EraseGuestDataModal
+      open={eraseDialog !== null}
+      guestDisplayName={eraseDialog?.displayName ?? ''}
+      clientLower={clientLower}
+      bookingWordLower={bookingWord.toLowerCase()}
+      busy={eraseDialog !== null && eraseLoadingId === eraseDialog.id}
+      onClose={() => {
+        if (eraseDialog !== null && eraseLoadingId === eraseDialog.id) return;
+        setEraseDialog(null);
+      }}
+      onConfirmErase={async () => {
+        if (!eraseDialog) return false;
+        return performEraseGuest(eraseDialog.id);
+      }}
+    />
+    </>
   );
 }
 

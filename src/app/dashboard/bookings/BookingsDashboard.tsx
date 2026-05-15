@@ -11,7 +11,6 @@ import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDe
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import {
-  BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
   canMarkNoShowForSlot,
   canTransitionBookingStatus,
@@ -20,14 +19,7 @@ import {
   isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import {
-  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
-  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
-  BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON,
-  BOOKING_ATTENDANCE_UNDO_SPINNER,
-  BOOKING_START_PRIMARY_BUTTON_CLASSES,
-  bookingStatusVisualForKey,
-} from '@/lib/table-management/booking-status-visual';
+import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
 import { readResponseJson } from '@/lib/http/read-response-json';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -50,8 +42,6 @@ import {
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
-  canShowConfirmBookingAttendanceAction,
-  canShowCancelStaffAttendanceConfirmationAction,
 } from '@/lib/booking/booking-staff-indicators';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -411,7 +401,6 @@ export function BookingsDashboard({
   const [changeTableDayLoading, setChangeTableDayLoading] = useState(false);
   const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
   const [changeTableSaving, setChangeTableSaving] = useState(false);
-  const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [startHourOverride, setStartHourOverride] = useState<number | null>(rememberedPreferences.startHourOverride ?? null);
@@ -908,56 +897,6 @@ export function BookingsDashboard({
     void loadBookingDetail(bookingId, true);
     void fetchBookings({ silent: true, ids: [bookingId] });
   }, [loadBookingDetail, fetchBookings]);
-
-  const confirmBookingAttendance = useCallback(
-    async (bookingId: string) => {
-      setConfirmAttendanceLoadingId(bookingId);
-      try {
-        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ staff_attendance_confirmed: true }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          addToast((j as { error?: string }).error ?? 'Could not confirm attendance', 'error');
-          return;
-        }
-        addToast('Attendance confirmed', 'success');
-        void fetchBookings({ silent: true, ids: [bookingId] });
-      } catch {
-        addToast('Could not confirm attendance', 'error');
-      } finally {
-        setConfirmAttendanceLoadingId(null);
-      }
-    },
-    [addToast, fetchBookings],
-  );
-
-  const cancelStaffAttendanceConfirmation = useCallback(
-    async (bookingId: string) => {
-      setConfirmAttendanceLoadingId(bookingId);
-      try {
-        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ staff_attendance_confirmed: false }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          addToast((j as { error?: string }).error ?? 'Could not cancel confirmation', 'error');
-          return;
-        }
-        addToast('Confirmation cancelled', 'success');
-        void fetchBookings({ silent: true, ids: [bookingId] });
-      } catch {
-        addToast('Could not cancel confirmation', 'error');
-      } finally {
-        setConfirmAttendanceLoadingId(null);
-      }
-    },
-    [addToast, fetchBookings],
-  );
 
   const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
     const previous = bookings.find((b) => b.id === bookingId)?.status;
@@ -1889,9 +1828,6 @@ export function BookingsDashboard({
           onStatusAction={requestStatusChange}
           onDetailUpdated={handleDetailUpdated}
           showAreaBadge={showAreaBookingsChrome && !filterAreaId}
-          confirmAttendanceLoadingId={confirmAttendanceLoadingId}
-          onConfirmBookingAttendance={confirmBookingAttendance}
-          onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
           onPrefetchBookingDetail={prefetchBookingDetail}
           venueStaffBookingModel={primaryBookingModel}
           venueStaffEnabledBookingModels={enabledModels}
@@ -1900,7 +1836,7 @@ export function BookingsDashboard({
         <div className="space-y-4">
           {Object.entries(groupedByDate ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([date, dayBookings]) => (
             <div key={date} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+              <div className="flex items-center justify-between border-b border-slate-200/90 bg-slate-50 px-5 py-3">
                 <h3 className="text-sm font-semibold text-slate-700">{formatDayHeader(date)}</h3>
                 <div className="flex items-center gap-3 text-xs text-slate-500">
                   <span>
@@ -1942,9 +1878,6 @@ export function BookingsDashboard({
                 onStatusAction={requestStatusChange}
                 onDetailUpdated={handleDetailUpdated}
                 showAreaBadge={showAreaBookingsChrome && !filterAreaId}
-                confirmAttendanceLoadingId={confirmAttendanceLoadingId}
-                onConfirmBookingAttendance={confirmBookingAttendance}
-                onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
                 onPrefetchBookingDetail={prefetchBookingDetail}
                 venueStaffBookingModel={primaryBookingModel}
                 venueStaffEnabledBookingModels={enabledModels}
@@ -2212,9 +2145,6 @@ function BookingsAccordionList({
   onStatusAction,
   onDetailUpdated,
   showAreaBadge = false,
-  confirmAttendanceLoadingId,
-  onConfirmBookingAttendance,
-  onCancelStaffAttendanceConfirmation,
   onPrefetchBookingDetail,
   venueStaffBookingModel,
   venueStaffEnabledBookingModels,
@@ -2241,9 +2171,6 @@ function BookingsAccordionList({
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
   showAreaBadge?: boolean;
-  confirmAttendanceLoadingId: string | null;
-  onConfirmBookingAttendance: (bookingId: string) => void;
-  onCancelStaffAttendanceConfirmation: (bookingId: string) => void;
   onPrefetchBookingDetail?: (bookingId: string) => void;
   venueStaffBookingModel: BookingModel;
   venueStaffEnabledBookingModels: BookingModel[];
@@ -2251,9 +2178,9 @@ function BookingsAccordionList({
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-      <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2 sm:px-4">
-        <div className="flex items-center justify-between">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
+      <div className="border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:px-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
             <input
               type="checkbox"
               checked={allSelected}
@@ -2265,10 +2192,12 @@ function BookingsAccordionList({
             />
             Select all
           </label>
-          <span className="text-[11px] font-medium text-slate-400">{bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}</span>
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
+            {bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}
+          </span>
         </div>
       </div>
-      <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3">
+      <div className="flex flex-col gap-2.5 bg-slate-100 p-2 sm:gap-3 sm:p-3">
         {bookings.map((booking) => {
           const expanded = expandedIds.includes(booking.id);
           const detail = detailById[booking.id];
@@ -2295,7 +2224,7 @@ function BookingsAccordionList({
                 onPrefetchBookingDetail?.(booking.id);
               }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
-              className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-2 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(booking)} ${expanded ? 'border-slate-200 bg-brand-50/50 shadow-md ring-brand-900/12' : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'}`}
+              className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(booking)} ${expanded ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
             >
               <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
                 <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
@@ -2400,93 +2329,6 @@ function BookingsAccordionList({
                     </span>
                   </div>
                 </div>
-                {(() => {
-                  const action = BOOKING_PRIMARY_ACTIONS[booking.status as BookingStatus];
-                  const tableStyle = isTableBooking;
-                  const primaryLabel =
-                    action && action.target === 'Seated' && !tableStyle ? 'Start' : action?.label;
-                  const showUndoStart =
-                    booking.status === 'Seated' && !tableStyle;
-                  const showChangeTable = isTableBooking && coversChangeTableEnabled && booking.status === 'Seated';
-                  const showAttendanceConfirm = canShowConfirmBookingAttendanceAction(booking);
-                  const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(booking);
-                  if (!action && !showChangeTable && !showUndoStart && !showAttendanceConfirm && !showAttendanceCancel) {
-                    return null;
-                  }
-                  return (
-                    <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center justify-end gap-1">
-                      {showAttendanceConfirm && (
-                        <button
-                          type="button"
-                          disabled={confirmAttendanceLoadingId === booking.id}
-                          onClick={() => onConfirmBookingAttendance(booking.id)}
-                          className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[8.75rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
-                          aria-label={`Confirm attendance for ${booking.guest_name}`}
-                          aria-busy={confirmAttendanceLoadingId === booking.id}
-                        >
-                          {confirmAttendanceLoadingId === booking.id ? (
-                            <span
-                              className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
-                              aria-hidden
-                            />
-                          ) : null}
-                          Confirm
-                        </button>
-                      )}
-                      {showAttendanceCancel && (
-                        <button
-                          type="button"
-                          disabled={confirmAttendanceLoadingId === booking.id}
-                          onClick={() => onCancelStaffAttendanceConfirmation(booking.id)}
-                          className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[9.5rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON}`}
-                          aria-label={`Undo confirm for ${booking.guest_name}`}
-                          aria-busy={confirmAttendanceLoadingId === booking.id}
-                        >
-                          {confirmAttendanceLoadingId === booking.id ? (
-                            <span
-                              className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`}
-                              aria-hidden
-                            />
-                          ) : null}
-                          <span className="sm:hidden">Undo</span>
-                          <span className="hidden sm:inline">Undo confirm</span>
-                        </button>
-                      )}
-                      {action && (
-                        <button
-                          type="button"
-                          onClick={() => onStatusAction(booking, action.target)}
-                          className={`inline-flex min-h-8 min-w-[3.75rem] touch-manipulation items-center justify-center rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[4.5rem] sm:px-2.5 sm:text-xs ${primaryLabel === 'Start' ? BOOKING_START_PRIMARY_BUTTON_CLASSES : 'border border-transparent bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500/40 active:bg-brand-800'}`}
-                          aria-label={`${primaryLabel ?? action.label} booking for ${booking.guest_name}`}
-                        >
-                          {primaryLabel}
-                        </button>
-                      )}
-                      {showUndoStart && (
-                        <button
-                          type="button"
-                          onClick={() => onStatusAction(booking, 'Booked')}
-                          className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 shadow-sm transition-colors duration-150 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30 active:bg-amber-100/80 sm:px-2.5 sm:text-xs"
-                          aria-label={`Undo start for ${booking.guest_name}`}
-                        >
-                          <span className="sm:hidden">Undo</span>
-                          <span className="hidden sm:inline">Undo Start</span>
-                        </button>
-                      )}
-                      {showChangeTable && (
-                        <button
-                          type="button"
-                          onClick={() => onRequestChangeTable(booking)}
-                          className="inline-flex min-h-8 touch-manipulation items-center justify-center rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 active:bg-slate-100 sm:px-2.5 sm:text-xs"
-                          aria-label={`Change table for ${booking.guest_name}`}
-                        >
-                          <span className="sm:hidden">Table</span>
-                          <span className="hidden sm:inline">Change table</span>
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
                 <svg className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                 </svg>

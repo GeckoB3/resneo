@@ -1891,47 +1891,64 @@ export function AppointmentBookingFlow({
                       <button
                         type="button"
                         onClick={navigateFromServiceRow}
-                        className="min-w-0 flex-1 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60"
+                        className="min-w-0 flex-1 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
                       >
                         <div className="font-medium text-slate-900">{svc.name}</div>
                         {serviceHasVariants ? (
                           <div className="mt-0.5 text-xs text-slate-500">From ({svc.duration_minutes} min)</div>
                         ) : null}
                       </button>
-                      <div className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-1">
-                        {!serviceHasVariants ? (
+                      {!serviceHasVariants ? (
+                        <div className="flex flex-shrink-0 items-stretch border-l border-slate-100 bg-white">
                           <button
                             type="button"
                             onClick={() => {
                               setDurationPopoverOpenForKey(null);
                               setDurationPopoverServiceId((current) => (current === svc.id ? null : svc.id));
                             }}
-                            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
-                              durationIsCustom
-                                ? 'border-brand-200 bg-brand-50 text-brand-700'
-                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                            className={`inline-flex items-center gap-1 self-stretch px-3 py-3.5 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-inset ${
+                              durationIsCustom ? 'bg-brand-50/80 text-brand-700' : 'bg-white text-slate-600 hover:bg-slate-50/80'
                             }`}
                             aria-expanded={durationPopoverServiceId === svc.id}
                             aria-haspopup="dialog"
                           >
-                            {displayedDuration} min
-                            <span className="sr-only">Custom duration</span>
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"
-                              />
-                            </svg>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 shadow-sm ${
+                                durationIsCustom
+                                  ? 'border-brand-200 bg-brand-50 text-brand-700'
+                                  : 'border-slate-200 bg-slate-50 text-slate-600'
+                              }`}
+                            >
+                              {displayedDuration} min
+                              <span className="sr-only">Custom duration</span>
+                              <svg
+                                className="h-3 w-3"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                strokeWidth={2}
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"
+                                />
+                              </svg>
+                            </span>
                           </button>
-                        ) : null}
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={navigateFromServiceRow}
+                        className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-3 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                      >
                         <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
-                      </div>
-                      <div className="pointer-events-none flex items-center pr-3 text-slate-300">
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                        <svg className="h-4 w-4 flex-shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                         </svg>
-                      </div>
+                      </button>
                     </div>
                     {!serviceHasVariants && durationPopoverServiceId === svc.id ? (
                       <StaffCustomDurationPopover

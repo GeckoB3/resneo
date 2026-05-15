@@ -35,7 +35,6 @@ import {
 import {
   EXP_BOOKING_AMBER_ATTN,
   EXP_BOOKING_ATTEND,
-  EXP_BOOKING_ATTEND_UNDO,
   EXP_BOOKING_DANGER,
   EXP_BOOKING_DANGER_ROSE,
   EXP_BOOKING_ICO,
@@ -44,7 +43,6 @@ import {
   EXP_BOOKING_PRIMARY,
   EXP_BOOKING_REVERT,
   EXP_BOOKING_SOFT,
-  EXP_BOOKING_START,
   EXP_BOOKING_SPIN_AM,
   EXP_BOOKING_SPIN_NA,
   NO_EXTRA_ENABLED_BOOKING_MODELS,
@@ -64,7 +62,7 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import { BOOKING_ATTENDANCE_CONFIRM_SPINNER, BOOKING_ATTENDANCE_UNDO_SPINNER } from '@/lib/table-management/booking-status-visual';
+import { BOOKING_ATTENDANCE_CONFIRM_SPINNER } from '@/lib/table-management/booking-status-visual';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 
 export interface BookingRow {
@@ -691,7 +689,7 @@ export function ExpandedBookingContent({
                 key={action.target}
                 type="button"
                 onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
-                className={action.target === 'Seated' && !tableStyle ? EXP_BOOKING_START : EXP_BOOKING_PRIMARY}
+                className={EXP_BOOKING_PRIMARY}
               >
                 {(action.target === 'Confirmed' || action.target === 'Booked') && (
                   <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
@@ -724,17 +722,13 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 disabled={inlineActionLoading !== null}
-                onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-clear')}
-                className={EXP_BOOKING_ATTEND_UNDO}
+                onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-cancel')}
+                className={EXP_BOOKING_NEUTRAL}
               >
-                {inlineActionLoading === 'staff-attendance-clear' ? (
-                  <span className={`${EXP_BOOKING_ICO} animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`} aria-hidden />
-                ) : (
-                  <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
-                  </svg>
-                )}
-                Undo confirm
+                {inlineActionLoading === 'staff-attendance-cancel' ? (
+                  <span className={EXP_BOOKING_SPIN_NA} aria-hidden />
+                ) : null}
+                Cancel confirmation
               </button>
             ) : null}
 
@@ -776,15 +770,7 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
-                className={
-                  revertIsAttendanceUndoConfirm
-                    ? EXP_BOOKING_ATTEND_UNDO
-                    : revertButtonLabel() === 'Undo Start'
-                      ? EXP_BOOKING_ATTEND
-                      : booking.status === 'Completed' && revertAction?.target === 'Seated'
-                        ? EXP_BOOKING_START
-                        : EXP_BOOKING_REVERT
-                }
+                className={EXP_BOOKING_REVERT}
               >
                 <svg className={EXP_BOOKING_ICO} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
                 {revertButtonLabel()}
@@ -1037,7 +1023,7 @@ export function ExpandedBookingContent({
               <button
                 type="button"
                 onClick={() => setShowMessageBox(false)}
-                className="rounded-lg border border-slate-200 bg-white px-[9px] py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
+                className="rounded-lg border border-slate-200 bg-white px-[11px] py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
               >
                 Cancel
               </button>

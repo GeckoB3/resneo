@@ -27,16 +27,8 @@ import {
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
-  canShowConfirmBookingAttendanceAction,
-  canShowCancelStaffAttendanceConfirmationAction,
 } from '@/lib/booking/booking-staff-indicators';
-import {
-  BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
-  BOOKING_ATTENDANCE_CONFIRM_SPINNER,
-  BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON,
-  BOOKING_ATTENDANCE_UNDO_SPINNER,
-  bookingStatusVisualForKey,
-} from '@/lib/table-management/booking-status-visual';
+import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
@@ -363,7 +355,6 @@ export function AppointmentBookingsDashboard({
   const [detailLoadingIds, setDetailLoadingIds] = useState<string[]>([]);
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
@@ -766,52 +757,6 @@ export function AppointmentBookingsDashboard({
     return list;
   }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
 
-  async function confirmBookingAttendance(bookingId: string) {
-    setConfirmAttendanceLoadingId(bookingId);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_attendance_confirmed: true }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Could not confirm attendance', 'error');
-        return;
-      }
-      addToast('Attendance confirmed', 'success');
-      void fetchBookings({ silent: true });
-      void fetchBookingsForStats();
-    } catch {
-      addToast('Could not confirm attendance', 'error');
-    } finally {
-      setConfirmAttendanceLoadingId(null);
-    }
-  }
-
-  async function cancelStaffAttendanceConfirmation(bookingId: string) {
-    setConfirmAttendanceLoadingId(bookingId);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_attendance_confirmed: false }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Could not cancel confirmation', 'error');
-        return;
-      }
-      addToast('Confirmation cancelled', 'success');
-      void fetchBookings({ silent: true });
-      void fetchBookingsForStats();
-    } catch {
-      addToast('Could not cancel confirmation', 'error');
-    } finally {
-      setConfirmAttendanceLoadingId(null);
-    }
-  }
-
   async function updateRowStatus(bookingId: string, nextStatus: string) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev) return;
@@ -1011,33 +956,38 @@ export function AppointmentBookingsDashboard({
       { key: 'deposit', label: 'Deposit' },
       { key: 'type', label: 'Type' },
     ];
+    /** Matches OperationsWorkspaceToolbar compact “Today” control sizing and weight. */
+    const sortTriggerClass =
+      'min-h-8 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-xs';
     return (
-      <div className="flex items-center gap-1.5 text-xs text-slate-500">
-        <label htmlFor="appt-sort-key" className="font-medium">
+      <div className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
+        <label htmlFor="appt-sort-key" className="shrink-0 text-[11px] font-semibold text-slate-500 sm:text-xs">
           Sort
         </label>
-        <select
-          id="appt-sort-key"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="min-h-[32px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          aria-label="Sort by"
-        >
-          {options.map((o) => (
-            <option key={o.key} value={o.key}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-          className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
-        >
-          <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>
-          <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
-        </button>
+        <div className="flex min-w-0 flex-1 items-center gap-1 sm:flex-none">
+          <select
+            id="appt-sort-key"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className={`${sortTriggerClass} min-w-0 flex-1 sm:max-w-[10rem] sm:flex-none`}
+            aria-label="Sort by"
+          >
+            {options.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            className={`${sortTriggerClass} inline-flex shrink-0 items-center gap-1`}
+            aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+          >
+            <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>
+            <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -1058,8 +1008,8 @@ export function AppointmentBookingsDashboard({
             : 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5'
         }
       >
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-3 py-2 sm:px-4">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
+        <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
+          <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
             <input
               type="checkbox"
               checked={allSelected}
@@ -1068,14 +1018,14 @@ export function AppointmentBookingsDashboard({
             />
             Select all
           </label>
-          <div className="flex items-center gap-3">
-            {showSort && <SortControl />}
-            <span className="text-[11px] font-medium text-slate-400">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+            {showSort ? <SortControl /> : null}
+            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
               {list.length} {list.length === 1 ? 'booking' : 'bookings'}
             </span>
           </div>
         </div>
-        <div className="flex flex-col gap-2.5 bg-slate-50/60 p-2 sm:gap-3 sm:p-3">
+        <div className="flex flex-col gap-2.5 bg-slate-100 p-2 sm:gap-3 sm:p-3">
           {list.map((b) => renderAppointmentRow(b))}
         </div>
       </div>
@@ -1096,8 +1046,6 @@ export function AppointmentBookingsDashboard({
     const expanded = expandedIds.includes(b.id);
     const startTime = b.booking_time.slice(0, 5);
     const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
-    const showConfirm = canShowConfirmBookingAttendanceAction(b);
-    const showCancelConfirm = canShowCancelStaffAttendanceConfirmationAction(b);
     const duration = registryAppointmentDurationMinutes(b, svc?.duration_minutes ?? null);
     const priceDisplay =
       b.deposit_amount_pence != null
@@ -1120,7 +1068,7 @@ export function AppointmentBookingsDashboard({
             toggleExpanded(b.id);
           }
         }}
-        className={`cursor-pointer rounded-xl border border-slate-200/90 bg-white px-2 py-2 shadow-sm ring-1 ring-slate-900/[0.04] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded ? 'border-slate-200 bg-brand-50/50 shadow-md ring-brand-900/12' : 'hover:border-slate-300 hover:bg-slate-50/65 hover:shadow-md'}`}
+        className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
       >
         <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
           <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
@@ -1247,45 +1195,6 @@ export function AppointmentBookingsDashboard({
                 </span>
               )}
             </div>
-          </div>
-          <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center justify-end gap-1">
-            {showConfirm && (
-              <button
-                type="button"
-                disabled={confirmAttendanceLoadingId === b.id}
-                onClick={() => void confirmBookingAttendance(b.id)}
-                className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[4.75rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
-                aria-label={`Confirm attendance for ${b.guest_name}`}
-                aria-busy={confirmAttendanceLoadingId === b.id}
-              >
-                {confirmAttendanceLoadingId === b.id ? (
-                  <span
-                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_CONFIRM_SPINNER}`}
-                    aria-hidden
-                  />
-                ) : null}
-                <span>Confirm</span>
-              </button>
-            )}
-            {showCancelConfirm && (
-              <button
-                type="button"
-                disabled={confirmAttendanceLoadingId === b.id}
-                onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors duration-150 focus:outline-none focus:ring-2 disabled:opacity-60 sm:min-w-[5.5rem] sm:px-2.5 sm:text-xs ${BOOKING_ATTENDANCE_UNDO_OUTLINE_BUTTON}`}
-                aria-label={`Undo confirm for ${b.guest_name}`}
-                aria-busy={confirmAttendanceLoadingId === b.id}
-              >
-                {confirmAttendanceLoadingId === b.id ? (
-                  <span
-                    className={`h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${BOOKING_ATTENDANCE_UNDO_SPINNER}`}
-                    aria-hidden
-                  />
-                ) : null}
-                <span className="sm:hidden">Undo</span>
-                <span className="hidden sm:inline">Undo confirm</span>
-              </button>
-            )}
           </div>
           <svg
             className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}

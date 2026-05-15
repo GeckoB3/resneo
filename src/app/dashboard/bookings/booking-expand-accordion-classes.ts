@@ -18,4 +18,4 @@ export const bookingExpandActionsBarClass =
 
 /** Outer shell for inline expanded booking rows (bookings list, day sheet, appointments). */
 export const expandedBookingRowShellClass =
-  'border-t border-slate-100/95 bg-slate-50/30 px-2 pb-2.5 pt-2 sm:px-3';
+  'border-t border-slate-200/85 bg-slate-100/35 px-2 pb-2.5 pt-2 sm:px-3';

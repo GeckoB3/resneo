@@ -157,37 +157,35 @@ function ContactRow({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
             <h3
-              className={`truncate text-sm font-semibold leading-tight text-slate-900 ${
+              className={`min-w-0 flex-[1_1_10rem] text-sm font-semibold leading-snug text-slate-900 sm:flex-[1_1_12rem] md:flex-[1_1_14rem] ${
                 isAnonRow ? 'italic text-slate-500' : ''
               }`}
             >
               {displayNameStr}
             </h3>
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0 text-[11px] leading-tight text-slate-500">
-              {phone ? (
-                <span className="inline-flex max-w-full min-w-0 items-center gap-1 tabular-nums text-slate-600">
-                  <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.163-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-                  </svg>
-                  <span className="truncate">{phone}</span>
-                </span>
-              ) : null}
-              {phone && email ? <span className="hidden text-slate-300 sm:inline" aria-hidden>·</span> : null}
-              {email ? (
-                <span className="inline-flex min-w-0 max-w-[min(100%,14rem)] items-center gap-1 sm:max-w-[18rem]">
-                  <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
-                  </svg>
-                  <span className="min-w-0 truncate">{email}</span>
-                </span>
-              ) : null}
-              {!phone && !email ? (
-                <span className="text-slate-400">No contact details</span>
-              ) : null}
-            </div>
+            {phone ? (
+              <span className="inline-flex min-w-0 shrink-[2] basis-auto items-center gap-1 text-[11px] leading-tight tabular-nums text-slate-600">
+                <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.163-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+                </svg>
+                <span className="min-w-0 truncate">{phone}</span>
+              </span>
+            ) : null}
+            {phone && email ? <span className="hidden text-slate-300 sm:inline" aria-hidden>·</span> : null}
+            {email ? (
+              <span className="inline-flex min-w-0 shrink-[3] basis-auto items-center gap-1 text-[11px] leading-tight">
+                <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                </svg>
+                <span className="min-w-0 truncate">{email}</span>
+              </span>
+            ) : null}
+            {!phone && !email ? (
+              <span className="text-[11px] text-slate-400">No contact details</span>
+            ) : null}
           </div>
           <svg
             className={`mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? 'rotate-180 text-brand-600' : ''}`}

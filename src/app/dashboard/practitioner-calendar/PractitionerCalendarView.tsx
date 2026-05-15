@@ -40,10 +40,8 @@ import {
 } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
-import {
-  EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE,
-  EXP_BOOKING_ST_FOCUS,
-} from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
+import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
+import { EXP_BOOKING_ST_FOCUS } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';

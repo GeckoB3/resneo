@@ -1,4 +1,7 @@
 import type { BookingModel } from '@/types/booking-models';
+import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
+
+export { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE };
 
 /** Icon size + touch behaviour for toolbar controls in expanded booking/contact panels. */
 export const EXP_BOOKING_ICO = 'h-3.5 w-3.5 shrink-0';
@@ -11,7 +14,7 @@ export const EXP_BOOKING_ST_FOCUS =
   'focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-1 focus-visible:ring-offset-white';
 
 export const EXP_BOOKING_PRIMARY =
-  `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold border border-brand-800/[0.16] bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800`;
+  `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`;
 
 export const EXP_BOOKING_NEUTRAL =
   `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold border border-slate-200/95 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50`;

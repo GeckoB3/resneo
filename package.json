@@ -64,7 +64,7 @@
     "eslint-config-next": "16.1.6",
     "knip": "^6.6.2",
     "madge": "^8.0.0",
-    "supabase": "^2.89.1",
+    "supabase": "^2.98.2",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",

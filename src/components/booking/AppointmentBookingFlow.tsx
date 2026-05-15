@@ -274,6 +274,8 @@ export function AppointmentBookingFlow({
   /** Staff-created appointments can override duration for this booking only. Keyed by parent service id. */
   const [staffDurationOverrides, setStaffDurationOverrides] = useState<Record<string, number>>({});
   const [durationPopoverServiceId, setDurationPopoverServiceId] = useState<string | null>(null);
+  /** Staff variant-step duration editor: which composite override key has its popover open. */
+  const [durationPopoverOpenForKey, setDurationPopoverOpenForKey] = useState<string | null>(null);
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
     editBooking?.practitioner_id ?? (lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null),
   );
@@ -569,9 +571,21 @@ export function AppointmentBookingFlow({
   );
 
   const primeSelectedAppointmentCalendar = useCallback(
-    (practitionerId: string, serviceId: string, durationMinutes?: number | null) => {
+    (
+      practitionerId: string,
+      serviceId: string,
+      durationMinutes?: number | null,
+      variantId?: string | null,
+    ) => {
       const { year, month } = calendarMonthRef.current;
-      void loadAppointmentCalendarMonth({ practitionerId, serviceId, durationMinutes, year, month }).catch(() => {
+      void loadAppointmentCalendarMonth({
+        practitionerId,
+        serviceId,
+        durationMinutes,
+        variantId: variantId ?? null,
+        year,
+        month,
+      }).catch(() => {
         /* best-effort: the mounted calendar effect will surface an empty state if needed */
       });
     },
@@ -660,7 +674,10 @@ export function AppointmentBookingFlow({
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
     const variantId = isGroup ? null : selectedVariantId;
-    const durationMinutes = !isGroup && svc ? staffDurationOverrides[svc] ?? null : null;
+    const durationMinutes =
+      !isGroup && svc
+        ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null
+        : null;
     if (!svc || !prac) return;
     fetchAvailability({ serviceId: svc, practitionerId: prac, variantId, durationMinutes });
   }, [
@@ -685,7 +702,8 @@ export function AppointmentBookingFlow({
     const tasks: Array<{ practitionerId: string; serviceId: string; durationMinutes?: number | null }> = [];
 
     if (step === 'practitioner' && selectedServiceId) {
-      const durationMinutes = staffDurationOverrides[selectedServiceId] ?? null;
+      const durationMinutes =
+        staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null;
       for (const p of catalogStaff) {
         if (p.services.some((s) => s.id === selectedServiceId)) {
           tasks.push({ practitionerId: p.id, serviceId: selectedServiceId, durationMinutes });
@@ -718,6 +736,7 @@ export function AppointmentBookingFlow({
   }, [
     step,
     selectedServiceId,
+    selectedVariantId,
     staffDurationOverrides,
     groupServiceId,
     isLockedPractitionerFlow,
@@ -738,7 +757,10 @@ export function AppointmentBookingFlow({
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
     const variantId = isGroup ? null : selectedVariantId;
-    const durationMinutes = !isGroup && svc ? staffDurationOverrides[svc] ?? null : null;
+    const durationMinutes =
+      !isGroup && svc
+        ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null
+        : null;
     if (!svc || !prac) return;
 
     const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month, variantId, durationMinutes);
@@ -912,8 +934,6 @@ export function AppointmentBookingFlow({
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
   const selectedServiceForPractitioner =
     selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
-  const staffCustomDurationMinutes =
-    isStaff && selectedServiceId ? staffDurationOverrides[selectedServiceId] ?? null : null;
   /** Variants the customer can pick from for the currently selected service (active only). */
   const variantsForSelectedService = useMemo<CatalogVariant[]>(() => {
     if (!selectedServiceId) return [];
@@ -924,8 +944,15 @@ export function AppointmentBookingFlow({
     if (!selectedVariantId) return null;
     return variantsForSelectedService.find((v) => v.id === selectedVariantId) ?? null;
   }, [variantsForSelectedService, selectedVariantId]);
+  const staffCustomDurationMinutes =
+    isStaff && selectedServiceId
+      ? staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null
+      : null;
   const serviceSelectionDurationMinutes = selectedServiceId
-    ? staffDurationOverrides[selectedServiceId] ?? selectedService?.duration_minutes ?? null
+    ? staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ??
+      selectedVariant?.duration_minutes ??
+      selectedService?.duration_minutes ??
+      null
     : null;
   /**
    * Practitioner offer with variant overrides applied. Used everywhere price / duration / deposit
@@ -1910,29 +1937,60 @@ export function AppointmentBookingFlow({
             This service has a few variations to choose from. Pick one to continue.
           </p>
           <div className="space-y-2">
-            {variantsForSelectedService.map((variant) => (
-              <button
-                key={variant.id}
-                type="button"
-                onClick={() => {
-                  setSelectedVariantId(variant.id);
-                  if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
-                    primeSelectedAppointmentCalendar(
-                      selectedPractitionerId,
-                      selectedServiceId,
-                      staffDurationOverrides[selectedServiceId] ?? null,
-                    );
-                  }
-                  setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
-                }}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-medium text-slate-900">{variant.name}</div>
-                    <div className="mt-0.5 text-xs text-slate-500">
-                      {variant.duration_minutes} min
-                      {variant.description ? ` · ${variant.description}` : ''}
+            {variantsForSelectedService.map((variant) => {
+              if (!selectedServiceId) return null;
+              const variantOverrideKey = staffDurationOverrideKey(selectedServiceId, variant.id);
+              const variantDisplayedDuration =
+                staffDurationOverrides[variantOverrideKey] ?? variant.duration_minutes;
+              const variantDurationIsCustom = variantDisplayedDuration !== variant.duration_minutes;
+
+              const primeDuration = staffDurationOverrides[variantOverrideKey] ?? null;
+
+              if (!isStaff || isEdit) {
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedVariantId(variant.id);
+                      if (
+                        staffCalendarSlotPrefillActive &&
+                        preselectedPractitionerId &&
+                        !isLockedPractitionerFlow &&
+                        selectedServiceId
+                      ) {
+                        void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
+                        return;
+                      }
+                      if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                        primeSelectedAppointmentCalendar(
+                          selectedPractitionerId,
+                          selectedServiceId,
+                          primeDuration,
+                          variant.id,
+                        );
+                      }
+                      setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{variant.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {variant.duration_minutes} min
+                          {variant.description ? ` · ${variant.description}` : ''}
+                        </div>
+                      </div>
+                      <svg
+                        className="h-4 w-4 flex-shrink-0 text-slate-300"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                      </svg>
                     </div>
                   </button>
                 );
@@ -1957,7 +2015,7 @@ export function AppointmentBookingFlow({
                         primeSelectedAppointmentCalendar(
                           selectedPractitionerId,
                           selectedServiceId,
-                          staffDurationOverrides[variantOverrideKey] ?? null,
+                          primeDuration,
                           variant.id,
                         );
                       }
@@ -2076,8 +2134,7 @@ export function AppointmentBookingFlow({
                   ) : null}
                 </div>
               );
-            })
-              : null}
+            })}
           </div>
         </div>
       )}
@@ -2133,10 +2190,12 @@ export function AppointmentBookingFlow({
                     key={prac.id}
                     onClick={() => {
                       if (selectedServiceId) {
+                        const durKey = staffDurationOverrideKey(selectedServiceId, selectedVariantId);
                         primeSelectedAppointmentCalendar(
                           prac.id,
                           selectedServiceId,
-                          staffDurationOverrides[selectedServiceId] ?? null,
+                          staffDurationOverrides[durKey] ?? null,
+                          selectedVariantId,
                         );
                       }
                       setSelectedPractitionerId(prac.id);

@@ -11,8 +11,25 @@ import {
   bookingExpandAccordionSummaryClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import type { BookingModel } from '@/types/booking-models';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
+import { writeStaffRebookBootstrap } from '@/lib/booking/staff-rebook-bootstrap';
+import { staffBookingSurfaceTabIdToQueryParam } from '@/lib/booking/staff-booking-modal-options';
+import {
+  bookingSourceDurationMinutes,
+  bookingSourceWallEndHm,
+  buildStaffRebookBootstrapFromBookingSource,
+} from '@/lib/booking/staff-rebook-from-booking-source';
 
-/** Max depth of BookingDetailPanel opened from nested “Detail” (guest history), including the root panel. */
+/** Venue defaults loaded for staff rebook modal (guest-history accordion). */
+interface GuestBookingsStaffVenueDefaults {
+  venueId: string;
+  currency: string;
+  bookingModel: BookingModel;
+  enabledModels: BookingModel[];
+  tableManagementEnabled: boolean;
+}
 export const BOOKING_DETAIL_MAX_STACK_DEPTH = 8;
 
 export interface GuestBookingHistoryRow {

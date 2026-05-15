@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
 import { readResponseJson } from '@/lib/http/read-response-json';
-import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
+import { formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
@@ -864,84 +864,6 @@ export function AppointmentBookingsDashboard({
       const d = new Date(`${anchorDate}T12:00:00`);
       d.setMonth(d.getMonth() + direction);
       setAnchorDate(d.toISOString().slice(0, 10));
-    }
-  };
-
-  const openCsvModal = () => {
-    setCsvFrom(from);
-    setCsvTo(to);
-    setCsvModalOpen(true);
-  };
-
-  const runCsvExport = async () => {
-    if (invalidCsvRange) return;
-    setCsvExporting(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ from: csvFrom, to: csvTo });
-      const res = await fetch(`/api/venue/bookings/list?${params}`);
-      const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
-      if (!res.ok) {
-        setError(data.error ?? 'Failed to load appointments for export');
-        return;
-      }
-      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) =>
-        venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
-      );
-
-      const header = [
-        'Date',
-        'Time',
-        'Type',
-        'Booking ref (full)',
-        'Status',
-        'Source',
-        'Client',
-        'Phone',
-        'Email',
-        'Practitioner',
-        'Service',
-        'Service price',
-        'Deposit status',
-        'Deposit amount',
-        'Customer comments',
-        'Staff notes',
-      ];
-
-      const csvRows = rows.map((b) => {
-        const cid = columnIdForRegistry(b);
-        const sid = serviceIdForRegistry(b);
-        const prac = cid ? practitionerMap.get(cid)?.name ?? '' : '';
-        const svc =
-          b.booking_item_name?.trim() || (sid ? serviceMap.get(sid)?.name ?? '' : '');
-        const price = effectivePricePence(b);
-        return [
-          b.booking_date,
-          b.booking_time.slice(0, 5),
-          bookingModelShortLabel(inferRegistryModel(b)),
-          b.id,
-          statusLabelForCsv(b.status),
-          sourceLabelForCsv(b.source),
-          b.guest_name,
-          b.guest_phone ?? '',
-          b.guest_email ?? '',
-          prac,
-          svc,
-          formatMoneyPence(price, sym),
-          b.deposit_status,
-          b.deposit_amount_pence != null ? formatMoneyPence(b.deposit_amount_pence, sym) : '',
-          b.special_requests?.replace(/\r\n/g, '\n') ?? '',
-          b.internal_notes?.replace(/\r\n/g, '\n') ?? '',
-        ];
-      });
-
-      const csv = buildCsvFromRows(header, csvRows);
-      downloadCsvString(csv, `bookings_${csvFrom}_to_${csvTo}.csv`);
-      setCsvModalOpen(false);
-    } catch {
-      setError('Failed to export CSV');
-    } finally {
-      setCsvExporting(false);
     }
   };
 

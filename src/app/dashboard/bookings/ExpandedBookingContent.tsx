@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -52,8 +52,8 @@ import {
   type GuestHistoryRelatedBookingPayload,
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
-import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 import { buildStaffRebookBootstrapFromBookingSource } from '@/lib/booking/staff-rebook-from-booking-source';
+import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
@@ -308,6 +308,53 @@ export function ExpandedBookingContent({
   const tableStyle = inferredBookingModel === 'table_reservation';
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
   const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
+
+  const staffNewBookingPrimary = venueStaffBookingModel ?? inferredBookingModel;
+  const staffNewBookingEnabledModels = useMemo(
+    () => venueStaffEnabledBookingModels ?? [],
+    [venueStaffEnabledBookingModels],
+  );
+
+  const staffNewBookingDefaultSurfaceTab = useMemo(
+    () => defaultStaffBookingSurfaceTab(staffNewBookingPrimary, staffNewBookingEnabledModels),
+    [staffNewBookingPrimary, staffNewBookingEnabledModels],
+  );
+
+  const staffNewBookingGuestContacts = useMemo<StaffRebookGuestPrefill>(
+    () => ({
+      firstName: detail?.guest?.first_name ?? booking.guest_first_name ?? undefined,
+      lastName: detail?.guest?.last_name ?? booking.guest_last_name ?? undefined,
+      email: detail?.guest?.email ?? booking.guest_email,
+      phone: detail?.guest?.phone ?? booking.guest_phone,
+      dietaryNotes: booking.dietary_notes,
+      occasion: booking.occasion,
+      specialRequests: detail?.special_requests ?? null,
+      internalNotes: detail?.internal_notes ?? null,
+      customerProfileNotes: detail?.guest?.customer_profile_notes ?? null,
+    }),
+    [
+      booking.dietary_notes,
+      booking.guest_email,
+      booking.guest_first_name,
+      booking.guest_last_name,
+      booking.guest_phone,
+      booking.occasion,
+      detail?.guest?.customer_profile_notes,
+      detail?.guest?.email,
+      detail?.guest?.first_name,
+      detail?.guest?.last_name,
+      detail?.guest?.phone,
+      detail?.internal_notes,
+      detail?.special_requests,
+    ],
+  );
+
+  const rebookGuestPrefill = staffNewBookingGuestContacts;
+
+  const canExpandStaffRebook = useMemo(
+    () => buildStaffRebookBootstrapFromBookingSource(booking, staffNewBookingGuestContacts) !== null,
+    [booking, staffNewBookingGuestContacts],
+  );
 
   if (detailLoading) {
     return (

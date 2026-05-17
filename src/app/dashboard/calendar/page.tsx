@@ -12,6 +12,8 @@ import {
 } from '@/lib/booking/active-models';
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
+import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarView';
+import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
@@ -60,6 +62,11 @@ export default async function CalendarPage() {
     redirect('/dashboard');
   }
 
+  const linkFeature = isLinkFeatureVenue({
+    pricing_tier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier ?? null,
+    booking_model: (venue?.booking_model as string | null) ?? null,
+  });
+
   const linkedPractitionerIds =
     staff.role === 'staff' && staff.id
       ? await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id)
@@ -84,6 +91,11 @@ export default async function CalendarPage() {
             enabledModels={enabledModels}
             calendarTodayIso={calendarTodayIso}
           />
+          {linkFeature ? (
+            <section className="mt-6">
+              <LinkedCalendarView hideWhenEmpty title="Linked calendars" />
+            </section>
+          ) : null}
         </div>
       </div>
     </ToastProvider>

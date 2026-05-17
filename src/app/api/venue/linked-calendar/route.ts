@@ -13,11 +13,12 @@ import type {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * GET /api/venue/linked-calendar?date=YYYY-MM-DD — bookings and practitioners
- * of every venue linked to the caller's venue, for a single day. Available to
- * all staff (visibility is inherited from the link, §3.1). time_only links
- * return bare time blocks; full_details links return full detail (PII only
- * when granted).
+ * GET /api/venue/linked-calendar — bookings and practitioners of every venue
+ * linked to the caller's venue. Pass either `?date=YYYY-MM-DD` for a single
+ * day or `?from=YYYY-MM-DD&to=YYYY-MM-DD` for a date range (used by the
+ * bookings list, §8.2). Available to all staff (visibility is inherited from
+ * the link, §3.1). time_only links return bare time blocks; full_details
+ * links return full detail (PII only when granted).
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -29,16 +30,30 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
   }
 
-  const date = request.nextUrl.searchParams.get('date') ?? '';
-  if (!DATE_RE.test(date)) {
+  const params = request.nextUrl.searchParams;
+  const date = params.get('date') ?? '';
+  const fromParam = params.get('from') ?? '';
+  const toParam = params.get('to') ?? '';
+  const isRange = fromParam !== '' || toParam !== '';
+
+  if (isRange) {
+    if (!DATE_RE.test(fromParam) || !DATE_RE.test(toParam) || fromParam > toParam) {
+      return NextResponse.json(
+        { error: 'A valid from/to range (YYYY-MM-DD) is required.' },
+        { status: 400 },
+      );
+    }
+  } else if (!DATE_RE.test(date)) {
     return NextResponse.json({ error: 'A valid date (YYYY-MM-DD) is required.' }, { status: 400 });
   }
+  const rangeFrom = isRange ? fromParam : date;
+  const rangeTo = isRange ? toParam : date;
 
   try {
     const admin = getSupabaseAdminClient();
     const accessible = await loadAccessibleLinkedVenueIds(admin, staff.venue_id);
     if (accessible.length === 0) {
-      return NextResponse.json({ date, venues: [] });
+      return NextResponse.json({ date, from: rangeFrom, to: rangeTo, venues: [] });
     }
 
     const venueIds = accessible.map((a) => a.venueId);
@@ -74,7 +89,8 @@ export async function GET(request: NextRequest) {
           'id, practitioner_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
         )
         .eq('venue_id', access.venueId)
-        .eq('booking_date', date);
+        .gte('booking_date', rangeFrom)
+        .lte('booking_date', rangeTo);
 
       const rawBookings = (bookingRows ?? []) as unknown as Array<Record<string, unknown>>;
 
@@ -163,7 +179,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ date, venues: calendars });
+    return NextResponse.json({ date, from: rangeFrom, to: rangeTo, venues: calendars });
   } catch (err) {
     console.error('GET /api/venue/linked-calendar failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -185,6 +185,27 @@ export async function notifyPermissionReduced(
   });
 }
 
+/**
+ * §6.7 foreseeable-lapse warning: sent ~7 days before a linked venue's
+ * subscription is expected to lapse, to every venue linked to it.
+ */
+export async function notifyLinkLapseWarning(
+  admin: SupabaseClient,
+  venueId: string,
+  lapsingVenueName: string,
+  effectiveDateLabel: string,
+): Promise<void> {
+  await notifyVenue(admin, venueId, 'A linked account may be suspended soon', {
+    heading: 'Linked account at risk of suspension',
+    paragraphs: [
+      `${lapsingVenueName}'s ReserveNI subscription is due to lapse on ${effectiveDateLabel}.`,
+      `If it is not renewed, the link with your venue will be suspended and cross-venue calendar and booking access will pause. The link resumes automatically if ${lapsingVenueName}'s subscription is restored within 30 days.`,
+    ],
+    ctaLabel: 'View linked accounts',
+    ctaUrl: settingsUrl(),
+  });
+}
+
 export async function notifyLinkSuspended(
   admin: SupabaseClient,
   venueId: string,

@@ -33,7 +33,10 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neut
   return 'neutral';
 }
 
-export function LinkedCalendarView() {
+export function LinkedCalendarView({
+  hideWhenEmpty = false,
+  title,
+}: { hideWhenEmpty?: boolean; title?: string } = {}) {
   const [date, setDate] = useState(todayIso());
   const [venues, setVenues] = useState<LinkedVenueCalendar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,8 +79,15 @@ export function LinkedCalendarView() {
     [venues, hidden],
   );
 
+  // When embedded in a calendar page, stay invisible unless the venue actually
+  // has linked calendars, so venues without linked accounts see no change.
+  if (hideWhenEmpty && venues.length === 0 && !error) return null;
+
   return (
     <div className="space-y-4">
+      {title ? (
+        <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <span className="font-medium">Date</span>
@@ -294,7 +304,7 @@ function LinkedBookingChip({
   );
 }
 
-function EditLinkedBookingModal({
+export function EditLinkedBookingModal({
   venueName,
   booking,
   onClose,

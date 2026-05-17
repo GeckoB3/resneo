@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "supabase test db",
     "smoke:cron": "node scripts/smoke-cron.mjs",
     "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
     "seed:dev-restaurant1": "node scripts/seed-dev-restaurant1-account.mjs",

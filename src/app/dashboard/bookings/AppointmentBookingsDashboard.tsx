@@ -39,6 +39,9 @@ import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModa
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { LinkedBookingsPanel } from '@/components/linked-accounts/LinkedBookingsPanel';
+
+type SourceScope = 'all' | 'own' | 'linked';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -368,6 +371,10 @@ export function AppointmentBookingsDashboard({
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
+  /** Own / linked-in / all source filter (§8.2). */
+  const [sourceScope, setSourceScope] = useState<SourceScope>('all');
+  /** True once the venue is known to hold at least one linked calendar. */
+  const [linkedAvailable, setLinkedAvailable] = useState(false);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -1636,7 +1643,30 @@ export function AppointmentBookingsDashboard({
         />
       </div>
 
-      {loading ? (
+      {linkedAvailable ? (
+        <div
+          className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm"
+          role="group"
+          aria-label="Booking source"
+        >
+          {(['all', 'own', 'linked'] as SourceScope[]).map((scope) => (
+            <button
+              key={scope}
+              type="button"
+              onClick={() => setSourceScope(scope)}
+              className={`rounded-lg px-3 py-1.5 transition-colors ${
+                sourceScope === scope
+                  ? 'bg-brand-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {scope === 'all' ? 'All' : scope === 'own' ? 'My venue' : 'Linked-in'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {sourceScope !== 'linked' && (loading ? (
         <div className="space-y-3" role="status" aria-label="Loading bookings">
           {[1, 2, 3, 4, 5].map((i) => (
             <Skeleton.Card key={i} className="py-4">
@@ -1692,7 +1722,11 @@ export function AppointmentBookingsDashboard({
               </section>
             ))}
         </div>
-      )}
+      ))}
+
+      {sourceScope !== 'own' ? (
+        <LinkedBookingsPanel from={from} to={to} onAvailabilityChange={setLinkedAvailable} />
+      ) : null}
 
       {bulkGuestMessageOpen && (
         <BulkGuestMessageModal

@@ -10,12 +10,53 @@ interface WidgetSectionProps {
   baseUrl: string;
 }
 
+interface CollectiveEmbedOption {
+  slug: string;
+  name: string;
+}
+
 export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [accentColour, setAccentColour] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const embedUrl = `${baseUrl.replace(/\/$/, '')}/embed/${venueSlug}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`;
-  const bookUrl = `${baseUrl.replace(/\/$/, '')}/book/${venueSlug}`;
+  /** 'venue' = this venue's own page; otherwise a collective slug. */
+  const [target, setTarget] = useState<'venue' | string>('venue');
+  const [collectives, setCollectives] = useState<CollectiveEmbedOption[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/venue/collectives');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        const options: CollectiveEmbedOption[] = (json.collectives ?? [])
+          .filter(
+            (c: { status: string; myMembershipStatus: string | null; activeMemberCount: number }) =>
+              c.status === 'active' &&
+              c.myMembershipStatus === 'active' &&
+              c.activeMemberCount >= 2,
+          )
+          .map((c: { slug: string; name: string }) => ({ slug: c.slug, name: c.name }));
+        setCollectives(options);
+      } catch {
+        // Collective embed is optional; ignore failures.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const usingCollective = target !== 'venue';
+  const root = baseUrl.replace(/\/$/, '');
+  const embedUrl = usingCollective
+    ? `${root}/book/c/${target}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`
+    : `${root}/embed/${venueSlug}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`;
+  const bookUrl = usingCollective
+    ? `${root}/book/c/${target}`
+    : `${root}/book/${venueSlug}`;
   const snippet = `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
 <script src="${baseUrl.replace(/\/$/, '')}/embed/resize.js"></script>`;
 
@@ -82,6 +123,31 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
         <p className="mt-1 text-sm text-neutral-600">
           Add this to your website to show the booking form in an iframe. The widget will resize to fit the content.
         </p>
+        {collectives.length > 0 ? (
+          <div className="mt-4">
+            <label htmlFor="embed-target" className="mb-1 block text-sm font-medium text-neutral-700">
+              What to embed
+            </label>
+            <select
+              id="embed-target"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              className="w-full max-w-sm rounded border border-neutral-300 px-3 py-2 text-sm"
+            >
+              <option value="venue">My venue only ({venueName})</option>
+              {collectives.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  Venue collective — {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-neutral-500">
+              {usingCollective
+                ? 'This embeds the combined collective booking page.'
+                : 'This embeds only your own venue’s booking flow.'}
+            </p>
+          </div>
+        ) : null}
         <div className="mt-4">
           <label htmlFor="accent" className="block text-sm font-medium text-neutral-700 mb-1">Accent colour (optional)</label>
           <div className="flex items-center gap-2">

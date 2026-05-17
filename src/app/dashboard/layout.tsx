@@ -22,6 +22,8 @@ import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 import { SupportSessionControls } from '@/components/dashboard/SupportSessionControls';
 import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRebookBootstrapRouteCleanup';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
+import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -257,6 +259,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         )}
+        {isAdmin && !isRestaurantTableProductTier(pricingTier) ? <LinkedAccountBanner /> : null}
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
         <StaffRebookBootstrapRouteCleanup />
         <DashboardVenueBootstrapProvider value={venueBootstrap}>

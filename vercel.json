@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/account-hard-delete",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/account-link-maintenance",
+      "schedule": "30 4 * * *"
     }
   ]
 }

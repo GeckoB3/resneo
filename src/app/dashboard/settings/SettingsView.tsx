@@ -22,6 +22,7 @@ import { StripeConnectSection } from './sections/StripeConnectSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
 import { RequireAccountLoginSection } from './sections/RequireAccountLoginSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
+import { LinkedAccountsSection } from './sections/LinkedAccountsSection';
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
@@ -98,6 +99,12 @@ const TABS = [
     description: 'Team logins, roles, calendar access, and session security.',
   },
   {
+    key: 'linked-accounts',
+    label: 'Linked Accounts',
+    description:
+      'Link with other ReserveNI venues to share calendar visibility and booking access.',
+  },
+  {
     key: 'data-import',
     label: 'Data import',
     description: 'CSV imports for clients and bookings with validation and undo.',
@@ -107,11 +114,16 @@ const TABS = [
 type TabKey = typeof TABS[number]['key'];
 type SettingsWarmupKey = 'profile-account' | 'business-closures' | 'payments' | 'comms' | 'staff';
 
-function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): TabKey {
+function resolveInitialTab(
+  initialTab: string | undefined,
+  isAdmin: boolean,
+  linkedAccountsAvailable: boolean,
+): TabKey {
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
     if (t === 'data-import' && !isAdmin) return 'profile';
+    if (t === 'linked-accounts' && !linkedAccountsAvailable) return 'profile';
     return t;
   }
   return 'profile';
@@ -1058,7 +1070,16 @@ function SettingsViewInner({
   const searchParams = useSearchParams();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const isAppointmentsProduct = isAppointmentsProductVenue(venue?.pricing_tier ?? null);
-  const [selectedTab, setSelectedTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
+  /**
+   * Linked Accounts is admin-only and hidden for restaurant table-reservation
+   * venues (§3, §8.1). The flag is stable across the venue's lifetime, so
+   * deriving it from the venue's pricing tier is safe for tab resolution.
+   */
+  const linkedAccountsAvailable =
+    isAdmin && !isRestaurantTableProductTier(initialVenue?.pricing_tier ?? null);
+  const [selectedTab, setSelectedTab] = useState<TabKey>(() =>
+    resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable),
+  );
   const settingsScrollAnchorRef = useRef<HTMLDivElement>(null);
   const skipScrollOnTabChangeRef = useRef(true);
   const [completedWarmup, setCompletedWarmup] = useState<Set<SettingsWarmupKey>>(() => new Set());
@@ -1067,8 +1088,12 @@ function SettingsViewInner({
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(
     () =>
-      isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import'),
-    [isAdmin],
+      TABS.filter((x) => {
+        if (x.key === 'data-import' && !isAdmin) return false;
+        if (x.key === 'linked-accounts' && !linkedAccountsAvailable) return false;
+        return true;
+      }),
+    [isAdmin, linkedAccountsAvailable],
   );
   const tabBarTabs = useMemo(
     (): { id: TabKey; label: string; description?: string }[] =>
@@ -1076,8 +1101,8 @@ function SettingsViewInner({
     [visibleTabs],
   );
   const activeTabFromUrl = useMemo(
-    () => resolveInitialTab(searchParams.get('tab') ?? initialTab, isAdmin),
-    [searchParams, initialTab, isAdmin],
+    () => resolveInitialTab(searchParams.get('tab') ?? initialTab, isAdmin, linkedAccountsAvailable),
+    [searchParams, initialTab, isAdmin, linkedAccountsAvailable],
   );
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
   const warmupKeys = useMemo<SettingsWarmupKey[]>(() => {
@@ -1209,13 +1234,14 @@ function SettingsViewInner({
   }, [venue?.id, venue?.pricing_tier]);
 
   useEffect(() => {
-    if (!isAdmin) {
-      const raw = searchParams.get('tab');
-      if (raw === 'staff' || raw === 'data-import') {
-        replaceWithTab('profile');
-      }
+    const raw = searchParams.get('tab');
+    if (!isAdmin && (raw === 'staff' || raw === 'data-import')) {
+      replaceWithTab('profile');
     }
-  }, [isAdmin, searchParams, replaceWithTab]);
+    if (raw === 'linked-accounts' && !linkedAccountsAvailable) {
+      replaceWithTab('profile');
+    }
+  }, [isAdmin, linkedAccountsAvailable, searchParams, replaceWithTab]);
 
   useEffect(() => {
     if (selectedTab !== 'profile') return;
@@ -1283,13 +1309,13 @@ function SettingsViewInner({
 
   if (!venue) {
     return (
-      <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 2} />
+      <SettingsPageSkeleton tabCount={visibleTabs.length} />
     );
   }
 
   return (
     <>
-      {!settingsReady ? <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 2} /> : null}
+      {!settingsReady ? <SettingsPageSkeleton tabCount={visibleTabs.length} /> : null}
       <div ref={settingsScrollAnchorRef} className={settingsReady ? 'space-y-8' : 'hidden'}>
       <header className="space-y-5">
         <PageHeader
@@ -1485,6 +1511,17 @@ function SettingsViewInner({
               pricingTier={venue.pricing_tier ?? null}
               onInitialLoadComplete={markStaffWarmupComplete}
             />
+          </div>
+        ) : null}
+
+        {linkedAccountsAvailable ? (
+          <div
+            className={selectedTab === 'linked-accounts' ? '' : 'hidden'}
+            aria-hidden={selectedTab !== 'linked-accounts'}
+          >
+            {selectedTab === 'linked-accounts' ? (
+              <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
+            ) : null}
           </div>
         ) : null}
 

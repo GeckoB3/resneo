@@ -7,7 +7,53 @@ import {
   requireManagedCalendarIds,
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { listActiveHostCalendarIds, requireVenueHostCalendarId } from '@/lib/venue-calendar-resolve';
 import { z } from 'zod';
+
+const LEAVE_SELECT =
+  'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, unavailable_start_time, unavailable_end_time';
+
+async function calendarNamesById(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  calendarIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (calendarIds.length === 0) return map;
+
+  const { data: ucRows, error: ucErr } = await admin
+    .from('unified_calendars')
+    .select('id, name')
+    .eq('venue_id', venueId)
+    .in('id', calendarIds);
+
+  if (ucErr) {
+    console.error('[practitioner-leave] unified_calendars name lookup failed:', ucErr.message);
+  } else {
+    for (const row of ucRows ?? []) {
+      map.set((row as { id: string }).id, (row as { name: string }).name);
+    }
+  }
+
+  const missing = calendarIds.filter((id) => !map.has(id));
+  if (missing.length > 0) {
+    const { data: prRows, error: prErr } = await admin
+      .from('practitioners')
+      .select('id, name')
+      .eq('venue_id', venueId)
+      .in('id', missing);
+    if (prErr) {
+      console.error('[practitioner-leave] practitioners name lookup failed:', prErr.message);
+    } else {
+      for (const row of prRows ?? []) {
+        const r = row as { id: string; name: string };
+        if (!map.has(r.id)) map.set(r.id, r.name);
+      }
+    }
+  }
+
+  return map;
+}
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
@@ -77,9 +123,7 @@ export async function GET(request: NextRequest) {
 
     let query = admin
       .from('practitioner_leave_periods')
-      .select(
-        'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, unavailable_start_time, unavailable_end_time, practitioner:practitioners(name)',
-      )
+      .select(LEAVE_SELECT)
       .eq('venue_id', staff.venue_id)
       .lte('start_date', to)
       .gte('end_date', from)
@@ -101,17 +145,14 @@ export async function GET(request: NextRequest) {
         if (!access.ok) {
           return NextResponse.json({ error: access.error }, { status: 403 });
         }
-      } else {
+      } else if (scope.managedCalendarIds.length > 0) {
         query = query.in('practitioner_id', scope.managedCalendarIds);
+      } else {
+        return NextResponse.json({ periods: [] });
       }
     } else if (filterPractitionerId) {
-      const { data: pRow } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('id', filterPractitionerId)
-        .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      if (!pRow) {
+      const cal = await requireVenueHostCalendarId(admin, staff.venue_id, filterPractitionerId);
+      if (!cal.ok) {
         return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
       }
     }
@@ -127,8 +168,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load unavailability' }, { status: 500 });
     }
 
+    const calendarIds = [
+      ...new Set((data ?? []).map((row) => (row as { practitioner_id: string }).practitioner_id)),
+    ];
+    const nameById = await calendarNamesById(admin, staff.venue_id, calendarIds);
+
     const periods = (data ?? []).map((row: Record<string, unknown>) => {
-      const pr = row.practitioner as { name?: string } | null;
+      const practitionerId = row.practitioner_id as string;
       const ust = row.unavailable_start_time;
       const uen = row.unavailable_end_time;
       const startT =
@@ -146,7 +192,7 @@ export async function GET(request: NextRequest) {
       return {
         id: row.id,
         practitioner_id: row.practitioner_id,
-        practitioner_name: pr?.name ?? 'Calendar',
+        practitioner_name: nameById.get(practitionerId) ?? 'Calendar',
         start_date: row.start_date,
         end_date: row.end_date,
         leave_type: row.leave_type,
@@ -201,6 +247,12 @@ export async function POST(request: NextRequest) {
       if (apply_to_all_active) {
         return NextResponse.json({ error: 'Only admins can add unavailability for all calendars' }, { status: 403 });
       }
+      if (practitioner_id) {
+        const cal = await requireVenueHostCalendarId(admin, staff.venue_id, practitioner_id);
+        if (!cal.ok) {
+          return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
+        }
+      }
       const access = await requireManagedCalendarAccess(
         admin,
         staff.venue_id,
@@ -238,30 +290,16 @@ export async function POST(request: NextRequest) {
 
     let practitionerIds: string[] = [];
     if (apply_to_all_active) {
-      const { data: pracs, error: prErr } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('is_active', true);
-      if (prErr) {
-        console.error('POST practitioner-leave list practitioners:', prErr);
-        return NextResponse.json({ error: 'Failed to resolve calendars' }, { status: 500 });
-      }
-      practitionerIds = (pracs ?? []).map((p: { id: string }) => p.id);
+      practitionerIds = await listActiveHostCalendarIds(admin, staff.venue_id);
       if (practitionerIds.length === 0) {
         return NextResponse.json({ error: 'No active calendars to add unavailability for' }, { status: 400 });
       }
     } else if (practitioner_id) {
-      const { data: one, error: oneErr } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('id', practitioner_id)
-        .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      if (oneErr || !one) {
+      const cal = await requireVenueHostCalendarId(admin, staff.venue_id, practitioner_id);
+      if (!cal.ok) {
         return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
       }
-      practitionerIds = [practitioner_id];
+      practitionerIds = [cal.id];
     }
 
     const rows = practitionerIds.map((pid) => ({

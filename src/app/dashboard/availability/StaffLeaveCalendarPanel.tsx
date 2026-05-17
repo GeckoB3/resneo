@@ -1,6 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  ResourceExceptionsCalendar,
+  type CalendarUnavailabilityDayValue,
+} from '@/app/dashboard/resource-timeline/ResourceExceptionsCalendar';
 import type { PractitionerLeaveType } from '@/types/booking-models';
 
 export interface LeavePeriodRow {
@@ -12,7 +17,6 @@ export interface LeavePeriodRow {
   leave_type: PractitionerLeaveType;
   notes: string | null;
   created_at: string;
-  /** HH:mm; both null/undefined = full day off for each date in range. */
   unavailable_start_time?: string | null;
   unavailable_end_time?: string | null;
 }
@@ -22,73 +26,97 @@ interface CalendarOption {
   name: string;
 }
 
-/** Display labels for DB enum `leave_type` (legacy values annual / sick / other). */
-const UNAVAILABILITY_LABELS: Record<PractitionerLeaveType, string> = {
-  annual: 'Closed',
-  sick: 'Unavailable',
-  other: 'Other',
+type CalendarBlockType = 'closed' | 'partial';
+
+interface DraftState {
+  block_type: CalendarBlockType;
+  date_start: string;
+  date_end: string;
+  time_start: string | null;
+  time_end: string | null;
+  leave_type: PractitionerLeaveType;
+  notes: string;
+  apply_to_all_active: boolean;
+}
+
+const BLOCK_TYPE_LABELS: Record<CalendarBlockType, string> = {
+  closed: 'Closure',
+  partial: 'Unavailable window',
 };
 
-const UNAVAILABILITY_DOT: Record<PractitionerLeaveType, string> = {
-  annual: 'bg-sky-500',
-  sick: 'bg-rose-500',
-  other: 'bg-slate-400',
+const BLOCK_TYPE_COLORS: Record<CalendarBlockType, string> = {
+  closed: 'bg-red-100 text-red-700',
+  partial: 'bg-rose-100 text-rose-700',
 };
 
-const UNAVAILABILITY_RING: Record<PractitionerLeaveType, string> = {
-  annual: 'ring-sky-200',
-  sick: 'ring-rose-200',
-  other: 'ring-slate-200',
-};
-
-function monthGrid(year: number, monthIndex: number): (number | null)[] {
-  const first = new Date(year, monthIndex, 1);
-  const startPad = (first.getDay() + 6) % 7;
-  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < startPad; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
-}
-
-function ymd(year: number, monthIndex: number, day: number): string {
-  const m = monthIndex + 1;
-  return `${year}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-function parseYmd(s: string): { y: number; m: number; d: number } {
-  const [y, mo, d] = s.split('-').map(Number);
-  return { y: y!, m: mo! - 1, d: d! };
-}
-
-function formatRange(start: string, end: string): string {
-  const a = parseYmd(start);
-  const b = parseYmd(end);
-  if (a.y !== b.y) {
-    return `${new Date(start + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} – ${new Date(end + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  }
-  if (start === end) {
-    return new Date(start + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
-  }
-  return `${new Date(start + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(end + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-}
-
-function periodCoversDate(p: LeavePeriodRow, iso: string): boolean {
-  return p.start_date <= iso && p.end_date >= iso;
+function emptyDraft(): DraftState {
+  return {
+    block_type: 'closed',
+    date_start: '',
+    date_end: '',
+    time_start: null,
+    time_end: null,
+    leave_type: 'annual',
+    notes: '',
+    apply_to_all_active: false,
+  };
 }
 
 function isFullDayLeave(p: Pick<LeavePeriodRow, 'unavailable_start_time' | 'unavailable_end_time'>): boolean {
-  return (p.unavailable_start_time == null || p.unavailable_start_time === '') &&
-    (p.unavailable_end_time == null || p.unavailable_end_time === '');
+  return (
+    (p.unavailable_start_time == null || p.unavailable_start_time === '') &&
+    (p.unavailable_end_time == null || p.unavailable_end_time === '')
+  );
 }
 
-function formatDailyWindow(p: LeavePeriodRow): string | null {
-  if (isFullDayLeave(p)) return null;
-  const a = p.unavailable_start_time ?? '';
-  const b = p.unavailable_end_time ?? '';
-  if (!a || !b) return null;
-  return `${a}–${b} each day`;
+function draftFromPeriod(p: LeavePeriodRow): DraftState {
+  const fullDay = isFullDayLeave(p);
+  return {
+    block_type: fullDay ? 'closed' : 'partial',
+    date_start: p.start_date,
+    date_end: p.end_date,
+    time_start: fullDay ? null : (p.unavailable_start_time?.slice(0, 5) ?? null),
+    time_end: fullDay ? null : (p.unavailable_end_time?.slice(0, 5) ?? null),
+    leave_type: p.leave_type,
+    notes: p.notes ?? '',
+    apply_to_all_active: false,
+  };
+}
+
+function bestLeaveForDay(periods: LeavePeriodRow[], iso: string): LeavePeriodRow | null {
+  let best: LeavePeriodRow | null = null;
+  let bestPri = -1;
+  for (const p of periods) {
+    if (iso < p.start_date || iso > p.end_date) continue;
+    const pri = isFullDayLeave(p) ? 2 : 1;
+    if (pri > bestPri) {
+      best = p;
+      bestPri = pri;
+    }
+  }
+  return best;
+}
+
+function leavePeriodsToCalendarMap(
+  periods: LeavePeriodRow[],
+  year: number,
+  month: number,
+): Record<string, CalendarUnavailabilityDayValue> {
+  const lastDay = new Date(year, month, 0).getDate();
+  const map: Record<string, CalendarUnavailabilityDayValue> = {};
+  for (let d = 1; d <= lastDay; d++) {
+    const iso = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const p = bestLeaveForDay(periods, iso);
+    if (!p) continue;
+    if (isFullDayLeave(p)) {
+      map[iso] = { closed: true };
+      continue;
+    }
+    const start = p.unavailable_start_time ?? '';
+    const end = p.unavailable_end_time ?? '';
+    if (start && end) map[iso] = { unavailableWindow: { start, end } };
+  }
+  return map;
 }
 
 export function StaffLeaveCalendarPanel({
@@ -99,45 +127,53 @@ export function StaffLeaveCalendarPanel({
 }: {
   practitioners: CalendarOption[];
   isAdmin: boolean;
-  /** When set, non-admin users can manage unavailability only for this calendar column. */
   selfPractitionerId?: string | null;
   onError: (msg: string | null) => void;
 }) {
   const canManageUnavailability = isAdmin || Boolean(selfPractitionerId);
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [filterId, setFilterId] = useState<string>('all');
+
+  const initialCalendarId =
+    selfPractitionerId ?? practitioners[0]?.id ?? '';
+
+  const [calendarId, setCalendarId] = useState(initialCalendarId);
   const [periods, setPeriods] = useState<LeavePeriodRow[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [editing, setEditing] = useState<LeavePeriodRow | null>(null);
-  const [formStart, setFormStart] = useState('');
-  const [formEnd, setFormEnd] = useState('');
-  const [formType, setFormType] = useState<PractitionerLeaveType>('annual');
-  const [formPractitionerId, setFormPractitionerId] = useState('');
-  const [formWholeTeam, setFormWholeTeam] = useState(false);
-  const [formNotes, setFormNotes] = useState('');
-  const [formFullDay, setFormFullDay] = useState(true);
-  const [formStartTime, setFormStartTime] = useState('09:00');
-  const [formEndTime, setFormEndTime] = useState('12:00');
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const monthLabel = useMemo(
-    () => new Date(viewYear, viewMonth, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
-    [viewYear, viewMonth],
-  );
+  const nowDate = new Date();
+  const [calYear, setCalYear] = useState(nowDate.getFullYear());
+  const [calMonth, setCalMonth] = useState(nowDate.getMonth() + 1);
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<DraftState>(emptyDraft);
 
-  const rangeFrom = ymd(viewYear, viewMonth, 1);
-  const rangeTo = ymd(viewYear, viewMonth, new Date(viewYear, viewMonth + 1, 0).getDate());
+  useEffect(() => {
+    if (selfPractitionerId) {
+      setCalendarId(selfPractitionerId);
+      return;
+    }
+    if (!calendarId && practitioners[0]?.id) {
+      setCalendarId(practitioners[0].id);
+    }
+  }, [selfPractitionerId, practitioners, calendarId]);
 
-  const fetchPeriods = useCallback(async () => {
+  const rangeFrom = `${calYear}-${String(calMonth).padStart(2, '0')}-01`;
+  const rangeTo = `${calYear}-${String(calMonth).padStart(2, '0')}-${String(
+    new Date(calYear, calMonth, 0).getDate(),
+  ).padStart(2, '0')}`;
+
+  const reload = useCallback(async () => {
+    if (!calendarId) {
+      setPeriods([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     onError(null);
     try {
-      const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
-      if (filterId !== 'all') params.set('practitioner_id', filterId);
+      const params = new URLSearchParams({ from: rangeFrom, to: rangeTo, practitioner_id: calendarId });
       const res = await fetch(`/api/venue/practitioner-leave?${params}`);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -153,111 +189,122 @@ export function StaffLeaveCalendarPanel({
     } finally {
       setLoading(false);
     }
-  }, [filterId, rangeFrom, rangeTo, onError]);
+  }, [calendarId, rangeFrom, rangeTo, onError]);
 
   useEffect(() => {
-    void fetchPeriods();
-  }, [fetchPeriods]);
+    void reload();
+  }, [reload]);
 
-  useEffect(() => {
-    if (!sheetOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSheetOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [sheetOpen]);
-
-  const grid = useMemo(() => monthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
-
-  const canEditPeriod = useCallback(
-    (p: LeavePeriodRow) => isAdmin || Boolean(selfPractitionerId && p.practitioner_id === selfPractitionerId),
-    [isAdmin, selfPractitionerId],
+  const calendarExceptions = useMemo(
+    () => leavePeriodsToCalendarMap(periods, calYear, calMonth),
+    [periods, calYear, calMonth],
   );
 
-  function openAdd(prefillDay?: number) {
-    setEditing(null);
-    const start =
-      prefillDay != null ? ymd(viewYear, viewMonth, prefillDay) : rangeFrom;
-    setFormStart(start);
-    setFormEnd(start);
-    setFormType('annual');
-    setFormNotes('');
-    setFormWholeTeam(false);
-    setFormFullDay(true);
-    setFormStartTime('09:00');
-    setFormEndTime('12:00');
-    if (selfPractitionerId) {
-      setFormPractitionerId(selfPractitionerId);
-    } else if (filterId === 'all') {
-      setFormPractitionerId(practitioners[0]?.id ?? '');
-    } else {
-      setFormPractitionerId(filterId);
-    }
-    setSheetOpen(true);
-  }
+  const prevMonth = useCallback(() => {
+    setCalMonth((m) => {
+      if (m === 1) {
+        setCalYear((y) => y - 1);
+        return 12;
+      }
+      return m - 1;
+    });
+  }, []);
 
-  function openEdit(p: LeavePeriodRow) {
-    setEditing(p);
-    setFormStart(p.start_date);
-    setFormEnd(p.end_date);
-    setFormType(p.leave_type);
-    setFormNotes(p.notes ?? '');
-    setFormPractitionerId(p.practitioner_id);
-    setFormWholeTeam(false);
-    const fd = isFullDayLeave(p);
-    setFormFullDay(fd);
-    setFormStartTime(
-      p.unavailable_start_time && p.unavailable_start_time.length >= 5
-        ? p.unavailable_start_time.slice(0, 5)
-        : '09:00',
-    );
-    setFormEndTime(
-      p.unavailable_end_time && p.unavailable_end_time.length >= 5
-        ? p.unavailable_end_time.slice(0, 5)
-        : '12:00',
-    );
-    setSheetOpen(true);
-  }
+  const nextMonth = useCallback(() => {
+    setCalMonth((m) => {
+      if (m === 12) {
+        setCalYear((y) => y + 1);
+        return 1;
+      }
+      return m + 1;
+    });
+  }, []);
 
-  async function submitForm() {
-    if (!canManageUnavailability) return;
-    if (!formStart || !formEnd || formEnd < formStart) {
-      onError('Choose a valid date range');
-      return;
-    }
-    if (!editing && !formWholeTeam && !formPractitionerId && !selfPractitionerId) {
-      onError('Select a calendar');
-      return;
-    }
-    if (!formFullDay) {
-      if (!formStartTime || !formEndTime || formEndTime <= formStartTime) {
-        onError('Set a valid time window (end must be after start)');
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setDraft(emptyDraft());
+    setRangeStart(null);
+    setRangeEnd(null);
+    setFormError(null);
+  }, []);
+
+  const editPeriod = useCallback((p: LeavePeriodRow) => {
+    setEditingId(p.id);
+    setDraft(draftFromPeriod(p));
+    setRangeStart(p.start_date);
+    setRangeEnd(p.end_date);
+    setFormError(null);
+  }, []);
+
+  const handleDayClick = useCallback(
+    (ymd: string) => {
+      if (!canManageUnavailability) return;
+      if (editingId) {
+        cancelEdit();
         return;
       }
+      const onDay = periods.filter((p) => p.start_date <= ymd && p.end_date >= ymd);
+      if (onDay.length === 1 && (isAdmin || onDay[0]!.practitioner_id === selfPractitionerId)) {
+        editPeriod(onDay[0]!);
+        return;
+      }
+      if (!rangeStart) {
+        setRangeStart(ymd);
+        setRangeEnd(ymd);
+        setDraft((d) => ({ ...d, date_start: ymd, date_end: ymd }));
+      } else if (rangeStart === ymd && rangeEnd === ymd) {
+        setRangeStart(null);
+        setRangeEnd(null);
+        setDraft((d) => ({ ...d, date_start: '', date_end: '' }));
+      } else {
+        const a = rangeStart <= ymd ? rangeStart : ymd;
+        const b = rangeStart <= ymd ? ymd : rangeStart;
+        setRangeStart(a);
+        setRangeEnd(b);
+        setDraft((d) => ({ ...d, date_start: a, date_end: b }));
+      }
+    },
+    [canManageUnavailability, editingId, cancelEdit, periods, editPeriod, isAdmin, selfPractitionerId, rangeStart, rangeEnd],
+  );
+
+  const handleSave = useCallback(async () => {
+    if (!canManageUnavailability) return;
+    if (!draft.date_start || !draft.date_end) {
+      setFormError('Select dates on the calendar or enter a start and end date.');
+      return;
+    }
+    if (draft.date_end < draft.date_start) {
+      setFormError('End date must be on or after start date.');
+      return;
+    }
+    if (draft.block_type === 'partial' && (!draft.time_start || !draft.time_end || draft.time_end <= draft.time_start)) {
+      setFormError('Unavailable window requires a valid start and end time (end after start).');
+      return;
+    }
+    if (!editingId && !draft.apply_to_all_active && !calendarId) {
+      setFormError('Select a calendar.');
+      return;
     }
 
+    const fullDay = draft.block_type === 'closed' && !draft.time_start && !draft.time_end;
+    const payload = {
+      start_date: draft.date_start,
+      end_date: draft.date_end,
+      leave_type: draft.leave_type,
+      notes: draft.notes.trim() || null,
+      unavailable_start_time: fullDay ? null : draft.time_start,
+      unavailable_end_time: fullDay ? null : draft.time_end,
+    };
+
     setSaving(true);
+    setFormError(null);
     onError(null);
     try {
-      if (editing) {
-        if (!canEditPeriod(editing)) {
-          onError('You can only edit unavailability on your own calendar');
-          setSaving(false);
-          return;
-        }
+      if (editingId) {
         const res = await fetch('/api/venue/practitioner-leave', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: editing.id,
-            start_date: formStart,
-            end_date: formEnd,
-            leave_type: formType,
-            notes: formNotes.trim() || null,
-            unavailable_start_time: formFullDay ? null : formStartTime,
-            unavailable_end_time: formFullDay ? null : formEndTime,
-          }),
+          body: JSON.stringify({ id: editingId, ...payload }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
@@ -268,525 +315,429 @@ export function StaffLeaveCalendarPanel({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            apply_to_all_active: formWholeTeam,
-            practitioner_id: formWholeTeam ? undefined : formPractitionerId,
-            start_date: formStart,
-            end_date: formEnd,
-            leave_type: formType,
-            notes: formNotes.trim() || null,
-            unavailable_start_time: formFullDay ? null : formStartTime,
-            unavailable_end_time: formFullDay ? null : formEndTime,
+            apply_to_all_active: draft.apply_to_all_active,
+            practitioner_id: draft.apply_to_all_active ? undefined : calendarId,
+            ...payload,
           }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          throw new Error(typeof j.error === 'string' ? j.error : 'Could not add unavailability');
+          throw new Error(typeof j.error === 'string' ? j.error : 'Could not save');
         }
       }
-      setSheetOpen(false);
-      await fetchPeriods();
+      cancelEdit();
+      await reload();
     } catch (e) {
-      onError(e instanceof Error ? e.message : 'Save failed');
+      setFormError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
     }
-  }
+  }, [canManageUnavailability, draft, editingId, calendarId, cancelEdit, reload, onError]);
 
-  async function removePeriod(id: string) {
-    const row = periods.find((x) => x.id === id);
-    if (!row || !canEditPeriod(row)) return;
-    if (!confirm('Remove this unavailability from the calendar?')) return;
-    onError(null);
-    try {
-      const res = await fetch('/api/venue/practitioner-leave', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(typeof j.error === 'string' ? j.error : 'Delete failed');
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!confirm('Remove this closure from the calendar?')) return;
+      setFormError(null);
+      onError(null);
+      try {
+        const res = await fetch('/api/venue/practitioner-leave', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(typeof j.error === 'string' ? j.error : 'Delete failed');
+        }
+        if (editingId === id) cancelEdit();
+        await reload();
+      } catch (e) {
+        setFormError(e instanceof Error ? e.message : 'Delete failed');
       }
-      await fetchPeriods();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : 'Delete failed');
-    }
-  }
-
-  const sortedPeriods = useMemo(
-    () => [...periods].sort((a, b) => a.start_date.localeCompare(b.start_date) || a.practitioner_name.localeCompare(b.practitioner_name)),
-    [periods],
+    },
+    [editingId, cancelEdit, reload, onError],
   );
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const futurePeriods = useMemo(
+    () => periods.filter((p) => p.end_date >= today).sort((a, b) => a.start_date.localeCompare(b.start_date)),
+    [periods, today],
+  );
+  const pastPeriods = useMemo(
+    () => periods.filter((p) => p.end_date < today).sort((a, b) => b.start_date.localeCompare(a.start_date)),
+    [periods, today],
+  );
+
+  const selectedCalendarName = practitioners.find((p) => p.id === calendarId)?.name ?? 'Calendar';
+
+  if (practitioners.length === 0) {
+    return (
+      <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+        Add a calendar first to set closures and unavailable windows.
+      </p>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-xl space-y-1">
-          <p className="text-sm text-slate-600">
-            Block online booking per calendar: choose full days or a repeating time window on each day in your date
-            range (for example closed mornings all week). Weekly default hours still live under Availability; this tab is
-            for one-off or dated exceptions.
-          </p>
-          <p className="text-xs text-slate-500">
-            Tip: use <span className="font-medium text-slate-600">All calendars</span> for venue-wide closures or the
-            same hours on every active column.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <>
-            <label className="sr-only" htmlFor="leave-filter">
-              Show unavailability for
-            </label>
-            <select
-              id="leave-filter"
-              value={filterId}
-              onChange={(e) => setFilterId(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="all">All calendars</option>
-              {practitioners.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </>
-          {canManageUnavailability && (
-            <button
-              type="button"
-              onClick={() => openAdd()}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-            >
-              Add unavailability
-            </button>
-          )}
-        </div>
+    <section className="space-y-6">
+      <div className="max-w-xl space-y-1">
+        <p className="text-sm text-slate-600">
+          Block online booking for one calendar column at a time. Click dates on the calendar to select a range, then
+          set closure or unavailable window details below.
+        </p>
+        <p className="text-xs text-slate-500">
+          Whole-venue closures and amended opening hours for every booking type are in{' '}
+          <Link href="/dashboard/settings?tab=business-hours" className="font-medium text-brand-600 hover:underline">
+            Settings → Business hours
+          </Link>
+          .
+        </p>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Previous month"
-            className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
-            onClick={() => {
-              if (viewMonth === 0) {
-                setViewMonth(11);
-                setViewYear((y) => y - 1);
-              } else setViewMonth((m) => m - 1);
-            }}
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h2 className="min-w-[10rem] text-center text-lg font-semibold text-slate-900">{monthLabel}</h2>
-          <button
-            type="button"
-            aria-label="Next month"
-            className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
-            onClick={() => {
-              if (viewMonth === 11) {
-                setViewMonth(0);
-                setViewYear((y) => y + 1);
-              } else setViewMonth((m) => m + 1);
-            }}
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="ml-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            onClick={() => {
-              const t = new Date();
-              setViewYear(t.getFullYear());
-              setViewMonth(t.getMonth());
-            }}
-          >
-            Today
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-          {(Object.keys(UNAVAILABILITY_LABELS) as PractitionerLeaveType[]).map((k) => (
-            <span key={k} className="inline-flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${UNAVAILABILITY_DOT[k]}`} />
-              {UNAVAILABILITY_LABELS[k]}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_minmax(16rem,20rem)]">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          {loading ? (
-            <div className="flex h-64 items-center justify-center text-sm text-slate-500">Loading calendar…</div>
-          ) : (
-            <>
-              <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/80 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                  <div key={d} className="px-1 py-2">
-                    {d}
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-px bg-slate-200 p-px">
-                {grid.map((day, i) => {
-                  if (day == null) {
-                    return <div key={`e-${i}`} className="min-h-[5.5rem] bg-slate-50/50" />;
-                  }
-                  const iso = ymd(viewYear, viewMonth, day);
-                  const dayPeriods = periods.filter((p) => periodCoversDate(p, iso));
-                  const isToday = iso === todayIso;
-                    return (
-                    <div
-                      key={iso}
-                      className={`group relative flex min-h-[5.5rem] flex-col bg-white p-1.5 transition-colors ${
-                        isToday ? 'ring-1 ring-inset ring-blue-400/60' : ''
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <span
-                          className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium ${
-                            isToday ? 'bg-brand-600 text-white' : 'text-slate-700'
-                          }`}
-                        >
-                          {day}
-                        </span>
-                        {canManageUnavailability && (
-                          <button
-                            type="button"
-                            title="Add unavailability on this day"
-                            className="rounded p-0.5 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-blue-600 group-hover:opacity-100"
-                            onClick={() => openAdd(day)}
-                          >
-                            <span className="sr-only">Add</span>
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                      <div className="mt-1 flex flex-1 flex-col gap-0.5">
-                        {dayPeriods.slice(0, 3).map((p) => {
-                          const editable = canEditPeriod(p);
-                          const timeLine = formatDailyWindow(p);
-                          const pillTitle = `${p.practitioner_name} · ${UNAVAILABILITY_LABELS[p.leave_type]}${
-                            timeLine ? ` · ${timeLine}` : ''
-                          }`;
-                          const pillClass = `truncate rounded px-1 py-0.5 text-left text-[10px] font-medium ring-1 ring-inset ${UNAVAILABILITY_RING[p.leave_type]} ${
-                            p.leave_type === 'annual'
-                              ? 'bg-sky-50 text-sky-900'
-                              : p.leave_type === 'sick'
-                                ? 'bg-rose-50 text-rose-900'
-                                : 'bg-slate-50 text-slate-700'
-                          } ${editable ? 'cursor-pointer hover:opacity-90' : 'cursor-default'}`;
-                          const pillBody =
-                            filterId === 'all' ? (
-                              <>
-                                <span className="block truncate font-semibold">{p.practitioner_name}</span>
-                                <span className="block truncate opacity-80">{UNAVAILABILITY_LABELS[p.leave_type]}</span>
-                                {timeLine && (
-                                  <span className="block truncate text-[9px] font-normal opacity-75">
-                                    {timeLine.replace(' each day', '')}
-                                  </span>
-                                )}
-                              </>
-                            ) : (
-                              <>
-                                <span className="block truncate">{UNAVAILABILITY_LABELS[p.leave_type]}</span>
-                                {timeLine && (
-                                  <span className="block truncate text-[9px] font-normal opacity-75">
-                                    {timeLine.replace(' each day', '')}
-                                  </span>
-                                )}
-                              </>
-                            );
-                          return editable ? (
-                            <button
-                              key={p.id}
-                              type="button"
-                              title={pillTitle}
-                              onClick={() => openEdit(p)}
-                              className={pillClass}
-                            >
-                              {pillBody}
-                            </button>
-                          ) : (
-                            <div key={p.id} title={pillTitle} className={pillClass}>
-                              {pillBody}
-                            </div>
-                          );
-                        })}
-                        {dayPeriods.length > 3 && (
-                          <span className="text-[10px] font-medium text-slate-500">+{dayPeriods.length - 3} more</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-900">This month</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {sortedPeriods.length === 0
-              ? 'No entries. Add a closure or unavailability to block booking for those days.'
-              : `${sortedPeriods.length} entr${sortedPeriods.length === 1 ? 'y' : 'ies'}`}
-          </p>
-          <ul className="mt-3 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-            {sortedPeriods.map((p) => {
-              const dailyWindow = formatDailyWindow(p);
-              return (
-              <li
-                key={p.id}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-slate-300"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium text-slate-900">{p.practitioner_name}</p>
-                    <p className="text-xs text-slate-500">{formatRange(p.start_date, p.end_date)}</p>
-                    {dailyWindow && (
-                      <p className="mt-0.5 text-xs font-medium text-slate-600">{dailyWindow}</p>
-                    )}
-                    <p className="mt-1 text-xs font-medium text-slate-700">{UNAVAILABILITY_LABELS[p.leave_type]}</p>
-                    {p.notes && <p className="mt-1 text-xs text-slate-600 line-clamp-2">{p.notes}</p>}
-                  </div>
-                  {canEditPeriod(p) && (
-                    <div className="flex shrink-0 flex-col gap-1">
-                      <button
-                        type="button"
-                        className="rounded-lg px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
-                        onClick={() => openEdit(p)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                        onClick={() => void removePeriod(p.id)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </li>
-            );
-            })}
-          </ul>
-        </div>
-      </div>
-
-      {sheetOpen && (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/40 p-0 sm:p-4"
-          role="presentation"
-          onClick={() => setSheetOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="leave-sheet-title"
-            className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <h2 id="leave-sheet-title" className="text-lg font-semibold text-slate-900">
-                {editing ? 'Edit unavailability' : 'Add unavailability'}
-              </h2>
-              <button
-                type="button"
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-                onClick={() => setSheetOpen(false)}
-                aria-label="Close"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              {!editing && (
-                <>
-                  {!selfPractitionerId && (
-                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                      <input
-                        type="checkbox"
-                        checked={formWholeTeam}
-                        onChange={(e) => setFormWholeTeam(e.target.checked)}
-                        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
-                      />
-                      <span>
-                        <span className="font-medium text-slate-900">All calendars (all active)</span>
-                        <span className="mt-0.5 block text-xs text-slate-500">
-                          Adds the same entry to every active calendar (full day or the same hours each day) — for
-                          venue-wide closures, bank holidays, or training.
-                        </span>
-                      </span>
-                    </label>
-                  )}
-                  {!selfPractitionerId && !formWholeTeam && (
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
-                      <select
-                        value={formPractitionerId}
-                        onChange={(e) => setFormPractitionerId(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      >
-                        <option value="">Select…</option>
-                        {practitioners.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </>
-              )}
-              {editing && (
-                <p className="text-sm text-slate-600">
-                  <span className="font-medium text-slate-800">{editing.practitioner_name}</span>
-                </p>
-              )}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Category</label>
-                <div className="flex flex-wrap gap-2">
-                  {(Object.keys(UNAVAILABILITY_LABELS) as PractitionerLeaveType[]).map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setFormType(k)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                        formType === k
-                          ? k === 'annual'
-                            ? 'bg-sky-600 text-white'
-                            : k === 'sick'
-                              ? 'bg-rose-600 text-white'
-                              : 'bg-slate-700 text-white'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {UNAVAILABILITY_LABELS[k]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Start</label>
-                  <input
-                    type="date"
-                    value={formStart}
-                    onChange={(e) => setFormStart(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">End</label>
-                  <input
-                    type="date"
-                    value={formEnd}
-                    onChange={(e) => setFormEnd(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-800">Within each day</p>
-                <div className="flex flex-col gap-2">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name="leave-coverage"
-                      checked={formFullDay}
-                      onChange={() => setFormFullDay(true)}
-                      className="h-4 w-4 border-slate-300 text-blue-600"
-                    />
-                    <span className="text-sm text-slate-700">Unavailable all day</span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name="leave-coverage"
-                      checked={!formFullDay}
-                      onChange={() => setFormFullDay(false)}
-                      className="h-4 w-4 border-slate-300 text-blue-600"
-                    />
-                    <span className="text-sm text-slate-700">Unavailable between times (same window on every date)</span>
-                  </label>
-                </div>
-                {!formFullDay && (
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="leave-from-time">
-                        From
-                      </label>
-                      <input
-                        id="leave-from-time"
-                        type="time"
-                        value={formStartTime}
-                        onChange={(e) => setFormStartTime(e.target.value.slice(0, 5))}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="leave-to-time">
-                        To
-                      </label>
-                      <input
-                        id="leave-to-time"
-                        type="time"
-                        value={formEndTime}
-                        onChange={(e) => setFormEndTime(e.target.value.slice(0, 5))}
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-slate-500">
-                {formFullDay
-                  ? 'One day only: set start and end date to the same day. No online bookings for that calendar on those whole days.'
-                  : 'Guests can still book outside this window on each date. The window repeats for every day from start through end date.'}
-              </p>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Notes (optional)</label>
-                <textarea
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  rows={3}
-                  placeholder="e.g. Bank holiday closure · shortened hours — see Availability tab"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 border-t border-slate-100 px-5 py-4">
-              <button
-                type="button"
-                className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                onClick={() => setSheetOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="flex-1 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                onClick={() => void submitForm()}
-              >
-                {saving ? 'Saving…' : editing ? 'Save changes' : 'Add to calendar'}
-              </button>
-            </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Calendar closures</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {canManageUnavailability
+                ? `Managing: ${selectedCalendarName}`
+                : `Viewing: ${selectedCalendarName}`}
+            </p>
           </div>
+          {isAdmin && !selfPractitionerId && (
+            <div className="w-full sm:max-w-xs">
+              <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="leave-calendar-picker">
+                Calendar
+              </label>
+              <select
+                id="leave-calendar-picker"
+                value={calendarId}
+                onChange={(e) => {
+                  setCalendarId(e.target.value);
+                  cancelEdit();
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              >
+                {practitioners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
+
+        {loading ? (
+          <div className="flex h-48 items-center justify-center text-sm text-slate-500">Loading calendar…</div>
+        ) : (
+          <>
+            <ResourceExceptionsCalendar
+              year={calYear}
+              month={calMonth}
+              onPrevMonth={prevMonth}
+              onNextMonth={nextMonth}
+              exceptions={calendarExceptions}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              editingDay={editingId ? draft.date_start : null}
+              onDayClick={handleDayClick}
+              displayMode="calendar_unavailability"
+            />
+
+            {canManageUnavailability && (
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-800">
+                  {editingId ? 'Edit block' : 'New block'}
+                </h3>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
+                    <select
+                      value={draft.block_type}
+                      onChange={(e) => {
+                        const block_type = e.target.value as CalendarBlockType;
+                        setDraft((d) => ({
+                          ...d,
+                          block_type,
+                          time_start: block_type === 'partial' ? d.time_start ?? '09:00' : null,
+                          time_end: block_type === 'partial' ? d.time_end ?? '12:00' : null,
+                        }));
+                      }}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="closed">Closure</option>
+                      <option value="partial">Unavailable window</option>
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Closure blocks the whole day unless you add optional times. Unavailable window blocks the same
+                      time range on every day in the range.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
+                    <input
+                      type="date"
+                      value={draft.date_start}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          date_start: e.target.value,
+                          date_end: draft.date_end || e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">End date</label>
+                    <input
+                      type="date"
+                      value={draft.date_end}
+                      onChange={(e) => setDraft({ ...draft, date_end: e.target.value })}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  {(draft.block_type === 'closed' || draft.block_type === 'partial') && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          {draft.block_type === 'partial'
+                            ? 'Start time'
+                            : 'Start time (optional, for partial-day)'}
+                        </label>
+                        <input
+                          type="time"
+                          value={draft.time_start ?? ''}
+                          onChange={(e) =>
+                            setDraft({ ...draft, time_start: e.target.value || null })
+                          }
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          {draft.block_type === 'partial' ? 'End time' : 'End time (optional)'}
+                        </label>
+                        <input
+                          type="time"
+                          value={draft.time_end ?? ''}
+                          onChange={(e) => setDraft({ ...draft, time_end: e.target.value || null })}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Label (optional)</label>
+                    <select
+                      value={draft.leave_type}
+                      onChange={(e) =>
+                        setDraft({ ...draft, leave_type: e.target.value as PractitionerLeaveType })
+                      }
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="annual">Closed</option>
+                      <option value="sick">Unavailable</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Notes (optional)</label>
+                    <input
+                      type="text"
+                      value={draft.notes}
+                      onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                      placeholder="e.g. Training day, equipment maintenance"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  {isAdmin && !selfPractitionerId && !editingId && (
+                    <div className="sm:col-span-2">
+                      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                        <input
+                          type="checkbox"
+                          checked={draft.apply_to_all_active}
+                          onChange={(e) =>
+                            setDraft({ ...draft, apply_to_all_active: e.target.checked })
+                          }
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                        <span>
+                          <span className="text-sm font-medium text-slate-900">Apply to all active calendars</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">
+                            Same dates and times on every active calendar column at once.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {formError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {formError}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={saving || !draft.date_start || !draft.date_end}
+                    onClick={() => void handleSave()}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add to calendar'}
+                  </button>
+                  {editingId && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(editingId)}
+                        className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                  {!editingId && rangeStart && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRangeStart(null);
+                        setRangeEnd(null);
+                        setDraft((d) => ({ ...d, date_start: '', date_end: '' }));
+                      }}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {futurePeriods.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+          <h3 className="text-sm font-semibold text-slate-700">Upcoming</h3>
+          {futurePeriods.map((p) => {
+            const fullDay = isFullDayLeave(p);
+            const blockType: CalendarBlockType = fullDay ? 'closed' : 'partial';
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => canManageUnavailability && editPeriod(p)}
+                disabled={!canManageUnavailability}
+                className={`flex w-full items-start justify-between rounded-lg border p-3 text-left transition hover:bg-slate-50 disabled:cursor-default ${
+                  editingId === p.id ? 'border-brand-300 bg-brand-50/30' : 'border-slate-100'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${BLOCK_TYPE_COLORS[blockType]}`}
+                    >
+                      {BLOCK_TYPE_LABELS[blockType]}
+                    </span>
+                    <span className="text-sm font-medium text-slate-700">
+                      {p.start_date === p.end_date ? p.start_date : `${p.start_date} – ${p.end_date}`}
+                    </span>
+                    {!fullDay && p.unavailable_start_time && p.unavailable_end_time && (
+                      <span className="text-xs text-slate-400">
+                        {p.unavailable_start_time}–{p.unavailable_end_time} each day
+                      </span>
+                    )}
+                  </div>
+                  {p.notes && <p className="mt-1 text-xs text-slate-500">{p.notes}</p>}
+                </div>
+                {canManageUnavailability && (
+                  <svg
+                    className="ml-2 mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"
+                    />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {pastPeriods.length > 0 && (
+        <details className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm text-sm">
+          <summary className="cursor-pointer font-medium text-slate-500">
+            Past blocks ({pastPeriods.length})
+          </summary>
+          <div className="mt-3 space-y-2">
+            {pastPeriods.map((p) => {
+              const fullDay = isFullDayLeave(p);
+              const blockType: CalendarBlockType = fullDay ? 'closed' : 'partial';
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs text-slate-400"
+                >
+                  <div>
+                    <span
+                      className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${BLOCK_TYPE_COLORS[blockType]}`}
+                    >
+                      {BLOCK_TYPE_LABELS[blockType]}
+                    </span>
+                    {p.start_date === p.end_date ? p.start_date : `${p.start_date} – ${p.end_date}`}
+                    {p.notes ? ` – ${p.notes}` : ''}
+                  </div>
+                  {canManageUnavailability && (
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(p.id)}
+                      className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                      title="Delete"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+
+      {!loading && periods.length === 0 && (
+        <p className="text-center text-sm text-slate-400">
+          No closures or unavailable windows for this calendar. Click dates on the calendar to add one.
+        </p>
       )}
 
       {!canManageUnavailability && (
@@ -795,6 +746,6 @@ export function StaffLeaveCalendarPanel({
           your staff profile to the right calendar column.
         </p>
       )}
-    </div>
+    </section>
   );
 }

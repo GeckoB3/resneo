@@ -25,6 +25,19 @@ export type ExceptionDayValue =
   | { periods: Array<{ start: string; end: string }> }
   | { reducedCapacity: true; maxCovers?: number };
 
+/** Per-calendar closures tab: full day off or a blocked time window (not venue amended opening hours). */
+export type CalendarUnavailabilityDayValue =
+  | { closed: true }
+  | { unavailableWindow: { start: string; end: string } };
+
+export type ResourceExceptionsDisplayMode = 'venue_exceptions' | 'calendar_unavailability';
+
+function isCalendarUnavailabilityValue(
+  ex: ExceptionDayValue | CalendarUnavailabilityDayValue,
+): ex is CalendarUnavailabilityDayValue {
+  return 'unavailableWindow' in ex;
+}
+
 function isInSelectionRange(ymd: string, rangeStart: string | null, rangeEnd: string | null): boolean {
   if (!rangeStart) return false;
   if (!rangeEnd) return ymd === rangeStart;
@@ -43,17 +56,20 @@ export function ResourceExceptionsCalendar({
   rangeEnd,
   editingDay,
   onDayClick,
+  displayMode = 'venue_exceptions',
 }: {
   year: number;
   month: number;
-  exceptions: Record<string, ExceptionDayValue>;
+  exceptions: Record<string, ExceptionDayValue | CalendarUnavailabilityDayValue>;
   rangeStart: string | null;
   rangeEnd: string | null;
   editingDay: string | null;
   onPrevMonth: () => void;
   onNextMonth: () => void;
   onDayClick: (ymd: string) => void;
+  displayMode?: ResourceExceptionsDisplayMode;
 }) {
+  const calendarMode = displayMode === 'calendar_unavailability';
   const first = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0).getDate();
   const leading = (first.getDay() + 6) % 7;
@@ -114,6 +130,9 @@ export function ResourceExceptionsCalendar({
             if ('closed' in ex) {
               bg = 'bg-red-50 hover:bg-red-100';
               ring = 'ring-1 ring-red-200';
+            } else if (calendarMode && isCalendarUnavailabilityValue(ex) && 'unavailableWindow' in ex) {
+              bg = 'bg-rose-50 hover:bg-rose-100';
+              ring = 'ring-1 ring-rose-200';
             } else if ('reducedCapacity' in ex) {
               bg = 'bg-orange-50 hover:bg-orange-100';
               ring = 'ring-1 ring-orange-200';
@@ -132,9 +151,13 @@ export function ResourceExceptionsCalendar({
           const label = ex
             ? 'closed' in ex
               ? 'Closed'
-              : 'reducedCapacity' in ex
-                ? `Reduced capacity${ex.maxCovers != null ? ` (${ex.maxCovers} covers)` : ''}`
-                : `Amended hours ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
+              : calendarMode && isCalendarUnavailabilityValue(ex) && 'unavailableWindow' in ex
+                ? `Unavailable ${ex.unavailableWindow.start}–${ex.unavailableWindow.end}`
+                : 'reducedCapacity' in ex
+                  ? `Reduced capacity${ex.maxCovers != null ? ` (${ex.maxCovers} covers)` : ''}`
+                  : 'periods' in ex
+                    ? `Amended hours ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
+                    : ''
             : inRange
               ? 'Selected for new range'
               : '';
@@ -152,7 +175,13 @@ export function ResourceExceptionsCalendar({
               <span>{d}</span>
               {ex && (
                 <span className="mt-0.5 max-w-full truncate px-0.5 text-[9px] font-normal leading-tight text-slate-600">
-                  {'closed' in ex ? 'Off' : 'reducedCapacity' in ex ? 'Cap' : 'Hrs'}
+                  {'closed' in ex
+                    ? 'Off'
+                    : calendarMode && isCalendarUnavailabilityValue(ex) && 'unavailableWindow' in ex
+                      ? 'Block'
+                      : 'reducedCapacity' in ex
+                        ? 'Cap'
+                        : 'Hrs'}
                 </span>
               )}
             </button>
@@ -165,18 +194,27 @@ export function ResourceExceptionsCalendar({
           <span className="h-3 w-3 rounded border border-red-200 bg-red-50" aria-hidden />
           Closed
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border border-amber-200 bg-amber-50" aria-hidden />
-          Amended hours
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border border-orange-200 bg-orange-50" aria-hidden />
-          Reduced capacity
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border-2 border-brand-500 bg-white" aria-hidden />
-          New range
-        </span>
+        {calendarMode ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded border border-rose-200 bg-rose-50" aria-hidden />
+            Unavailable window
+          </span>
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border border-amber-200 bg-amber-50" aria-hidden />
+              Amended hours
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border border-orange-200 bg-orange-50" aria-hidden />
+              Reduced capacity
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border-2 border-brand-500 bg-white" aria-hidden />
+              New range
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

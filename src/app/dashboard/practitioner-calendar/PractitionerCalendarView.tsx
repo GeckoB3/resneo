@@ -2149,9 +2149,26 @@ export function PractitionerCalendarView({
     }
   }, [linkFeature, listFromTo]);
 
-  useEffect(() => {
-    void loadLinkedData();
+  /**
+   * Debounced linked-data refetch. Date paging and realtime events both route
+   * through here so rapid day changes (or a burst of linked-venue edits)
+   * collapse into a single request rather than one fetch per tick.
+   */
+  const linkedRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLinkedRefetch = useCallback(() => {
+    if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
+    linkedRefetchTimerRef.current = setTimeout(() => {
+      linkedRefetchTimerRef.current = null;
+      void loadLinkedData();
+    }, 400);
   }, [loadLinkedData]);
+
+  useEffect(() => {
+    scheduleLinkedRefetch();
+    return () => {
+      if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
+    };
+  }, [scheduleLinkedRefetch]);
 
   useEffect(() => {
     if (!showResourceBooking || resourceBookingVenue) return;
@@ -2244,6 +2261,40 @@ export function PractitionerCalendarView({
       void supabase.removeChannel(channel);
     };
   }, [venueId, scheduleSilentCalendarRefetch]);
+
+  /** Stable key for the set of linked venues — so realtime does not re-subscribe on a plain refetch. */
+  const linkedVenueIdsKey = useMemo(
+    () =>
+      [...new Set(linkedVenues.map((v) => v.venueId))].sort().join(','),
+    [linkedVenues],
+  );
+
+  /**
+   * Linked-venue bookings (§8.2) get their own realtime channel so a change in
+   * a linked venue surfaces live, not only on date change. RLS gates delivery —
+   * the caller receives an event only for a row a link lets them see — and the
+   * refetch is debounced. Keyed on the stable venue-id set so an ordinary
+   * linked-data refetch never tears the subscription down.
+   */
+  useEffect(() => {
+    const ids = linkedVenueIdsKey ? linkedVenueIdsKey.split(',') : [];
+    if (!linkFeature || ids.length === 0) return;
+    const supabase = createClient();
+    const channel = supabase.channel(`linked-calendar-${venueId}`);
+    for (const linkedVenueId of ids) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${linkedVenueId}` },
+        () => {
+          scheduleLinkedRefetch();
+        },
+      );
+    }
+    channel.subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [linkFeature, venueId, linkedVenueIdsKey, scheduleLinkedRefetch]);
 
   const activePractitioners = useMemo(
     () => practitioners.filter((p) => p.is_active),

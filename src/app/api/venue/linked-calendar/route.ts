@@ -120,11 +120,19 @@ export async function GET(request: NextRequest) {
         }));
       }
 
+      // Bookings are read through the RLS-enforced path, not the admin client:
+      // full_details links read the base table; time_only links read
+      // `bookings_linked_anonymised`, which nulls every PII column at the
+      // database (§4.4). The user-scoped client makes RLS the backstop, so a
+      // future change here cannot silently widen what a link exposes.
+      //
       // Cancelled bookings are excluded: a cancelled slot is free, so it must
       // never render as "busy" on a time_only link or clutter a full_details
       // grid. No-Show rows are kept — that time was still reserved.
-      const { data: bookingRows } = await admin
-        .from('bookings')
+      const bookingSource =
+        access.grant.calendar === 'time_only' ? 'bookings_linked_anonymised' : 'bookings';
+      const { data: bookingRows } = await supabase
+        .from(bookingSource)
         .select(
           'id, practitioner_id, calendar_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
         )
@@ -164,7 +172,10 @@ export async function GET(request: NextRequest) {
             ),
           ];
           if (guestIds.length > 0) {
-            const { data: guests } = await admin
+            // RLS-enforced: `linked_venue_can_view_guests` only returns rows
+            // when the link grants full_details + PII (§4.4) — the same
+            // condition as `canSeePii`, so RLS is the backstop here too.
+            const { data: guests } = await supabase
               .from('guests')
               .select('id, name, first_name, last_name')
               .in('id', guestIds);

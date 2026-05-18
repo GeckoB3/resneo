@@ -33,6 +33,20 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neut
   return 'neutral';
 }
 
+/**
+ * Best-effort ping recording that a linked-venue booking's detail was opened
+ * (§4.2 `viewed_booking`). The server debounces to a 5-minute window, so the
+ * modals can fire this freely on every open. Failures are swallowed — an audit
+ * ping must never disrupt the detail the user already opened.
+ */
+function pingLinkedBookingView(bookingId: string): void {
+  void fetch('/api/venue/linked-calendar/booking/view', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bookingId }),
+  }).catch(() => {});
+}
+
 export function LinkedCalendarView({
   hideWhenEmpty = false,
   title,
@@ -352,6 +366,10 @@ export function EditLinkedBookingModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    pingLinkedBookingView(booking.id);
+  }, [booking.id]);
+
   const save = async (overrideStatus?: string) => {
     setBusy(true);
     setError(null);
@@ -484,6 +502,10 @@ export function LinkedBookingDetailModal({
   const timeLabel = booking.bookingEndTime
     ? `${fmtTime(booking.bookingTime)}–${fmtTime(booking.bookingEndTime)}`
     : fmtTime(booking.bookingTime);
+
+  useEffect(() => {
+    pingLinkedBookingView(booking.id);
+  }, [booking.id]);
 
   return (
     <Modal

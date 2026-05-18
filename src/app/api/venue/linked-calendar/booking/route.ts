@@ -7,6 +7,7 @@ import {
   linkedBookingChangeSchema,
   linkedBookingCreateSchema,
 } from '@/lib/linked-accounts/validation';
+import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -172,13 +173,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The owning venue's column model determines both the table the chosen
+    // calendar must exist in and which booking column the row is keyed on.
+    const ownerUsesUnified = await venueUsesUnifiedCalendarList(admin, input.ownerVenueId);
+
     if (input.practitionerId) {
-      const { data: practitioner } = await admin
-        .from('practitioners')
+      const calendarTable = ownerUsesUnified ? 'unified_calendars' : 'practitioners';
+      const { data: calendar } = await admin
+        .from(calendarTable)
         .select('id, venue_id')
         .eq('id', input.practitionerId)
         .maybeSingle();
-      if (!practitioner || practitioner.venue_id !== input.ownerVenueId) {
+      if (!calendar || calendar.venue_id !== input.ownerVenueId) {
         return NextResponse.json(
           { error: 'That calendar does not belong to the linked venue.' },
           { status: 400 },
@@ -211,7 +217,8 @@ export async function POST(request: NextRequest) {
         booking_time: input.bookingTime,
         booking_end_time: input.bookingEndTime ?? '',
         party_size: input.partySize ?? 1,
-        practitioner_id: input.practitionerId ?? '',
+        practitioner_id: ownerUsesUnified ? '' : input.practitionerId ?? '',
+        calendar_id: ownerUsesUnified ? input.practitionerId ?? '' : '',
         appointment_service_id: input.appointmentServiceId ?? '',
         special_requests: input.specialRequests ?? null,
       },

@@ -4,6 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
 import { recordReadAudit } from '@/lib/linked-accounts/audit';
+import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
 import type {
   LinkedBooking,
   LinkedPractitioner,
@@ -73,16 +74,35 @@ export async function GET(request: NextRequest) {
       const fullDetails = access.grant.calendar === 'full_details';
       const canSeePii = fullDetails && access.grant.pii;
 
-      const { data: practitionerRows } = await admin
-        .from('practitioners')
-        .select('id, name, is_active')
-        .eq('venue_id', access.venueId)
-        .order('sort_order', { ascending: true });
-      const practitioners: LinkedPractitioner[] = (practitionerRows ?? []).map((p) => ({
-        id: p.id as string,
-        name: (p.name as string) ?? 'Calendar',
-        isActive: (p.is_active as boolean) ?? true,
-      }));
+      // Calendar columns: appointments-family venues store them in
+      // `unified_calendars`; only legacy table venues use `practitioners`.
+      const usesUnified = await venueUsesUnifiedCalendarList(admin, access.venueId);
+      let practitioners: LinkedPractitioner[];
+      if (usesUnified) {
+        const { data: calendarRows } = await admin
+          .from('unified_calendars')
+          .select('id, name, is_active, calendar_type')
+          .eq('venue_id', access.venueId)
+          .order('sort_order', { ascending: true });
+        practitioners = (calendarRows ?? [])
+          .filter((c) => (c.calendar_type as string | null) !== 'resource')
+          .map((c) => ({
+            id: c.id as string,
+            name: (c.name as string) ?? 'Calendar',
+            isActive: (c.is_active as boolean) ?? true,
+          }));
+      } else {
+        const { data: practitionerRows } = await admin
+          .from('practitioners')
+          .select('id, name, is_active')
+          .eq('venue_id', access.venueId)
+          .order('sort_order', { ascending: true });
+        practitioners = (practitionerRows ?? []).map((p) => ({
+          id: p.id as string,
+          name: (p.name as string) ?? 'Calendar',
+          isActive: (p.is_active as boolean) ?? true,
+        }));
+      }
 
       // Services — only meaningful to full_details viewers (used by the
       // cross-venue "new booking" form when the link allows creating).
@@ -103,7 +123,7 @@ export async function GET(request: NextRequest) {
       const { data: bookingRows } = await admin
         .from('bookings')
         .select(
-          'id, practitioner_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
+          'id, practitioner_id, calendar_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
         )
         .eq('venue_id', access.venueId)
         .gte('booking_date', rangeFrom)
@@ -159,9 +179,14 @@ export async function GET(request: NextRequest) {
       const editable =
         access.grant.act === 'edit_existing' || access.grant.act === 'create_edit_cancel';
 
+      // Resolve each booking onto its column id. Unified venues key bookings
+      // by `calendar_id`; legacy venues by `practitioner_id`. The fallback
+      // covers mirror rows, where both ids are shared.
       const bookings: LinkedBooking[] = rawBookings.map((b) => ({
         id: b.id as string,
-        practitionerId: (b.practitioner_id as string | null) ?? null,
+        practitionerId: usesUnified
+          ? (b.calendar_id as string | null) ?? (b.practitioner_id as string | null) ?? null
+          : (b.practitioner_id as string | null) ?? (b.calendar_id as string | null) ?? null,
         bookingDate: b.booking_date as string,
         bookingTime: (b.booking_time as string) ?? '',
         bookingEndTime: (b.booking_end_time as string | null) ?? null,

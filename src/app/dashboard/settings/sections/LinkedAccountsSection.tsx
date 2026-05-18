@@ -20,7 +20,12 @@ import {
   isReductionOnly,
   normaliseGrant,
 } from '@/lib/linked-accounts/permissions';
-import { DEFAULT_LINK_GRANT, type AccountLinkView, type LinkGrant } from '@/lib/linked-accounts/types';
+import {
+  DEFAULT_LINK_GRANT,
+  LINK_COUNT_SOFT_WARNING,
+  type AccountLinkView,
+  type LinkGrant,
+} from '@/lib/linked-accounts/types';
 import type { EligibilityResult } from '@/lib/linked-accounts/eligibility';
 
 interface ApiData {
@@ -150,10 +155,14 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
               {data.eligibility.reason}
             </p>
           ) : null}
-          {activeLinks.length >= 10 ? (
-            <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
-              You have a lot of linked venues. Consider whether a venue collective would be
-              simpler to manage.
+          {activeLinks.length + receivedRequests.length + sentRequests.length >=
+          LINK_COUNT_SOFT_WARNING ? (
+            <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              You have {activeLinks.length + receivedRequests.length + sentRequests.length}{' '}
+              active or pending links (we suggest keeping fewer than {LINK_COUNT_SOFT_WARNING} for
+              easier management). A{' '}
+              <span className="font-semibold">venue collective</span> may be simpler if you share a
+              brand with several partners.
             </p>
           ) : null}
           {activeLinks.length > 0 ? (

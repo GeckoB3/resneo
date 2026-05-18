@@ -43,6 +43,10 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  applyBookingRowOverlayFields,
+  overlayFromPatchPayload,
+} from '@/lib/booking/booking-row-overlay';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
@@ -51,9 +55,17 @@ import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModa
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
+import {
+  useDashboardDetailCache,
+  type VenueBookingDetailPayload,
+} from '@/components/providers/DashboardDetailCacheProvider';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
+import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 
 interface BookingRow {
   id: string;
@@ -73,6 +85,7 @@ interface BookingRow {
   guest_email: string | null;
   guest_phone: string | null;
   guest_id?: string;
+  guest_visit_count?: number | null;
   table_assignments?: Array<{ id: string; name: string }>;
   service_id?: string | null;
   practitioner_id?: string | null;
@@ -342,23 +355,33 @@ export function BookingsDashboard({
   currency,
   primaryBookingModel = 'table_reservation',
   enabledModels = [],
+  initialTodayIso,
 }: {
   venueId: string;
   currency?: string;
   primaryBookingModel?: BookingModel;
   enabledModels?: BookingModel[];
+  /** yyyy-mm-dd from the server render — keeps “today” aligned between SSR and hydration. */
+  initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const {
+    peekVenueBookingDetail,
+    primeVenueBookingDetail,
+    invalidateVenueBookingDetail,
+    warmVenueBookingDetail,
+  } = useDashboardDetailCache();
   const venueBootstrap = useDashboardVenueBootstrap();
+  const todayIso = initialTodayIso ?? todayISO();
   const preferencesKey = bookingsPreferencesKey(venueId);
   const rememberedPreferences = useMemo(
     () => readSessionPreference<BookingsDashboardPreferences>(preferencesKey, {}, isBookingsDashboardPreferences),
     [preferencesKey],
   );
   const [viewMode, setViewMode] = useState<ViewMode>(rememberedPreferences.viewMode ?? 'day');
-  const [anchorDate, setAnchorDate] = useState(rememberedPreferences.anchorDate ?? todayISO);
-  const [customFrom, setCustomFrom] = useState(rememberedPreferences.customFrom ?? todayISO);
-  const [customTo, setCustomTo] = useState(rememberedPreferences.customTo ?? todayISO);
+  const [anchorDate, setAnchorDate] = useState(rememberedPreferences.anchorDate ?? todayIso);
+  const [customFrom, setCustomFrom] = useState(rememberedPreferences.customFrom ?? todayIso);
+  const [customTo, setCustomTo] = useState(rememberedPreferences.customTo ?? todayIso);
   const [statusFilter, setStatusFilter] = useState<string>(rememberedPreferences.statusFilter ?? 'All');
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>(rememberedPreferences.modelFilter ?? 'all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -825,50 +848,99 @@ export function BookingsDashboard({
     return () => { void supabase.removeChannel(channel); };
   }, [venueId, fetchBookings]);
 
-  const loadBookingDetail = useCallback(async (bookingId: string, force = false) => {
-    if (!force && detailById[bookingId]) return;
-    if (detailLoadingIds.includes(bookingId)) return;
-    setDetailLoadingIds((prev) => [...prev, bookingId]);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setDetailById((prev) => ({ ...prev, [bookingId]: data as BookingDetailLite }));
-      setGuestHistoryRevisionById((prev) => ({
-        ...prev,
-        [bookingId]: (prev[bookingId] ?? 0) + 1,
-      }));
-    } finally {
-      setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
-    }
-  }, [detailById, detailLoadingIds]);
+  useEffect(() => {
+    if (bookings.length === 0) return;
+    const ids = bookings
+      .filter((b) => b.status !== 'Cancelled')
+      .slice(0, 24)
+      .map((b) => b.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, warmVenueBookingDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [bookings, warmVenueBookingDetail]);
+
+  const loadBookingDetail = useCallback(
+    async (bookingId: string, force = false) => {
+      if (!force && detailById[bookingId]) return;
+
+      const cachedRaw = !force ? peekVenueBookingDetail(bookingId) : undefined;
+      const fromCache =
+        cachedRaw &&
+        typeof cachedRaw === 'object' &&
+        typeof (cachedRaw as unknown as BookingDetailLite).id === 'string' &&
+        (cachedRaw as unknown as BookingDetailLite).id === bookingId
+          ? (cachedRaw as unknown as BookingDetailLite)
+          : undefined;
+
+      if (fromCache && !detailById[bookingId]) {
+        setDetailById((prev) => ({ ...prev, [bookingId]: fromCache }));
+      }
+
+      const blockingSpinner = force || !fromCache;
+      if (detailLoadingIds.includes(bookingId)) return;
+      if (blockingSpinner) {
+        setDetailLoadingIds((prev) => [...prev, bookingId]);
+      }
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as BookingDetailLite;
+        primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
+        setDetailById((prev) => ({ ...prev, [bookingId]: data }));
+        setGuestHistoryRevisionById((prev) => ({
+          ...prev,
+          [bookingId]: (prev[bookingId] ?? 0) + 1,
+        }));
+      } finally {
+        if (blockingSpinner) {
+          setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
+        }
+      }
+    },
+    [detailById, detailLoadingIds, peekVenueBookingDetail, primeVenueBookingDetail],
+  );
 
   const prefetchBookingDetail = useCallback(
     (bookingId: string) => {
-      if (detailById[bookingId]) return;
-      if (detailLoadingIds.includes(bookingId)) return;
-      void fetch(`/api/venue/bookings/${bookingId}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (!data) return;
-          setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: data as BookingDetailLite }));
-          setGuestHistoryRevisionById((prev) => ({
-            ...prev,
-            [bookingId]: (prev[bookingId] ?? 0) + 1,
-          }));
-        })
-        .catch(() => {});
+      void (async () => {
+        await warmVenueBookingDetail(bookingId);
+        const lite = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
+        if (!lite) return;
+        setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: lite }));
+      })();
     },
-    [detailById, detailLoadingIds],
+    [peekVenueBookingDetail, warmVenueBookingDetail],
   );
 
-  const toggleExpand = useCallback((bookingId: string) => {
-    setExpandedIds((prev) => {
-      if (prev.includes(bookingId)) return [];
-      return [bookingId];
-    });
-    void loadBookingDetail(bookingId);
-  }, [loadBookingDetail]);
+  const toggleExpand = useCallback(
+    (bookingId: string) => {
+      setExpandedIds((prev) => {
+        if (prev.includes(bookingId)) return [];
+        return [bookingId];
+      });
+      const row = bookings.find((b) => b.id === bookingId);
+      const fromCache = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
+      const fromRow = row ? bookingDetailLiteFromListRow(row) : undefined;
+      const seed = fromCache ?? fromRow;
+      if (seed) {
+        setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: seed }));
+      }
+      void loadBookingDetail(bookingId);
+    },
+    [bookings, loadBookingDetail, peekVenueBookingDetail],
+  );
 
   useEffect(() => {
     const ob = searchParams.get('openBooking');
@@ -892,16 +964,36 @@ export function BookingsDashboard({
     void fetchBookings({ silent: true });
   }, [fetchBookings]);
 
-  const handleDetailUpdated = useCallback((bookingId: string) => {
-    setDetailById((prev) => { const next = { ...prev }; delete next[bookingId]; return next; });
-    void loadBookingDetail(bookingId, true);
-    void fetchBookings({ silent: true, ids: [bookingId] });
-  }, [loadBookingDetail, fetchBookings]);
+  const handleDetailUpdated = useCallback(
+    (bookingId: string) => {
+      invalidateVenueBookingDetail(bookingId);
+      setDetailById((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        return next;
+      });
+      void loadBookingDetail(bookingId, true);
+      void fetchBookings({ silent: true, ids: [bookingId] });
+    },
+    [invalidateVenueBookingDetail, loadBookingDetail, fetchBookings],
+  );
 
   const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
     const previous = bookings.find((b) => b.id === bookingId)?.status;
     if (!previous || previous === newStatus || !canTransitionBookingStatus(previous, newStatus)) return;
-    setBookings((prev) => prev.map((booking) => booking.id === bookingId ? { ...booking, status: newStatus } : booking));
+    setBookings((prev) =>
+      prev.map((row) => {
+        if (row.id !== bookingId) return row;
+        const updated = { ...row, status: newStatus };
+        if (previous === 'Confirmed' && newStatus === 'Booked') {
+          updated.staff_attendance_confirmed_at = null;
+          updated.guest_attendance_confirmed_at = null;
+        } else if (newStatus === 'Confirmed' && previous !== 'Confirmed') {
+          updated.staff_attendance_confirmed_at = new Date().toISOString();
+        }
+        return updated;
+      }),
+    );
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -910,6 +1002,16 @@ export function BookingsDashboard({
       });
       if (!res.ok) {
         throw new Error('Failed to update booking status');
+      }
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (payload && typeof payload === 'object' && !('error' in payload)) {
+        setBookings((prev) =>
+          prev.map((row) =>
+            row.id === bookingId
+              ? applyBookingRowOverlayFields(row, overlayFromPatchPayload(payload))
+              : row,
+          ),
+        );
       }
       const row = bookings.find((x) => x.id === bookingId);
       const displayNew = bookingStatusDisplayLabel(newStatus, row ? isTableReservationBooking(row) : true);
@@ -922,7 +1024,6 @@ export function BookingsDashboard({
         current_state: { bookingId, status: newStatus },
       });
       addToast('Booking status updated', 'success');
-      void fetchBookings({ silent: true, ids: [bookingId] });
     } catch {
       setBookings((prev) => prev.map((booking) => booking.id === bookingId ? { ...booking, status: previous } : booking));
       setError(`Could not update booking status for ${bookingId.slice(0, 8).toUpperCase()}.`);
@@ -960,6 +1061,7 @@ export function BookingsDashboard({
           const w = payload.errors.join('; ');
           addToast(`Sent with issues — ${w}`, 'error');
           setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          invalidateVenueBookingDetail(bookingId);
           setDetailById((prev) => {
             const next = { ...prev };
             delete next[bookingId];
@@ -970,6 +1072,7 @@ export function BookingsDashboard({
         }
         addToast('Message sent', 'success');
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        invalidateVenueBookingDetail(bookingId);
         setDetailById((prev) => {
           const next = { ...prev };
           delete next[bookingId];
@@ -986,7 +1089,7 @@ export function BookingsDashboard({
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
     },
-    [addToast, loadBookingDetail],
+    [addToast, invalidateVenueBookingDetail, loadBookingDetail],
   );
 
   const executeBulkNoShow = useCallback(async () => {
@@ -1710,6 +1813,7 @@ export function BookingsDashboard({
         summary={bookingToolbarSummary}
         summaryContent={bookingSummaryContent}
         date={anchorDate}
+        todayIso={todayIso}
         dateLabel={viewMode === 'custom' ? `${customFrom} – ${customTo}` : formatDateLabel(anchorDate, viewMode)}
         onDateChange={setAnchorDate}
         onPreviousDate={() => navigate(-1)}
@@ -2220,9 +2324,9 @@ function BookingsAccordionList({
               aria-expanded={expanded}
               aria-controls={`booking-expand-${booking.id}`}
               onClick={() => onToggleExpand(booking.id)}
-              onPointerEnter={() => {
-                onPrefetchBookingDetail?.(booking.id);
-              }}
+              {...(onPrefetchBookingDetail
+                ? bindDetailPrefetchHandlers(booking.id, onPrefetchBookingDetail)
+                : {})}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
               className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(booking)} ${expanded ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
             >
@@ -2334,7 +2438,11 @@ function BookingsAccordionList({
                 </svg>
               </div>
               {expanded && (
-                <div className={expandedBookingRowShellClass}>
+                <div
+                  className={expandedBookingRowShellClass}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   <ExpandedBookingContent
                     booking={booking}
                     detail={detail}

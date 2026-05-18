@@ -152,6 +152,7 @@ export function DashboardHomeClient({
 }) {
   const { data, error, mutate, isValidating } = useSWR('/api/venue/dashboard-home', fetchDashboardHome, {
     fallbackData: initialData,
+    revalidateOnMount: false,
     revalidateOnFocus: false,
     dedupingInterval: 60_000,
     keepPreviousData: true,

@@ -39,35 +39,35 @@ describe('pickInfoRowCount', () => {
 });
 
 describe('groupInfoRows', () => {
-  it('collapses all full booking fields onto one row at the shortest height', () => {
-    expect(groupInfoRows(1, false)).toEqual([['name', 'service', 'phone', 'time', 'pill']]);
+  it('collapses all full booking fields onto one row at the shortest height (calendar priority order)', () => {
+    expect(groupInfoRows(1, false)).toEqual([['name', 'time', 'pill', 'service', 'phone']]);
   });
 
   it('expands all full booking fields onto separate rows at the tallest height', () => {
     expect(groupInfoRows(5, false)).toEqual([
       ['name'],
-      ['service'],
-      ['phone'],
       ['time'],
       ['pill'],
+      ['service'],
+      ['phone'],
     ]);
   });
 
-  it('moves fields up as available row count decreases', () => {
+  it('keeps time and status pill together as height grows', () => {
     expect(groupInfoRows(4, false)).toEqual([
       ['name'],
+      ['time', 'pill'],
       ['service'],
       ['phone'],
-      ['time', 'pill'],
     ]);
     expect(groupInfoRows(3, false)).toEqual([
       ['name'],
-      ['service'],
-      ['phone', 'time', 'pill'],
+      ['time', 'pill'],
+      ['service', 'phone'],
     ]);
     expect(groupInfoRows(2, false)).toEqual([
       ['name'],
-      ['service', 'phone', 'time', 'pill'],
+      ['time', 'pill', 'service', 'phone'],
     ]);
   });
 });
@@ -81,24 +81,24 @@ describe('pickVisibleInfoRows', () => {
     pill: 50,
   };
 
-  it('keeps higher-priority fields before lower-priority fields on one short row', () => {
+  it('keeps name, time, and status before service and phone on a short row', () => {
     expect(
       pickVisibleInfoRows({
-        rows: [['name', 'service', 'phone', 'time', 'pill']],
+        rows: [['name', 'time', 'pill', 'service', 'phone']],
         availableWidth: 260,
         widths,
       }),
-    ).toEqual([['name', 'service', 'phone']]);
+    ).toEqual([['name', 'time', 'pill']]);
   });
 
-  it('does not show time if service or phone cannot fit before it', () => {
+  it('drops phone and service before time when space is very tight', () => {
     expect(
       pickVisibleInfoRows({
-        rows: [['name', 'service', 'phone', 'time', 'pill']],
-        availableWidth: 190,
+        rows: [['name', 'time', 'pill', 'service', 'phone']],
+        availableWidth: 200,
         widths,
       }),
-    ).toEqual([['name', 'service']]);
+    ).toEqual([['name', 'time']]);
   });
 
   it('shows all fields when they have dedicated rows', () => {

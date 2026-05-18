@@ -27,9 +27,13 @@ function shiftDate(isoDate: string, deltaDays: number): string {
   return formatDateInput(base);
 }
 
+const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/** Deterministic date label — avoids `toLocaleDateString` SSR/client ICU differences. */
 function formatDateHeading(isoDate: string): string {
   const d = new Date(`${isoDate}T12:00:00`);
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function KpiChips({
@@ -262,7 +266,8 @@ export function OperationsWorkspaceToolbar({
   const timelineTriggerRef = useRef<HTMLButtonElement>(null);
   const controlsTriggerRef = useRef<HTMLButtonElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const todayIso = todayIsoProp ?? formatDateInput(new Date());
+  const [fallbackTodayIso] = useState(() => formatDateInput(new Date()));
+  const todayIso = todayIsoProp ?? fallbackTodayIso;
   const isToday = date === todayIso;
   const inlineInfoOpen = compact && open === 'info';
   const inlineDateOpen = compact && open === 'date';

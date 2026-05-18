@@ -1,13 +1,41 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { StaffBookingSurfaceTabsBar } from '@/components/booking/StaffBookingSurfaceTabsBar';
-import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
-import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
-import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
-import { EventBookingFlow } from '@/components/booking/EventBookingFlow';
-import { ClassBookingFlow } from '@/components/booking/ClassBookingFlow';
-import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
+
+function StaffBookingFlowSpinner() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+    </div>
+  );
+}
+
+const UnifiedBookingForm = dynamic(
+  () => import('@/components/booking/UnifiedBookingForm').then((m) => m.UnifiedBookingForm),
+  { loading: StaffBookingFlowSpinner },
+);
+const WalkInModal = dynamic(
+  () => import('@/app/dashboard/bookings/WalkInModal').then((m) => m.WalkInModal),
+  { loading: StaffBookingFlowSpinner },
+);
+const AppointmentBookingFlow = dynamic(
+  () => import('@/components/booking/AppointmentBookingFlow').then((m) => m.AppointmentBookingFlow),
+  { loading: StaffBookingFlowSpinner },
+);
+const EventBookingFlow = dynamic(
+  () => import('@/components/booking/EventBookingFlow').then((m) => m.EventBookingFlow),
+  { loading: StaffBookingFlowSpinner },
+);
+const ClassBookingFlow = dynamic(
+  () => import('@/components/booking/ClassBookingFlow').then((m) => m.ClassBookingFlow),
+  { loading: StaffBookingFlowSpinner },
+);
+const ResourceBookingFlow = dynamic(
+  () => import('@/components/booking/ResourceBookingFlow').then((m) => m.ResourceBookingFlow),
+  { loading: StaffBookingFlowSpinner },
+);
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
 import {

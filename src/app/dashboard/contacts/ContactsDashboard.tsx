@@ -33,7 +33,10 @@ import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel'
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { useToast } from '@/components/ui/Toast';
+import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 
 export type { GuestListRow } from '@/types/contacts';
 
@@ -387,6 +390,12 @@ export function ContactsDashboard({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { addToast } = useToast();
+  const {
+    peekGuestDetail,
+    primeGuestDetail,
+    invalidateGuestDetail,
+    warmGuestDetail,
+  } = useDashboardDetailCache();
   const isAppointment = appointmentDashboardExperience;
   const clientWord = terminology.client;
   const clientLower = clientWord.toLowerCase();
@@ -692,27 +701,71 @@ export function ContactsDashboard({
     [addToast, clientLower, clientWord, guests, loadList, selectedIds],
   );
 
-  const loadDetail = useCallback(async (guestId: string) => {
-    setDetailLoading(true);
-    setDetail(null);
-    setEditError(null);
-    try {
-      const res = await fetch(`/api/venue/guests/${guestId}?booking_history_limit=80`);
-      const data = (await res.json()) as GuestDetailResponse & { error?: string };
-      if (!res.ok) {
-        throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
+  const loadDetail = useCallback(
+    async (guestId: string) => {
+      const cached = peekGuestDetail(guestId);
+      const cacheHit = cached?.guest?.id === guestId;
+
+      setDetailLoading(!cacheHit);
+      setEditError(null);
+
+      if (cacheHit) {
+        setDetail(cached);
+        setEditFirstName(cached.guest.first_name ?? '');
+        setEditLastName(cached.guest.last_name ?? '');
+        setEditEmail(cached.guest.email ?? '');
+        setEditPhone(cached.guest.phone ?? '');
+      } else {
+        setDetail((prev) => (prev?.guest.id === guestId ? prev : null));
       }
-      setDetail(data);
-      setEditFirstName(data.guest.first_name ?? '');
-      setEditLastName(data.guest.last_name ?? '');
-      setEditEmail(data.guest.email ?? '');
-      setEditPhone(data.guest.phone ?? '');
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+
+      try {
+        const res = await fetch(`/api/venue/guests/${guestId}?booking_history_limit=80`);
+        const data = (await res.json()) as GuestDetailResponse & { error?: string };
+        if (!res.ok) {
+          throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
+        }
+        primeGuestDetail(guestId, data);
+        setDetail(data);
+        setEditFirstName(data.guest.first_name ?? '');
+        setEditLastName(data.guest.last_name ?? '');
+        setEditEmail(data.guest.email ?? '');
+        setEditPhone(data.guest.phone ?? '');
+      } catch (e) {
+        setEditError(e instanceof Error ? e.message : 'Failed to load');
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [peekGuestDetail, primeGuestDetail],
+  );
+
+  const prefetchGuestDetail = useCallback(
+    (guestId: string) => {
+      void warmGuestDetail(guestId);
+    },
+    [warmGuestDetail],
+  );
+
+  useEffect(() => {
+    if (guests.length === 0) return;
+    const ids = guests.slice(0, 28).map((g) => g.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, warmGuestDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [guests, warmGuestDetail]);
 
   useEffect(() => {
     if (!expandedGuestId) {
@@ -765,7 +818,9 @@ export function ContactsDashboard({
         console.error('PATCH /api/venue/guests/[id] returned unexpected guest payload');
         await loadDetail(detail.guest.id);
       } else {
-        setDetail((prev) => (prev && prev.guest.id === j.guest!.id ? mergeGuestDetailFromSavedGuest(prev, j.guest!) : prev));
+        const merged = mergeGuestDetailFromSavedGuest(detail, j.guest!);
+        primeGuestDetail(merged.guest.id, merged);
+        setDetail(merged);
         setEditFirstName(j.guest.first_name ?? '');
         setEditLastName(j.guest.last_name ?? '');
         setEditEmail(j.guest.email ?? '');
@@ -779,7 +834,7 @@ export function ContactsDashboard({
     } finally {
       setEditSaving(false);
     }
-  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList]);
+  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList, primeGuestDetail]);
 
   const exportFilteredCsv = useCallback(async () => {
     setExporting(true);
@@ -902,6 +957,7 @@ export function ContactsDashboard({
         if (!res.ok) {
           throw new Error(typeof j.error === 'string' ? j.error : 'Erase failed');
         }
+        invalidateGuestDetail(guestId);
         setExpandedGuestId(null);
         setDetail(null);
         await loadList();
@@ -913,7 +969,7 @@ export function ContactsDashboard({
         setEraseLoadingId(null);
       }
     },
-    [loadList],
+    [invalidateGuestDetail, loadList],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
@@ -1653,6 +1709,7 @@ export function ContactsDashboard({
                         aria-expanded={expanded}
                         aria-controls={`contact-expand-${g.id}`}
                         onClick={() => toggleContactExpand(g.id)}
+                        {...bindDetailPrefetchHandlers(g.id, prefetchGuestDetail)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();

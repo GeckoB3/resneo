@@ -88,46 +88,77 @@ export async function GET(
       return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
     }
 
-    const { data: statBookings, error: sbErr } = await staff.db
-      .from('bookings')
-      .select('id, booking_date, status, deposit_status, deposit_amount_pence')
-      .eq('guest_id', guestId)
-      .eq('venue_id', staff.venue_id);
+    const venueId = staff.venue_id;
 
-    if (sbErr) {
-      console.error('GET guest stats failed:', sbErr);
+    const [
+      { count: totalBookingsCount, error: totalCountErr },
+      { count: cancellations, error: cancelCountErr },
+      { count: noShows, error: noShowCountErr },
+      { data: paidDeposits, error: depositErr },
+      { data: firstVisitRows, error: firstVisitErr },
+      { data: lastVisitRows, error: lastVisitErr },
+    ] = await Promise.all([
+      staff.db
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId),
+      staff.db
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId)
+        .eq('status', 'Cancelled'),
+      staff.db
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId)
+        .eq('status', 'No-Show'),
+      staff.db
+        .from('bookings')
+        .select('deposit_amount_pence')
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId)
+        .eq('deposit_status', 'Paid'),
+      staff.db
+        .from('bookings')
+        .select('booking_date')
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId)
+        .not('booking_date', 'is', null)
+        .order('booking_date', { ascending: true })
+        .limit(1),
+      staff.db
+        .from('bookings')
+        .select('booking_date')
+        .eq('guest_id', guestId)
+        .eq('venue_id', venueId)
+        .not('booking_date', 'is', null)
+        .order('booking_date', { ascending: false })
+        .limit(1),
+    ]);
+
+    const statsErr =
+      totalCountErr ?? cancelCountErr ?? noShowCountErr ?? depositErr ?? firstVisitErr ?? lastVisitErr;
+    if (statsErr) {
+      console.error('GET guest stats failed:', statsErr);
       return NextResponse.json({ error: 'Failed to load guest stats' }, { status: 500 });
     }
 
-    let cancellations = 0;
-    let noShows = 0;
+    const cancellationsCount = cancellations ?? 0;
+    const totalBookingsExcludingCancelled = Math.max(0, (totalBookingsCount ?? 0) - cancellationsCount);
     let depositTotalPence = 0;
-    let firstVisit: string | null = null;
-    let lastVisit: string | null = null;
-    let totalBookingsExcludingCancelled = 0;
-
-    for (const b of statBookings ?? []) {
-      const row = b as {
-        booking_date?: string | null;
-        status?: string;
-        deposit_status?: string | null;
-        deposit_amount_pence?: number | null;
-      };
-      if (row.status === 'Cancelled') {
-        cancellations += 1;
-      } else {
-        totalBookingsExcludingCancelled += 1;
-      }
-      if (row.status === 'No-Show') noShows += 1;
-      if (row.deposit_status === 'Paid' && typeof row.deposit_amount_pence === 'number') {
-        depositTotalPence += row.deposit_amount_pence;
-      }
-      const d = row.booking_date;
-      if (d) {
-        if (!firstVisit || d < firstVisit) firstVisit = d;
-        if (!lastVisit || d > lastVisit) lastVisit = d;
+    for (const row of paidDeposits ?? []) {
+      const pence = (row as { deposit_amount_pence?: number | null }).deposit_amount_pence;
+      if (typeof pence === 'number' && Number.isFinite(pence)) {
+        depositTotalPence += pence;
       }
     }
+    const firstVisit =
+      (firstVisitRows?.[0] as { booking_date?: string | null } | undefined)?.booking_date ?? null;
+    const lastVisit =
+      (lastVisitRows?.[0] as { booking_date?: string | null } | undefined)?.booking_date ?? null;
 
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
@@ -279,12 +310,20 @@ export async function GET(
       };
     });
 
-    const bookingIdsForComms = [...new Set((statBookings ?? []).map((b) => (b as { id?: string }).id).filter(Boolean))] as string[];
+    const { data: bookingIdRows } = await staff.db
+      .from('bookings')
+      .select('id')
+      .eq('guest_id', guestId)
+      .eq('venue_id', staff.venue_id)
+      .limit(300);
+
+    const bookingIdsForComms = (bookingIdRows ?? [])
+      .map((b) => (b as { id?: string }).id)
+      .filter((id): id is string => typeof id === 'string');
+
     const commsOrParts: string[] = [`guest_id.eq.${guestId}`];
     if (bookingIdsForComms.length > 0) {
-      const cap = 300;
-      const slice = bookingIdsForComms.slice(0, cap);
-      commsOrParts.push(`booking_id.in.(${slice.join(',')})`);
+      commsOrParts.push(`booking_id.in.(${bookingIdsForComms.join(',')})`);
     }
     const { data: commRows, error: commErr } = await staff.db
       .from('communications')
@@ -370,8 +409,8 @@ export async function GET(
       },
       stats: {
         total_bookings: totalBookingsExcludingCancelled,
-        cancellations,
-        no_shows: noShows,
+        cancellations: cancellationsCount,
+        no_shows: noShows ?? 0,
         total_deposit_pence_paid: depositTotalPence,
         first_visit_date: firstVisit,
         last_visit_date: lastVisit,

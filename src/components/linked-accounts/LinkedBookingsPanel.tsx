@@ -35,7 +35,9 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neut
 
 function formatDayLabel(date: string): string {
   const d = new Date(`${date}T12:00:00`);
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+  return `${weekdays[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 export function LinkedBookingsPanel({

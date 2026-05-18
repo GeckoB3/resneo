@@ -25,9 +25,12 @@ import {
   useDraggable,
   useDroppable,
   type DragCancelEvent,
+  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  pointerWithin,
+  rectIntersection,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
@@ -40,6 +43,7 @@ import {
   LinkedBookingDetailModal,
 } from '@/components/linked-accounts/LinkedCalendarView';
 import type { LinkedVenueCalendar, LinkedBooking } from '@/lib/linked-accounts/calendar';
+import { linkedBookingCountByDate } from '@/lib/linked-accounts/month-linked-counts';
 import {
   BookingDetailPanel,
   type BookingDetailPanelSnapshot,
@@ -49,6 +53,13 @@ import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/Eve
 import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
 import { EXP_BOOKING_ST_FOCUS } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
+import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
+import {
+  bookingDetailPanelSnapshotFromListRow,
+  estimatedEndIsoFromSchedule,
+} from '@/lib/booking/booking-detail-from-row';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import type { BookingStatus } from '@/lib/table-management/booking-status';
@@ -78,7 +89,11 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
-import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import {
+  bookingStatusDisplayLabel,
+  inferBookingRowModel,
+  isTableReservationBooking,
+} from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
@@ -177,10 +192,12 @@ interface Booking {
   service_item_id: string | null;
   service_variant_id?: string | null;
   processing_time_blocks?: unknown | null;
+  guest_id?: string;
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
   guest_visit_count: number | null;
+  booking_item_name?: string | null;
   estimated_end_time: string | null;
   special_requests: string | null;
   internal_notes: string | null;
@@ -354,8 +371,8 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
 }
 
 /**
- * Staff calendar booking blocks — product palette (`accent` = 3px left stripe; fill/text/border are light tints).
- * Booked accent #93C5FD · Confirmed accent #1E40AF · Arrived #F59E0B · Started #22C55E · Completed #6B7280 · No show #FEF2F2 · Cancelled #6B7280
+ * Staff calendar booking blocks — product palette (`accent` = left stripe; fill/text/border match {@link bookingStatusVisualForKey}).
+ * Pending orange · Booked cyan-sky · Confirmed indigo · Arrived amber · Started emerald · Completed slate · No-show red · Cancelled slate.
  */
 interface BookingBlockPalette {
   bg: string;
@@ -364,60 +381,65 @@ interface BookingBlockPalette {
   accent: string;
 }
 
+const BOOKING_PALETTE_PENDING: BookingBlockPalette = {
+  bg: '#FFEDD5',
+  text: '#9A3412',
+  border: '#FDBA74',
+  accent: '#EA580C',
+};
 const BOOKING_PALETTE_BOOKED: BookingBlockPalette = {
-  bg: '#EFF6FF',
-  text: '#1E3A8A',
-  border: '#BFDBFE',
-  accent: '#93C5FD',
+  bg: '#E0F2FE',
+  text: '#0C4A6E',
+  border: '#38BDF8',
+  accent: '#0369A1',
 };
 const BOOKING_PALETTE_CONFIRMED: BookingBlockPalette = {
-  bg: '#DBEAFE',
-  text: '#1E3A8A',
-  border: '#93C5FD',
-  accent: '#1E40AF',
+  bg: '#E0E7FF',
+  text: '#312E81',
+  border: '#818CF8',
+  accent: '#4338CA',
 };
 const BOOKING_PALETTE_ARRIVED_WAITING: BookingBlockPalette = {
-  bg: '#FFFBEB',
-  text: '#92400E',
-  border: '#FDE68A',
-  accent: '#F59E0B',
+  bg: '#FEF3C7',
+  text: '#78350F',
+  border: '#FBBF24',
+  accent: '#D97706',
 };
 const BOOKING_PALETTE_STARTED: BookingBlockPalette = {
-  bg: '#F0FDF4',
-  text: '#166534',
-  border: '#BBF7D0',
-  accent: '#22C55E',
+  bg: '#D1FAE5',
+  text: '#064E3B',
+  border: '#34D399',
+  accent: '#047857',
 };
 const BOOKING_PALETTE_COMPLETED: BookingBlockPalette = {
-  bg: '#F3F4F6',
+  bg: '#E5E7EB',
   text: '#374151',
-  border: '#D1D5DB',
-  accent: '#6B7280',
+  border: '#9CA3AF',
+  accent: '#4B5563',
 };
 const BOOKING_PALETTE_NO_SHOW: BookingBlockPalette = {
-  bg: '#FEF2F2',
+  bg: '#FEE2E2',
   text: '#991B1B',
-  border: '#FECACA',
-  accent: '#EF4444',
+  border: '#F87171',
+  accent: '#DC2626',
 };
 const BOOKING_PALETTE_CANCELLED: BookingBlockPalette = {
-  bg: '#F3F4F6',
-  text: '#6B7280',
-  border: '#E5E7EB',
-  accent: '#6B7280',
+  bg: '#E5E7EB',
+  text: '#4B5563',
+  border: '#D1D5DB',
+  accent: '#4B5563',
 };
 
 function bookingBlockCardStyle(p: BookingBlockPalette): CSSProperties {
   return {
     backgroundColor: p.bg,
-    backgroundImage: `linear-gradient(135deg, ${p.bg} 0%, #ffffff 145%)`,
     color: p.text,
     borderTopColor: p.border,
     borderRightColor: p.border,
     borderBottomColor: p.border,
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
     borderLeftColor: p.accent,
-    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72)',
+    boxShadow: '0 10px 26px rgba(15, 23, 42, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.42)',
   };
 }
 
@@ -436,6 +458,7 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
   if (status === 'Confirmed') return BOOKING_PALETTE_CONFIRMED;
   if (status === 'Pending' || status === 'Booked') {
     if (isAttendanceConfirmed(b)) return BOOKING_PALETTE_CONFIRMED;
+    if (status === 'Pending') return BOOKING_PALETTE_PENDING;
     return BOOKING_PALETTE_BOOKED;
   }
   return BOOKING_PALETTE_BOOKED;
@@ -444,6 +467,15 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
 function calendarStatusLabel(b: Booking): string {
   if (isArrivedWaitingDisplay(b)) return 'Arrived';
   return bookingStatusDisplayLabel(b.status, isTableReservationBooking(b));
+}
+
+function calendarBookingServiceLabel(
+  b: Booking,
+  svc: AppointmentService | null | undefined,
+  resourceName: string | null,
+): string | null {
+  const label = b.booking_item_name?.trim() || svc?.name?.trim() || null;
+  return [resourceName, label].filter(Boolean).join(' · ') || null;
 }
 
 function CalendarBookingStatusBadge({ b }: { b: Booking }) {
@@ -827,7 +859,7 @@ function BookingBlockPills({ b }: { b: Booking }) {
 /** Bottom strip for duration resize (hit target height). */
 const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
 /** Space kept between interactive booking chrome and resize gestures (paint + cushion so actions never butt the slider). */
-const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 2;
+const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 1;
 
 /** Deferred guest modification notify after calendar drag: Confirm or timer end. */
 const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
@@ -836,8 +868,7 @@ const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
 const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
 const BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX = 9;
 
-/** Right-column top padding only (pt-1.5); bottom is flush above the resize strip. Gap-0.5 between buttons (2px each). */
-const BOOKING_RIGHT_COL_PAD_Y = 6;
+/** Gap between stacked corner action buttons (gap-0.5 ≈ 2px). */
 const BOOKING_RIGHT_GAP_PX = 2;
 
 /** Counts must mirror `collectBookingRightColumnActionNodes` render order. */
@@ -868,12 +899,24 @@ function bookingShowsSeatedUndoInRightColumn(b: Booking): boolean {
   return b.status === 'Seated';
 }
 
-/** Per-row height for the single-column action stack. */
-const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
-/** Overlap lanes stack every action vertically in one narrow strip — delay compact/smaller typography slightly vs the padded wide strip. */
-const BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX = 24;
+/** Horizontal inset so booking info does not run under bottom-right action buttons. */
+const BOOKING_ACTIONS_CORNER_RIGHT_PX = 68;
+
 /** Action buttons should stay compact on tall booking bars rather than stretching to fill the card. */
 const BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS = 'max-h-9';
+/** Minimum gap between the booking bar top edge and the action stack. */
+const BOOKING_ACTION_TRAY_TOP_GAP_PX = 8;
+/** Gap between the action stack and the resize strip (or card bottom when not resizable). */
+const BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX = 1;
+/** Internal tray padding above / below buttons. */
+const BOOKING_CORNER_TRAY_PAD_TOP_PX = 4;
+const BOOKING_CORNER_TRAY_PAD_BOTTOM_PX = 2;
+const BOOKING_CORNER_TRAY_PAD_Y_PX =
+  BOOKING_CORNER_TRAY_PAD_TOP_PX + BOOKING_CORNER_TRAY_PAD_BOTTOM_PX;
+/** Preferred per-button height in the corner stack; only shrink below when the bar cannot fit. */
+const BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX = 28;
+/** When every action would get less than this, omit secondary rows (Arrived / Undo start). */
+const BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX = 22;
 
 const BOOKING_CARD_ROW_PAD_RESERVE_PX = 8;
 
@@ -883,71 +926,62 @@ function narrowBookingActionsWidthPx(shellRowWidthPx: number | null | undefined)
   return Math.min(shellRowWidthPx, actionBudget);
 }
 
-function perActionRowHeightPx(
-  blockHeightPx: number,
-  actionCount: number,
-  columns: number,
-  /** Wide action strip reserves `BOOKING_RIGHT_COL_PAD_Y` at top (`pt-1.5`); floating overlap strip does not. */
-  reserveRightColumnTopPad: boolean,
-): number {
-  const pad = reserveRightColumnTopPad ? BOOKING_RIGHT_COL_PAD_Y : 0;
-  const gap = BOOKING_RIGHT_GAP_PX;
-  const rows = Math.ceil(actionCount / columns);
-  const gapTotal = Math.max(0, rows - 1) * gap;
-  const available = blockHeightPx - pad - gapTotal;
-  return available / Math.max(1, rows);
-}
-
 interface BookingRightColumnLayoutResult {
   compact: boolean;
   fontSizePx: number;
   baseClass: string;
+  buttonMinHeightPx: number;
+  stackHeightPx: number;
 }
 
-function bookingRightColumnLayout(
+const BOOKING_CORNER_BUTTON_BASE_CLASS =
+  `inline-flex w-auto min-w-0 shrink-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} items-center justify-center whitespace-nowrap px-2 py-1 text-center font-semibold leading-tight [overflow-wrap:anywhere]`;
+
+function bookingCornerLayoutBudgetPx(blockHeightPx: number): number {
+  return Math.max(
+    0,
+    blockHeightPx - BOOKING_ACTION_TRAY_TOP_GAP_PX - BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
+  );
+}
+
+function cornerActionRawPerRowPx(layoutBudgetPx: number, actionCount: number): number {
+  if (actionCount <= 0) return layoutBudgetPx;
+  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
+  return (layoutBudgetPx - BOOKING_CORNER_TRAY_PAD_Y_PX - gapTotal) / actionCount;
+}
+
+/** Sizes bottom-right corner actions: comfort height by default, shrink only when the bar cannot fit. */
+function bookingCornerActionLayout(
   blockHeightPx: number,
   actionCount: number,
-  options: {
-    /** Mirrors top padding on the wide right column (`pt-1.5`); omit for floating overlap strips that use full height. */
-    reserveRightColumnTopPad?: boolean;
-  },
 ): BookingRightColumnLayoutResult {
-  const emptyBase =
-    `inline-flex w-full min-w-0 min-h-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]`;
-
   if (actionCount <= 0) {
-    return { compact: false, fontSizePx: 10, baseClass: emptyBase };
-  }
-
-  const reserveRightColumnTopPad = options.reserveRightColumnTopPad ?? true;
-  const comfortRowMinPx = reserveRightColumnTopPad
-    ? BOOKING_ACTION_ROW_COMFORT_MIN_PX
-    : BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX;
-
-  const perSingle = perActionRowHeightPx(
-    blockHeightPx,
-    actionCount,
-    1,
-    reserveRightColumnTopPad,
-  );
-  const chosenPerRow = perSingle;
-
-  const compact = chosenPerRow < comfortRowMinPx;
-  const fontSizePx = Math.round(Math.max(7, Math.min(10, chosenPerRow * 0.38)));
-
-  if (!compact) {
     return {
       compact: false,
       fontSizePx: 10,
-      baseClass:
-        `inline-flex w-full min-w-0 min-h-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]`,
+      baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
+      buttonMinHeightPx: 0,
+      stackHeightPx: 0,
     };
   }
+
+  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
+  const rawPer = cornerActionRawPerRowPx(blockHeightPx, actionCount);
+  const buttonMinHeightPx = Math.min(
+    BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX,
+    Math.max(0, Math.floor(rawPer)),
+  );
+  const stackHeightPx =
+    actionCount * buttonMinHeightPx + gapTotal + BOOKING_CORNER_TRAY_PAD_Y_PX;
+  const compact = buttonMinHeightPx < BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX;
+  const fontSizePx = buttonMinHeightPx < 22 ? 9 : 10;
+
   return {
-    compact: true,
+    compact,
     fontSizePx,
-    baseClass:
-      `flex min-h-0 min-w-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1.5 py-0.5 text-center [overflow-wrap:anywhere]`,
+    baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
+    buttonMinHeightPx,
+    stackHeightPx,
   };
 }
 
@@ -988,7 +1022,7 @@ function collectBookingRightColumnActionNodes({
   onArrived,
   baseClass,
   fontSizePx,
-  compact,
+  buttonMinHeightPx = 0,
   narrow = false,
   omitArrivalActions = false,
   omitSeatedUndoActions = false,
@@ -999,7 +1033,7 @@ function collectBookingRightColumnActionNodes({
   onArrived: (id: string, arrived: boolean) => void;
   baseClass: string;
   fontSizePx: number;
-  compact: boolean;
+  buttonMinHeightPx?: number;
   narrow?: boolean;
   /** Hide Arrived / Clear so Confirm or Start stays readable on very short booking bars. */
   omitArrivalActions?: boolean;
@@ -1010,9 +1044,14 @@ function collectBookingRightColumnActionNodes({
 
   const arrived = Boolean(b.client_arrived_at);
 
-  const textStyle = compact
-    ? ({ fontSize: `${fontSizePx}px`, lineHeight: 1.15 } as const)
-    : undefined;
+  const buttonStyle =
+    buttonMinHeightPx > 0
+      ? ({
+          minHeight: `${buttonMinHeightPx}px`,
+          fontSize: `${fontSizePx}px`,
+          lineHeight: 1.2,
+        } as const)
+      : ({ fontSize: `${fontSizePx}px`, lineHeight: 1.2 } as const);
 
   const out: ReactElement[] = [];
 
@@ -1022,7 +1061,7 @@ function collectBookingRightColumnActionNodes({
         key="reopen"
         type="button"
         disabled={busy}
-        style={textStyle}
+        style={buttonStyle}
         onClick={() => onStatus(b.id, 'Seated')}
         className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
       >
@@ -1041,7 +1080,7 @@ function collectBookingRightColumnActionNodes({
             key="arrived"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onArrived(b.id, true)}
             className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
           >
@@ -1054,7 +1093,7 @@ function collectBookingRightColumnActionNodes({
             key="arrived-clear"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onArrived(b.id, false)}
             className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
           >
@@ -1069,7 +1108,7 @@ function collectBookingRightColumnActionNodes({
           key="confirm-book"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Booked')}
           className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
         >
@@ -1083,7 +1122,7 @@ function collectBookingRightColumnActionNodes({
           key="start"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Seated')}
           className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
         >
@@ -1098,7 +1137,7 @@ function collectBookingRightColumnActionNodes({
             key="undo-start"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onStatus(b.id, 'Booked')}
             aria-label="Undo start"
             className={`${baseClass} rounded-lg font-semibold transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
@@ -1113,7 +1152,7 @@ function collectBookingRightColumnActionNodes({
           key="complete"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Completed')}
             className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
         >
@@ -1126,7 +1165,70 @@ function collectBookingRightColumnActionNodes({
   return out;
 }
 
-/** Right edge: fixed width (wider when multi-column actions); actions share vertical space when the block is short. */
+/** Padding for booking info so text stays clear of the bottom-right action stack. */
+function computeBookingActionCornerInset(
+  b: Booking,
+  blockHeightPx: number,
+): { right: number; bottom: number; hasActions: boolean } {
+  const fullActionCount = countBookingRightColumnActions(b);
+  if (fullActionCount <= 0) {
+    return { right: 0, bottom: 0, hasActions: false };
+  }
+
+  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
+  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
+
+  const omitArrivalActions =
+    bookingHasArrivalToggleInRightColumn(b) &&
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
+
+  const omitSeatedUndoActions =
+    bookingShowsSeatedUndoInRightColumn(b) &&
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
+
+  const effectiveActionCount =
+    fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
+  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
+
+  return {
+    right: BOOKING_ACTIONS_CORNER_RIGHT_PX,
+    bottom: layout.stackHeightPx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
+    hasActions: true,
+  };
+}
+
+/** Transparent hit target at the bottom-right; only as tall/wide as its buttons. */
+function CalendarBookingActionsTray({
+  children,
+  bottomPx,
+  rightPx,
+  maxWidthPx,
+  topGapPx = BOOKING_ACTION_TRAY_TOP_GAP_PX,
+}: {
+  children: ReactNode;
+  bottomPx: number;
+  rightPx: number;
+  maxWidthPx?: number;
+  topGapPx?: number;
+}) {
+  return (
+    <div
+      className="pointer-events-none absolute z-20 flex h-auto w-auto flex-col justify-end gap-0.5 px-0.5 pb-0.5 pt-1"
+      style={{
+        bottom: bottomPx,
+        right: rightPx,
+        maxHeight: `calc(100% - ${topGapPx + bottomPx}px)`,
+        maxWidth: maxWidthPx != null ? maxWidthPx : 'min(100%, calc(100% - 0.35rem))',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Bottom-right action stack (does not stretch to full bar height). */
 function CalendarBookingRightColumn({
   b,
   busy,
@@ -1151,88 +1253,60 @@ function CalendarBookingRightColumn({
   /** Space reserved below floating actions, e.g. the duration resize handle. */
   bottomReservePx?: number;
 }) {
-  const reserveRightColumnTopPad = !(narrow && floating);
-
-  const layoutOptions = { reserveRightColumnTopPad };
-
   const fullActionCount = countBookingRightColumnActions(b);
-  const layoutIfAllActions = bookingRightColumnLayout(blockHeightPx, fullActionCount, layoutOptions);
+  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
+  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
 
   const omitArrivalActions =
-    layoutIfAllActions.compact &&
     bookingHasArrivalToggleInRightColumn(b) &&
-    fullActionCount > 1;
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
 
   const omitSeatedUndoActions =
-    layoutIfAllActions.compact &&
     bookingShowsSeatedUndoInRightColumn(b) &&
-    fullActionCount > 1;
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
 
   const effectiveActionCount =
     fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
-  const layout = bookingRightColumnLayout(blockHeightPx, effectiveActionCount, layoutOptions);
-
-  /** Do not OR in `narrow`: that forced compact typography/padding whenever lanes overlapped, so buttons shrunk below wide-lane sizing for the same `blockHeightPx`. */
-  const compact = layout.compact;
-  const fontSizePx = layout.fontSizePx;
-  /** Overlap lanes use `narrow` for layout only; action sizing follows `bookingRightColumnLayout` like wide lanes (`min-h-0` only). */
-  const baseClass = layout.baseClass;
-
-  const widthClass = narrow
-    ? floating
-      ? 'min-w-0 max-w-full p-0'
-      : 'mb-2 min-w-0 max-w-full px-1 pb-0'
-    : 'w-[5.5rem] min-w-[5.5rem] max-w-[5.5rem] pt-1.5 pb-0 pl-1 pr-0.5';
-  const narrowWidthPx = narrowBookingActionsWidthPx(shellRowWidthPx);
-  const widthStyle =
-    narrow && floating
-      ? {
-          top: 0,
-          bottom: bottomReservePx,
-          ...(narrowWidthPx != null ? { width: narrowWidthPx } : {}),
-        }
-      : narrow && narrowWidthPx != null
-        ? { width: narrowWidthPx }
-        : floating
-          ? { bottom: bottomReservePx }
-          : undefined;
-
-  const heightClass =
-    narrow && floating ? 'min-h-0' : narrow ? 'h-auto max-h-full' : 'h-full';
-
-  const justifyActions = 'justify-end';
+  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
 
   const actionNodes = collectBookingRightColumnActionNodes({
     b,
     busy,
     onStatus,
     onArrived,
-    baseClass,
-    fontSizePx,
-    compact,
+    baseClass: layout.baseClass,
+    fontSizePx: layout.fontSizePx,
+    buttonMinHeightPx: layout.buttonMinHeightPx,
     narrow,
     omitArrivalActions,
     omitSeatedUndoActions,
   });
 
+  if (actionNodes.length === 0) {
+    return null;
+  }
+
+  const trayMaxWidthPx =
+    narrow && shellRowWidthPx != null
+      ? Math.max(56, shellRowWidthPx - 8)
+      : undefined;
+
   return (
-    <div
-      className={`${
-        narrow && floating
-          ? 'pointer-events-auto absolute right-1 z-20'
-          : ''
-      } flex ${heightClass} min-h-0 shrink-0 flex-col ${
-        narrow && floating ? '' : narrow ? 'self-end' : 'self-stretch'
-      } overflow-hidden ${widthClass}`}
-      style={widthStyle}
-      onPointerDown={(e) => e.stopPropagation()}
+    <CalendarBookingActionsTray
+      bottomPx={bottomReservePx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX}
+      rightPx={4}
+      maxWidthPx={trayMaxWidthPx}
     >
       <div
-        className={`flex min-h-0 w-full ${narrow && !floating ? 'flex-none' : 'flex-1'} flex-col gap-0.5 ${justifyActions}`}
+        className="pointer-events-auto flex h-auto w-auto max-w-full flex-col items-stretch gap-0.5 [&_button]:!h-auto [&_button]:!flex-none [&_button]:!basis-auto [&_button]:!grow-0"
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {actionNodes}
       </div>
-    </div>
+    </CalendarBookingActionsTray>
   );
 }
 
@@ -1386,11 +1460,21 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
 type DraggableHandleProps = {
   listeners: ReturnType<typeof useDraggable>['listeners'] | undefined;
   attributes: ReturnType<typeof useDraggable>['attributes'] | undefined;
+  setActivatorNodeRef: (element: HTMLElement | null) => void;
 };
 
 function snapCalendarMoveMinutes(minutes: number): number {
   return Math.round(minutes / CALENDAR_MOVE_INCREMENT_MINUTES) * CALENDAR_MOVE_INCREMENT_MINUTES;
 }
+
+/** Prefer the slot under the cursor; fall back to rectangle overlap for tall booking cards. */
+const calendarGridCollisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  if (pointerHits.length > 0) {
+    return pointerHits;
+  }
+  return rectIntersection(args);
+};
 
 function DragBookingPreview({
   booking,
@@ -1441,7 +1525,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   canDrag: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: `booking-${booking.id}`,
     disabled: !canDrag,
     data: { booking },
@@ -1456,10 +1540,11 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 20 + laneIndex,
     opacity: isDragging ? 0.85 : 1,
+    pointerEvents: isDragging ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
-    ? { listeners, attributes }
-    : { listeners: undefined, attributes: undefined };
+    ? { listeners, attributes, setActivatorNodeRef }
+    : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
   return (
     <div ref={setNodeRef} className="absolute" style={style}>
       {children(handleProps)}
@@ -1618,6 +1703,11 @@ export function PractitionerCalendarView({
   calendarTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const { warmVenueBookingDetail } = useDashboardDetailCache();
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => warmVenueBookingDetail(bookingId),
+    [warmVenueBookingDetail],
+  );
   const myCalendarIds = useMemo(
     () => linkedPractitionerIds ?? [],
     [linkedPractitionerIds],
@@ -2646,6 +2736,7 @@ export function PractitionerCalendarView({
     const dur = getBookingDuration(booking);
     const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
     const bookingEndForStore = `${endHm}:00`;
+    const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
     setBookings((rows) =>
       rows.map((b) =>
         b.id === booking.id
@@ -2654,6 +2745,7 @@ export function PractitionerCalendarView({
               booking_date: newDate,
               booking_time: timeForStore,
               booking_end_time: bookingEndForStore,
+              estimated_end_time: estimatedEndForStore,
               ...(b.calendar_id != null ? { calendar_id: newPracId } : { practitioner_id: newPracId }),
             }
           : b,
@@ -2695,8 +2787,21 @@ export function PractitionerCalendarView({
       const endLen5 = minutesToTime(timeToMinutes(newEndHm));
       if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
       const bookingEndForStore = `${endLen5}:00`;
+      const estimatedEndForStore = estimatedEndIsoFromSchedule(
+        booking.booking_date,
+        startHm,
+        endLen5,
+      );
       setBookings((rows) =>
-        rows.map((b) => (b.id === booking.id ? { ...b, booking_end_time: bookingEndForStore } : b)),
+        rows.map((b) =>
+          b.id === booking.id
+            ? {
+                ...b,
+                booking_end_time: bookingEndForStore,
+                estimated_end_time: estimatedEndForStore,
+              }
+            : b,
+        ),
       );
       try {
         const res = await fetch(`/api/venue/bookings/${booking.id}`, {
@@ -3096,15 +3201,15 @@ export function PractitionerCalendarView({
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Booked</span>
-        <span className="tabular-nums text-sky-600">{bookedCount}</span>
+        <span className="tabular-nums text-sky-800">{bookedCount}</span>
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Confirmed</span>
-        <span className="tabular-nums text-emerald-600">{confirmedCount}</span>
+        <span className="tabular-nums text-indigo-800">{confirmedCount}</span>
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Completed</span>
-        <span className="tabular-nums text-violet-600">{completedCount}</span>
+        <span className="tabular-nums text-slate-600">{completedCount}</span>
       </span>
     </div>
   );
@@ -3256,19 +3361,20 @@ export function PractitionerCalendarView({
    * Kept adjacent to `monthDayScheduleCounts` — never merged into the native
    * totals — and surfaced in the month grid as a separate desaturated marker.
    */
-  const monthLinkedCountByDate = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const col of visibleLinkedColumns) {
-      const venue = linkedVenueById.get(col.venueId);
-      if (!venue) continue;
-      for (const b of venue.bookings) {
-        if (b.practitionerId !== col.practitionerId) continue;
-        if (b.status === 'Cancelled') continue;
-        out[b.bookingDate] = (out[b.bookingDate] ?? 0) + 1;
-      }
-    }
-    return out;
-  }, [visibleLinkedColumns, linkedVenueById]);
+  const monthLinkedCountByDate = useMemo(
+    () =>
+      linkedBookingCountByDate(
+        visibleLinkedColumns.map((c) => ({
+          venueId: c.venueId,
+          practitionerId: c.practitionerId,
+        })),
+        [...linkedVenueById.values()].map((v) => ({
+          venueId: v.venueId,
+          bookings: v.bookings,
+        })),
+      ),
+    [visibleLinkedColumns, linkedVenueById],
+  );
 
   const openBookingDetail = useCallback((id: string, anchor?: { x: number; y: number }) => {
     if (justResizedBookingIdRef.current === id) return;
@@ -3301,23 +3407,39 @@ export function PractitionerCalendarView({
     if (!detailBookingId) return null;
     const b = bookings.find((x) => x.id === detailBookingId);
     if (!b) return null;
-    const startHm = b.booking_time.slice(0, 5);
-    const durationMins = bookingDurationMinutes(b, serviceMap);
-    const endHm = minutesToTime(timeToMinutes(startHm) + durationMins);
-    const serviceId = serviceIdForBooking(b);
-    const serviceName = serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
-    return {
-      bookingDate: b.booking_date,
-      guestName: b.guest_name,
-      partySize: b.party_size,
-      status: b.status,
-      startTime: startHm,
-      endTime: endHm,
-      specialRequests: b.special_requests,
-      depositStatus: b.deposit_status,
-      serviceName,
-    };
+    return bookingDetailPanelSnapshotFromListRow({
+      ...b,
+      guest_name: b.guest_name,
+      inferred_booking_model: inferBookingRowModel(b),
+      service_name: (() => {
+        const serviceId = serviceIdForBooking(b);
+        return serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
+      })(),
+    });
   }, [detailBookingId, bookings, serviceMap]);
+
+  useEffect(() => {
+    if (bookings.length === 0) return;
+    const ids = bookings
+      .filter((b) => b.status !== 'Cancelled')
+      .slice(0, 28)
+      .map((b) => b.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, prefetchBookingDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [bookings, prefetchBookingDetail]);
 
   return (
     <div className="flex min-w-[320px] flex-col">
@@ -3459,6 +3581,7 @@ export function PractitionerCalendarView({
                                   key={b.id}
                                   type="button"
                                   onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                  {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
                                   className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                   style={bookingBlockCardStyle(p)}
                                 >
@@ -3652,6 +3775,7 @@ export function PractitionerCalendarView({
         <div ref={timelineRootRef} className="flex min-w-0 w-full flex-col">
           <DndContext
             sensors={sensors}
+            collisionDetection={calendarGridCollisionDetection}
             onDragStart={handleDragStart}
             onDragMove={handleDragMove}
             onDragCancel={handleDragCancel}
@@ -4027,7 +4151,6 @@ export function PractitionerCalendarView({
                             !b.resource_id && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status);
                           const flash = flashIds.has(b.id);
                           const qBusy = quickActionId === b.id;
-                          const arrived = Boolean(b.client_arrived_at);
                           const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                           const resizeExtra =
                             resizeVisual?.bookingId === b.id ? resizeVisual.deltaYPx : 0;
@@ -4065,7 +4188,9 @@ export function PractitionerCalendarView({
                                   <BookingProcessingStrip b={b} serviceMap={serviceMap} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
+                                      ref={handle.setActivatorNodeRef}
                                       type="button"
+                                      data-no-calendar-pan="true"
                                       className={`relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing ${
                                         isOverlapLane ? 'text-[0]' : 'text-[10px]'
                                       }`}
@@ -4084,48 +4209,39 @@ export function PractitionerCalendarView({
                                       ⋮⋮
                                     </button>
                                   ) : null}
-                                    <BookingGuestActionsRowMeasured
-                                      className={`relative z-[1] flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
-                                        isOverlapLane ? 'flex-col' : 'flex-row'
-                                      }`}
-                                      style={
-                                        canDrag ? { paddingBottom: BOOKING_RESERVE_ABOVE_RESIZE_PX } : undefined
-                                      }
-                                    >
-                                      {(shellRowWidthPx) => (
-                                        <>
-                                      <div
-                                        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                                        style={
-                                          isOverlapLane
-                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
-                                            : undefined
-                                        }
-                                      >
+                                  <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
+                                      {(shellRowWidthPx) => {
+                                        const actionBlockHeight = Math.max(
+                                          0,
+                                          height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
+                                        );
+                                        const actionInset = computeBookingActionCornerInset(b, actionBlockHeight);
+                                        return (
+                                          <>
+                                            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                             <button
                                               type="button"
                                               onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                              {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
                                               className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                                                 blockH < 56 ? 'py-1.5' : 'py-2'
                                               }`}
+                                              style={{
+                                                paddingRight: actionInset.hasActions
+                                                  ? actionInset.right
+                                                  : undefined,
+                                                paddingBottom: actionInset.hasActions
+                                                  ? actionInset.bottom +
+                                                    (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0)
+                                                  : canDrag
+                                                    ? BOOKING_RESERVE_ABOVE_RESIZE_PX
+                                                    : undefined,
+                                              }}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
                                               <BookingCardInfo
                                                 name={b.guest_name}
-                                                nameAccessory={
-                                                  arrived &&
-                                                  b.status !== 'Seated' &&
-                                                  ['Pending', 'Booked', 'Confirmed'].includes(b.status) ? (
-                                                    <span
-                                                      className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                      aria-hidden
-                                                      title="Waiting"
-                                                    />
-                                                  ) : null
-                                                }
-                                                service={
-                                                  [resName, svc?.name].filter(Boolean).join(' · ') || null
-                                                }
+                                                service={calendarBookingServiceLabel(b, svc, resName ?? null)}
                                                 phone={formatPhoneForDisplay(b.guest_phone)}
                                                 start={b.booking_time.slice(0, 5)}
                                                 end={displayEndHm}
@@ -4141,23 +4257,21 @@ export function PractitionerCalendarView({
                                               ) : null}
                                               <div className="min-h-0 min-w-0 flex-1" aria-hidden />
                                             </button>
-                                          </div>
-                                          <CalendarBookingRightColumn
-                                            b={b}
-                                            busy={qBusy}
-                                            blockHeightPx={Math.max(
-                                              0,
-                                              height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
-                                            )}
-                                            onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                            onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                            narrow={isOverlapLane}
-                                            shellRowWidthPx={shellRowWidthPx}
-                                            floating={isOverlapLane}
-                                            bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
-                                          />
-                                        </>
-                                      )}
+                                            </div>
+                                            <CalendarBookingRightColumn
+                                              b={b}
+                                              busy={qBusy}
+                                              blockHeightPx={actionBlockHeight}
+                                              onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                              onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                              narrow={isOverlapLane}
+                                              shellRowWidthPx={shellRowWidthPx}
+                                              floating={false}
+                                              bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
+                                            />
+                                          </>
+                                        );
+                                      }}
                                     </BookingGuestActionsRowMeasured>
                                   {canDrag ? (
                                     <>
@@ -4215,9 +4329,10 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className="absolute bottom-0 left-0 right-0 z-30 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
                                         style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                         onPointerDown={beginAppointmentResize(b)}
+                                        onMouseDown={(e) => e.stopPropagation()}
                                       />
                                     </>
                                   ) : null}
@@ -4239,7 +4354,6 @@ export function PractitionerCalendarView({
                         const palette = bookingCalendarBlockStyle(first);
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
-                        const arrived = Boolean(first.client_arrived_at);
                         const isOverlapLane = layout.laneCount > 1;
                         const serviceTitle = items
                           .map((x) => {
@@ -4265,21 +4379,19 @@ export function PractitionerCalendarView({
                                 }`}
                                 style={bookingBlockCardStyle(palette)}
                                 title={serviceTitle || undefined}
+                                {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
-                                <BookingGuestActionsRowMeasured
-                                  className={`flex min-h-0 min-w-0 flex-1 items-stretch ${
-                                    isOverlapLane ? 'flex-col overflow-hidden' : 'flex-row'
-                                  }`}
-                                >
-                                  {(shellRowWidthPx) => (
+                                <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                                  {(shellRowWidthPx) => {
+                                    const actionInset = computeBookingActionCornerInset(first, height);
+                                    return (
                                     <>
                                       <div
                                         className="flex min-h-0 min-w-0 flex-1 flex-col"
-                                        style={
-                                          isOverlapLane
-                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
-                                            : undefined
-                                        }
+                                        style={{
+                                          paddingRight: actionInset.hasActions ? actionInset.right : undefined,
+                                          paddingBottom: actionInset.hasActions ? actionInset.bottom : undefined,
+                                        }}
                                       >
                                         {items.map((b, segIdx) => {
                                           const dur = getBookingDuration(b);
@@ -4288,8 +4400,7 @@ export function PractitionerCalendarView({
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
                                           const showSegPills = !isOverlapLane && segmentApproxPx >= 88;
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
-                                          const segServiceLabel =
-                                            [resSeg, svc?.name].filter(Boolean).join(' · ') || null;
+                                          const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
                                           return (
                                             <div
                                               key={b.id}
@@ -4306,18 +4417,6 @@ export function PractitionerCalendarView({
                                                 <BookingCardInfo
                                                   name={first.guest_name}
                                                   hideName={segIdx > 0}
-                                                  nameAccessory={
-                                                    segIdx === 0 &&
-                                                    arrived &&
-                                                    first.status !== 'Seated' &&
-                                                    ['Pending', 'Booked', 'Confirmed'].includes(first.status) ? (
-                                                      <span
-                                                        className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                        aria-hidden
-                                                        title="Waiting"
-                                                      />
-                                                    ) : null
-                                                  }
                                                   service={segServiceLabel}
                                                   phone={formatPhoneForDisplay(b.guest_phone)}
                                                   start={b.booking_time.slice(0, 5)}
@@ -4350,11 +4449,12 @@ export function PractitionerCalendarView({
                                         onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                         narrow={isOverlapLane}
                                         shellRowWidthPx={shellRowWidthPx}
-                                        floating={isOverlapLane}
+                                        floating={false}
                                         bottomReservePx={0}
                                       />
                                     </>
-                                  )}
+                                    );
+                                  }}
                                 </BookingGuestActionsRowMeasured>
                               </div>
                             )}
@@ -4609,6 +4709,7 @@ export function PractitionerCalendarView({
 
       {detailBookingId ? (
         <BookingDetailPanel
+          key={detailBookingId}
           bookingId={detailBookingId}
           venueId={venueId}
           venueCurrency={currency}

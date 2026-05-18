@@ -7,6 +7,7 @@ import { DashboardShell } from './DashboardShell';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
+import { DashboardDetailCacheProvider } from '@/components/providers/DashboardDetailCacheProvider';
 import {
   DashboardVenueBootstrapProvider,
   type DashboardVenueBootstrapValue,
@@ -263,7 +264,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
         <StaffRebookBootstrapRouteCleanup />
         <DashboardVenueBootstrapProvider value={venueBootstrap}>
-          <DashboardSWRProvider>{children}</DashboardSWRProvider>
+          <DashboardSWRProvider>
+            <DashboardDetailCacheProvider>{children}</DashboardDetailCacheProvider>
+          </DashboardSWRProvider>
         </DashboardVenueBootstrapProvider>
       </main>
       </DashboardShell>

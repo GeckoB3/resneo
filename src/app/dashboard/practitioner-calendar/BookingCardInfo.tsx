@@ -11,12 +11,11 @@ import {
 /**
  * Vertical layout tiers for booking info (full card: name + 4 meta fields).
  *
- * - **Shortest (`1`)** — one horizontal line: name + service + phone + time + pill.
- *   Narrow containers drop least-important fields first (see `cqPacked`).
- * - **Tallest (`5`)** — one field per row (name, service, phone, time, pill each
- *   get a full row). No width-based dropping on those dedicated rows (truncate only).
- * - **Between** — fields “move up” into fewer rows from the bottom: the bottom row
- *   stays packed until it merges upward as height increases (see `fullBody`).
+ * Calendar priority: **name → time → status → service → phone** (most useful when space is tight).
+ *
+ * - **Shortest (`1`)** — one horizontal line; narrow widths drop lowest-priority fields first.
+ * - **Tallest (`5`)** — one field per row (name, time, pill, service, phone).
+ * - **Between** — fields merge upward from the bottom as height increases.
  *
  * @param itemCount `5` = full booking; `4` = multi-service segment (no name row).
  */
@@ -40,6 +39,9 @@ const DEFAULT_WIDTHS: Record<InfoKey, number> = {
   pill: 82,
 };
 
+/** Inline packing order — earlier keys win when horizontal space is limited. */
+export const INLINE_INFO_FIELD_ORDER: InfoKey[] = ['name', 'time', 'pill', 'service', 'phone'];
+
 type InfoKey = 'name' | 'service' | 'phone' | 'time' | 'pill';
 type WidthMap = Partial<Record<InfoKey, number>>;
 
@@ -53,6 +55,8 @@ export interface BookingCardInfoProps {
   pill: ReactNode | null;
   contentHeightPx: number;
   hideName?: boolean;
+  /** Width reserved beside this block for the action tray (wide lanes). */
+  actionsReservePx?: number;
 }
 
 function metaTextClass(micro: boolean): string {
@@ -67,16 +71,16 @@ function timeChipClass(): string {
 
 export function groupInfoRows(rowCount: number, hideName: boolean): InfoKey[][] {
   if (hideName) {
-    if (rowCount <= 1) return [['service', 'phone', 'time', 'pill']];
-    if (rowCount === 2) return [['service'], ['phone', 'time', 'pill']];
-    if (rowCount === 3) return [['service'], ['phone'], ['time', 'pill']];
-    return [['service'], ['phone'], ['time'], ['pill']];
+    if (rowCount <= 1) return [['time', 'pill', 'service', 'phone']];
+    if (rowCount === 2) return [['time', 'pill'], ['service', 'phone']];
+    if (rowCount === 3) return [['time', 'pill'], ['service'], ['phone']];
+    return [['time'], ['pill'], ['service'], ['phone']];
   }
-  if (rowCount <= 1) return [['name', 'service', 'phone', 'time', 'pill']];
-  if (rowCount === 2) return [['name'], ['service', 'phone', 'time', 'pill']];
-  if (rowCount === 3) return [['name'], ['service'], ['phone', 'time', 'pill']];
-  if (rowCount === 4) return [['name'], ['service'], ['phone'], ['time', 'pill']];
-  return [['name'], ['service'], ['phone'], ['time'], ['pill']];
+  if (rowCount <= 1) return [INLINE_INFO_FIELD_ORDER];
+  if (rowCount === 2) return [['name'], ['time', 'pill', 'service', 'phone']];
+  if (rowCount === 3) return [['name'], ['time', 'pill'], ['service', 'phone']];
+  if (rowCount === 4) return [['name'], ['time', 'pill'], ['service'], ['phone']];
+  return [['name'], ['time'], ['pill'], ['service'], ['phone']];
 }
 
 export function pickVisibleInfoRows({
@@ -92,9 +96,12 @@ export function pickVisibleInfoRows({
   return rows
     .map((row) => {
       if (row.length === 1) return row;
+      const ordered = [...row].sort(
+        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
+      );
       const visible: InfoKey[] = [];
       let used = 0;
-      for (const key of row) {
+      for (const key of ordered) {
         const itemWidth =
           key === 'name'
             ? Math.min(Math.max(widthFor('name'), MIN_NAME_INLINE_PX), Math.max(MIN_NAME_INLINE_PX, availableWidth))
@@ -105,7 +112,9 @@ export function pickVisibleInfoRows({
           used = next;
         }
       }
-      return visible;
+      return visible.sort(
+        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
+      );
     })
     .filter((row) => row.length > 0);
 }
@@ -137,13 +146,14 @@ export function BookingCardInfo({
   pill,
   contentHeightPx,
   hideName = false,
+  actionsReservePx = 0,
 }: BookingCardInfoProps) {
   const itemCount: 4 | 5 = hideName ? 4 : 5;
   const rows = pickInfoRowCount(contentHeightPx, itemCount);
   const micro = contentHeightPx < 28;
   const mt = metaTextClass(micro);
   const timeRange = `${start}–${end}`;
-  const [containerRef, availableWidth] = useMeasuredWidth<HTMLDivElement>();
+  const [containerRef, containerWidth] = useMeasuredWidth<HTMLDivElement>();
   const [nameRef, nameWidth] = useMeasuredWidth<HTMLDivElement>();
   const [serviceRef, serviceWidth] = useMeasuredWidth<HTMLSpanElement>();
   const [phoneRef, phoneWidth] = useMeasuredWidth<HTMLSpanElement>();
@@ -170,6 +180,11 @@ export function BookingCardInfo({
     return keys;
   }, [hideName, phone, pill, service]);
 
+  const availableWidth = Math.max(
+    0,
+    (containerWidth > 0 ? containerWidth : 0) - Math.max(0, actionsReservePx),
+  );
+
   const visibleRows = useMemo(() => {
     const grouped = groupInfoRows(rows, hideName).map((row) => row.filter((key) => availableKeys.has(key)));
     return pickVisibleInfoRows({
@@ -186,7 +201,9 @@ export function BookingCardInfo({
           key="name"
           className={`flex min-w-0 items-center gap-1.5 ${dedicated ? 'w-full' : 'max-w-full shrink'}`}
         >
-          <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">{name}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight text-slate-900">
+            {name}
+          </span>
           {nameAccessory ? <div className="flex shrink-0 items-center gap-1">{nameAccessory}</div> : null}
         </div>
       );
@@ -231,7 +248,7 @@ export function BookingCardInfo({
   };
 
   return (
-    <div ref={containerRef} className="relative min-w-0 w-full max-w-full">
+    <div ref={containerRef} className="@container relative min-w-0 w-full max-w-full">
       <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-1.5 overflow-hidden whitespace-nowrap">
         <div ref={nameRef} className="flex items-center gap-1.5 text-[13px] font-extrabold tracking-tight">
           <span>{name}</span>

@@ -12,7 +12,6 @@ import {
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
-import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarView';
 import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function DaySheetPage() {
@@ -75,12 +74,8 @@ export default async function DaySheetPage() {
             currency={(venue?.currency as string) ?? 'GBP'}
             bookingModel={bookingModel}
             enabledModels={enabledModels}
+            linkFeature={linkFeature}
           />
-          {linkFeature ? (
-            <section className="mt-6">
-              <LinkedCalendarView hideWhenEmpty title="Linked calendars" />
-            </section>
-          ) : null}
         </ToastProvider>
       </div>
     </div>

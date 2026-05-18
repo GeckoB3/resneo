@@ -149,6 +149,28 @@ export async function notifyLinkUnlinked(
   });
 }
 
+/** §6.6 — a linked venue was removed from ReserveNI; the surviving partner is notified. */
+export async function notifyLinkPartnerVenueDeleted(
+  admin: SupabaseClient,
+  survivorVenueId: string,
+  deletedVenueName: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    survivorVenueId,
+    `${deletedVenueName} is no longer on ReserveNI`,
+    {
+      heading: 'Linked venue removed',
+      paragraphs: [
+        `${deletedVenueName} has been removed from ReserveNI. Your link with that venue has ended and all cross-venue calendar and booking access has stopped immediately.`,
+        'Your bookings and client data are unchanged. You can view the historical audit log for past links in Linked Accounts settings.',
+      ],
+      ctaLabel: 'View linked accounts',
+      ctaUrl: settingsUrl(),
+    },
+  );
+}
+
 export async function notifyPermissionChangeProposed(
   admin: SupabaseClient,
   venueId: string,

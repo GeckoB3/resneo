@@ -13,6 +13,7 @@ import {
   SUSPENDED_LINK_EXPIRY_DAYS,
 } from '@/lib/linked-accounts/types';
 import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
+import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 
 interface VenueState {
   id: string;
@@ -297,5 +298,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, ...results });
+  const outcome = await finalizeCronRun({
+    job: 'account-link-maintenance',
+    results,
+    errors: results.errors,
+  });
+  return NextResponse.json(outcome.body, { status: outcome.httpStatus });
 }

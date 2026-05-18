@@ -15,6 +15,7 @@
     "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
     "seed:dev-restaurant1": "node scripts/seed-dev-restaurant1-account.mjs",
     "delete:user-venue": "node scripts/delete-user-and-venue.mjs",
+    "delete:venue": "tsx scripts/hard-delete-venue.ts",
     "supabase": "supabase"
   },
   "dependencies": {

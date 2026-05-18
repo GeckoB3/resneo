@@ -2037,7 +2037,7 @@ function DraggableBlock({
             <span className="text-[10px] font-semibold">{block.party_size}</span>
             {isConfirmed && (
               <span
-                className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-[#1E40AF] text-[8px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
+                className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-[#4338CA] text-[8px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
                 title="Confirmed"
               >
                 c
@@ -2055,7 +2055,7 @@ function DraggableBlock({
             </span>
             {isConfirmed && (
               <span
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#1E40AF] text-[9px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#4338CA] text-[9px] font-black lowercase leading-none text-white shadow-sm ring-1 ring-white/70"
                 title="Confirmed"
               >
                 c
@@ -2115,7 +2115,7 @@ function DraggableBlock({
                 e.stopPropagation();
                 onQuickStatusChange('Confirmed');
               }}
-              className={`min-h-7 rounded-md px-2 py-1 text-[10px] font-bold shadow-sm ring-1 ring-[#1E40AF]/20 transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-[#1E40AF]/40 sm:min-h-0 sm:px-1.5 sm:py-0.5 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+              className={`min-h-7 rounded-md px-2 py-1 text-[10px] font-bold shadow-sm ring-1 ring-[#4338CA]/25 transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-[#4338CA]/40 sm:min-h-0 sm:px-1.5 sm:py-0.5 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
               aria-label={`Confirm booking for ${block.guest_name}`}
             >
               Confirm

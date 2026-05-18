@@ -61,6 +61,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarView';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -449,11 +450,14 @@ export function DaySheetView({
   currency,
   bookingModel = 'table_reservation',
   enabledModels = [],
+  linkFeature = false,
 }: {
   venueId: string;
   currency?: string;
   bookingModel?: BookingModel;
   enabledModels?: BookingModel[];
+  /** When true, linked calendars follow this page's selected date (§8.2). */
+  linkFeature?: boolean;
 }) {
   const { addToast } = useToast();
   const router = useRouter();
@@ -782,6 +786,32 @@ export function DaySheetView({
   const patchStaffAttendance = useCallback(
     async (bookingId: string, unifiedAttendanceConfirmed: boolean) => {
       setStaffAttendanceLoadingId(bookingId);
+      const snapshot = data;
+      if (snapshot) {
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            periods: prev.periods.map((p) => ({
+              ...p,
+              bookings: p.bookings.map((b) => {
+                if (b.id !== bookingId) return b;
+                const updated = {
+                  ...b,
+                  staff_attendance_confirmed_at: unifiedAttendanceConfirmed ? null : new Date().toISOString(),
+                  guest_attendance_confirmed_at: null,
+                };
+                if (!unifiedAttendanceConfirmed && b.status === 'Booked') {
+                  updated.status = 'Confirmed';
+                } else if (unifiedAttendanceConfirmed && b.status === 'Confirmed') {
+                  updated.status = 'Booked';
+                }
+                return updated;
+              }),
+            })),
+          };
+        });
+      }
       try {
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
@@ -791,16 +821,18 @@ export function DaySheetView({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           addToast((j as { error?: string }).error ?? 'Update failed', 'error');
+          if (snapshot) setData(snapshot);
           return;
         }
         await fetchDaySheet();
       } catch {
         addToast('Update failed', 'error');
+        if (snapshot) setData(snapshot);
       } finally {
         setStaffAttendanceLoadingId(null);
       }
     },
-    [addToast, fetchDaySheet],
+    [addToast, data, fetchDaySheet],
   );
 
   // Status change with optimistic update
@@ -821,7 +853,17 @@ export function DaySheetView({
       if (!prev) return prev;
       const activeStatuses = ['Pending', 'Booked', 'Confirmed', 'Seated'];
       const updatedPeriods = prev.periods.map((p) => {
-        const updatedBookings = p.bookings.map((b) => b.id === bookingId ? { ...b, status: newStatus } : b);
+        const updatedBookings = p.bookings.map((b) => {
+          if (b.id !== bookingId) return b;
+          const updated = { ...b, status: newStatus };
+          if (fromStatus === 'Confirmed' && newStatus === 'Booked') {
+            updated.staff_attendance_confirmed_at = null;
+            updated.guest_attendance_confirmed_at = null;
+          } else if (newStatus === 'Confirmed' && fromStatus !== 'Confirmed') {
+            updated.staff_attendance_confirmed_at = new Date().toISOString();
+          }
+          return updated;
+        });
         const bookedCovers = updatedBookings
           .filter((b) => activeStatuses.includes(b.status))
           .reduce((sum, b) => sum + b.party_size, 0);
@@ -1543,7 +1585,11 @@ export function DaySheetView({
                         </div>
 
                         {isExpanded && (
-                          <div className={expandedBookingRowShellClass}>
+                          <div
+                            className={expandedBookingRowShellClass}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
                             <ExpandedBookingContent
                               booking={bookingRow}
                               detail={detailById[b.id]}
@@ -1784,6 +1830,24 @@ export function DaySheetView({
           </div>
         );
       })()}
+
+      {linkFeature ? (
+        <section className="mt-8 print:hidden">
+          <LinkedCalendarView
+            hideWhenEmpty
+            title="Linked calendars"
+            date={date}
+            hideDatePicker
+          />
+          <p className="mt-2 text-xs text-slate-500">
+            For column view and week/month overviews, use{' '}
+            <a href="/dashboard/calendar" className="font-medium text-brand-600 hover:underline">
+              Calendar
+            </a>
+            .
+          </p>
+        </section>
+      ) : null}
 
       {/* ── Print Footer (print only) ── */}
       <div className="hidden print:block print:fixed print:bottom-0 print:left-0 print:right-0 print:border-t print:border-slate-200 print:py-2 print:px-6 print:text-xs print:text-slate-400 print:text-center">

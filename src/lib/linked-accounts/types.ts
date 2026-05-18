@@ -1,5 +1,8 @@
 /** Shared types for the Linked Accounts feature. See Docs/reserveni-linked-accounts-spec.md. */
 
+/** Soft UI warning when live link count reaches this threshold (§3). */
+export const LINK_COUNT_SOFT_WARNING = 10;
+
 export type LinkStatus =
   | 'pending'
   | 'accepted'

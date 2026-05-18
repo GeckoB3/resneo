@@ -349,6 +349,7 @@ export function AppointmentAvailabilitySettings({
       const [pracRes, svcRes] = await Promise.all([
         fetch('/api/venue/practitioners?roster=1'),
         fetch('/api/venue/appointment-services'),
+        isAdmin ? fetchAssociationData() : Promise.resolve(null),
       ]);
       if (!pracRes.ok || !svcRes.ok) {
         setError('Failed to load data. Please refresh the page.');
@@ -359,7 +360,6 @@ export function AppointmentAvailabilitySettings({
       setPractitioners(pracs);
       setServices(svcData.services ?? []);
       setPLinks(svcData.practitioner_services ?? []);
-      if (isAdmin) await fetchAssociationData();
       setSelectedPractitionerId((prev) => {
         const pool = (pracs as Practitioner[]).filter(
           (p) => (p.calendar_type ?? 'practitioner') !== 'resource',

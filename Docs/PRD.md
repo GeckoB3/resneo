@@ -858,6 +858,12 @@ what makes the four-month build timeline achievable.
   **Multi-venue          Phase 3. No pilot venue operates multiple sites.
   management dashboard** 
 
+  **Linked Accounts      Post-MVP (Appointments SKUs). Pairwise calendar
+  (pairwise links)**     sharing between independent venues; optional
+                         venue collectives for a combined `/book/c/{slug}`
+                         page. Not restaurant table-reservation. See
+                         `Docs/reserveni-linked-accounts-spec.md`.
+
   **POS integration for  Phase 2 / Phase 3. Valuable for
   revenue tracking**     revenue-per-cover analytics but not essential
                          for booking and no-show reduction.
@@ -1988,6 +1994,18 @@ is disproportionately high relative to the effort required.
                          based on an expected sitting duration. Prevents
                          overbooking when tables from earlier sittings
                          are still occupied.
+
+  **Linked Accounts**    Optional feature for Appointments-family venues:
+                         two or more independent ReserveNI subscriptions
+                         link to share calendar visibility and (by
+                         agreement) limited cross-venue booking actions.
+                         Data is never merged; each venue keeps its own
+                         guests and bookings. See
+                         `Docs/reserveni-linked-accounts-spec.md`.
+
+  **Venue collective**   A combined public booking page (`/book/c/{slug}`)
+                         joining two or more linked venues under shared
+                         branding. Bookings still belong to one venue each.
   -----------------------------------------------------------------------
 
 *End of Document*

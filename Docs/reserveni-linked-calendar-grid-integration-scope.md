@@ -1,6 +1,6 @@
 # ReserveNI: Linked-Calendar Grid Integration — Scope
 
-**Status:** Partly implemented.
+**Status:** Calendar grid integration shipped (day/week/month markers + columns). Day-sheet uses date-synced `LinkedCalendarView` (not full grid).
 **Parent spec:** `Docs/reserveni-linked-accounts-spec.md` §8.2
 **Depends on:** Linked Accounts Phase 1 (shipped — PRs #28, #30, plus the action-tier /
 create-endpoint / RLS-test follow-up)
@@ -176,17 +176,30 @@ as an editable own-venue row.
 - **Performance.** Linked fetch is one extra parallel request per range; acceptable. Watch
   the week/month grid with several linked venues.
 
-Manual QA matrix: own-venue calendar unaffected · linked column toggle on/off persists ·
-`time_only` shows bare blocks only · `full_details`+`none` read-only · `edit_existing` opens
-edit modal, cancel blocked · `create_edit_cancel` create-on-empty-slot works · day/week/month
-all follow one date · revoked link mid-session degrades cleanly.
+### 6.1 Manual QA checklist (Linked Accounts P1)
+
+Run on two Appointments-family test venues (A and B) with an accepted link. Record pass/fail.
+
+| # | Scenario | Steps | Expected |
+|---|---|---|---|
+| 1 | Own calendar unaffected | On `/dashboard/calendar`, create/move own booking | Own drag/drop and detail panel work as before |
+| 2 | Linked column toggle | Enable linked column in picker, refresh | Column persists in session; desaturated header shows source venue |
+| 3 | `time_only` | Set link to time-only one direction | Bare “{venue} — busy” blocks; no PII; not editable |
+| 4 | `full_details` + `none` | Full detail, act none | Guest/service visible; click opens read-only detail |
+| 5 | `edit_existing` | act edit_existing | Edit modal opens; cancel status blocked if spec requires |
+| 6 | `create_edit_cancel` | act create_edit_cancel | Empty slot opens create modal on linked column |
+| 7 | Week range | Week view + 2 linked venues | Linked rows appear; counts match API |
+| 8 | Month markers | Month view + linked columns on | `+N` linked badge on days with linked bookings |
+| 9 | Date sync | Change week/month/day | Linked fetch uses same range as native calendar |
+| 10 | Mid-session unlink | Unlink while calendar open | Linked columns empty; no JS errors |
+| 11 | Bookings list | `/dashboard/bookings` source filter | Own / linked / all filters correct |
+| 12 | Day-sheet sync | Legacy day-sheet + link | Linked section matches day-sheet date |
 
 ---
 
 ## 7. Open questions
 
-- **Day-sheet:** integrate columns now, or keep its `LinkedCalendarView` section this round?
-  (Recommendation: keep the section; appointments grid first.)
+- **Day-sheet full grid:** deferred — date-synced list section + link to `/dashboard/calendar` (May 2026).
 - **Week/month density:** with many linked venues the column count can grow large — do we
   cap, or rely on the column picker (default-off) to keep it manageable? (Recommendation:
   rely on the picker; revisit only if it bites.)

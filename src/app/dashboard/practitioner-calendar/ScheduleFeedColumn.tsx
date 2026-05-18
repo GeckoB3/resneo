@@ -7,10 +7,10 @@ import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
 
-/** Matches Confirmed appointment lane styling in PractitionerCalendarView. */
-const CLASS_LANE_BG = 'bg-blue-50';
-const CLASS_LANE_BORDER = 'border-blue-200';
-const CLASS_LANE_TEXT = 'text-blue-900';
+/** Matches Confirmed (indigo) lane styling next to practitioner calendar booking blocks. */
+const CLASS_LANE_BG = 'bg-indigo-100';
+const CLASS_LANE_BORDER = 'border-indigo-400';
+const CLASS_LANE_TEXT = 'text-indigo-950';
 
 function timeToMinutes(t: string): number {
   const [hh, mm] = t.slice(0, 5).split(':').map(Number);

@@ -50,8 +50,20 @@ function pingLinkedBookingView(bookingId: string): void {
 export function LinkedCalendarView({
   hideWhenEmpty = false,
   title,
-}: { hideWhenEmpty?: boolean; title?: string } = {}) {
-  const [date, setDate] = useState(todayIso());
+  /** When set, the date picker is hidden and this date drives fetches (e.g. day-sheet sync). */
+  date: controlledDate,
+  onDateChange,
+  hideDatePicker = false,
+}: {
+  hideWhenEmpty?: boolean;
+  title?: string;
+  date?: string;
+  onDateChange?: (isoDate: string) => void;
+  hideDatePicker?: boolean;
+} = {}) {
+  const [internalDate, setInternalDate] = useState(todayIso());
+  const date = controlledDate ?? internalDate;
+  const setDate = onDateChange ?? setInternalDate;
   const [venues, setVenues] = useState<LinkedVenueCalendar[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,22 +116,31 @@ export function LinkedCalendarView({
         <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
       ) : null}
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <span className="font-medium">Date</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-        </label>
-        <button
-          type="button"
-          className={btnSecondary}
-          onClick={() => setDate(todayIso())}
-        >
-          Today
-        </button>
+        {!hideDatePicker && controlledDate === undefined ? (
+          <>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <span className="font-medium">Date</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </label>
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => setDate(todayIso())}
+            >
+              Today
+            </button>
+          </>
+        ) : controlledDate ? (
+          <p className="text-xs text-slate-500">
+            Linked calendars for{' '}
+            <span className="font-semibold text-slate-700">{date}</span> (same date as this page).
+          </p>
+        ) : null}
       </div>
 
       {/* Legend ------------------------------------------------------- */}

@@ -1,9 +1,10 @@
 # ReserveNI: Linked Accounts Feature Specification
 
-**Status:** Draft for review — rewritten against the live ReserveNI schema and codebase
+**Status:** Living specification — **Phase 1 shipped**; **Phase 2 partially implemented** (see §15)
 **Plan scope:** Appointments-family venues only (`light`, `plus`, `appointments` pricing tiers)
-**Settings location:** `/dashboard/settings` → new **Linked Accounts** tab (`?tab=linked-accounts`)
-**Last updated:** 2026-05-17
+**Settings location:** `/dashboard/settings` → **Linked Accounts** tab (`?tab=linked-accounts`)
+**Last updated:** 2026-05-18
+**Related scope doc:** `Docs/reserveni-linked-calendar-grid-integration-scope.md` (calendar grid integration — largely complete on `/dashboard/calendar`; day-sheet deferred)
 
 ---
 
@@ -719,20 +720,26 @@ consistency):
 
 ### 8.2 Calendar and bookings page integration
 
-`/dashboard/calendar`, `/dashboard/practitioner-calendar`, `/dashboard/day-sheet`:
+**Target behaviour** (unchanged):
 
-- A legend lists all visible calendars; own `practitioners` render solid, linked-in
-  practitioners render desaturated/patterned and labelled with the source venue name.
+- Own `practitioners` render solid; linked-in practitioners render desaturated/patterned and
+  labelled with the source venue name.
 - Each linked-in calendar can be toggled in the view (a local view preference; does not
   affect the link).
-- Bookings the viewer cannot edit (`act = 'none'`, or `time_only`) show a lock affordance.
+- Bookings the viewer cannot edit (`act = 'none'`, or `time_only`) are read-only in the UI.
 - `time_only` linked bookings render as bare time blocks: "{Venue} — busy", no other detail.
 
-`/dashboard/bookings` (list view):
+**Implementation status (2026-05-18):**
 
-- Linked-in bookings carry a clear indicator and a "Source: {venue name}" column.
-- A filter toggles own only / linked-in only / all.
-- Action buttons are hidden or disabled where the viewer lacks `act`.
+| Surface | Status | Notes |
+|---|---|---|
+| `/dashboard/calendar` (`PractitionerCalendarView`, `linkFeature` gated) | **Shipped (day + week)** | Linked practitioners appear as extra columns in the native grid (`linked:{venueId}:{practitionerId}` keys), grouped in `CalendarColumnsChecklist`, persisted in session preferences, data from `/api/venue/linked-calendar` on the page's `listFromTo` range. Interactions use `LinkedBookingDetailModal` / `EditLinkedBookingModal` / `CreateLinkedBookingModal` by grant. Linked bookings are not draggable. |
+| `/dashboard/calendar` month view | **Shipped (summary)** | Per-day linked booking count badge + marker dot; click day → day view for column detail. |
+| `/dashboard/day-sheet` | **Synced list** | `LinkedCalendarView` uses the day-sheet date (no second date picker); CTA to `/dashboard/calendar` for column/week/month view. |
+| `/dashboard/linked-calendar` | **Fallback page** | Standalone linked-calendar page retained; not linked from main nav. |
+| `/dashboard/bookings` (appointments list) | **Shipped** | `AppointmentBookingsDashboard`: own / linked-in / all source filter; `LinkedBookingsPanel` for linked rows with grant-aware actions. |
+
+`/dashboard/bookings` (list view) — as specified: source filter and grant-gated actions are live.
 
 ### 8.3 Incoming-request banner
 
@@ -835,12 +842,17 @@ termination (severance is intrinsic — nothing is ever copied).
 
 This should be reflected in:
 
-- ReserveNI's Terms of Service, updated to describe linked accounts.
-- A short data-sharing notice shown in the link-acceptance modal.
-- Guidance to venues to update their own privacy policy when they link.
+- ReserveNI's customer Terms of Service, updated to describe linked accounts. **✅ Done** —
+  subsection under §7 in `src/app/terms/customer/page.tsx` (May 2026). Website Terms of Use
+  unchanged (public-site scope only).
+- A short data-sharing notice shown in the link-acceptance modal. **✅ Done** — copy in
+  `LinkedAccountsSection.tsx` accept/review modal (controller-to-controller arrangement,
+  revocation, data-controller retention).
+- Guidance to venues to update their own privacy policy when they link. **⬜ Not done** — no
+  in-product onboarding doc / checklist item yet.
 
-These updates should be reviewed by ReserveNI's Northern Ireland commercial solicitor before
-launch.
+These legal/product copy updates should be reviewed by ReserveNI's Northern Ireland commercial
+solicitor before treating the feature as production-ready for all founding venues.
 
 ### 10.3 Customer-facing disclosure
 
@@ -854,40 +866,52 @@ advise venues to update their privacy policy when they link.
 
 ## 11. Implementation phasing
 
-### Phase 1 — pairwise links (MVP)
+Status key: ✅ shipped · 🟡 partial · ⬜ not started
 
-1. Migration: `link_status`, `link_calendar_visibility`, `link_action_level`,
-   `link_termination_reason` enums; `account_links` and `account_link_audit_log` tables;
-   `bookings.created_by_linked_venue_id` / `last_modified_by_linked_venue_id` columns; the
-   `current_staff_venue_ids()` / `link_calendar_grant()` / `link_pii_grant()` /
-   `link_action_grant()` helper functions; the `bookings_linked_anonymised` view; all RLS
-   policies in §4.4; the `bookings` cross-venue audit trigger. CHECK constraints for §5.5.
-2. RLS test suite (pgTAP or seeded integration tests) proving severance and time-only
-   redaction **before** any UI is written.
-3. `linked-accounts` tab in `SettingsView.tsx` with Active / Pending / Past sections.
-4. Server routes under `/api/venue/account-links` for create / respond / edit / reduce /
-   unlink, plus the Admin-only slug-lookup endpoint.
-5. Incoming-request banner in the dashboard shell.
-6. Calendar / bookings page integration (§8.2).
-7. Audit log view with filters + CSV export.
-8. `/api/cron/account-link-maintenance` daily cron (expiry, suspension, resume) registered
-   in `vercel.json`, secured with `CRON_SECRET`.
-9. SendGrid email templates for the §9 events.
-10. Subscription-lapse handling wired into the cron and existing plan-status changes.
+### Phase 1 — pairwise links (MVP) — ✅ shipped (with production gaps in §15)
 
-### Phase 2 — venue collectives
+| # | Deliverable | Status |
+|---|---|---|
+| 1 | Migration + enums + `account_links` / `account_link_audit_log` + `bookings` attribution columns + RLS helpers + `bookings_linked_anonymised` + audit trigger | ✅ `supabase/migrations/20260919120000_linked_accounts.sql` (+ `20260920120000`, `20260921120000`, `20260922120000`) |
+| 2 | RLS test suite before UI | ✅ `supabase/tests/linked_accounts_rls_test.sql`; unit tests in `src/lib/linked-accounts/permissions.test.ts` |
+| 3 | Linked Accounts settings tab | ✅ `LinkedAccountsSection.tsx`, gated in `SettingsView.tsx` |
+| 4 | `/api/venue/account-links/*` (create, respond, edit, reduce, unlink, lookup, audit) | ✅ |
+| 5 | Incoming-request + pending-change banner | ✅ `LinkedAccountBanner.tsx` in dashboard shell; 24h dismiss via `localStorage` |
+| 6 | Calendar / bookings integration | 🟡 Day + week grid on `/dashboard/calendar`; day-sheet still standalone §8.2; month view outstanding |
+| 7 | Audit log UI + CSV export | ✅ `LinkedAccountAuditModal.tsx` → `GET …/audit?format=csv` |
+| 8 | Daily cron | ✅ `/api/cron/account-link-maintenance` in `vercel.json` |
+| 9 | Email notifications (§9) | ✅ `src/lib/linked-accounts/notifications.ts` + `src/lib/emails/templates/linked-account-emails.ts` |
+| 10 | Subscription lapse / resume / 30-day suspended expiry | ✅ Cron + `notifyLinkLapseWarning` / `Suspended` / `Resumed` |
+| — | Cross-venue calendar API | ✅ `/api/venue/linked-calendar`, `…/booking`, `…/guests`, `…/booking/view` |
+| — | Read-audit debouncing | ✅ `recordReadAudit()` (5-minute window) |
+| — | Pending outgoing cap + rejected cooldown | ✅ `MAX_PENDING_OUTGOING_REQUESTS`, `REJECTED_REQUEST_COOLDOWN_DAYS` in create route |
+| — | Mid-link permission negotiation (`pending_change`) | ✅ API + settings UI + banner |
 
-- `venue_collectives` / `venue_collective_members` tables and RLS.
-- `/book/c/{slug}` combined booking page reusing `BookPublicBookingFlow`.
-- Collective-aware widget option in `WidgetSection.tsx`.
-- "Any practitioner" routing.
-- Collective-scoped cross-suggestion on no-availability.
+**Phase 1 code map:** `src/lib/linked-accounts/*`, `src/components/linked-accounts/*`,
+`src/app/api/venue/account-links/*`, `src/app/api/venue/linked-calendar/*`.
 
-### Phase 3 — post-launch, demand-driven
+### Phase 2 — venue collectives — 🟡 partial
+
+| Deliverable | Status |
+|---|---|
+| `venue_collectives` / `venue_collective_members` + RLS | ✅ Same migration family as Phase 1 |
+| Settings UI (`VenueCollectivesPanel`) + `/api/venue/collectives/*` | ✅ Create, invite, accept, configure, remove, dissolve, `transfer_host` |
+| `/book/c/{slug}` public page | ✅ `src/app/book/c/[slug]/` + `CollectiveBookingFlow.tsx` |
+| Collective-aware widget embed | ✅ `WidgetSection.tsx` |
+| `bookings.collective_id` attribution | ✅ Validated on create routes |
+| Link-change → collective reconcile | ✅ `reconcileCollective` / cron hook |
+| **"Any practitioner" routing (§7.6)** | ⬜ Flag stored (`allow_any_practitioner`, per-member substitution); **no slot search / routing in `CollectiveBookingFlow`** |
+| **Cross-suggestion when fully booked (§8.6)** | ⬜ Not implemented on per-venue `/book/[slug]` pages |
+| Collective name reuse after dissolve (30 days, §7.2.1) | ⬜ Only **active** name uniqueness enforced; dissolved names immediately reusable |
+| Host transfer with accept step (§7.4) | 🟡 API updates `host_venue_id` immediately; no separate acceptance flow |
+| Collective branding on confirmation comms (§7.8) | ⬜ Not verified / likely still per-venue templates only |
+
+### Phase 3 — post-launch, demand-driven — ⬜ not started
 
 - Saved permission presets / link templates.
 - Bulk link requests.
 - Analytics on linked-calendar usage.
+- Soft UI warning when a venue holds many links (~10, §3).
 
 ---
 
@@ -925,6 +949,18 @@ advise venues to update their privacy policy when they link.
 
 ## 14. Decision log
 
+**2026-05-18 (P1):** Month linked-count helper + tests; day-sheet date-synced linked section;
+`LINK_COUNT_SOFT_WARNING` banner; PRD + QA checklist updates.
+
+**2026-05-18 (P0):** Customer Terms Linked Accounts subsection; venue-delete link termination +
+partner email (`terminate_account_links_for_venue_deletion`, `hardDeleteVenueWithLinkedAccountNotifications`);
+cron `finalizeCronRun` (Sentry + optional `CRON_ALERT_EMAIL`); vitest coverage for account-links POST,
+venue-deletion parsing, banner dismiss, cron finalize.
+
+**2026-05-18:** Added §15 implementation status and production-readiness checklist; updated §8.2,
+§10.2, and §11 to reflect shipped Phase 1, partial Phase 2, and known gaps (month view, day-sheet,
+any-practitioner routing, cross-suggestion, ToS, venue-deleted email).
+
 **2026-05-17:** Rewritten against the live ReserveNI schema. Replaced the generic
 account/calendar/client/booking model with `venues` / `practitioners` / `guests` /
 `bookings`. Replaced `current_account_id()` with `current_staff_venue_ids()` and the
@@ -940,8 +976,121 @@ table-reservation venues are excluded. Resolved the identifier question in favou
 
 ---
 
+## 15. Implementation status and production readiness
+
+This section is the **operational companion** to §11. It records what is in the codebase today
+and what remains before Linked Accounts meets a **production-ready** bar: correct behaviour
+under failure, legal clarity, test confidence, and polished UX on every surface named in the
+spec.
+
+### 15.1 Summary
+
+| Phase | Overall | Safe to use today? |
+|---|---|---|
+| **Phase 1** — pairwise links | Core path shipped end-to-end | **Yes, for controlled rollout** — RLS + cron + settings + calendar (day/week) + bookings list + audit. Gaps below are polish, legal, and test depth, not missing core security. |
+| **Phase 2** — venue collectives | Browse + per-venue booking works; advanced routing missing | **Yes for simple collectives** (pick a member venue/practitioner, book normally). **No** for "any practitioner" or cross-venue availability routing. |
+| **Phase 3** | Not started | N/A |
+
+### 15.2 Phase 1 — implemented (reference)
+
+**Database & security**
+
+- Migrations: `20260919120000_linked_accounts.sql`, `20260920120000_linked_accounts_audit_hardening.sql`, `20260921120000_linked_calendar_insert_calendar_id.sql`, `20260922120000_linked_anonymised_view_calendar_id.sql`.
+- RLS helpers: `current_staff_venue_ids()`, `link_calendar_grant()`, `link_pii_grant()`, `link_action_grant()`.
+- Cross-venue write attribution on `bookings` + trigger-written `account_link_audit_log`.
+- pgTAP-style RLS tests: `supabase/tests/linked_accounts_rls_test.sql`.
+
+**Server**
+
+- `GET|POST /api/venue/account-links`, `GET|PATCH|DELETE /api/venue/account-links/[id]`, `POST …/reduce`, `GET …/lookup`, `GET …/incoming`, `GET …/[id]/audit` (JSON + CSV).
+- `GET /api/venue/linked-calendar` (+ booking CRUD, guests, view audit).
+- `GET /api/cron/account-link-maintenance` (pending expiry, lapse warning, suspend/resume, long-suspended expiry, plan ineligibility, collective reconcile).
+
+**Dashboard UI**
+
+- Settings → Linked Accounts: active / pending / past links, permission editor, reduce access, unlink, audit modal.
+- `LinkedAccountBanner`: incoming link requests + pending permission changes; dismiss 24h.
+- Calendar: integrated linked columns (day + week) in `PractitionerCalendarView.tsx`.
+- Bookings: source scope filter + `LinkedBookingsPanel`.
+- Fallback: `/dashboard/linked-calendar` + `LinkedCalendarView` component (still used by day-sheet).
+
+**Communications**
+
+- All §9 email events wired through `notifications.ts` and `linked-account-emails.ts` (email-only, as specified).
+
+### 15.3 Phase 1 — production gaps (priority order)
+
+**P0 — before broad production launch**
+
+| Gap | Spec | Status (2026-05-18) |
+|---|---|---|
+| Legal / ToS | §10.2 | **Done** — Linked Accounts subsection in `src/app/terms/customer/page.tsx`. Solicitor review of acceptance-modal copy still recommended before GA. |
+| Venue-deleted survivor notice | §6.6 | **Done** — `terminate_account_links_for_venue_deletion()` + `admin_hard_delete_venue` returns partner JSON; `hardDeleteVenueWithLinkedAccountNotifications()` sends `notifyLinkPartnerVenueDeleted`. Migration: `20260518120000_venue_delete_terminate_account_links.sql`. Dev script: `npx tsx scripts/hard-delete-venue.ts`. |
+| Automated test depth | §11 item 2 | **Done (vitest)** — `route.test.ts`, `venue-deletion.test.ts`, `LinkedAccountBanner.test.ts`, existing `permissions.test.ts` + pgTAP. Full DB E2E / Playwright still optional follow-up. |
+| Cron observability | §6.3, §6.7 | **Done** — `finalizeCronRun()` → Sentry on `errors > 0`, optional `CRON_ALERT_EMAIL` / `OPS_ALERT_EMAIL`, HTTP 500 when unhealthy; counters documented in `src/lib/cron/finalize-cron-run.ts`; smoke script includes this cron. |
+
+**P1 — professional polish (soon after launch)**
+
+| Gap | Spec | Status (2026-05-18) |
+|---|---|---|
+| Month-view linked calendars | §8.2 | **Done** — month grid shows linked booking counts (`+N` badge + slate dot) via `linkedCountByDate` / `linkedBookingCountByDate()`; full column grid remains day/week only. |
+| Day-sheet integration | §8.2 | **Done (synced list)** — `LinkedCalendarView` follows day-sheet date; link to full calendar. Full column grid on day-sheet deferred (restaurant/legacy surface). |
+| ~10 links soft warning | §3 | **Done** — `LINK_COUNT_SOFT_WARNING` (10); banner counts active + pending links in `LinkedAccountsSection`. |
+| PRD / founder-facing docs | Project rules | **Done** — row in §4 “What Is Not in the MVP” + glossary entries in `Docs/PRD.md`. |
+| Manual QA matrix | Scope doc §6.1 | **Done** — checklist in `Docs/reserveni-linked-calendar-grid-integration-scope.md` §6.1 (execute before GA). |
+
+**P2 — nice to have**
+
+| Gap | Action |
+|---|---|
+| Remove `/dashboard/linked-calendar` orphan page once day-sheet is integrated | Redirect to calendar with linked columns enabled. |
+| Realtime linked-calendar refresh | Today: Supabase channel + debounced refetch on `PractitionerCalendarView`; verify under load. |
+| Staff (non-admin) training copy | Short in-app help on what linking does *not* do (no shared clients). |
+
+### 15.4 Phase 2 — implemented (reference)
+
+- Tables `venue_collectives`, `venue_collective_members` with RLS (Phase 1 migration).
+- `VenueCollectivesPanel` in settings: create, invite, accept, configure visibility, leave, host remove, dissolve.
+- APIs: `/api/venue/collectives`, `/api/venue/collectives/[id]`, `…/members` (including `transfer_host`).
+- Public page: `/book/c/[slug]` → `CollectiveBookingFlow` → per-member `BookPublicBookingFlow` with `collectiveId` attribution.
+- Widget: collective embed option when venue is an active member (`WidgetSection.tsx`).
+- Maintenance: `reconcileCollective` on link termination / cron; invitation and dissolution emails.
+
+### 15.5 Phase 2 — production gaps (complete Phase 2 as specified)
+
+| Gap | Spec | Action |
+|---|---|---|
+| **Any-practitioner routing** | §7.6 | Implement cross-venue earliest-slot search in `CollectiveBookingFlow` (respect `allow_any_practitioner` + per-member `allow_any_practitioner_substitution`). Until then, hide or disable the flags in UI to avoid false expectations. |
+| **Fully-booked cross-suggestion** | §8.6 | On member venue `/book/[slug]`, when no slots: if venue is in an active collective, show CTA to `/book/c/{slug}`. |
+| **Dissolved name cooldown (30 days)** | §7.2.1 | Enforce on create: reject names matching a dissolved collective dissolved within 30 days (case-insensitive). |
+| **Host transfer acceptance** | §7.4 | Optional: require new host Admin to accept before `host_venue_id` changes (today: immediate API update). |
+| **Collective confirmation branding** | §7.8 | Apply collective logo/colour to emails/SMS for bookings with `collective_id` set. |
+| **Public page load / SEO** | §7.1 | Meta tags, error states when &lt; 2 active members, caching strategy for multi-venue service lists. |
+| **E2E collective booking** | — | Test: create collective → accept invite → book via `/book/c/{slug}` → `collective_id` on row → link break removes member. |
+
+### 15.6 Known deviations from this spec (intentional or pending doc sync)
+
+| Topic | Spec says | Code does |
+|---|---|---|
+| Calendar layout | Single integrated grid on calendar + day-sheet (§8.2) | **Calendar:** integrated day/week grid. **Day-sheet:** still separate `LinkedCalendarView` section. |
+| Linked calendar drag | Not in grid-integration scope | Linked bookings are **not** draggable (correct). Own-venue drag/resize is independent. |
+| Host transfer | New host must accept (§7.4) | Immediate `host_venue_id` update via API. |
+| Collective name reuse | 30 days after dissolve (§7.2.1) | Active-name uniqueness only. |
+| GDPR notice | Short notice in acceptance modal (§10.2) | **Implemented** in `LinkedAccountsSection` review modal. |
+
+When closing a deviation, update this table and the relevant normative section (§7 / §8 / §10).
+
+### 15.7 Suggested release sequencing
+
+1. **Linked Accounts Phase 1 GA** — after P0 gaps (legal, venue-deleted notice, test depth, cron monitoring).
+2. **Collectives "simple mode" GA** — collective browse + explicit practitioner/venue choice only; document that "any practitioner" is coming.
+3. **Collectives Phase 2 complete** — any-practitioner routing + cross-suggestion + name cooldown + branding.
+4. **Phase 3** — only if venue demand warrants presets / bulk / analytics.
+
+---
+
 ## End of specification
 
 This document is the source of truth for the linked accounts feature. Any deviation during
-implementation should be reflected back into this document. When briefing an AI coding
-agent, reference sections by number rather than restating requirements.
+implementation should be reflected back into this document (especially §15.6). When briefing
+an AI coding agent, reference sections by number rather than restating requirements.

@@ -12,6 +12,10 @@ import {
 } from './ExpandedBookingContent';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
+import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -28,6 +32,10 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  applyBookingRowOverlayFields,
+  overlayFromPatchPayload,
+} from '@/lib/booking/booking-row-overlay';
 import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
@@ -40,6 +48,10 @@ import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LinkedBookingsPanel } from '@/components/linked-accounts/LinkedBookingsPanel';
+import {
+  useDashboardDetailCache,
+  type VenueBookingDetailPayload,
+} from '@/components/providers/DashboardDetailCacheProvider';
 
 type SourceScope = 'all' | 'own' | 'linked';
 
@@ -309,6 +321,7 @@ export function AppointmentBookingsDashboard({
   enabledModels = [],
   defaultPractitionerFilter = 'all',
   linkedPractitionerIds = [],
+  initialTodayIso,
 }: {
   venueId: string;
   currency?: string;
@@ -318,14 +331,23 @@ export function AppointmentBookingsDashboard({
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages. */
   linkedPractitionerIds?: string[];
+  /** yyyy-mm-dd from the server render — keeps “today” aligned between SSR and hydration. */
+  initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const {
+    peekVenueBookingDetail,
+    primeVenueBookingDetail,
+    invalidateVenueBookingDetail,
+    warmVenueBookingDetail,
+  } = useDashboardDetailCache();
   const myCalendarIds = useMemo(() => linkedPractitionerIds, [linkedPractitionerIds]);
   const sym = currencySymbolFromCode(currency);
+  const todayIso = initialTodayIso ?? todayISO();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
-  const [anchorDate, setAnchorDate] = useState(todayISO);
-  const [customFrom, setCustomFrom] = useState(todayISO);
-  const [customTo, setCustomTo] = useState(addDays(todayISO(), 7));
+  const [anchorDate, setAnchorDate] = useState(todayIso);
+  const [customFrom, setCustomFrom] = useState(todayIso);
+  const [customTo, setCustomTo] = useState(addDays(todayIso, 7));
   const [viewRangePopoverOpen, setViewRangePopoverOpen] = useState(false);
   const viewRangeTriggerRef = useRef<HTMLButtonElement>(null);
   const viewRangeWrapRef = useRef<HTMLDivElement>(null);
@@ -421,29 +443,65 @@ export function AppointmentBookingsDashboard({
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
 
-  const loadBookingDetail = useCallback(async (bookingId: string, force = false) => {
-    if (!force && detailById[bookingId]) return;
-    setDetailLoadingIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as BookingDetailLite;
-      setDetailById((prev) => ({ ...prev, [bookingId]: data }));
-      setGuestHistoryRevisionById((prev) => ({
-        ...prev,
-        [bookingId]: (prev[bookingId] ?? 0) + 1,
-      }));
-      setBookings((rows) =>
-        rows.map((booking) =>
-          booking.id === bookingId && data.inferred_booking_model
-            ? { ...booking, booking_model: data.inferred_booking_model }
-            : booking,
-        ),
-      );
-    } finally {
-      setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
-    }
-  }, [detailById]);
+  const loadBookingDetail = useCallback(
+    async (bookingId: string, force = false) => {
+      if (!force && detailById[bookingId]) return;
+
+      const cachedRaw = !force ? peekVenueBookingDetail(bookingId) : undefined;
+      const fromCache =
+        cachedRaw &&
+        typeof cachedRaw === 'object' &&
+        typeof (cachedRaw as unknown as BookingDetailLite).id === 'string' &&
+        (cachedRaw as unknown as BookingDetailLite).id === bookingId
+          ? (cachedRaw as unknown as BookingDetailLite)
+          : undefined;
+
+      if (fromCache && !detailById[bookingId]) {
+        setDetailById((prev) => ({ ...prev, [bookingId]: fromCache }));
+      }
+
+      const blockingSpinner = force || !fromCache;
+      if (detailLoadingIds.includes(bookingId)) return;
+      if (blockingSpinner) {
+        setDetailLoadingIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
+      }
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as BookingDetailLite;
+        primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
+        setDetailById((prev) => ({ ...prev, [bookingId]: data }));
+        setGuestHistoryRevisionById((prev) => ({
+          ...prev,
+          [bookingId]: (prev[bookingId] ?? 0) + 1,
+        }));
+        setBookings((rows) =>
+          rows.map((booking) =>
+            booking.id === bookingId && data.inferred_booking_model
+              ? { ...booking, booking_model: data.inferred_booking_model }
+              : booking,
+          ),
+        );
+      } finally {
+        if (blockingSpinner) {
+          setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
+        }
+      }
+    },
+    [detailById, detailLoadingIds, peekVenueBookingDetail, primeVenueBookingDetail],
+  );
+
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => {
+      void (async () => {
+        await warmVenueBookingDetail(bookingId);
+        const lite = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
+        if (!lite) return;
+        setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: lite }));
+      })();
+    },
+    [peekVenueBookingDetail, warmVenueBookingDetail],
+  );
 
   /** Legacy filter label before "Started" rename. */
   useEffect(() => {
@@ -764,10 +822,45 @@ export function AppointmentBookingsDashboard({
     return list;
   }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
 
+  useEffect(() => {
+    if (sortedBookings.length === 0) return;
+    const ids = sortedBookings
+      .filter((b) => b.status !== 'Cancelled')
+      .slice(0, 28)
+      .map((b) => b.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, warmVenueBookingDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [sortedBookings, warmVenueBookingDetail]);
+
   async function updateRowStatus(bookingId: string, nextStatus: string) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev) return;
-    setBookings((rows) => rows.map((r) => (r.id === bookingId ? { ...r, status: nextStatus } : r)));
+    setBookings((rows) =>
+      rows.map((r) => {
+        if (r.id !== bookingId) return r;
+        const updated: RegistryAppointment = { ...r, status: nextStatus };
+        if (prev.status === 'Confirmed' && nextStatus === 'Booked') {
+          updated.staff_attendance_confirmed_at = null;
+          updated.guest_attendance_confirmed_at = null;
+        } else if (nextStatus === 'Confirmed' && prev.status !== 'Confirmed') {
+          updated.staff_attendance_confirmed_at = new Date().toISOString();
+        }
+        return updated;
+      }),
+    );
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -780,7 +873,16 @@ export function AppointmentBookingsDashboard({
         setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
         return;
       }
-      void fetchBookings({ silent: true });
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (payload && typeof payload === 'object' && !('error' in payload)) {
+        setBookings((rows) =>
+          rows.map((r) =>
+            r.id === bookingId
+              ? applyBookingRowOverlayFields(r, overlayFromPatchPayload(payload))
+              : r,
+          ),
+        );
+      }
       void fetchBookingsForStats();
     } catch {
       addToast('Could not update status', 'error');
@@ -923,6 +1025,7 @@ export function AppointmentBookingsDashboard({
         if (payload.errors && payload.errors.length > 0) {
           const w = payload.errors.join('; ');
           setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          invalidateVenueBookingDetail(bookingId);
           setDetailById((prev) => {
             const next = { ...prev };
             delete next[bookingId];
@@ -933,6 +1036,7 @@ export function AppointmentBookingsDashboard({
           return { ok: true, warning: `Sent with issues: ${w}` };
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        invalidateVenueBookingDetail(bookingId);
         setDetailById((prev) => {
           const next = { ...prev };
           delete next[bookingId];
@@ -948,15 +1052,23 @@ export function AppointmentBookingsDashboard({
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
     },
-    [addToast, loadBookingDetail],
+    [addToast, invalidateVenueBookingDetail, loadBookingDetail],
   );
 
-  function toggleExpanded(id: string) {
-    setExpandedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-    void loadBookingDetail(id);
-  }
+  const toggleExpanded = useCallback(
+    (id: string) => {
+      setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+      const row = bookings.find((b) => b.id === id);
+      const fromCache = bookingDetailLiteFromCachePayload(id, peekVenueBookingDetail(id));
+      const fromRow = row ? bookingDetailLiteFromListRow(row) : undefined;
+      const seed = fromCache ?? fromRow;
+      if (seed) {
+        setDetailById((prev) => (prev[id] ? prev : { ...prev, [id]: seed }));
+      }
+      void loadBookingDetail(id);
+    },
+    [bookings, loadBookingDetail, peekVenueBookingDetail],
+  );
 
   function SortControl() {
     const options: Array<{ key: SortKey; label: string }> = [
@@ -1075,6 +1187,7 @@ export function AppointmentBookingsDashboard({
         aria-expanded={expanded}
         aria-controls={`appt-expand-${b.id}`}
         onClick={() => toggleExpanded(b.id)}
+        {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -1224,6 +1337,7 @@ export function AppointmentBookingsDashboard({
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
             className={expandedBookingRowShellClass}
           >
             <ExpandedBookingContent
@@ -1249,6 +1363,7 @@ export function AppointmentBookingsDashboard({
               onSendMessage={(channel) => sendGuestMessage(b.id, draftMessage, channel)}
               onStatusAction={(status) => { void updateRowStatus(b.id, status); }}
               onDetailUpdated={() => {
+                invalidateVenueBookingDetail(b.id);
                 setDetailById((prev) => {
                   const next = { ...prev };
                   delete next[b.id];
@@ -1617,6 +1732,7 @@ export function AppointmentBookingsDashboard({
         summary={toolbarSummary}
         summaryContent={appointmentSummaryContent}
         date={anchorDate}
+        todayIso={todayIso}
         dateLabel={viewMode === 'custom' ? `${customFrom} - ${customTo}` : formatDateLabel(anchorDate, viewMode)}
         onDateChange={setAnchorDate}
         onPreviousDate={() => navigate(-1)}

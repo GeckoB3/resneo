@@ -42,6 +42,7 @@ import {
   appointmentProgressPhase,
   appointmentTimeSlotClass,
   APPOINTMENT_TIME_SLOTS_GRID_CLASS,
+  APPOINTMENT_TIME_SLOT_LABEL_CLASS,
   APPOINTMENT_DETAILS_SUBMIT_CLASS,
   APPOINTMENT_DETAILS_INPUT_CLASS,
 } from './appointment-public-ui';
@@ -1682,7 +1683,9 @@ export function AppointmentBookingFlow({
                     onClick={() => onSelect(slot.start_time)}
                     className={appointmentTimeSlotClass(false, isPublicGuest)}
                   >
-                    {slot.start_time.slice(0, 5)}
+                    <span className={APPOINTMENT_TIME_SLOT_LABEL_CLASS}>
+                      {slot.start_time.slice(0, 5)}
+                    </span>
                   </button>
                 ))}
               </div>

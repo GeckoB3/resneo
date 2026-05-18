@@ -215,21 +215,23 @@ export function AppointmentSummaryStrip({ children }: { children: ReactNode }) {
 }
 
 /**
- * Shared responsive grid for appointment time pickers (staff + public).
- * Matches `.appointment-public .ap-time-slot` sizing via equal-width cells.
+ * Container-aware grid for appointment time pickers (public page, embed, staff form).
+ * See `globals.css` — `repeat(auto-fill, minmax(...))` adapts column count to width.
  */
-export const APPOINTMENT_TIME_SLOTS_GRID_CLASS =
-  'grid grid-cols-4 gap-1.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8';
+export const APPOINTMENT_TIME_SLOTS_GRID_CLASS = 'ap-time-slots-grid';
 
 /** @deprecated Use {@link APPOINTMENT_TIME_SLOTS_GRID_CLASS}. */
 export const APPOINTMENT_STAFF_TIME_SLOTS_GRID_CLASS = APPOINTMENT_TIME_SLOTS_GRID_CLASS;
 
+/** Inner label — keeps HH:mm centered and ellipsized if space is tight. */
+export const APPOINTMENT_TIME_SLOT_LABEL_CLASS = 'ap-time-slot-label';
+
 /**
- * Staff/dashboard slot button — same padding, radius, and type scale as `.ap-time-slot`
- * in globals.css (outside `.appointment-public` we mirror with Tailwind + brand hover).
+ * Staff/dashboard slot button — shares base sizing with `.ap-time-slot` via `.ap-time-slot-btn`
+ * in globals.css; brand hover uses Tailwind outside `.appointment-public`.
  */
 export const APPOINTMENT_STAFF_TIME_SLOT_CLASS =
-  'w-full min-w-0 rounded-[0.625rem] border border-slate-200 bg-white px-2 py-2.5 text-center text-sm font-semibold tabular-nums text-slate-700 shadow-sm transition-[border-color,color,box-shadow,transform] duration-150 hover:border-brand-300 hover:text-brand-600 hover:shadow-md active:scale-[0.97]';
+  'ap-time-slot-btn transition-[border-color,color,box-shadow,transform] duration-150 hover:border-brand-300 hover:text-brand-600 hover:shadow-md active:scale-[0.97]';
 
 export function appointmentTimeSlotClass(selected = false, isPublic = true): string {
   if (!isPublic) {

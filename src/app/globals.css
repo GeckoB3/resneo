@@ -390,25 +390,67 @@ button, a, input, select, textarea {
   color: color-mix(in srgb, var(--ap-accent) 55%, #0f172a);
 }
 
-.appointment-public .ap-time-slot {
+/**
+ * Appointment time picker grid (public page, embed iframe, staff booking form).
+ * auto-fill fits as many equal columns as the container allows — avoids fixed breakpoints
+ * that crush slots in narrow embeds or leave ragged rows on wide staff modals.
+ */
+.ap-time-slots-grid {
+  display: grid;
+  gap: 0.375rem;
+  grid-template-columns: repeat(auto-fill, minmax(4.25rem, 1fr));
+}
+
+@media (min-width: 380px) {
+  .ap-time-slots-grid {
+    grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr));
+  }
+}
+
+/* Shared slot button surface (public `.ap-time-slot` + staff Tailwind mirror). */
+.ap-time-slot,
+.ap-time-slot-btn {
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
+  min-height: 2.75rem;
   border-radius: 0.625rem;
   border: 1px solid rgb(226 232 240);
   background: white;
-  padding: 0.625rem 0.5rem;
+  padding: 0.5rem 0.375rem;
   font-size: 0.875rem;
   font-weight: 600;
+  line-height: 1.25;
   text-align: center;
   font-variant-numeric: tabular-nums;
   color: rgb(51 65 85);
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  overflow: hidden;
   transition:
     border-color 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease,
     transform 0.1s ease;
 }
+
+@media (min-width: 640px) {
+  .ap-time-slot,
+  .ap-time-slot-btn {
+    min-height: 2.875rem;
+    padding: 0.625rem 0.5rem;
+  }
+}
+
+.ap-time-slot-label {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .appointment-public .ap-time-slot:hover {
   border-color: var(--ap-accent-border);
   color: var(--ap-accent);

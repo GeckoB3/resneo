@@ -4,6 +4,7 @@ import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import {
   notifyLinkExpired,
+  notifyLinkLapseWarning,
   notifyLinkResumed,
   notifyLinkSuspended,
 } from '@/lib/linked-accounts/notifications';
@@ -11,6 +12,8 @@ import {
   PENDING_REQUEST_EXPIRY_DAYS,
   SUSPENDED_LINK_EXPIRY_DAYS,
 } from '@/lib/linked-accounts/types';
+import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
+import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 
 interface VenueState {
   id: string;
@@ -32,12 +35,16 @@ export async function GET(request: NextRequest) {
   const admin = getSupabaseAdminClient();
   const results = {
     expired_requests: 0,
+    lapse_warnings: 0,
     suspended: 0,
     resumed: 0,
     expired_suspended: 0,
     terminated_ineligible: 0,
     errors: 0,
   };
+
+  /** Venues whose links left `accepted` this run — their collectives need re-checking (§7.5). */
+  const collectiveAffectedVenueIds = new Set<string>();
 
   const venueCache = new Map<string, VenueState | null>();
   async function getVenue(id: string): Promise<VenueState | null> {
@@ -99,6 +106,76 @@ export async function GET(request: NextRequest) {
     results.errors++;
   }
 
+  // ---- 1b. Advance lapse warnings (§6.7) -------------------------------
+  // Email every venue linked to one whose subscription is foreseeably lapsing
+  // ~7 days out: a scheduled cancellation, or a Light free period ending
+  // without conversion. The 24h window means the daily cron warns exactly once.
+  try {
+    const now = Date.now();
+    const windowStart = new Date(now + 6 * 24 * 60 * 60 * 1000).toISOString();
+    const windowEnd = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: cancelling } = await admin
+      .from('venues')
+      .select('id, name, subscription_current_period_end')
+      .eq('plan_status', 'cancelling')
+      .gte('subscription_current_period_end', windowStart)
+      .lt('subscription_current_period_end', windowEnd);
+
+    const { data: lightLapsing } = await admin
+      .from('venues')
+      .select('id, name, light_plan_free_period_ends_at')
+      .is('light_plan_converted_at', null)
+      .gte('light_plan_free_period_ends_at', windowStart)
+      .lt('light_plan_free_period_ends_at', windowEnd);
+
+    const lapsing = new Map<string, { name: string; effectiveDate: string }>();
+    for (const v of cancelling ?? []) {
+      lapsing.set(v.id as string, {
+        name: (v.name as string) ?? 'A linked venue',
+        effectiveDate: (v.subscription_current_period_end as string) ?? '',
+      });
+    }
+    for (const v of lightLapsing ?? []) {
+      if (lapsing.has(v.id as string)) continue;
+      lapsing.set(v.id as string, {
+        name: (v.name as string) ?? 'A linked venue',
+        effectiveDate: (v.light_plan_free_period_ends_at as string) ?? '',
+      });
+    }
+
+    for (const [venueId, info] of lapsing) {
+      try {
+        const dateLabel = info.effectiveDate
+          ? new Date(info.effectiveDate).toLocaleDateString('en-GB', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            })
+          : 'soon';
+        const { data: links } = await admin
+          .from('account_links')
+          .select('venue_low_id, venue_high_id')
+          .eq('status', 'accepted')
+          .or(`venue_low_id.eq.${venueId},venue_high_id.eq.${venueId}`);
+        for (const link of links ?? []) {
+          const otherVenueId =
+            (link.venue_low_id as string) === venueId
+              ? (link.venue_high_id as string)
+              : (link.venue_low_id as string);
+          await notifyLinkLapseWarning(admin, otherVenueId, info.name, dateLabel);
+          results.lapse_warnings++;
+        }
+      } catch (err) {
+        console.error('[account-link-maintenance] lapse-warning failed:', venueId, err);
+        results.errors++;
+      }
+    }
+  } catch (err) {
+    console.error('[account-link-maintenance] lapse-warning step failed:', err);
+    results.errors++;
+  }
+
   // ---- 2. Suspend / terminate accepted links on subscription lapse -----
   try {
     const { data: accepted } = await admin
@@ -125,6 +202,8 @@ export async function GET(request: NextRequest) {
               pending_change: null,
             })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           results.terminated_ineligible++;
           continue;
         }
@@ -136,6 +215,8 @@ export async function GET(request: NextRequest) {
             .from('account_links')
             .update({ status: 'suspended', suspended_at: new Date().toISOString() })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           await Promise.allSettled([
             notifyLinkSuspended(admin, link.venue_low_id as string, lapsed.name),
             notifyLinkSuspended(admin, link.venue_high_id as string, lapsed.name),
@@ -193,6 +274,8 @@ export async function GET(request: NextRequest) {
               pending_change: null,
             })
             .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
           results.expired_suspended++;
         }
       } catch (err) {
@@ -205,5 +288,20 @@ export async function GET(request: NextRequest) {
     results.errors++;
   }
 
-  return NextResponse.json({ ok: true, ...results });
+  // ---- 4. Reconcile collectives whose links left 'accepted' (§7.5) -----
+  if (collectiveAffectedVenueIds.size > 0) {
+    try {
+      await reconcileCollectivesAfterLinkChange(admin, [...collectiveAffectedVenueIds]);
+    } catch (err) {
+      console.error('[account-link-maintenance] collective reconcile failed:', err);
+      results.errors++;
+    }
+  }
+
+  const outcome = await finalizeCronRun({
+    job: 'account-link-maintenance',
+    results,
+    errors: results.errors,
+  });
+  return NextResponse.json(outcome.body, { status: outcome.httpStatus });
 }

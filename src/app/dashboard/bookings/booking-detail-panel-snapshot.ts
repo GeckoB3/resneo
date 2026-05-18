@@ -1,3 +1,5 @@
+import type { BookingModel } from '@/types/booking-models';
+
 /** Snapshot for placeholder header / optimistic open before GET /api/venue/bookings/[id] completes. */
 export interface BookingDetailPanelSnapshot {
   bookingDate: string;
@@ -13,4 +15,14 @@ export interface BookingDetailPanelSnapshot {
   serviceName?: string | null;
   /** Display-only until the booking payload hydrates. */
   tableNames?: string[];
+  inferredBookingModel?: BookingModel;
+  guestId?: string | null;
+  guestEmail?: string | null;
+  guestPhone?: string | null;
+  guestVisitCount?: number | null;
+  source?: string | null;
+  practitionerId?: string | null;
+  appointmentServiceId?: string | null;
+  serviceItemId?: string | null;
+  calendarId?: string | null;
 }

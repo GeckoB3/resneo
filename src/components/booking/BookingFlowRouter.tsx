@@ -53,6 +53,8 @@ interface Props {
   accentColour?: string;
   /** Model B: pre-selected practitioner from /book/{venue}/{practitioner-slug} */
   lockedPractitioner?: LockedPractitionerBooking | null;
+  /** §7.7: set when this flow is mounted inside a venue collective page. */
+  collectiveId?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function BookingFlowRouter({
   cancellationPolicy,
   accentColour,
   lockedPractitioner,
+  collectiveId,
 }: Props) {
   const model: BookingModel =
     activeBookingModel ?? ((venue.booking_model as BookingModel | undefined) ?? 'table_reservation');
@@ -91,6 +94,7 @@ export function BookingFlowRouter({
           onHeightChange={onHeightChange}
           accentColour={accentColour}
           lockedPractitioner={lockedPractitioner ?? undefined}
+          collectiveId={collectiveId}
         />
       );
     case 'event_ticket':

@@ -25,15 +25,25 @@ import {
   useDraggable,
   useDroppable,
   type DragCancelEvent,
+  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  pointerWithin,
+  rectIntersection,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
 import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import { CalendarColumnsChecklist } from '@/app/dashboard/practitioner-calendar/CalendarColumnsFilter';
+import {
+  EditLinkedBookingModal,
+  CreateLinkedBookingModal,
+  LinkedBookingDetailModal,
+} from '@/components/linked-accounts/LinkedCalendarView';
+import type { LinkedVenueCalendar, LinkedBooking } from '@/lib/linked-accounts/calendar';
+import { linkedBookingCountByDate } from '@/lib/linked-accounts/month-linked-counts';
 import {
   BookingDetailPanel,
   type BookingDetailPanelSnapshot,
@@ -43,6 +53,13 @@ import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/Eve
 import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
 import { EXP_BOOKING_ST_FOCUS } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
+import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
+import {
+  bookingDetailPanelSnapshotFromListRow,
+  estimatedEndIsoFromSchedule,
+} from '@/lib/booking/booking-detail-from-row';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import type { BookingStatus } from '@/lib/table-management/booking-status';
@@ -72,11 +89,16 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
-import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import {
+  bookingStatusDisplayLabel,
+  inferBookingRowModel,
+  isTableReservationBooking,
+} from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCardInfo } from './BookingCardInfo';
 import { formatPhoneForDisplay } from '@/lib/phone/e164';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -122,6 +144,29 @@ interface CalendarVariantRow {
   processing_time_blocks?: ProcessingTimeBlock[];
 }
 
+/**
+ * A read-only practitioner column belonging to a *linked* venue (§8.2). Linked
+ * columns are kept entirely separate from the native `Practitioner` pipeline —
+ * no droppables, drag, resource logic or availability maths touch them — so the
+ * core calendar is unaffected. The `key` is namespaced to avoid colliding with
+ * a native column id.
+ */
+interface LinkedColumn {
+  key: string;
+  venueId: string;
+  venueName: string;
+  linkId: string;
+  practitionerId: string;
+  practitionerName: string;
+  practitionerActive: boolean;
+  visibility: LinkedVenueCalendar['visibility'];
+  action: LinkedVenueCalendar['action'];
+}
+
+function linkedColumnKey(venueId: string, practitionerId: string): string {
+  return `linked:${venueId}:${practitionerId}`;
+}
+
 interface AppointmentService {
   id: string;
   name: string;
@@ -148,10 +193,12 @@ interface Booking {
   service_item_id: string | null;
   service_variant_id?: string | null;
   processing_time_blocks?: unknown | null;
+  guest_id?: string;
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
   guest_visit_count: number | null;
+  booking_item_name?: string | null;
   estimated_end_time: string | null;
   special_requests: string | null;
   internal_notes: string | null;
@@ -239,6 +286,15 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
+/** Manual blocks staff can drag, resize, and edit (not class-tied blocks). */
+function isManualEditableBlock(bl: CalendarBlock): boolean {
+  return bl.block_type !== 'class_session' && !bl.class_instance_id;
+}
+
+function blockDurationMinutes(bl: CalendarBlock): number {
+  return minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
+}
+
 /** Aligns with dashboard/bookings filters: Confirmed = `bookings.status = 'Confirmed'` (set via guest/staff attendance confirm); Started = status Seated. */
 function bookingMatchesCalendarStatusFilter(b: Booking, filterKey: string): boolean {
   if (filterKey === 'all') return true;
@@ -279,6 +335,8 @@ interface PractitionerCalendarPreferences {
   weekStart?: string;
   monthAnchor?: string;
   visibleCalendarIdsState?: string[] | null;
+  /** Linked-venue columns the user has opted into (§8.2). Default: none. */
+  visibleLinkedColumnIds?: string[];
   filterStatus?: string;
   startHourOverride?: number | null;
   endHourOverride?: number | null;
@@ -305,6 +363,13 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
   if (value.visibleCalendarIdsState !== undefined && value.visibleCalendarIdsState !== null) {
     if (!Array.isArray(value.visibleCalendarIdsState) || !value.visibleCalendarIdsState.every((id) => typeof id === 'string' && UUID_RE.test(id))) return false;
   }
+  if (value.visibleLinkedColumnIds !== undefined) {
+    if (
+      !Array.isArray(value.visibleLinkedColumnIds) ||
+      !value.visibleLinkedColumnIds.every((id) => typeof id === 'string' && id.startsWith('linked:'))
+    )
+      return false;
+  }
   /**
    * Accept any string here; unknown values (e.g. legacy `Cancelled`) are dropped
    * at hydration time below rather than invalidating the whole prefs blob.
@@ -316,8 +381,8 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
 }
 
 /**
- * Staff calendar booking blocks — product palette (`accent` = 3px left stripe; fill/text/border are light tints).
- * Booked accent #93C5FD · Confirmed accent #1E40AF · Arrived #F59E0B · Started #22C55E · Completed #6B7280 · No show #FEF2F2 · Cancelled #6B7280
+ * Staff calendar booking blocks — product palette (`accent` = left stripe; fill/text/border match {@link bookingStatusVisualForKey}).
+ * Pending orange · Booked cyan-sky · Confirmed indigo · Arrived amber · Started emerald · Completed slate · No-show red · Cancelled slate.
  */
 interface BookingBlockPalette {
   bg: string;
@@ -326,60 +391,65 @@ interface BookingBlockPalette {
   accent: string;
 }
 
+const BOOKING_PALETTE_PENDING: BookingBlockPalette = {
+  bg: '#FFEDD5',
+  text: '#9A3412',
+  border: '#FDBA74',
+  accent: '#EA580C',
+};
 const BOOKING_PALETTE_BOOKED: BookingBlockPalette = {
-  bg: '#EFF6FF',
-  text: '#1E3A8A',
-  border: '#BFDBFE',
-  accent: '#93C5FD',
+  bg: '#E0F2FE',
+  text: '#0C4A6E',
+  border: '#38BDF8',
+  accent: '#0369A1',
 };
 const BOOKING_PALETTE_CONFIRMED: BookingBlockPalette = {
-  bg: '#DBEAFE',
-  text: '#1E3A8A',
-  border: '#93C5FD',
-  accent: '#1E40AF',
+  bg: '#E0E7FF',
+  text: '#312E81',
+  border: '#818CF8',
+  accent: '#4338CA',
 };
 const BOOKING_PALETTE_ARRIVED_WAITING: BookingBlockPalette = {
-  bg: '#FFFBEB',
-  text: '#92400E',
-  border: '#FDE68A',
-  accent: '#F59E0B',
+  bg: '#FEF3C7',
+  text: '#78350F',
+  border: '#FBBF24',
+  accent: '#D97706',
 };
 const BOOKING_PALETTE_STARTED: BookingBlockPalette = {
-  bg: '#F0FDF4',
-  text: '#166534',
-  border: '#BBF7D0',
-  accent: '#22C55E',
+  bg: '#D1FAE5',
+  text: '#064E3B',
+  border: '#34D399',
+  accent: '#047857',
 };
 const BOOKING_PALETTE_COMPLETED: BookingBlockPalette = {
-  bg: '#F3F4F6',
+  bg: '#E5E7EB',
   text: '#374151',
-  border: '#D1D5DB',
-  accent: '#6B7280',
+  border: '#9CA3AF',
+  accent: '#4B5563',
 };
 const BOOKING_PALETTE_NO_SHOW: BookingBlockPalette = {
-  bg: '#FEF2F2',
+  bg: '#FEE2E2',
   text: '#991B1B',
-  border: '#FECACA',
-  accent: '#EF4444',
+  border: '#F87171',
+  accent: '#DC2626',
 };
 const BOOKING_PALETTE_CANCELLED: BookingBlockPalette = {
-  bg: '#F3F4F6',
-  text: '#6B7280',
-  border: '#E5E7EB',
-  accent: '#6B7280',
+  bg: '#E5E7EB',
+  text: '#4B5563',
+  border: '#D1D5DB',
+  accent: '#4B5563',
 };
 
 function bookingBlockCardStyle(p: BookingBlockPalette): CSSProperties {
   return {
     backgroundColor: p.bg,
-    backgroundImage: `linear-gradient(135deg, ${p.bg} 0%, #ffffff 145%)`,
     color: p.text,
     borderTopColor: p.border,
     borderRightColor: p.border,
     borderBottomColor: p.border,
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
     borderLeftColor: p.accent,
-    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72)',
+    boxShadow: '0 10px 26px rgba(15, 23, 42, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.42)',
   };
 }
 
@@ -398,6 +468,7 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
   if (status === 'Confirmed') return BOOKING_PALETTE_CONFIRMED;
   if (status === 'Pending' || status === 'Booked') {
     if (isAttendanceConfirmed(b)) return BOOKING_PALETTE_CONFIRMED;
+    if (status === 'Pending') return BOOKING_PALETTE_PENDING;
     return BOOKING_PALETTE_BOOKED;
   }
   return BOOKING_PALETTE_BOOKED;
@@ -406,6 +477,15 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
 function calendarStatusLabel(b: Booking): string {
   if (isArrivedWaitingDisplay(b)) return 'Arrived';
   return bookingStatusDisplayLabel(b.status, isTableReservationBooking(b));
+}
+
+function calendarBookingServiceLabel(
+  b: Booking,
+  svc: AppointmentService | null | undefined,
+  resourceName: string | null,
+): string | null {
+  const label = b.booking_item_name?.trim() || svc?.name?.trim() || null;
+  return [resourceName, label].filter(Boolean).join(' · ') || null;
 }
 
 function CalendarBookingStatusBadge({ b }: { b: Booking }) {
@@ -789,7 +869,7 @@ function BookingBlockPills({ b }: { b: Booking }) {
 /** Bottom strip for duration resize (hit target height). */
 const BOOKING_RESIZE_HANDLE_HEIGHT_PX = 18;
 /** Space kept between interactive booking chrome and resize gestures (paint + cushion so actions never butt the slider). */
-const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 2;
+const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 1;
 
 /** Deferred guest modification notify after calendar drag: Confirm or timer end. */
 const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
@@ -798,8 +878,7 @@ const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
 const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
 const BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX = 9;
 
-/** Right-column top padding only (pt-1.5); bottom is flush above the resize strip. Gap-0.5 between buttons (2px each). */
-const BOOKING_RIGHT_COL_PAD_Y = 6;
+/** Gap between stacked corner action buttons (gap-0.5 ≈ 2px). */
 const BOOKING_RIGHT_GAP_PX = 2;
 
 /** Counts must mirror `collectBookingRightColumnActionNodes` render order. */
@@ -830,12 +909,24 @@ function bookingShowsSeatedUndoInRightColumn(b: Booking): boolean {
   return b.status === 'Seated';
 }
 
-/** Per-row height for the single-column action stack. */
-const BOOKING_ACTION_ROW_COMFORT_MIN_PX = 30;
-/** Overlap lanes stack every action vertically in one narrow strip — delay compact/smaller typography slightly vs the padded wide strip. */
-const BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX = 24;
+/** Horizontal inset so booking info does not run under bottom-right action buttons. */
+const BOOKING_ACTIONS_CORNER_RIGHT_PX = 68;
+
 /** Action buttons should stay compact on tall booking bars rather than stretching to fill the card. */
 const BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS = 'max-h-9';
+/** Minimum gap between the booking bar top edge and the action stack. */
+const BOOKING_ACTION_TRAY_TOP_GAP_PX = 8;
+/** Gap between the action stack and the resize strip (or card bottom when not resizable). */
+const BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX = 1;
+/** Internal tray padding above / below buttons. */
+const BOOKING_CORNER_TRAY_PAD_TOP_PX = 4;
+const BOOKING_CORNER_TRAY_PAD_BOTTOM_PX = 2;
+const BOOKING_CORNER_TRAY_PAD_Y_PX =
+  BOOKING_CORNER_TRAY_PAD_TOP_PX + BOOKING_CORNER_TRAY_PAD_BOTTOM_PX;
+/** Preferred per-button height in the corner stack; only shrink below when the bar cannot fit. */
+const BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX = 28;
+/** When every action would get less than this, omit secondary rows (Arrived / Undo start). */
+const BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX = 22;
 
 const BOOKING_CARD_ROW_PAD_RESERVE_PX = 8;
 
@@ -845,71 +936,62 @@ function narrowBookingActionsWidthPx(shellRowWidthPx: number | null | undefined)
   return Math.min(shellRowWidthPx, actionBudget);
 }
 
-function perActionRowHeightPx(
-  blockHeightPx: number,
-  actionCount: number,
-  columns: number,
-  /** Wide action strip reserves `BOOKING_RIGHT_COL_PAD_Y` at top (`pt-1.5`); floating overlap strip does not. */
-  reserveRightColumnTopPad: boolean,
-): number {
-  const pad = reserveRightColumnTopPad ? BOOKING_RIGHT_COL_PAD_Y : 0;
-  const gap = BOOKING_RIGHT_GAP_PX;
-  const rows = Math.ceil(actionCount / columns);
-  const gapTotal = Math.max(0, rows - 1) * gap;
-  const available = blockHeightPx - pad - gapTotal;
-  return available / Math.max(1, rows);
-}
-
 interface BookingRightColumnLayoutResult {
   compact: boolean;
   fontSizePx: number;
   baseClass: string;
+  buttonMinHeightPx: number;
+  stackHeightPx: number;
 }
 
-function bookingRightColumnLayout(
+const BOOKING_CORNER_BUTTON_BASE_CLASS =
+  `inline-flex w-auto min-w-0 shrink-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} items-center justify-center whitespace-nowrap px-2 py-1 text-center font-semibold leading-tight [overflow-wrap:anywhere]`;
+
+function bookingCornerLayoutBudgetPx(blockHeightPx: number): number {
+  return Math.max(
+    0,
+    blockHeightPx - BOOKING_ACTION_TRAY_TOP_GAP_PX - BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
+  );
+}
+
+function cornerActionRawPerRowPx(layoutBudgetPx: number, actionCount: number): number {
+  if (actionCount <= 0) return layoutBudgetPx;
+  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
+  return (layoutBudgetPx - BOOKING_CORNER_TRAY_PAD_Y_PX - gapTotal) / actionCount;
+}
+
+/** Sizes bottom-right corner actions: comfort height by default, shrink only when the bar cannot fit. */
+function bookingCornerActionLayout(
   blockHeightPx: number,
   actionCount: number,
-  options: {
-    /** Mirrors top padding on the wide right column (`pt-1.5`); omit for floating overlap strips that use full height. */
-    reserveRightColumnTopPad?: boolean;
-  },
 ): BookingRightColumnLayoutResult {
-  const emptyBase =
-    `inline-flex w-full min-w-0 min-h-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]`;
-
   if (actionCount <= 0) {
-    return { compact: false, fontSizePx: 10, baseClass: emptyBase };
-  }
-
-  const reserveRightColumnTopPad = options.reserveRightColumnTopPad ?? true;
-  const comfortRowMinPx = reserveRightColumnTopPad
-    ? BOOKING_ACTION_ROW_COMFORT_MIN_PX
-    : BOOKING_OVERLAP_FLOAT_COMFORT_MIN_PX;
-
-  const perSingle = perActionRowHeightPx(
-    blockHeightPx,
-    actionCount,
-    1,
-    reserveRightColumnTopPad,
-  );
-  const chosenPerRow = perSingle;
-
-  const compact = chosenPerRow < comfortRowMinPx;
-  const fontSizePx = Math.round(Math.max(7, Math.min(10, chosenPerRow * 0.38)));
-
-  if (!compact) {
     return {
       compact: false,
       fontSizePx: 10,
-      baseClass:
-        `inline-flex w-full min-w-0 min-h-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} shrink items-center justify-center whitespace-normal break-words px-1.5 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]`,
+      baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
+      buttonMinHeightPx: 0,
+      stackHeightPx: 0,
     };
   }
+
+  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
+  const rawPer = cornerActionRawPerRowPx(blockHeightPx, actionCount);
+  const buttonMinHeightPx = Math.min(
+    BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX,
+    Math.max(0, Math.floor(rawPer)),
+  );
+  const stackHeightPx =
+    actionCount * buttonMinHeightPx + gapTotal + BOOKING_CORNER_TRAY_PAD_Y_PX;
+  const compact = buttonMinHeightPx < BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX;
+  const fontSizePx = buttonMinHeightPx < 22 ? 9 : 10;
+
   return {
-    compact: true,
+    compact,
     fontSizePx,
-    baseClass:
-      `flex min-h-0 min-w-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1.5 py-0.5 text-center [overflow-wrap:anywhere]`,
+    baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
+    buttonMinHeightPx,
+    stackHeightPx,
   };
 }
 
@@ -950,7 +1032,7 @@ function collectBookingRightColumnActionNodes({
   onArrived,
   baseClass,
   fontSizePx,
-  compact,
+  buttonMinHeightPx = 0,
   narrow = false,
   omitArrivalActions = false,
   omitSeatedUndoActions = false,
@@ -961,7 +1043,7 @@ function collectBookingRightColumnActionNodes({
   onArrived: (id: string, arrived: boolean) => void;
   baseClass: string;
   fontSizePx: number;
-  compact: boolean;
+  buttonMinHeightPx?: number;
   narrow?: boolean;
   /** Hide Arrived / Clear so Confirm or Start stays readable on very short booking bars. */
   omitArrivalActions?: boolean;
@@ -972,9 +1054,14 @@ function collectBookingRightColumnActionNodes({
 
   const arrived = Boolean(b.client_arrived_at);
 
-  const textStyle = compact
-    ? ({ fontSize: `${fontSizePx}px`, lineHeight: 1.15 } as const)
-    : undefined;
+  const buttonStyle =
+    buttonMinHeightPx > 0
+      ? ({
+          minHeight: `${buttonMinHeightPx}px`,
+          fontSize: `${fontSizePx}px`,
+          lineHeight: 1.2,
+        } as const)
+      : ({ fontSize: `${fontSizePx}px`, lineHeight: 1.2 } as const);
 
   const out: ReactElement[] = [];
 
@@ -984,7 +1071,7 @@ function collectBookingRightColumnActionNodes({
         key="reopen"
         type="button"
         disabled={busy}
-        style={textStyle}
+        style={buttonStyle}
         onClick={() => onStatus(b.id, 'Seated')}
         className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
       >
@@ -1003,7 +1090,7 @@ function collectBookingRightColumnActionNodes({
             key="arrived"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onArrived(b.id, true)}
             className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
           >
@@ -1016,7 +1103,7 @@ function collectBookingRightColumnActionNodes({
             key="arrived-clear"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onArrived(b.id, false)}
             className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
           >
@@ -1031,7 +1118,7 @@ function collectBookingRightColumnActionNodes({
           key="confirm-book"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Booked')}
           className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
         >
@@ -1045,7 +1132,7 @@ function collectBookingRightColumnActionNodes({
           key="start"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Seated')}
           className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
         >
@@ -1060,7 +1147,7 @@ function collectBookingRightColumnActionNodes({
             key="undo-start"
             type="button"
             disabled={busy}
-            style={textStyle}
+            style={buttonStyle}
             onClick={() => onStatus(b.id, 'Booked')}
             aria-label="Undo start"
             className={`${baseClass} rounded-lg font-semibold transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
@@ -1075,7 +1162,7 @@ function collectBookingRightColumnActionNodes({
           key="complete"
           type="button"
           disabled={busy}
-          style={textStyle}
+          style={buttonStyle}
           onClick={() => onStatus(b.id, 'Completed')}
             className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
         >
@@ -1088,7 +1175,70 @@ function collectBookingRightColumnActionNodes({
   return out;
 }
 
-/** Right edge: fixed width (wider when multi-column actions); actions share vertical space when the block is short. */
+/** Padding for booking info so text stays clear of the bottom-right action stack. */
+function computeBookingActionCornerInset(
+  b: Booking,
+  blockHeightPx: number,
+): { right: number; bottom: number; hasActions: boolean } {
+  const fullActionCount = countBookingRightColumnActions(b);
+  if (fullActionCount <= 0) {
+    return { right: 0, bottom: 0, hasActions: false };
+  }
+
+  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
+  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
+
+  const omitArrivalActions =
+    bookingHasArrivalToggleInRightColumn(b) &&
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
+
+  const omitSeatedUndoActions =
+    bookingShowsSeatedUndoInRightColumn(b) &&
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
+
+  const effectiveActionCount =
+    fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
+  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
+
+  return {
+    right: BOOKING_ACTIONS_CORNER_RIGHT_PX,
+    bottom: layout.stackHeightPx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
+    hasActions: true,
+  };
+}
+
+/** Transparent hit target at the bottom-right; only as tall/wide as its buttons. */
+function CalendarBookingActionsTray({
+  children,
+  bottomPx,
+  rightPx,
+  maxWidthPx,
+  topGapPx = BOOKING_ACTION_TRAY_TOP_GAP_PX,
+}: {
+  children: ReactNode;
+  bottomPx: number;
+  rightPx: number;
+  maxWidthPx?: number;
+  topGapPx?: number;
+}) {
+  return (
+    <div
+      className="pointer-events-none absolute z-20 flex h-auto w-auto flex-col justify-end gap-0.5 px-0.5 pb-0.5 pt-1"
+      style={{
+        bottom: bottomPx,
+        right: rightPx,
+        maxHeight: `calc(100% - ${topGapPx + bottomPx}px)`,
+        maxWidth: maxWidthPx != null ? maxWidthPx : 'min(100%, calc(100% - 0.35rem))',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Bottom-right action stack (does not stretch to full bar height). */
 function CalendarBookingRightColumn({
   b,
   busy,
@@ -1113,88 +1263,60 @@ function CalendarBookingRightColumn({
   /** Space reserved below floating actions, e.g. the duration resize handle. */
   bottomReservePx?: number;
 }) {
-  const reserveRightColumnTopPad = !(narrow && floating);
-
-  const layoutOptions = { reserveRightColumnTopPad };
-
   const fullActionCount = countBookingRightColumnActions(b);
-  const layoutIfAllActions = bookingRightColumnLayout(blockHeightPx, fullActionCount, layoutOptions);
+  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
+  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
 
   const omitArrivalActions =
-    layoutIfAllActions.compact &&
     bookingHasArrivalToggleInRightColumn(b) &&
-    fullActionCount > 1;
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
 
   const omitSeatedUndoActions =
-    layoutIfAllActions.compact &&
     bookingShowsSeatedUndoInRightColumn(b) &&
-    fullActionCount > 1;
+    fullActionCount > 1 &&
+    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
 
   const effectiveActionCount =
     fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
-  const layout = bookingRightColumnLayout(blockHeightPx, effectiveActionCount, layoutOptions);
-
-  /** Do not OR in `narrow`: that forced compact typography/padding whenever lanes overlapped, so buttons shrunk below wide-lane sizing for the same `blockHeightPx`. */
-  const compact = layout.compact;
-  const fontSizePx = layout.fontSizePx;
-  /** Overlap lanes use `narrow` for layout only; action sizing follows `bookingRightColumnLayout` like wide lanes (`min-h-0` only). */
-  const baseClass = layout.baseClass;
-
-  const widthClass = narrow
-    ? floating
-      ? 'min-w-0 max-w-full p-0'
-      : 'mb-2 min-w-0 max-w-full px-1 pb-0'
-    : 'w-[5.5rem] min-w-[5.5rem] max-w-[5.5rem] pt-1.5 pb-0 pl-1 pr-0.5';
-  const narrowWidthPx = narrowBookingActionsWidthPx(shellRowWidthPx);
-  const widthStyle =
-    narrow && floating
-      ? {
-          top: 0,
-          bottom: bottomReservePx,
-          ...(narrowWidthPx != null ? { width: narrowWidthPx } : {}),
-        }
-      : narrow && narrowWidthPx != null
-        ? { width: narrowWidthPx }
-        : floating
-          ? { bottom: bottomReservePx }
-          : undefined;
-
-  const heightClass =
-    narrow && floating ? 'min-h-0' : narrow ? 'h-auto max-h-full' : 'h-full';
-
-  const justifyActions = 'justify-end';
+  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
 
   const actionNodes = collectBookingRightColumnActionNodes({
     b,
     busy,
     onStatus,
     onArrived,
-    baseClass,
-    fontSizePx,
-    compact,
+    baseClass: layout.baseClass,
+    fontSizePx: layout.fontSizePx,
+    buttonMinHeightPx: layout.buttonMinHeightPx,
     narrow,
     omitArrivalActions,
     omitSeatedUndoActions,
   });
 
+  if (actionNodes.length === 0) {
+    return null;
+  }
+
+  const trayMaxWidthPx =
+    narrow && shellRowWidthPx != null
+      ? Math.max(56, shellRowWidthPx - 8)
+      : undefined;
+
   return (
-    <div
-      className={`${
-        narrow && floating
-          ? 'pointer-events-auto absolute right-1 z-20'
-          : ''
-      } flex ${heightClass} min-h-0 shrink-0 flex-col ${
-        narrow && floating ? '' : narrow ? 'self-end' : 'self-stretch'
-      } overflow-hidden ${widthClass}`}
-      style={widthStyle}
-      onPointerDown={(e) => e.stopPropagation()}
+    <CalendarBookingActionsTray
+      bottomPx={bottomReservePx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX}
+      rightPx={4}
+      maxWidthPx={trayMaxWidthPx}
     >
       <div
-        className={`flex min-h-0 w-full ${narrow && !floating ? 'flex-none' : 'flex-1'} flex-col gap-0.5 ${justifyActions}`}
+        className="pointer-events-auto flex h-auto w-auto max-w-full flex-col items-stretch gap-0.5 [&_button]:!h-auto [&_button]:!flex-none [&_button]:!basis-auto [&_button]:!grow-0"
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {actionNodes}
       </div>
-    </div>
+    </CalendarBookingActionsTray>
   );
 }
 
@@ -1209,6 +1331,7 @@ function slotOccupied(
   eventColumnBlocks: ScheduleBlockDTO[] = [],
   resourceParentById: Map<string, string>,
   excludeBookingId?: string | null,
+  excludeBlockId?: string | null,
   options?: { ignoreBookings?: boolean },
 ): boolean {
   if (!options?.ignoreBookings) {
@@ -1222,6 +1345,7 @@ function slotOccupied(
     }
   }
   for (const bl of blocks) {
+    if (excludeBlockId && bl.id === excludeBlockId) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -1255,7 +1379,11 @@ function appointmentWindowCollides(
   classScheduleBlocks: ScheduleBlockDTO[],
   eventColumnBlocks: ScheduleBlockDTO[],
   resourceParentById: Map<string, string>,
-  options?: { ignoreBookings?: boolean; candidatePractitionerBusy?: Array<{ start: number; end: number }> | null },
+  options?: {
+    ignoreBookings?: boolean;
+    excludeBlockId?: string;
+    candidatePractitionerBusy?: Array<{ start: number; end: number }> | null;
+  },
 ): boolean {
   if (endMin <= startMin) return true;
   const candIntervals =
@@ -1276,6 +1404,7 @@ function appointmentWindowCollides(
     }
   }
   for (const bl of blocks) {
+    if (options?.excludeBlockId && bl.id === options.excludeBlockId) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -1348,11 +1477,21 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
 type DraggableHandleProps = {
   listeners: ReturnType<typeof useDraggable>['listeners'] | undefined;
   attributes: ReturnType<typeof useDraggable>['attributes'] | undefined;
+  setActivatorNodeRef: (element: HTMLElement | null) => void;
 };
 
 function snapCalendarMoveMinutes(minutes: number): number {
   return Math.round(minutes / CALENDAR_MOVE_INCREMENT_MINUTES) * CALENDAR_MOVE_INCREMENT_MINUTES;
 }
+
+/** Prefer the slot under the cursor; fall back to rectangle overlap for tall booking cards. */
+const calendarGridCollisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  if (pointerHits.length > 0) {
+    return pointerHits;
+  }
+  return rectIntersection(args);
+};
 
 function DragBookingPreview({
   booking,
@@ -1403,7 +1542,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   canDrag: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
     id: `booking-${booking.id}`,
     disabled: !canDrag,
     data: { booking },
@@ -1418,13 +1557,204 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 20 + laneIndex,
     opacity: isDragging ? 0.85 : 1,
+    pointerEvents: isDragging ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
-    ? { listeners, attributes }
-    : { listeners: undefined, attributes: undefined };
+    ? { listeners, attributes, setActivatorNodeRef }
+    : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
   return (
     <div ref={setNodeRef} className="absolute" style={style}>
       {children(handleProps)}
+    </div>
+  );
+});
+
+function DragBlockPreview({
+  block,
+  movePreview,
+}: {
+  block: CalendarBlock;
+  movePreview?: { label: string; invalid: boolean } | null;
+}) {
+  const label = block.reason?.trim() ? `Blocked: ${block.reason}` : 'Blocked';
+  return (
+    <div
+      className="flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-400 bg-slate-200/95 shadow-2xl shadow-slate-900/15"
+      style={{ borderLeftWidth: 4, borderLeftColor: '#94a3b8' }}
+    >
+      {movePreview ? (
+        <div
+          className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
+            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+          }`}
+          aria-live="polite"
+        >
+          <span className="line-clamp-3">{movePreview.label}</span>
+        </div>
+      ) : null}
+      <div className="px-2.5 py-1.5 text-xs font-semibold text-slate-800">{label}</div>
+    </div>
+  );
+}
+
+const DraggableBlockShell = memo(function DraggableBlockShell({
+  block,
+  top,
+  height,
+  heightExtraPx = 0,
+  canDrag,
+  children,
+}: {
+  block: CalendarBlock;
+  top: number;
+  height: number;
+  heightExtraPx?: number;
+  canDrag: boolean;
+  children: (handle: DraggableHandleProps) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+    id: `block-${block.id}`,
+    disabled: !canDrag,
+    data: { block },
+  });
+  const totalHeight = Math.max(SLOT_HEIGHT * 0.5, height + heightExtraPx);
+  const style = {
+    top,
+    height: totalHeight,
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 50 : 15,
+    opacity: isDragging ? 0.85 : 1,
+    pointerEvents: isDragging ? 'none' : undefined,
+  } as CSSProperties;
+  const handleProps: DraggableHandleProps = canDrag
+    ? { listeners, attributes, setActivatorNodeRef }
+    : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
+  return (
+    <div ref={setNodeRef} className="absolute left-1 right-1" style={style}>
+      {children(handleProps)}
+    </div>
+  );
+});
+
+function linkedTimeToMinutes(time: string): number {
+  const [hh, mm] = (time ?? '').split(':');
+  return (parseInt(hh, 10) || 0) * 60 + (parseInt(mm, 10) || 0);
+}
+
+function linkedSlotTop(time: string, startHour: number): number {
+  return ((linkedTimeToMinutes(time) - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT;
+}
+
+function linkedBlockHeight(start: string, end: string | null): number {
+  if (!end) return SLOT_HEIGHT;
+  const d = linkedTimeToMinutes(end) - linkedTimeToMinutes(start);
+  return Math.max((d / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.6);
+}
+
+function linkedBookingIsClickable(column: LinkedColumn, b: LinkedBooking): boolean {
+  return (
+    column.visibility === 'full_details' &&
+    b.editable &&
+    b.status !== 'Cancelled'
+  );
+}
+
+/**
+ * One read-only day-grid column for a linked venue's practitioner (§8.2).
+ * Deliberately self-contained: no droppables, no drag, no resource maths — the
+ * native calendar pipeline never sees this. Bookings render desaturated; only
+ * `full_details` + editable links are clickable.
+ */
+const LinkedDayColumn = memo(function LinkedDayColumn({
+  column,
+  bookings,
+  startHour,
+  totalSlots,
+  onBookingClick,
+  onCreateAt,
+}: {
+  column: LinkedColumn;
+  bookings: LinkedBooking[];
+  startHour: number;
+  totalSlots: number;
+  onBookingClick: (b: LinkedBooking) => void;
+  /** When set, empty slots are clickable to create a booking (§4.3). */
+  onCreateAt?: (time: string) => void;
+}) {
+  const timeOnly = column.visibility === 'time_only';
+  return (
+    <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
+      <div className="relative bg-slate-50/50" style={{ height: totalSlots * SLOT_HEIGHT }}>
+        {Array.from({ length: totalSlots }, (_, i) => (
+          <div
+            key={i}
+            className="absolute left-0 w-full border-t border-slate-100"
+            style={{ top: i * SLOT_HEIGHT }}
+            aria-hidden
+          />
+        ))}
+        {onCreateAt
+          ? Array.from({ length: totalSlots }, (_, i) => {
+              const slotTime = minutesToTime(startHour * 60 + i * SLOT_MINUTES);
+              return (
+                <button
+                  key={`slot-${i}`}
+                  type="button"
+                  onClick={() => onCreateAt(slotTime)}
+                  className="absolute left-0 w-full transition-colors hover:bg-brand-50/60"
+                  style={{ top: i * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+                  title={`New booking at ${slotTime}`}
+                  aria-label={`New booking in ${column.venueName} at ${slotTime}`}
+                />
+              );
+            })
+          : null}
+        {bookings.map((b) => {
+          const top = linkedSlotTop(b.bookingTime, startHour);
+          const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime);
+          const clickable = linkedBookingIsClickable(column, b);
+          const timeLabel = `${b.bookingTime.slice(0, 5)}${
+            b.bookingEndTime ? `–${b.bookingEndTime.slice(0, 5)}` : ''
+          }`;
+          const detail = timeOnly
+            ? `${column.venueName} — busy`
+            : b.guestName ?? b.serviceName ?? 'Booking';
+          const inner = (
+            <div
+              className="flex h-full min-h-0 w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-slate-300 bg-white/70 px-1.5 py-1 text-left text-[10px] text-slate-500 saturate-50"
+              style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+            >
+              <span className="font-semibold tabular-nums text-slate-600">{timeLabel}</span>
+              <span className="truncate">{detail}</span>
+              {!timeOnly ? (
+                <span className="mt-auto text-[9px] uppercase tracking-wide text-slate-400">
+                  {b.status}
+                </span>
+              ) : null}
+            </div>
+          );
+          return (
+            <div
+              key={b.id}
+              className="absolute left-1 right-1 z-[15]"
+              style={{ top, height }}
+            >
+              <button
+                type="button"
+                onClick={() => onBookingClick(b)}
+                className="block h-full w-full text-left transition hover:saturate-100 hover:opacity-90"
+                title={
+                  clickable
+                    ? `Edit in ${column.venueName}`
+                    : `View detail · ${column.venueName}`
+                }
+              >
+                {inner}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 });
@@ -1437,12 +1767,15 @@ export function PractitionerCalendarView({
   bookingModel = 'unified_scheduling',
   enabledModels = [],
   calendarTodayIso,
+  linkFeature = false,
 }: {
   venueId: string;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages (unified scheduling). */
   linkedPractitionerIds?: string[];
+  /** True when the venue is eligible for Linked Accounts (§8.2 grid columns). */
+  linkFeature?: boolean;
   /** Primary bookable model (for merged schedule feeds §4.2). */
   bookingModel?: BookingModel;
   /** Secondary models; used to show Events / Classes lanes on the day grid. */
@@ -1454,6 +1787,11 @@ export function PractitionerCalendarView({
   calendarTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const { warmVenueBookingDetail } = useDashboardDetailCache();
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => warmVenueBookingDetail(bookingId),
+    [warmVenueBookingDetail],
+  );
   const myCalendarIds = useMemo(
     () => linkedPractitionerIds ?? [],
     [linkedPractitionerIds],
@@ -1491,7 +1829,21 @@ export function PractitionerCalendarView({
   const [visibleCalendarIdsState, setVisibleCalendarIdsState] = useState<string[] | null>(() =>
     defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
   );
+  /** Linked-venue calendars (§8.2). Adjacent to the native pipeline, never merged. */
+  const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
+  /** Linked columns the user has opted into. Default: none (opt-in). */
+  const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[]>([]);
+  const [linkedEditing, setLinkedEditing] = useState<
+    { column: LinkedColumn; booking: LinkedBooking } | null
+  >(null);
+  const [linkedViewing, setLinkedViewing] = useState<
+    { column: LinkedColumn; booking: LinkedBooking } | null
+  >(null);
+  const [linkedCreating, setLinkedCreating] = useState<
+    { venue: LinkedVenueCalendar; practitionerId?: string; time?: string } | null
+  >(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
@@ -1520,6 +1872,8 @@ export function PractitionerCalendarView({
   const [dragBooking, setDragBooking] = useState<Booking | null>(null);
   /** While dragging, droppable occupancy ignores this booking so slots under it stay valid targets. */
   const [dragExcludeBookingId, setDragExcludeBookingId] = useState<string | null>(null);
+  const [dragBlock, setDragBlock] = useState<CalendarBlock | null>(null);
+  const [dragExcludeBlockId, setDragExcludeBlockId] = useState<string | null>(null);
   const [calendarDragPreview, setCalendarDragPreview] = useState<{ label: string; invalid: boolean } | null>(null);
   const [calendarDragTarget, setCalendarDragTarget] = useState<{
     pracId: string;
@@ -1530,7 +1884,12 @@ export function PractitionerCalendarView({
   const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
   const [resizePreviewEnd, setResizePreviewEnd] = useState<{ bookingId: string; endHm: string } | null>(null);
+  const [blockResizeVisual, setBlockResizeVisual] = useState<{ blockId: string; deltaYPx: number } | null>(null);
+  const [blockResizePreviewEnd, setBlockResizePreviewEnd] = useState<{ blockId: string; endHm: string } | null>(
+    null,
+  );
   const justResizedBookingIdRef = useRef<string | null>(null);
+  const justResizedBlockIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   /** Single-step undo for drag-move and duration resize on the day/week grid. */
@@ -1786,6 +2145,9 @@ export function PractitionerCalendarView({
     if (remembered.visibleCalendarIdsState !== undefined) {
       setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
     }
+    if (remembered.visibleLinkedColumnIds !== undefined) {
+      setVisibleLinkedColumnIds(remembered.visibleLinkedColumnIds);
+    }
     if (
       remembered.filterStatus &&
       CALENDAR_STATUS_FILTERS.some((s) => s.value === remembered.filterStatus)
@@ -1811,6 +2173,7 @@ export function PractitionerCalendarView({
       weekStart,
       monthAnchor,
       visibleCalendarIdsState,
+      visibleLinkedColumnIds,
       filterStatus,
       startHourOverride,
       endHourOverride,
@@ -1823,6 +2186,7 @@ export function PractitionerCalendarView({
     weekStart,
     monthAnchor,
     visibleCalendarIdsState,
+    visibleLinkedColumnIds,
     filterStatus,
     startHourOverride,
     endHourOverride,
@@ -1941,6 +2305,53 @@ export function PractitionerCalendarView({
     void fetchData();
   }, [fetchData]);
 
+  /**
+   * Linked-venue calendars (§8.2) are loaded in a fully isolated effect: a
+   * failure here never affects the core calendar — it just leaves the linked
+   * data empty. Keyed off the same date range so linked data follows the
+   * page's day/week selection automatically.
+   */
+  const loadLinkedData = useCallback(async () => {
+    if (!linkFeature) {
+      setLinkedVenues([]);
+      return;
+    }
+    try {
+      const { from, to } = listFromTo;
+      const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
+      const res = await fetch(`/api/venue/linked-calendar?${params}`);
+      if (!res.ok) {
+        setLinkedVenues([]);
+        return;
+      }
+      const json = (await res.json()) as { venues?: LinkedVenueCalendar[] };
+      setLinkedVenues(json.venues ?? []);
+    } catch {
+      setLinkedVenues([]);
+    }
+  }, [linkFeature, listFromTo]);
+
+  /**
+   * Debounced linked-data refetch. Date paging and realtime events both route
+   * through here so rapid day changes (or a burst of linked-venue edits)
+   * collapse into a single request rather than one fetch per tick.
+   */
+  const linkedRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLinkedRefetch = useCallback(() => {
+    if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
+    linkedRefetchTimerRef.current = setTimeout(() => {
+      linkedRefetchTimerRef.current = null;
+      void loadLinkedData();
+    }, 400);
+  }, [loadLinkedData]);
+
+  useEffect(() => {
+    scheduleLinkedRefetch();
+    return () => {
+      if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
+    };
+  }, [scheduleLinkedRefetch]);
+
   useEffect(() => {
     if (!showResourceBooking || resourceBookingVenue) return;
 
@@ -2033,6 +2444,40 @@ export function PractitionerCalendarView({
     };
   }, [venueId, scheduleSilentCalendarRefetch]);
 
+  /** Stable key for the set of linked venues — so realtime does not re-subscribe on a plain refetch. */
+  const linkedVenueIdsKey = useMemo(
+    () =>
+      [...new Set(linkedVenues.map((v) => v.venueId))].sort().join(','),
+    [linkedVenues],
+  );
+
+  /**
+   * Linked-venue bookings (§8.2) get their own realtime channel so a change in
+   * a linked venue surfaces live, not only on date change. RLS gates delivery —
+   * the caller receives an event only for a row a link lets them see — and the
+   * refetch is debounced. Keyed on the stable venue-id set so an ordinary
+   * linked-data refetch never tears the subscription down.
+   */
+  useEffect(() => {
+    const ids = linkedVenueIdsKey ? linkedVenueIdsKey.split(',') : [];
+    if (!linkFeature || ids.length === 0) return;
+    const supabase = createClient();
+    const channel = supabase.channel(`linked-calendar-${venueId}`);
+    for (const linkedVenueId of ids) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${linkedVenueId}` },
+        () => {
+          scheduleLinkedRefetch();
+        },
+      );
+    }
+    channel.subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [linkFeature, venueId, linkedVenueIdsKey, scheduleLinkedRefetch]);
+
   const activePractitioners = useMemo(
     () => practitioners.filter((p) => p.is_active),
     [practitioners],
@@ -2062,6 +2507,63 @@ export function PractitionerCalendarView({
     const allowed = new Set(calendarFilterIds);
     return columnPractitioners.filter((p) => allowed.has(p.id));
   }, [columnPractitioners, calendarFilterIds]);
+
+  /** Every practitioner column exposed by a linked venue (§8.2). */
+  const linkedColumns = useMemo<LinkedColumn[]>(() => {
+    const out: LinkedColumn[] = [];
+    for (const v of linkedVenues) {
+      for (const p of v.practitioners) {
+        out.push({
+          key: linkedColumnKey(v.venueId, p.id),
+          venueId: v.venueId,
+          venueName: v.venueName,
+          linkId: v.linkId,
+          practitionerId: p.id,
+          practitionerName: p.name,
+          practitionerActive: p.isActive,
+          visibility: v.visibility,
+          action: v.action,
+        });
+      }
+    }
+    return out;
+  }, [linkedVenues]);
+
+  /** Linked columns the user has switched on — these render on the grid. */
+  const visibleLinkedColumns = useMemo(
+    () => linkedColumns.filter((c) => visibleLinkedColumnIds.includes(c.key)),
+    [linkedColumns, visibleLinkedColumnIds],
+  );
+
+  const linkedVenueById = useMemo(() => {
+    const m = new Map<string, LinkedVenueCalendar>();
+    for (const v of linkedVenues) m.set(v.venueId, v);
+    return m;
+  }, [linkedVenues]);
+
+  const linkedBookingsFor = useCallback(
+    (column: LinkedColumn, dayDate: string): LinkedBooking[] => {
+      const venue = linkedVenueById.get(column.venueId);
+      if (!venue) return [];
+      return venue.bookings.filter(
+        (b) => b.practitionerId === column.practitionerId && b.bookingDate === dayDate,
+      );
+    },
+    [linkedVenueById],
+  );
+
+  /**
+   * A click on any linked booking opens the edit modal when the grant allows
+   * it, or a read-only detail modal otherwise (§4.3) — so the grid never
+   * swallows a click silently.
+   */
+  const openLinkedBooking = useCallback((column: LinkedColumn, booking: LinkedBooking) => {
+    if (linkedBookingIsClickable(column, booking)) {
+      setLinkedEditing({ column, booking });
+    } else {
+      setLinkedViewing({ column, booking });
+    }
+  }, []);
 
   useEffect(() => {
     const root = timelineRootRef.current;
@@ -2237,7 +2739,7 @@ export function PractitionerCalendarView({
   }
 
   function openEditBlockModal(bl: CalendarBlock) {
-    if (bl.block_type === 'class_session') {
+    if (!isManualEditableBlock(bl)) {
       return;
     }
     const colId = columnIdForBlock(bl);
@@ -2267,6 +2769,7 @@ export function PractitionerCalendarView({
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            start_time: blockModal.startTime,
             end_time: blockModal.endTime,
             reason: blockModal.reason.trim() || null,
           }),
@@ -2303,6 +2806,81 @@ export function PractitionerCalendarView({
     }
   }
 
+  const patchBlockResize = useCallback(
+    async (block: CalendarBlock, newEndHm: string) => {
+      const prev = { ...block };
+      const startHm = block.start_time.slice(0, 5);
+      if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
+      setBlocks((rows) =>
+        rows.map((bl) => (bl.id === block.id ? { ...bl, end_time: newEndHm } : bl)),
+      );
+      try {
+        const res = await fetch(`/api/venue/practitioner-calendar-blocks/${block.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ end_time: newEndHm }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not update block duration', 'error');
+          setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+        } else {
+          void fetchData({ silent: true });
+        }
+      } catch {
+        addToast('Could not update block duration', 'error');
+        setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+      }
+    },
+    [addToast, fetchData],
+  );
+
+  async function patchBlockMove(block: CalendarBlock, newDate: string, newStart: string, newColId: string) {
+    const prev = { ...block };
+    const duration = blockDurationMinutes(block);
+    const newEnd = minutesToTime(timeToMinutes(newStart) + duration);
+    const colId = columnIdForBlock(block);
+    setBlocks((rows) =>
+      rows.map((bl) => {
+        if (bl.id !== block.id) return bl;
+        const next: CalendarBlock = {
+          ...bl,
+          block_date: newDate,
+          start_time: newStart,
+          end_time: newEnd,
+        };
+        if (bl.calendar_id) next.calendar_id = newColId;
+        else next.practitioner_id = newColId;
+        return next;
+      }),
+    );
+    try {
+      const res = await fetch(`/api/venue/practitioner-calendar-blocks/${block.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          block_date: newDate,
+          start_time: newStart,
+          end_time: newEnd,
+          practitioner_id: newColId,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not move block', 'error');
+        setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+        return;
+      }
+      if (colId !== newColId || block.block_date !== newDate) {
+        addToast('Block moved', 'success');
+      }
+      void fetchData({ silent: true });
+    } catch {
+      addToast('Could not move block', 'error');
+      setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
+    }
+  }
+
   async function deleteBlockFromModal() {
     if (!blockModal?.blockId) return;
     if (!window.confirm('Remove this blocked time?')) return;
@@ -2326,6 +2904,7 @@ export function PractitionerCalendarView({
     const dur = getBookingDuration(booking);
     const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
     const bookingEndForStore = `${endHm}:00`;
+    const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
     setBookings((rows) =>
       rows.map((b) =>
         b.id === booking.id
@@ -2334,6 +2913,7 @@ export function PractitionerCalendarView({
               booking_date: newDate,
               booking_time: timeForStore,
               booking_end_time: bookingEndForStore,
+              estimated_end_time: estimatedEndForStore,
               ...(b.calendar_id != null ? { calendar_id: newPracId } : { practitioner_id: newPracId }),
             }
           : b,
@@ -2375,8 +2955,21 @@ export function PractitionerCalendarView({
       const endLen5 = minutesToTime(timeToMinutes(newEndHm));
       if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
       const bookingEndForStore = `${endLen5}:00`;
+      const estimatedEndForStore = estimatedEndIsoFromSchedule(
+        booking.booking_date,
+        startHm,
+        endLen5,
+      );
       setBookings((rows) =>
-        rows.map((b) => (b.id === booking.id ? { ...b, booking_end_time: bookingEndForStore } : b)),
+        rows.map((b) =>
+          b.id === booking.id
+            ? {
+                ...b,
+                booking_end_time: bookingEndForStore,
+                estimated_end_time: estimatedEndForStore,
+              }
+            : b,
+        ),
       );
       try {
         const res = await fetch(`/api/venue/bookings/${booking.id}`, {
@@ -2504,6 +3097,8 @@ export function PractitionerCalendarView({
   function clearCalendarDragUi() {
     setDragBooking(null);
     setDragExcludeBookingId(null);
+    setDragBlock(null);
+    setDragExcludeBlockId(null);
     setCalendarDragPreview(null);
     setCalendarDragTarget(null);
     calendarDragTargetRef.current = null;
@@ -2533,14 +3128,75 @@ export function PractitionerCalendarView({
 
   function handleDragStart(e: DragStartEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
-    setDragBooking(b ?? null);
-    setDragExcludeBookingId(b?.id ?? null);
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
+    if (b) {
+      setDragBooking(b);
+      setDragExcludeBookingId(b.id);
+      setDragBlock(null);
+      setDragExcludeBlockId(null);
+    } else if (bl) {
+      setDragBlock(bl);
+      setDragExcludeBlockId(bl.id);
+      setDragBooking(null);
+      setDragExcludeBookingId(null);
+    } else {
+      setDragBooking(null);
+      setDragExcludeBookingId(null);
+      setDragBlock(null);
+      setDragExcludeBlockId(null);
+    }
   }
 
   function handleDragMove(e: DragMoveEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
     const over = e.over;
-    if (!b || !over?.data?.current) {
+    if ((!b && !bl) || !over?.data?.current) {
+      setCalendarDragPreview(null);
+      setCalendarDragTarget(null);
+      return;
+    }
+    if (bl) {
+      const { pracId, dateStr } = over.data.current as {
+        pracId: string;
+        dateStr: string;
+        slotStartMins: number;
+      };
+      const originalStartMins = timeToMinutes(bl.start_time.slice(0, 5));
+      const deltaMinutes = snapCalendarMoveMinutes((e.delta.y / SLOT_HEIGHT) * SLOT_MINUTES);
+      const targetStartMins = originalStartMins + deltaMinutes;
+      const duration = blockDurationMinutes(bl);
+      const endMin = targetStartMins + duration;
+      const dayStartMin = startHour * 60;
+      const dayEndMin = endHour * 60;
+      const pracClassBlocks = classBlocksForGrid.filter((cbl) => cbl.calendar_id === pracId && cbl.date === dateStr);
+      const pracEventBlocks = eventBlocksForGrid.filter((cbl) => cbl.calendar_id === pracId && cbl.date === dateStr);
+      const invalid =
+        targetStartMins < dayStartMin ||
+        endMin > dayEndMin ||
+        appointmentWindowCollides(
+          targetStartMins,
+          endMin,
+          pracId,
+          dateStr,
+          undefined,
+          bookings,
+          blocks,
+          serviceMap,
+          pracClassBlocks,
+          pracEventBlocks,
+          resourceParentById,
+          { ignoreBookings: true, excludeBlockId: bl.id },
+        );
+      const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
+      const timeLabel = minutesToTime(targetStartMins);
+      const sameColumn = columnIdForBlock(bl) === pracId && bl.block_date === dateStr;
+      const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
+      setCalendarDragPreview({ label, invalid });
+      setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid });
+      return;
+    }
+    if (!b) {
       setCalendarDragPreview(null);
       setCalendarDragTarget(null);
       return;
@@ -2591,10 +3247,11 @@ export function PractitionerCalendarView({
 
   function handleDragEnd(e: DragEndEvent) {
     const b = e.active.data.current?.booking as Booking | undefined;
+    const bl = e.active.data.current?.block as CalendarBlock | undefined;
     const over = e.over;
     const target = calendarDragTargetRef.current;
     clearCalendarDragUi();
-    if (!b || !over?.data?.current) return;
+    if ((!b && !bl) || !over?.data?.current) return;
     if (target?.invalid) {
       addToast('That time is not available', 'error');
       return;
@@ -2606,6 +3263,18 @@ export function PractitionerCalendarView({
     };
     const targetStartMins = target?.startMin ?? slotStartMins;
     const newTime = minutesToTime(targetStartMins);
+    if (bl) {
+      if (
+        bl.block_date === dateStr &&
+        columnIdForBlock(bl) === pracId &&
+        bl.start_time.slice(0, 5) === newTime
+      ) {
+        return;
+      }
+      void patchBlockMove(bl, dateStr, newTime, pracId);
+      return;
+    }
+    if (!b) return;
     if (
       b.booking_date === dateStr &&
       resolveBookingColumnId(b, resourceParentById) === pracId &&
@@ -2704,6 +3373,89 @@ export function PractitionerCalendarView({
     [endHour, patchBookingResize, serviceMap],
   );
 
+  const beginBlockResize = useCallback(
+    (block: CalendarBlock) => (downEvent: ReactPointerEvent<HTMLSpanElement>) => {
+      if (!isManualEditableBlock(block)) return;
+      downEvent.stopPropagation();
+      downEvent.preventDefault();
+      if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+
+      const pointerId = downEvent.pointerId;
+      const startY = downEvent.clientY;
+      const startM = timeToMinutes(block.start_time.slice(0, 5));
+      const endM0 = startM + blockDurationMinutes(block);
+      const minEnd = startM + SLOT_MINUTES;
+      const gridEndMax = endHour * 60;
+      const target = downEvent.currentTarget;
+
+      setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
+      setBlockResizePreviewEnd({ blockId: block.id, endHm: minutesToTime(endM0) });
+
+      const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+      const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+
+      const clampDeltaY = (clientY: number) => {
+        const raw = clientY - startY;
+        return Math.max(deltaYMin, Math.min(deltaYMax, raw));
+      };
+
+      const endMinutesFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+      };
+
+      const applyFromClientY = (clientY: number) => {
+        const dY = clampDeltaY(clientY);
+        const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+        setBlockResizeVisual({ blockId: block.id, deltaYPx: dY });
+        setBlockResizePreviewEnd({
+          blockId: block.id,
+          endHm: minutesToTime(Math.round(endFloat)),
+        });
+      };
+
+      try {
+        target.setPointerCapture(pointerId);
+      } catch {
+        /* ignore */
+      }
+
+      const onMove = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        ev.preventDefault();
+        applyFromClientY(ev.clientY);
+      };
+
+      const finish = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        const endFloat = endMinutesFromClientY(ev.clientY);
+        const committedEndMin = Math.min(gridEndMax, Math.max(minEnd, Math.round(endFloat)));
+        const endStr = minutesToTime(committedEndMin);
+        setBlockResizeVisual(null);
+        setBlockResizePreviewEnd(null);
+        if (committedEndMin === endM0) return;
+        justResizedBlockIdRef.current = block.id;
+        window.setTimeout(() => {
+          if (justResizedBlockIdRef.current === block.id) justResizedBlockIdRef.current = null;
+        }, 220);
+        void patchBlockResize(block, endStr);
+      };
+
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    },
+    [endHour, patchBlockResize],
+  );
+
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
     const mins = startHour * 60 + i * SLOT_MINUTES;
     return timelineMinutesToTime(mins);
@@ -2760,7 +3512,10 @@ export function PractitionerCalendarView({
   const bookedCount = bookingsForToolbarStats.filter((b) => b.status === 'Booked').length;
   const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
-  const calendarFilterCount = (calendarFilterIds === null ? 0 : 1) + (filterStatus !== 'all' ? 1 : 0);
+  const calendarFilterCount =
+    (calendarFilterIds === null ? 0 : 1) +
+    (filterStatus !== 'all' ? 1 : 0) +
+    (visibleLinkedColumnIds.length > 0 ? 1 : 0);
   const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
   const calendarSummaryContent = (
     <div
@@ -2773,15 +3528,15 @@ export function PractitionerCalendarView({
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Booked</span>
-        <span className="tabular-nums text-sky-600">{bookedCount}</span>
+        <span className="tabular-nums text-sky-800">{bookedCount}</span>
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Confirmed</span>
-        <span className="tabular-nums text-emerald-600">{confirmedCount}</span>
+        <span className="tabular-nums text-indigo-800">{confirmedCount}</span>
       </span>
       <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
         <span className="font-normal text-slate-500">Completed</span>
-        <span className="tabular-nums text-violet-600">{completedCount}</span>
+        <span className="tabular-nums text-slate-600">{completedCount}</span>
       </span>
     </div>
   );
@@ -2798,6 +3553,56 @@ export function PractitionerCalendarView({
           maxHeightClass="max-h-56"
         />
       </div>
+
+      {linkedColumns.length > 0 ? (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Linked venues
+          </p>
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {[
+              ...new Map(linkedColumns.map((c) => [c.venueId, c.venueName])).entries(),
+            ].map(([venueId, venueName]) => (
+              <div key={venueId}>
+                <p className="px-1 py-0.5 text-[11px] font-semibold text-slate-600">
+                  {venueName}
+                </p>
+                <div className="space-y-0.5">
+                  {linkedColumns
+                    .filter((c) => c.venueId === venueId)
+                    .map((c) => {
+                      const checked = visibleLinkedColumnIds.includes(c.key);
+                      return (
+                        <label
+                          key={c.key}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800"
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            checked={checked}
+                            onChange={(e) => {
+                              setVisibleLinkedColumnIds((cur) => {
+                                const next = new Set(cur);
+                                if (e.target.checked) next.add(c.key);
+                                else next.delete(c.key);
+                                return [...next];
+                              });
+                            }}
+                          />
+                          <span className="truncate">
+                            {c.practitionerName}
+                            {c.practitionerActive ? '' : ' (inactive)'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div>
         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
@@ -2824,6 +3629,7 @@ export function PractitionerCalendarView({
           type="button"
           onClick={() => {
             setVisibleCalendarIdsState(null);
+            setVisibleLinkedColumnIds([]);
             setFilterStatus('all');
           }}
           className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
@@ -2877,6 +3683,26 @@ export function PractitionerCalendarView({
     [bookingsMatchingFilters, scheduleBlocksInVisibleColumns, monthCells],
   );
 
+  /**
+   * Linked bookings per day on the columns the user has opted into (§8.2).
+   * Kept adjacent to `monthDayScheduleCounts` — never merged into the native
+   * totals — and surfaced in the month grid as a separate desaturated marker.
+   */
+  const monthLinkedCountByDate = useMemo(
+    () =>
+      linkedBookingCountByDate(
+        visibleLinkedColumns.map((c) => ({
+          venueId: c.venueId,
+          practitionerId: c.practitionerId,
+        })),
+        [...linkedVenueById.values()].map((v) => ({
+          venueId: v.venueId,
+          bookings: v.bookings,
+        })),
+      ),
+    [visibleLinkedColumns, linkedVenueById],
+  );
+
   const openBookingDetail = useCallback((id: string, anchor?: { x: number; y: number }) => {
     if (justResizedBookingIdRef.current === id) return;
     setClassInstanceSheet(null);
@@ -2908,23 +3734,39 @@ export function PractitionerCalendarView({
     if (!detailBookingId) return null;
     const b = bookings.find((x) => x.id === detailBookingId);
     if (!b) return null;
-    const startHm = b.booking_time.slice(0, 5);
-    const durationMins = bookingDurationMinutes(b, serviceMap);
-    const endHm = minutesToTime(timeToMinutes(startHm) + durationMins);
-    const serviceId = serviceIdForBooking(b);
-    const serviceName = serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
-    return {
-      bookingDate: b.booking_date,
-      guestName: b.guest_name,
-      partySize: b.party_size,
-      status: b.status,
-      startTime: startHm,
-      endTime: endHm,
-      specialRequests: b.special_requests,
-      depositStatus: b.deposit_status,
-      serviceName,
-    };
+    return bookingDetailPanelSnapshotFromListRow({
+      ...b,
+      guest_name: b.guest_name,
+      inferred_booking_model: inferBookingRowModel(b),
+      service_name: (() => {
+        const serviceId = serviceIdForBooking(b);
+        return serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
+      })(),
+    });
   }, [detailBookingId, bookings, serviceMap]);
+
+  useEffect(() => {
+    if (bookings.length === 0) return;
+    const ids = bookings
+      .filter((b) => b.status !== 'Cancelled')
+      .slice(0, 28)
+      .map((b) => b.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, prefetchBookingDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [bookings, prefetchBookingDetail]);
 
   return (
     <div className="flex min-w-[320px] flex-col">
@@ -2941,7 +3783,10 @@ export function PractitionerCalendarView({
           startHour={startHour}
           endHour={endHour}
           onTimeRangeChange={handleTimeRangeChange}
-          onRefresh={() => void fetchData()}
+          onRefresh={() => {
+            void fetchData();
+            void loadLinkedData();
+          }}
           onNewBooking={() => {
             setPrefillDate(viewMode === 'day' ? date : undefined);
             setPrefillTime(undefined);
@@ -2966,6 +3811,21 @@ export function PractitionerCalendarView({
             pending: scheduleUndoPending,
             onUndo: () => void undoLastScheduleEdit(),
           }}
+          searchActive={guestToolbarSearchQuery.trim().length > 0}
+          searchAriaLabel="Search contacts"
+          searchPanel={(
+            <OperationsToolbarGuestSearchPanel
+              onQueryChange={setGuestToolbarSearchQuery}
+              initialDate={viewMode === 'day' ? date : undefined}
+              preselectedPractitionerId={
+                calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined
+              }
+              onBookingCreated={() => {
+                void fetchData();
+                void loadLinkedData();
+              }}
+            />
+          )}
         />
       </div>
 
@@ -2996,6 +3856,7 @@ export function PractitionerCalendarView({
           monthAnchor={monthAnchor}
           monthCells={monthCells}
           monthDayScheduleCounts={monthDayScheduleCounts}
+          linkedCountByDate={monthLinkedCountByDate}
           showMergedFeeds={showMergedFeeds}
           openingHours={openingHours}
           venueTimezone={venueTimezone}
@@ -3062,6 +3923,7 @@ export function PractitionerCalendarView({
                                   key={b.id}
                                   type="button"
                                   onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                  {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
                                   className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                   style={bookingBlockCardStyle(p)}
                                 >
@@ -3159,6 +4021,84 @@ export function PractitionerCalendarView({
                     })}
                   </tr>
                 ))}
+                {visibleLinkedColumns.map((col) => (
+                  <tr key={col.key} className="border-b border-slate-100 bg-slate-50/40">
+                    <td className="sticky left-0 bg-slate-50/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
+                      <span className="font-semibold text-slate-600">{col.practitionerName}</span>
+                      <span className="mt-0.5 block text-[10px] font-medium text-slate-400">
+                        Linked · {col.venueName}
+                      </span>
+                      {col.action === 'create_edit_cancel' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const v = linkedVenueById.get(col.venueId);
+                            if (v)
+                              setLinkedCreating({
+                                venue: v,
+                                practitionerId: col.practitionerId,
+                              });
+                          }}
+                          className="mt-1 text-[10px] font-semibold text-brand-600 hover:underline"
+                        >
+                          + New booking
+                        </button>
+                      ) : null}
+                    </td>
+                    {weekDays.map((d) => {
+                      const dayBookings = linkedBookingsFor(col, d);
+                      return (
+                        <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
+                          <div className="flex min-h-[80px] flex-col gap-1">
+                            {dayBookings.map((b) => {
+                              const clickable = linkedBookingIsClickable(col, b);
+                              const detail =
+                                col.visibility === 'time_only'
+                                  ? `${col.venueName} — busy`
+                                  : b.guestName ?? b.serviceName ?? 'Booking';
+                              const timeLabel = `${b.bookingTime.slice(0, 5)}${
+                                b.bookingEndTime
+                                  ? `–${b.bookingEndTime.slice(0, 5)}`
+                                  : ''
+                              }`;
+                              const inner = (
+                                <div
+                                  className="rounded-lg border border-slate-300 bg-white/70 px-2 py-1 text-left text-[11px] text-slate-500 saturate-50"
+                                  style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                                >
+                                  <div className="font-semibold tabular-nums text-slate-600">
+                                    {timeLabel}
+                                  </div>
+                                  <div className="truncate">{detail}</div>
+                                  {col.visibility !== 'time_only' ? (
+                                    <div className="mt-0.5 text-[9px] uppercase tracking-wide text-slate-400">
+                                      {b.status}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                              return (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => openLinkedBooking(col, b)}
+                                  className="block w-full text-left transition hover:opacity-90"
+                                  title={
+                                    clickable
+                                      ? `Edit in ${col.venueName}`
+                                      : `View detail · ${col.venueName}`
+                                  }
+                                >
+                                  {inner}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
                 {showWeekStripRow ? (
                   <WeekScheduleCdeStrip
                     weekDays={weekDays}
@@ -3177,6 +4117,7 @@ export function PractitionerCalendarView({
         <div ref={timelineRootRef} className="flex min-w-0 w-full flex-col">
           <DndContext
             sensors={sensors}
+            collisionDetection={calendarGridCollisionDetection}
             onDragStart={handleDragStart}
             onDragMove={handleDragMove}
             onDragCancel={handleDragCancel}
@@ -3265,6 +4206,39 @@ export function PractitionerCalendarView({
                       <span className="text-center text-[11px] leading-tight text-slate-500">—</span>
                     </div>
                   ) : null}
+                  {visibleLinkedColumns.map((col) => (
+                    <div
+                      key={`hdr-${col.key}`}
+                      className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 bg-slate-50/70 px-3 py-1.5 sm:min-w-[240px]"
+                    >
+                      <span
+                        className="truncate text-center text-sm font-semibold text-slate-600"
+                        title={`${col.practitionerName} · ${col.venueName}`}
+                      >
+                        {col.practitionerName}
+                      </span>
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
+                        <span className="truncate">Linked · {col.venueName}</span>
+                      </span>
+                      {col.action === 'create_edit_cancel' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const v = linkedVenueById.get(col.venueId);
+                            if (v)
+                              setLinkedCreating({
+                                venue: v,
+                                practitionerId: col.practitionerId,
+                              });
+                          }}
+                          className="mt-0.5 text-[10px] font-semibold text-brand-600 hover:underline"
+                        >
+                          + New booking
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
                 <div className="flex w-full min-w-0 border-l border-slate-300">
               {filteredPractitioners.map((prac) => {
@@ -3308,6 +4282,7 @@ export function PractitionerCalendarView({
                           pracEventBlocks,
                           resourceParentById,
                           dragExcludeBookingId,
+                          dragExcludeBlockId,
                           { ignoreBookings: dragBooking != null },
                         );
                         const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
@@ -3362,38 +4337,96 @@ export function PractitionerCalendarView({
 
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
-                        const h = Math.max(
+                        const baseH = Math.max(
                           (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
-                        const label = `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
-                        const shellClass =
-                          'absolute left-1 right-1 z-[15] block cursor-pointer overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 px-1.5 py-1 text-left text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-300/90';
-                        const shellStyle = {
-                          top,
-                          height: h,
-                          borderLeftWidth: 3,
-                          borderLeftColor: '#94a3b8',
-                        } as const;
-                        const body = (
-                          <>
-                            <span className="line-clamp-3">{label}</span>
-                            <span className="mt-0.5 block font-normal text-[9px] opacity-90">
-                              {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
-                            </span>
-                          </>
-                        );
+                        const canDrag = isManualEditableBlock(bl);
+                        const resizeExtra =
+                          blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
+                        const displayEndHm =
+                          blockResizePreviewEnd?.blockId === bl.id
+                            ? blockResizePreviewEnd.endHm
+                            : bl.end_time.slice(0, 5);
                         return (
-                          <button
+                          <DraggableBlockShell
                             key={bl.id}
-                            type="button"
-                            onClick={() => openEditBlockModal(bl)}
-                            className={shellClass}
-                            style={shellStyle}
-                            title="Click to edit block"
+                            block={bl}
+                            top={top}
+                            height={baseH}
+                            heightExtraPx={resizeExtra}
+                            canDrag={canDrag}
                           >
-                            {body}
-                          </button>
+                            {(handle) => (
+                              <div
+                                className="group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 text-left shadow-sm hover:bg-slate-300/90"
+                                style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                              >
+                                {canDrag && handle.listeners && handle.attributes ? (
+                                  <button
+                                    ref={handle.setActivatorNodeRef}
+                                    type="button"
+                                    data-no-calendar-pan="true"
+                                    className="relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.06] px-0.5 text-[10px] text-slate-500 transition hover:bg-black/[0.1] active:cursor-grabbing"
+                                    style={{
+                                      width: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                      minWidth: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                    }}
+                                    aria-label="Drag to move block"
+                                    {...handle.listeners}
+                                    {...handle.attributes}
+                                  >
+                                    ⋮⋮
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (justResizedBlockIdRef.current === bl.id) return;
+                                    openEditBlockModal(bl);
+                                  }}
+                                  className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
+                                    canDrag ? 'pb-[19px]' : ''
+                                  }`}
+                                  title="Click to edit block"
+                                >
+                                  <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">
+                                    Blocked
+                                  </span>
+                                  {bl.reason ? (
+                                    <span className="mt-0.5 block truncate text-[11px] font-medium leading-snug text-slate-600/90">
+                                      {bl.reason}
+                                    </span>
+                                  ) : null}
+                                  <span className="mt-0.5 block text-[11px] font-medium leading-snug tabular-nums text-slate-600/90">
+                                    {bl.start_time.slice(0, 5)} – {displayEndHm}
+                                  </span>
+                                </button>
+                                {canDrag ? (
+                                  <>
+                                    {blockResizePreviewEnd?.blockId === bl.id ? (
+                                      <span
+                                        className="pointer-events-none absolute left-1/2 z-20 max-w-[calc(100%-0.5rem)] -translate-x-1/2 truncate rounded-md bg-slate-900 px-2 py-0.5 text-center text-[10px] font-bold tabular-nums text-white shadow-md"
+                                        style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+                                      >
+                                        Until {blockResizePreviewEnd.endHm}
+                                      </span>
+                                    ) : null}
+                                    <span
+                                      role="separator"
+                                      aria-orientation="horizontal"
+                                      aria-label="Drag to change block duration"
+                                      data-no-calendar-pan="true"
+                                      className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-lg border-t border-white/50 bg-black/[0.08] hover:bg-black/[0.14] active:bg-black/20"
+                                      style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
+                                      onPointerDown={beginBlockResize(bl)}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            )}
+                          </DraggableBlockShell>
                         );
                       })}
 
@@ -3519,7 +4552,6 @@ export function PractitionerCalendarView({
                             !b.resource_id && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status);
                           const flash = flashIds.has(b.id);
                           const qBusy = quickActionId === b.id;
-                          const arrived = Boolean(b.client_arrived_at);
                           const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                           const resizeExtra =
                             resizeVisual?.bookingId === b.id ? resizeVisual.deltaYPx : 0;
@@ -3557,7 +4589,9 @@ export function PractitionerCalendarView({
                                   <BookingProcessingStrip b={b} serviceMap={serviceMap} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
+                                      ref={handle.setActivatorNodeRef}
                                       type="button"
+                                      data-no-calendar-pan="true"
                                       className={`relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing ${
                                         isOverlapLane ? 'text-[0]' : 'text-[10px]'
                                       }`}
@@ -3576,48 +4610,39 @@ export function PractitionerCalendarView({
                                       ⋮⋮
                                     </button>
                                   ) : null}
-                                    <BookingGuestActionsRowMeasured
-                                      className={`relative z-[1] flex min-h-0 min-w-0 flex-1 items-stretch overflow-hidden ${
-                                        isOverlapLane ? 'flex-col' : 'flex-row'
-                                      }`}
-                                      style={
-                                        canDrag ? { paddingBottom: BOOKING_RESERVE_ABOVE_RESIZE_PX } : undefined
-                                      }
-                                    >
-                                      {(shellRowWidthPx) => (
-                                        <>
-                                      <div
-                                        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                                        style={
-                                          isOverlapLane
-                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
-                                            : undefined
-                                        }
-                                      >
+                                  <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
+                                      {(shellRowWidthPx) => {
+                                        const actionBlockHeight = Math.max(
+                                          0,
+                                          height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
+                                        );
+                                        const actionInset = computeBookingActionCornerInset(b, actionBlockHeight);
+                                        return (
+                                          <>
+                                            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                             <button
                                               type="button"
                                               onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                              {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
                                               className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                                                 blockH < 56 ? 'py-1.5' : 'py-2'
                                               }`}
+                                              style={{
+                                                paddingRight: actionInset.hasActions
+                                                  ? actionInset.right
+                                                  : undefined,
+                                                paddingBottom: actionInset.hasActions
+                                                  ? actionInset.bottom +
+                                                    (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0)
+                                                  : canDrag
+                                                    ? BOOKING_RESERVE_ABOVE_RESIZE_PX
+                                                    : undefined,
+                                              }}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
                                               <BookingCardInfo
                                                 name={b.guest_name}
-                                                nameAccessory={
-                                                  arrived &&
-                                                  b.status !== 'Seated' &&
-                                                  ['Pending', 'Booked', 'Confirmed'].includes(b.status) ? (
-                                                    <span
-                                                      className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                      aria-hidden
-                                                      title="Waiting"
-                                                    />
-                                                  ) : null
-                                                }
-                                                service={
-                                                  [resName, svc?.name].filter(Boolean).join(' · ') || null
-                                                }
+                                                service={calendarBookingServiceLabel(b, svc, resName ?? null)}
                                                 phone={formatPhoneForDisplay(b.guest_phone)}
                                                 start={b.booking_time.slice(0, 5)}
                                                 end={displayEndHm}
@@ -3633,23 +4658,21 @@ export function PractitionerCalendarView({
                                               ) : null}
                                               <div className="min-h-0 min-w-0 flex-1" aria-hidden />
                                             </button>
-                                          </div>
-                                          <CalendarBookingRightColumn
-                                            b={b}
-                                            busy={qBusy}
-                                            blockHeightPx={Math.max(
-                                              0,
-                                              height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
-                                            )}
-                                            onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                            onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                            narrow={isOverlapLane}
-                                            shellRowWidthPx={shellRowWidthPx}
-                                            floating={isOverlapLane}
-                                            bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
-                                          />
-                                        </>
-                                      )}
+                                            </div>
+                                            <CalendarBookingRightColumn
+                                              b={b}
+                                              busy={qBusy}
+                                              blockHeightPx={actionBlockHeight}
+                                              onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                              onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                              narrow={isOverlapLane}
+                                              shellRowWidthPx={shellRowWidthPx}
+                                              floating={false}
+                                              bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
+                                            />
+                                          </>
+                                        );
+                                      }}
                                     </BookingGuestActionsRowMeasured>
                                   {canDrag ? (
                                     <>
@@ -3707,9 +4730,10 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className="absolute bottom-0 left-0 right-0 z-30 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
                                         style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                         onPointerDown={beginAppointmentResize(b)}
+                                        onMouseDown={(e) => e.stopPropagation()}
                                       />
                                     </>
                                   ) : null}
@@ -3731,7 +4755,6 @@ export function PractitionerCalendarView({
                         const palette = bookingCalendarBlockStyle(first);
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
-                        const arrived = Boolean(first.client_arrived_at);
                         const isOverlapLane = layout.laneCount > 1;
                         const serviceTitle = items
                           .map((x) => {
@@ -3757,21 +4780,19 @@ export function PractitionerCalendarView({
                                 }`}
                                 style={bookingBlockCardStyle(palette)}
                                 title={serviceTitle || undefined}
+                                {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
-                                <BookingGuestActionsRowMeasured
-                                  className={`flex min-h-0 min-w-0 flex-1 items-stretch ${
-                                    isOverlapLane ? 'flex-col overflow-hidden' : 'flex-row'
-                                  }`}
-                                >
-                                  {(shellRowWidthPx) => (
+                                <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                                  {(shellRowWidthPx) => {
+                                    const actionInset = computeBookingActionCornerInset(first, height);
+                                    return (
                                     <>
                                       <div
                                         className="flex min-h-0 min-w-0 flex-1 flex-col"
-                                        style={
-                                          isOverlapLane
-                                            ? { paddingRight: narrowBookingActionsWidthPx(shellRowWidthPx) ?? undefined }
-                                            : undefined
-                                        }
+                                        style={{
+                                          paddingRight: actionInset.hasActions ? actionInset.right : undefined,
+                                          paddingBottom: actionInset.hasActions ? actionInset.bottom : undefined,
+                                        }}
                                       >
                                         {items.map((b, segIdx) => {
                                           const dur = getBookingDuration(b);
@@ -3780,8 +4801,7 @@ export function PractitionerCalendarView({
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
                                           const showSegPills = !isOverlapLane && segmentApproxPx >= 88;
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
-                                          const segServiceLabel =
-                                            [resSeg, svc?.name].filter(Boolean).join(' · ') || null;
+                                          const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
                                           return (
                                             <div
                                               key={b.id}
@@ -3798,18 +4818,6 @@ export function PractitionerCalendarView({
                                                 <BookingCardInfo
                                                   name={first.guest_name}
                                                   hideName={segIdx > 0}
-                                                  nameAccessory={
-                                                    segIdx === 0 &&
-                                                    arrived &&
-                                                    first.status !== 'Seated' &&
-                                                    ['Pending', 'Booked', 'Confirmed'].includes(first.status) ? (
-                                                      <span
-                                                        className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
-                                                        aria-hidden
-                                                        title="Waiting"
-                                                      />
-                                                    ) : null
-                                                  }
                                                   service={segServiceLabel}
                                                   phone={formatPhoneForDisplay(b.guest_phone)}
                                                   start={b.booking_time.slice(0, 5)}
@@ -3842,11 +4850,12 @@ export function PractitionerCalendarView({
                                         onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                         narrow={isOverlapLane}
                                         shellRowWidthPx={shellRowWidthPx}
-                                        floating={isOverlapLane}
+                                        floating={false}
                                         bottomReservePx={0}
                                       />
                                     </>
-                                  )}
+                                    );
+                                  }}
                                 </BookingGuestActionsRowMeasured>
                               </div>
                             )}
@@ -3878,6 +4887,31 @@ export function PractitionerCalendarView({
                   ) : null}
                 </>
               ) : null}
+              {viewMode === 'day'
+                ? visibleLinkedColumns.map((col) => (
+                    <LinkedDayColumn
+                      key={col.key}
+                      column={col}
+                      bookings={linkedBookingsFor(col, date)}
+                      startHour={startHour}
+                      totalSlots={TOTAL_SLOTS}
+                      onBookingClick={(b) => openLinkedBooking(col, b)}
+                      onCreateAt={
+                        col.action === 'create_edit_cancel'
+                          ? (time) => {
+                              const v = linkedVenueById.get(col.venueId);
+                              if (v)
+                                setLinkedCreating({
+                                  venue: v,
+                                  practitionerId: col.practitionerId,
+                                  time,
+                                });
+                            }
+                          : undefined
+                      }
+                    />
+                  ))
+                : null}
             </div>
             </div>
             </div>
@@ -3885,6 +4919,8 @@ export function PractitionerCalendarView({
           <DragOverlay dropAnimation={null}>
             {dragBooking ? (
               <DragBookingPreview booking={dragBooking} movePreview={calendarDragPreview} />
+            ) : dragBlock ? (
+              <DragBlockPreview block={dragBlock} movePreview={calendarDragPreview} />
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -3961,10 +4997,7 @@ export function PractitionerCalendarView({
             <h3 id="block-modal-title" className="text-base font-semibold text-slate-900">
               {blockModal.blockId ? 'Edit block' : 'Block time'}
             </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {blockModal.dateStr} · {blockModal.startTime} – {blockModal.endTime}
-              {blockModal.blockId ? ' (start time is fixed; adjust end time below)' : ''}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">{blockModal.dateStr}</p>
             {(() => {
               const durationMins = timeToMinutes(blockModal.endTime) - timeToMinutes(blockModal.startTime);
               if (durationMins <= 0) {
@@ -3982,6 +5015,15 @@ export function PractitionerCalendarView({
               );
             })()}
             <div className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Start time</label>
+                <input
+                  type="time"
+                  value={blockModal.startTime}
+                  onChange={(e) => setBlockModal((m) => (m ? { ...m, startTime: e.target.value } : m))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">End time</label>
                 <input
@@ -4076,6 +5118,7 @@ export function PractitionerCalendarView({
 
       {detailBookingId ? (
         <BookingDetailPanel
+          key={detailBookingId}
           bookingId={detailBookingId}
           venueId={venueId}
           venueCurrency={currency}
@@ -4174,6 +5217,42 @@ export function PractitionerCalendarView({
             )}
           </div>
         </div>
+      ) : null}
+
+      {linkedEditing ? (
+        <EditLinkedBookingModal
+          venueName={linkedEditing.column.venueName}
+          booking={linkedEditing.booking}
+          canCancel={linkedEditing.column.action === 'create_edit_cancel'}
+          onClose={() => setLinkedEditing(null)}
+          onSaved={() => {
+            setLinkedEditing(null);
+            void loadLinkedData();
+          }}
+        />
+      ) : null}
+
+      {linkedViewing ? (
+        <LinkedBookingDetailModal
+          venueName={linkedViewing.column.venueName}
+          visibility={linkedViewing.column.visibility}
+          booking={linkedViewing.booking}
+          onClose={() => setLinkedViewing(null)}
+        />
+      ) : null}
+
+      {linkedCreating ? (
+        <CreateLinkedBookingModal
+          venue={linkedCreating.venue}
+          practitionerId={linkedCreating.practitionerId}
+          time={linkedCreating.time}
+          date={viewMode === 'day' ? date : weekStart}
+          onClose={() => setLinkedCreating(null)}
+          onSaved={() => {
+            setLinkedCreating(null);
+            void loadLinkedData();
+          }}
+        />
       ) : null}
     </div>
   );

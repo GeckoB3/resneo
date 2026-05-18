@@ -16,6 +16,7 @@ import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } 
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { DiningAreaPicker } from '@/components/dashboard/DiningAreaPicker';
 import { coversInUseAtTime, tablesInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
@@ -541,11 +542,7 @@ export function TableGridView({
   const [loading, setLoading] = useState(true);
   const [zoneFilter, setZoneFilter] = useState<string | null>(rememberedPreferences.zoneFilter ?? null);
   const [statusFilter, setStatusFilter] = useState<string | null>(rememberedPreferences.statusFilter ?? null);
-  const [search, setSearch] = useState(rememberedPreferences.search ?? '');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchPopoverRef = useRef<HTMLDivElement>(null);
-  const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const filterPopoverRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
@@ -555,7 +552,7 @@ export function TableGridView({
   const [validDropCombos, setValidDropCombos] = useState<Map<string, string> | null>(null);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBookingAnchor, setSelectedBookingAnchor] = useState<{ x: number; y: number } | null>(null);
-  /** Bumps every minute while viewing today so “covers in use” stays current. */
+  /** Bumps every minute while viewing today so â€œcovers in useâ€ stays current. */
   const [coversClockTick, setCoversClockTick] = useState(0);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
   const [cellContext, setCellContext] = useState<{ tableId: string; time: string; x: number; y: number } | null>(null);
@@ -668,16 +665,6 @@ export function TableGridView({
   }, [forgetPendingVisualMutation, shouldRollbackPendingMutation]);
 
   useEffect(() => {
-    if (!searchOpen) return;
-
-    const focusTimer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 0);
-
-    return () => window.clearTimeout(focusTimer);
-  }, [searchOpen]);
-
-  useEffect(() => {
     if (!filterOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -695,25 +682,6 @@ export function TableGridView({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [filterOpen]);
-
-  useEffect(() => {
-    if (!searchOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (searchPopoverRef.current?.contains(event.target as Node)) return;
-      setSearchOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSearchOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [searchOpen]);
 
   const activeDiningAreas = useMemo(() => diningAreas.filter((a) => a.is_active), [diningAreas]);
   const showDiningAreaChrome = bookingModel === 'table_reservation' && activeDiningAreas.length > 1;
@@ -903,7 +871,7 @@ export function TableGridView({
       serviceId,
       zoneFilter,
       statusFilter,
-      search,
+      search: '',
       startHourOverride,
       endHourOverride,
       timeRangeFilterActive,
@@ -915,7 +883,6 @@ export function TableGridView({
     serviceId,
     zoneFilter,
     statusFilter,
-    search,
     startHourOverride,
     endHourOverride,
     timeRangeFilterActive,
@@ -1260,21 +1227,6 @@ export function TableGridView({
     const next_bookings_slot = computeNextBookingsSlot(gridData, refMin);
     return { ...gridData.summary, covers_in_use_now: coversInUse, tables_in_use: tablesInUse, next_bookings_slot };
   }, [gridData, date, filteredTables, coversClockTick]);
-
-  const highlightedBookingIds = useMemo(() => {
-    if (!search.trim() || !gridData) return new Set<string>();
-    const q = search.toLowerCase();
-    const ids = new Set<string>();
-    for (const cell of gridData.cells) {
-      if (cell.booking_details?.guest_name.toLowerCase().includes(q)) {
-        if (cell.booking_id) ids.add(cell.booking_id);
-      }
-    }
-    for (const b of gridData.unassigned_bookings) {
-      if (b.guest_name.toLowerCase().includes(q)) ids.add(b.id);
-    }
-    return ids;
-  }, [search, gridData]);
 
   const computeValidTargets = useCallback((block: { party_size: number; start_time: string; end_time: string; id: string } | null) => {
     if (!block || !gridData) {
@@ -1828,6 +1780,15 @@ export function TableGridView({
           }}
           compact
           showControlsButton={false}
+          searchActive={guestToolbarSearchQuery.trim().length > 0}
+          searchAriaLabel="Search contacts"
+          searchPanel={(
+            <OperationsToolbarGuestSearchPanel
+              onQueryChange={setGuestToolbarSearchQuery}
+              initialDate={date}
+              onBookingCreated={() => { void fetchGrid(); }}
+            />
+          )}
           timelineLabel={`${String(pickerStartHour).padStart(2, '0')}-${String(pickerEndHour).padStart(2, '0')}`}
           timelinePanel={(
             <div className="space-y-2">
@@ -1917,7 +1878,7 @@ export function TableGridView({
                   title="Narrower time columns"
                   aria-label="Decrease timeline scale"
                 >
-                  −
+                  âˆ’
                 </button>
                 <span className="flex min-w-[2.75rem] items-center justify-center border-x border-slate-200 px-1 font-medium tabular-nums text-slate-600 sm:min-w-[3.25rem]">
                   {timelineScalePercent}%
@@ -1936,64 +1897,6 @@ export function TableGridView({
           )}
           toolbarTools={(toolbarPanelAnchorRef) => (
             <>
-              <div ref={searchPopoverRef} className="relative shrink-0">
-                <button
-                  ref={searchTriggerRef}
-                  type="button"
-                  onClick={() => setSearchOpen((prev) => !prev)}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition-colors ${
-                    search || searchOpen
-                      ? 'border-brand-200 bg-brand-50 text-brand-700'
-                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                  }`}
-                  aria-label="Search guest"
-                  aria-expanded={searchOpen}
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                  </svg>
-                </button>
-                <ClampedFixedDropdown
-                  open={searchOpen}
-                  triggerRef={searchTriggerRef}
-                  verticalAnchorRef={toolbarPanelAnchorRef}
-                  horizontalCenter
-                  gapPx={4}
-                  align="start"
-                  maxWidthPx={272}
-                  onDismiss={() => setSearchOpen(false)}
-                  className="animate-fade-in z-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
-                >
-                  <div className="relative">
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search guest"
-                      className="h-8 w-full rounded-md border border-slate-200 bg-white py-0 pl-7 pr-7 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    />
-                    <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                    </svg>
-                    {search ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSearch('');
-                          searchInputRef.current?.focus();
-                        }}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        aria-label="Clear guest search"
-                      >
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    ) : null}
-                  </div>
-                </ClampedFixedDropdown>
-              </div>
               {showDiningAreaChrome && diningAreaId ? (
                 <DiningAreaPicker
                   areas={activeDiningAreas}
@@ -2138,7 +2041,7 @@ export function TableGridView({
             serviceEndTime={timelineEndTime}
             slotIntervalMinutes={gridData.slot_interval_minutes}
             statusFilter={statusFilter}
-            highlightedBookingIds={highlightedBookingIds}
+            highlightedBookingIds={new Set<string>()}
             validDropTargets={validDropTargets}
             validDropCombos={validDropCombos}
             currentDate={date}

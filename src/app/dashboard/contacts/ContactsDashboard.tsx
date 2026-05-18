@@ -24,6 +24,7 @@ import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkelet
 import { Pill } from '@/components/ui/dashboard/Pill';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
@@ -33,7 +34,10 @@ import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel'
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { useToast } from '@/components/ui/Toast';
+import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 
 export type { GuestListRow } from '@/types/contacts';
 
@@ -387,6 +391,12 @@ export function ContactsDashboard({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { addToast } = useToast();
+  const {
+    peekGuestDetail,
+    primeGuestDetail,
+    invalidateGuestDetail,
+    warmGuestDetail,
+  } = useDashboardDetailCache();
   const isAppointment = appointmentDashboardExperience;
   const clientWord = terminology.client;
   const clientLower = clientWord.toLowerCase();
@@ -692,27 +702,71 @@ export function ContactsDashboard({
     [addToast, clientLower, clientWord, guests, loadList, selectedIds],
   );
 
-  const loadDetail = useCallback(async (guestId: string) => {
-    setDetailLoading(true);
-    setDetail(null);
-    setEditError(null);
-    try {
-      const res = await fetch(`/api/venue/guests/${guestId}?booking_history_limit=80`);
-      const data = (await res.json()) as GuestDetailResponse & { error?: string };
-      if (!res.ok) {
-        throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
+  const loadDetail = useCallback(
+    async (guestId: string) => {
+      const cached = peekGuestDetail(guestId);
+      const cacheHit = cached?.guest?.id === guestId;
+
+      setDetailLoading(!cacheHit);
+      setEditError(null);
+
+      if (cacheHit) {
+        setDetail(cached);
+        setEditFirstName(cached.guest.first_name ?? '');
+        setEditLastName(cached.guest.last_name ?? '');
+        setEditEmail(cached.guest.email ?? '');
+        setEditPhone(cached.guest.phone ?? '');
+      } else {
+        setDetail((prev) => (prev?.guest.id === guestId ? prev : null));
       }
-      setDetail(data);
-      setEditFirstName(data.guest.first_name ?? '');
-      setEditLastName(data.guest.last_name ?? '');
-      setEditEmail(data.guest.email ?? '');
-      setEditPhone(data.guest.phone ?? '');
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+
+      try {
+        const res = await fetch(`/api/venue/guests/${guestId}?booking_history_limit=80`);
+        const data = (await res.json()) as GuestDetailResponse & { error?: string };
+        if (!res.ok) {
+          throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load guest');
+        }
+        primeGuestDetail(guestId, data);
+        setDetail(data);
+        setEditFirstName(data.guest.first_name ?? '');
+        setEditLastName(data.guest.last_name ?? '');
+        setEditEmail(data.guest.email ?? '');
+        setEditPhone(data.guest.phone ?? '');
+      } catch (e) {
+        setEditError(e instanceof Error ? e.message : 'Failed to load');
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [peekGuestDetail, primeGuestDetail],
+  );
+
+  const prefetchGuestDetail = useCallback(
+    (guestId: string) => {
+      void warmGuestDetail(guestId);
+    },
+    [warmGuestDetail],
+  );
+
+  useEffect(() => {
+    if (guests.length === 0) return;
+    const ids = guests.slice(0, 28).map((g) => g.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, warmGuestDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [guests, warmGuestDetail]);
 
   useEffect(() => {
     if (!expandedGuestId) {
@@ -765,7 +819,9 @@ export function ContactsDashboard({
         console.error('PATCH /api/venue/guests/[id] returned unexpected guest payload');
         await loadDetail(detail.guest.id);
       } else {
-        setDetail((prev) => (prev && prev.guest.id === j.guest!.id ? mergeGuestDetailFromSavedGuest(prev, j.guest!) : prev));
+        const merged = mergeGuestDetailFromSavedGuest(detail, j.guest!);
+        primeGuestDetail(merged.guest.id, merged);
+        setDetail(merged);
         setEditFirstName(j.guest.first_name ?? '');
         setEditLastName(j.guest.last_name ?? '');
         setEditEmail(j.guest.email ?? '');
@@ -779,7 +835,7 @@ export function ContactsDashboard({
     } finally {
       setEditSaving(false);
     }
-  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList]);
+  }, [detail, editFirstName, editLastName, editEmail, editPhone, loadDetail, loadList, primeGuestDetail]);
 
   const exportFilteredCsv = useCallback(async () => {
     setExporting(true);
@@ -902,6 +958,7 @@ export function ContactsDashboard({
         if (!res.ok) {
           throw new Error(typeof j.error === 'string' ? j.error : 'Erase failed');
         }
+        invalidateGuestDetail(guestId);
         setExpandedGuestId(null);
         setDetail(null);
         await loadList();
@@ -913,7 +970,7 @@ export function ContactsDashboard({
         setEraseLoadingId(null);
       }
     },
-    [loadList],
+    [invalidateGuestDetail, loadList],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
@@ -1495,41 +1552,13 @@ export function ContactsDashboard({
             searchActive={search.trim().length > 0}
             searchAriaLabel="Search contacts"
             searchPanel={(
-              <div className="space-y-2">
-                <label htmlFor="contacts-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Search
-                </label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                    </svg>
-                  </div>
-                  <input
-                    id="contacts-toolbar-search"
-                    type="text"
-                    value={search}
-                    onChange={(e) => {
-                      setSearch(e.target.value);
-                      setPage(0);
-                    }}
-                    placeholder="Name, email, or phone"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-                  />
-                </div>
-                {search.trim() ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearch('');
-                      setPage(0);
-                    }}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-                  >
-                    Clear search
-                  </button>
-                ) : null}
-              </div>
+              <OperationsToolbarGuestSearchPanel
+                onQueryChange={(q) => {
+                  setSearch(q);
+                  setPage(0);
+                }}
+                onBookingCreated={() => void loadList()}
+              />
             )}
             toolbarTools={contactsToolbarTools}
             trailingActions={(
@@ -1653,6 +1682,7 @@ export function ContactsDashboard({
                         aria-expanded={expanded}
                         aria-controls={`contact-expand-${g.id}`}
                         onClick={() => toggleContactExpand(g.id)}
+                        {...bindDetailPrefetchHandlers(g.id, prefetchGuestDetail)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();

@@ -4,7 +4,11 @@ import { getVenueStaff, OUTSIDE_ASSIGNED_CALENDARS_ERROR, staffManagesCalendar }
 import { z } from 'zod';
 
 const patchBodySchema = z.object({
+  start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
+  block_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** Staff column id: legacy `practitioners.id` or `unified_calendars.id`. */
+  practitioner_id: z.string().uuid().optional(),
   reason: z.string().max(500).nullable().optional(),
 });
 
@@ -83,14 +87,69 @@ export async function PATCH(
 
     const updates: Record<string, unknown> = {};
     const startRaw = typeof existing.start_time === 'string' ? existing.start_time : String(existing.start_time);
+    const endRaw = typeof existing.end_time === 'string' ? existing.end_time : String(existing.end_time);
+    const dateRaw =
+      typeof existing.block_date === 'string' ? existing.block_date : String(existing.block_date);
 
+    const nextStartNorm =
+      parsed.data.start_time !== undefined
+        ? normalizeTimeForDb(parsed.data.start_time)
+        : startRaw.length === 5
+          ? `${startRaw}:00`
+          : startRaw;
+    const nextEndNorm =
+      parsed.data.end_time !== undefined
+        ? normalizeTimeForDb(parsed.data.end_time)
+        : endRaw.length === 5
+          ? `${endRaw}:00`
+          : endRaw;
+    const nextDate = parsed.data.block_date ?? dateRaw;
+
+    if (timeToMinutes(nextEndNorm) <= timeToMinutes(nextStartNorm)) {
+      return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 });
+    }
+
+    if (parsed.data.start_time !== undefined) {
+      updates.start_time = nextStartNorm;
+    }
     if (parsed.data.end_time !== undefined) {
-      const endNorm = normalizeTimeForDb(parsed.data.end_time);
-      const startNorm = startRaw.length === 5 ? `${startRaw}:00` : startRaw;
-      if (timeToMinutes(endNorm) <= timeToMinutes(startNorm)) {
-        return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 });
+      updates.end_time = nextEndNorm;
+    }
+    if (parsed.data.block_date !== undefined) {
+      updates.block_date = nextDate;
+    }
+
+    if (parsed.data.practitioner_id !== undefined) {
+      const columnId = parsed.data.practitioner_id;
+      if (existingPrac) {
+        const { data: prac } = await staff.db
+          .from('practitioners')
+          .select('id')
+          .eq('id', columnId)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (!prac?.id) {
+          return NextResponse.json({ error: 'Calendar or practitioner not found' }, { status: 400 });
+        }
+        updates.practitioner_id = columnId;
+      } else if (existingCal) {
+        const { data: calendar } = await staff.db
+          .from('unified_calendars')
+          .select('id')
+          .eq('id', columnId)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (!calendar?.id) {
+          return NextResponse.json({ error: 'Calendar or practitioner not found' }, { status: 400 });
+        }
+        if (staff.role === 'staff') {
+          const allowed = await staffManagesCalendar(staff.db, staff.venue_id, staff.id, columnId);
+          if (!allowed) {
+            return NextResponse.json({ error: OUTSIDE_ASSIGNED_CALENDARS_ERROR }, { status: 403 });
+          }
+        }
+        updates.calendar_id = columnId;
       }
-      updates.end_time = endNorm;
     }
 
     if (parsed.data.reason !== undefined) {

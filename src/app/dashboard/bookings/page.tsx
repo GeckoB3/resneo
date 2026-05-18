@@ -58,6 +58,7 @@ export default async function BookingsPage() {
       : [];
   const defaultAppointmentPractitionerFilter: 'all' | string =
     linkedPractitionerIds.length === 1 ? linkedPractitionerIds[0] : 'all';
+  const initialTodayIso = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
@@ -75,6 +76,7 @@ export default async function BookingsPage() {
                 enabledModels={enabledModels}
                 defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
                 linkedPractitionerIds={linkedPractitionerIds}
+                initialTodayIso={initialTodayIso}
               />
             ) : (
               <BookingsDashboard
@@ -82,6 +84,7 @@ export default async function BookingsPage() {
                 currency={currency}
                 primaryBookingModel={bookingModel}
                 enabledModels={enabledModels}
+                initialTodayIso={initialTodayIso}
               />
             )}
           </Suspense>

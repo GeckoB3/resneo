@@ -12,6 +12,7 @@ import {
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
+import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
@@ -58,6 +59,11 @@ export default async function DaySheetPage() {
     redirect('/dashboard/calendar');
   }
 
+  const linkFeature = isLinkFeatureVenue({
+    pricing_tier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier ?? null,
+    booking_model: (venue?.booking_model as string | null) ?? null,
+  });
+
   return (
     <div className="p-3 md:p-6 lg:p-8">
       <div className="mx-auto max-w-5xl">
@@ -68,6 +74,7 @@ export default async function DaySheetPage() {
             currency={(venue?.currency as string) ?? 'GBP'}
             bookingModel={bookingModel}
             enabledModels={enabledModels}
+            linkFeature={linkFeature}
           />
         </ToastProvider>
       </div>

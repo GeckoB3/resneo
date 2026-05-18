@@ -84,21 +84,28 @@ export async function GET(
     }
     const rows = (data ?? []) as unknown as AccountLinkAuditRow[];
 
-    // Resolve venue names and acting-user names for display.
+    // Resolve venue names for display.
     const venueIds = new Set<string>();
-    const userIds = new Set<string>();
     for (const r of rows) {
       venueIds.add(r.acting_venue_id);
       venueIds.add(r.owning_venue_id);
-      if (r.acting_user_id) userIds.add(r.acting_user_id);
     }
     const venueLookup = await loadVenueLookup(ctx.admin, [...venueIds]);
+
+    // Distinct acting users across the whole link (unfiltered) — supplies both
+    // display names for the page rows and the options for the user filter.
+    const { data: actorRows } = await ctx.admin
+      .from('account_link_audit_log')
+      .select('acting_user_id')
+      .eq('link_id', id)
+      .not('acting_user_id', 'is', null);
+    const actorIds = [...new Set((actorRows ?? []).map((r) => r.acting_user_id as string))];
     const userLookup: Record<string, string> = {};
-    if (userIds.size > 0) {
+    if (actorIds.length > 0) {
       const { data: staffRows } = await ctx.admin
         .from('staff')
         .select('user_id, name, email')
-        .in('user_id', [...userIds]);
+        .in('user_id', actorIds);
       for (const s of staffRows ?? []) {
         const uid = s.user_id as string | null;
         if (uid) userLookup[uid] = (s.name as string) || (s.email as string) || 'Unknown user';
@@ -156,6 +163,9 @@ export async function GET(
 
     return NextResponse.json({
       entries: enriched,
+      users: actorIds
+        .map((uid) => ({ id: uid, name: userLookup[uid] ?? 'Unknown user' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
       page,
       pageSize,
       total: count ?? 0,

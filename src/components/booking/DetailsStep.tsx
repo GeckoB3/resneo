@@ -117,6 +117,8 @@ interface DetailsStepProps {
   initialAppointmentComments?: string;
   submitLabel?: string;
   hideAppointmentRequestField?: boolean;
+  submitClassName?: string;
+  fieldClassName?: string;
 }
 
 export function DetailsStep({
@@ -141,6 +143,8 @@ export function DetailsStep({
   initialAppointmentComments,
   submitLabel,
   hideAppointmentRequestField = false,
+  submitClassName,
+  fieldClassName,
 }: DetailsStepProps) {
   const isStaff = audience === 'staff';
   const isStaffWalkIn = audience === 'staff_walk_in';
@@ -204,6 +208,13 @@ export function DetailsStep({
     hasDeposit && slot.start_time && refundClassification
       ? formatRefundDeadlineDisplay(date, slot.start_time, refundNoticeHours)
       : null;
+
+  const inputCls =
+    fieldClassName ??
+    'min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+  const textareaCls =
+    fieldClassName?.replace('min-h-[44px]', '') ??
+    'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
 
   return (
     <div className="space-y-5">
@@ -330,7 +341,7 @@ export function DetailsStep({
             <input
               {...register('first_name')}
               autoComplete="given-name"
-              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className={inputCls}
               placeholder="First name"
             />
           </FormField>
@@ -348,7 +359,7 @@ export function DetailsStep({
           <input
             type="email"
             {...register('email')}
-            className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            className={inputCls}
             placeholder="you@example.com"
           />
         </FormField>
@@ -365,7 +376,11 @@ export function DetailsStep({
                 onChange={field.onChange}
                 defaultCountry={phoneDefaultCountry}
                 error={errors.phone?.message}
-                inputClassName="min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                inputClassName={
+                  fieldClassName
+                    ? `${fieldClassName} min-w-0`
+                    : 'min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500'
+                }
               />
             )}
           />
@@ -374,11 +389,11 @@ export function DetailsStep({
         {!useAppointmentFields && (
           <>
             <FormField label="Dietary notes" error={errors.dietary_notes?.message}>
-              <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Allergies, vegetarian, etc." />
+              <textarea {...register('dietary_notes')} rows={2} className={textareaCls} placeholder="Allergies, vegetarian, etc." />
             </FormField>
 
             <FormField label="Occasion" error={errors.occasion?.message}>
-              <input {...register('occasion')} className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="e.g. Birthday, Anniversary" />
+              <input {...register('occasion')} className={inputCls} placeholder="e.g. Birthday, Anniversary" />
             </FormField>
           </>
         )}
@@ -388,7 +403,7 @@ export function DetailsStep({
             <textarea
               {...register('comments_requests')}
               rows={3}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className={textareaCls}
               placeholder="Anything we should know (access needs, preferences, running late, etc.)"
             />
           </FormField>
@@ -399,7 +414,7 @@ export function DetailsStep({
             <textarea
               {...register('comments_requests')}
               rows={3}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className={textareaCls}
               placeholder="Any requirements, injuries, or things we should know?"
             />
           </FormField>
@@ -430,7 +445,10 @@ export function DetailsStep({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="min-h-[48px] w-full rounded-xl bg-brand-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+          className={
+            submitClassName ??
+            'min-h-[48px] w-full rounded-xl bg-brand-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50'
+          }
         >
           {isSubmitting
             ? 'Processing...'

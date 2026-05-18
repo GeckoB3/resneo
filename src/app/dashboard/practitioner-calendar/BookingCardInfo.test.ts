@@ -39,7 +39,7 @@ describe('pickInfoRowCount', () => {
 });
 
 describe('groupInfoRows', () => {
-  it('collapses all full booking fields onto one row at the shortest height', () => {
+  it('collapses all full booking fields onto one row at the shortest height (calendar priority order)', () => {
     expect(groupInfoRows(1, false)).toEqual([['name', 'service', 'phone', 'time', 'pill']]);
   });
 
@@ -53,7 +53,7 @@ describe('groupInfoRows', () => {
     ]);
   });
 
-  it('moves fields up as available row count decreases', () => {
+  it('merges lower-priority fields as height shrinks', () => {
     expect(groupInfoRows(4, false)).toEqual([
       ['name'],
       ['service'],
@@ -62,12 +62,22 @@ describe('groupInfoRows', () => {
     ]);
     expect(groupInfoRows(3, false)).toEqual([
       ['name'],
-      ['service'],
-      ['phone', 'time', 'pill'],
+      ['service', 'phone'],
+      ['time', 'pill'],
     ]);
     expect(groupInfoRows(2, false)).toEqual([
       ['name'],
       ['service', 'phone', 'time', 'pill'],
+    ]);
+  });
+
+  it('lays out segment blocks without name in service-first order', () => {
+    expect(groupInfoRows(1, true)).toEqual([['service', 'phone', 'time', 'pill']]);
+    expect(groupInfoRows(4, true)).toEqual([
+      ['service'],
+      ['phone'],
+      ['time'],
+      ['pill'],
     ]);
   });
 });
@@ -81,7 +91,7 @@ describe('pickVisibleInfoRows', () => {
     pill: 50,
   };
 
-  it('keeps higher-priority fields before lower-priority fields on one short row', () => {
+  it('keeps name, service, and phone before time and status on a short row', () => {
     expect(
       pickVisibleInfoRows({
         rows: [['name', 'service', 'phone', 'time', 'pill']],
@@ -91,11 +101,11 @@ describe('pickVisibleInfoRows', () => {
     ).toEqual([['name', 'service', 'phone']]);
   });
 
-  it('does not show time if service or phone cannot fit before it', () => {
+  it('drops time and status before service when space is very tight', () => {
     expect(
       pickVisibleInfoRows({
         rows: [['name', 'service', 'phone', 'time', 'pill']],
-        availableWidth: 190,
+        availableWidth: 200,
         widths,
       }),
     ).toEqual([['name', 'service']]);

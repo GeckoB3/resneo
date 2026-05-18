@@ -33,6 +33,19 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
+import {
+  AppointmentPublicShell,
+  AppointmentProgressBar,
+  AppointmentStepHeader,
+  AppointmentChoiceCard,
+  AppointmentBackLink,
+  appointmentProgressPhase,
+  appointmentTimeSlotClass,
+  APPOINTMENT_TIME_SLOTS_GRID_CLASS,
+  APPOINTMENT_TIME_SLOT_LABEL_CLASS,
+  APPOINTMENT_DETAILS_SUBMIT_CLASS,
+  APPOINTMENT_DETAILS_INPUT_CLASS,
+} from './appointment-public-ui';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 
 function staffRebookAppointmentInitialDetails(
@@ -233,6 +246,8 @@ interface AppointmentBookingFlowProps {
   accentColour?: string;
   /** From /book/{venue}/{practitioner-slug}: skip staff step; catalog filtered */
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
+  /** §7.7: set when this flow is mounted inside a venue collective page. */
+  collectiveId?: string;
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
   initialDate?: string;
@@ -289,9 +304,11 @@ function groupSlotsByPeriod(slots: Array<{ start_time: string }>) {
 export function AppointmentBookingFlow({
   venue,
   cancellationPolicy,
+  embed,
   onHeightChange,
   accentColour,
   lockedPractitioner,
+  collectiveId,
   bookingAudience = 'public',
   onBookingCreated,
   initialDate,
@@ -302,6 +319,7 @@ export function AppointmentBookingFlow({
   staffRebookBootstrap = null,
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isPublicGuest = bookingAudience === 'public';
   const isEdit = Boolean(editBooking);
   const isStaffWalkInAppointment = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
@@ -419,6 +437,11 @@ export function AppointmentBookingFlow({
     onHeightChange();
     return () => ro.disconnect();
   }, [onHeightChange]);
+
+  useEffect(() => {
+    if (!onHeightChange) return;
+    onHeightChange();
+  }, [step, onHeightChange]);
 
   useEffect(() => {
     function onReset() {
@@ -1324,6 +1347,7 @@ export function AppointmentBookingFlow({
                 ...(s.serviceVariantId ? { service_variant_id: s.serviceVariantId } : {}),
               })),
               marketing_consent: details.marketing_consent,
+              collective_id: collectiveId,
             }),
           });
           const data = await res.json();
@@ -1416,6 +1440,7 @@ export function AppointmentBookingFlow({
             dietary_notes: details.dietary_notes,
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
+            collective_id: collectiveId,
           }),
         });
         const data = await res.json();
@@ -1454,6 +1479,7 @@ export function AppointmentBookingFlow({
       isStaffWalkInAppointment,
       selectedServiceForPractitioner,
       onBookingCreated,
+      collectiveId,
     ],
   );
 
@@ -1649,14 +1675,17 @@ export function AppointmentBookingFlow({
           section.slots.length > 0 ? (
             <div key={section.label}>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{section.label}</p>
-              <div className="flex flex-wrap gap-2">
+              <div className={APPOINTMENT_TIME_SLOTS_GRID_CLASS}>
                 {section.slots.map((slot) => (
                   <button
                     key={slot.start_time}
+                    type="button"
                     onClick={() => onSelect(slot.start_time)}
-                    className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:border-brand-300 hover:text-brand-600 hover:shadow active:scale-95"
+                    className={appointmentTimeSlotClass(false, isPublicGuest)}
                   >
-                    {slot.start_time}
+                    <span className={APPOINTMENT_TIME_SLOT_LABEL_CLASS}>
+                      {slot.start_time.slice(0, 5)}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1722,11 +1751,25 @@ export function AppointmentBookingFlow({
   const appointmentRebookWait =
     Boolean(staffRebookBootstrap?.appointment) && isStaff && !editBooking && (catalogLoading || staffRebookPriming);
 
-  return (
+  const progressMeta = isPublicGuest ? appointmentProgressPhase(step) : null;
+  const choiceCardClass = isPublicGuest
+    ? 'ap-choice-card w-full text-left'
+    : 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  const publicDetailsFieldProps = isPublicGuest
+    ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
+    : {};
+
+  const flowContent = (
     <div
-      ref={containerRef}
-      className={`relative mx-auto max-w-lg${appointmentRebookWait ? ' min-h-[14rem]' : ''}`}
-      style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}
+      ref={isPublicGuest ? undefined : containerRef}
+      className={
+        isPublicGuest
+          ? 'relative'
+          : `relative mx-auto max-w-lg${appointmentRebookWait ? ' min-h-[14rem]' : ''}`
+      }
+      style={
+        !isPublicGuest && accentColour ? ({ '--accent': accentColour } as React.CSSProperties) : undefined
+      }
     >
       {appointmentRebookWait ? (
         <div
@@ -1761,39 +1804,32 @@ export function AppointmentBookingFlow({
           ════════════════════════════════════════════════ */}
       {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && (
         <div>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">How would you like to book?</h2>
-          <p className="mb-5 text-sm text-slate-500">Choose a single appointment or a group booking for several people.</p>
+          <AppointmentStepHeader
+            title="How would you like to book?"
+            description="Choose a single appointment or a group booking for several people."
+          />
           <div className="space-y-3">
-            <button
+            <AppointmentChoiceCard
               onClick={() => setStep('service')}
-              className="w-full rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
-            >
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900">Book an appointment</div>
-                  <div className="text-sm text-slate-500">Schedule an appointment for yourself</div>
-                </div>
-                <svg className="h-5 w-5 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-              </div>
-            </button>
-            <button
+              title="Book an appointment"
+              description="Schedule an appointment for yourself"
+              icon={
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                </svg>
+              }
+            />
+            <AppointmentChoiceCard
               onClick={() => setStep('group_review')}
-              className="w-full rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
-            >
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-purple-50 text-purple-600">
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900">Group appointment</div>
-                  <div className="text-sm text-slate-500">Different services for multiple people</div>
-                </div>
-                <svg className="h-5 w-5 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-              </div>
-            </button>
+              title="Group appointment"
+              description="Different services for multiple people"
+              tone="group"
+              icon={
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+                </svg>
+              }
+            />
           </div>
         </div>
       )}
@@ -1805,17 +1841,34 @@ export function AppointmentBookingFlow({
       {step === 'service' && (
         <div>
           {!isLockedPractitionerFlow && !isEdit && !isStaff && (
-            <button type="button" onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-              Back
-            </button>
+            isPublicGuest ? (
+              <AppointmentBackLink onClick={() => setStep('mode_choice')} />
+            ) : (
+              <button type="button" onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+                Back
+              </button>
+            )
           )}
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            {isEdit
-              ? 'Choose the service for your changed appointment.'
-              : 'Choose the service you want. You will pick a date and time in a later step.'}
-          </p>
+          {isPublicGuest ? (
+            <AppointmentStepHeader
+              title="Select a service"
+              description={
+                isEdit
+                  ? 'Choose the service for your changed appointment.'
+                  : 'Choose the service you want. You will pick a date and time in a later step.'
+              }
+            />
+          ) : (
+            <>
+              <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
+              <p className="mb-4 text-sm text-slate-500">
+                {isEdit
+                  ? 'Choose the service for your changed appointment.'
+                  : 'Choose the service you want. You will pick a date and time in a later step.'}
+              </p>
+            </>
+          )}
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : servicesWithFromPrice.length === 0 ? (
@@ -1867,7 +1920,7 @@ export function AppointmentBookingFlow({
                       key={svc.id}
                       type="button"
                       onClick={navigateFromServiceRow}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                      className={choiceCardClass}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -2043,7 +2096,7 @@ export function AppointmentBookingFlow({
                       }
                       setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                    className={choiceCardClass}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -2224,7 +2277,7 @@ export function AppointmentBookingFlow({
                       setSelectedPractitionerId(prac.id);
                       setStep('slot');
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                    className={choiceCardClass}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
@@ -2452,15 +2505,19 @@ export function AppointmentBookingFlow({
 
       {step === 'details' && selectedTime && (
         <div>
-          <button
-            onClick={() => {
-              setStep('multi_service');
-            }}
-            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-            Back
-          </button>
+          {isPublicGuest ? (
+            <AppointmentBackLink onClick={() => setStep('multi_service')} />
+          ) : (
+            <button
+              onClick={() => {
+                setStep('multi_service');
+              }}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+          )}
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
             <div className="mb-5">
               <MultiServiceSummaryCard
@@ -2611,6 +2668,7 @@ export function AppointmentBookingFlow({
               initialAppointmentComments={editBooking ? undefined : staffRebookBootstrap?.appointmentComments}
               hideAppointmentRequestField={isEdit}
               submitLabel={isEdit ? 'Save changes' : undefined}
+              {...publicDetailsFieldProps}
             />
           )}
         </div>
@@ -2910,7 +2968,7 @@ export function AppointmentBookingFlow({
                       setGroupPractitionerId(prac.id);
                       setStep('group_slot');
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                    className={choiceCardClass}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
@@ -3021,6 +3079,7 @@ export function AppointmentBookingFlow({
               multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              {...publicDetailsFieldProps}
             />
           )}
         </div>
@@ -3080,4 +3139,20 @@ export function AppointmentBookingFlow({
       )}
     </div>
   );
+
+  if (isPublicGuest) {
+    return (
+      <AppointmentPublicShell
+        ref={containerRef}
+        accentColour={accentColour}
+        embed={embed}
+        className={appointmentRebookWait ? 'min-h-[14rem]' : ''}
+      >
+        {progressMeta ? <AppointmentProgressBar phase={progressMeta.phase} /> : null}
+        {flowContent}
+      </AppointmentPublicShell>
+    );
+  }
+
+  return flowContent;
 }

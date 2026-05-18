@@ -22,6 +22,11 @@ export interface LinkedBooking {
   editable: boolean;
 }
 
+export interface LinkedService {
+  id: string;
+  name: string;
+}
+
 export interface LinkedVenueCalendar {
   venueId: string;
   venueName: string;
@@ -31,5 +36,7 @@ export interface LinkedVenueCalendar {
   /** Action level the viewer holds over this venue's bookings. */
   action: LinkGrant['act'];
   practitioners: LinkedPractitioner[];
+  /** This venue's services — populated only for full_details viewers. */
+  services: LinkedService[];
   bookings: LinkedBooking[];
 }

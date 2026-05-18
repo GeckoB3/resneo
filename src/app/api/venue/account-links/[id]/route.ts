@@ -15,6 +15,7 @@ import {
   notifyLinkUnlinked,
   notifyPermissionChangeProposed,
 } from '@/lib/linked-accounts/notifications';
+import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
 
 interface LinkContextResult {
   link: AccountLinkRow;
@@ -313,6 +314,12 @@ export async function PATCH(
           pending_change: null,
         })
         .eq('id', id);
+      // A change may drop visibility below full_details, invalidating any
+      // collective that depends on this link (§7.5).
+      await reconcileCollectivesAfterLinkChange(ctx.admin, [
+        link.venue_low_id,
+        link.venue_high_id,
+      ]);
       return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
     }
 
@@ -356,6 +363,12 @@ export async function DELETE(
       .eq('id', id);
 
     await notifyLinkUnlinked(ctx.admin, member.otherVenueId, ctx.venue.name);
+
+    // Unlinking breaks any collective that relied on this pairwise link (§7.5).
+    await reconcileCollectivesAfterLinkChange(ctx.admin, [
+      member.link.venue_low_id,
+      member.link.venue_high_id,
+    ]);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

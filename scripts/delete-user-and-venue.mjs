@@ -43,16 +43,27 @@ function requireEnv() {
  * Requires migration: supabase/migrations/20260516130000_admin_hard_delete_venue.sql applied on the target DB.
  */
 async function hardDeleteVenue(admin, venueId) {
-  const { error } = await admin.rpc('admin_hard_delete_venue', { p_venue_id: venueId });
+  const { data, error } = await admin.rpc('admin_hard_delete_venue', { p_venue_id: venueId });
   if (error) {
     if (/function .* does not exist|Could not find the function/i.test(error.message)) {
       throw new Error(
-        'Database function admin_hard_delete_venue is missing. In Supabase Dashboard → SQL Editor, run the SQL from:\n' +
+        'Database function admin_hard_delete_venue is missing. Apply migrations:\n' +
           '  supabase/migrations/20260516130000_admin_hard_delete_venue.sql\n' +
+          '  supabase/migrations/20260518120000_venue_delete_terminate_account_links.sql\n' +
           'Then re-run this script.',
       );
     }
     throw new Error(`admin_hard_delete_venue: ${error.message}`);
+  }
+  const partners = Array.isArray(data) ? data : [];
+  if (partners.length > 0) {
+    const survivorIds = [...new Set(partners.map((p) => p.survivor_venue_id).filter(Boolean))];
+    console.log(
+      `  Terminated ${partners.length} linked-account link(s). Survivor venue(s): ${survivorIds.join(', ')}.`,
+    );
+    console.log(
+      '  Partner notification emails: set SENDGRID_API_KEY and run via tsx hard-delete-venue script, or use in-app deletion.',
+    );
   }
 }
 

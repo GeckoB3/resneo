@@ -19,6 +19,7 @@ import {
   BILLING_ACCESS_SOURCE_SUPERUSER_FREE,
 } from '@/lib/billing/billing-access-source';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
+import { hardDeleteVenueWithLinkedAccountNotifications } from '@/lib/linked-accounts/venue-deletion';
 
 const provisionBodySchema = z
   .object({
@@ -172,7 +173,7 @@ export async function POST(request: Request) {
 
     if (staffError) {
       console.error('[platform/provision-venue] staff insert failed:', staffError);
-      await admin.from('venues').delete().eq('id', venueId);
+      await hardDeleteVenueWithLinkedAccountNotifications(admin, venueId);
       if (authUserId) {
         const { error: delErr } = await admin.auth.admin.deleteUser(authUserId);
         if (delErr) console.error('[platform/provision-venue] rollback deleteUser failed:', delErr);
@@ -207,8 +208,7 @@ export async function POST(request: Request) {
       });
 
       if (!linkResult.ok) {
-        await admin.from('staff').delete().eq('venue_id', venueId);
-        await admin.from('venues').delete().eq('id', venueId);
+        await hardDeleteVenueWithLinkedAccountNotifications(admin, venueId);
         if (authUserId) {
           const { error: delErr } = await admin.auth.admin.deleteUser(authUserId);
           if (delErr) console.error('[platform/provision-venue] rollback deleteUser failed:', delErr);

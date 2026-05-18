@@ -27,9 +27,13 @@ function shiftDate(isoDate: string, deltaDays: number): string {
   return formatDateInput(base);
 }
 
+const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/** Deterministic date label — avoids `toLocaleDateString` SSR/client ICU differences. */
 function formatDateHeading(isoDate: string): string {
   const d = new Date(`${isoDate}T12:00:00`);
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function KpiChips({
@@ -262,7 +266,8 @@ export function OperationsWorkspaceToolbar({
   const timelineTriggerRef = useRef<HTMLButtonElement>(null);
   const controlsTriggerRef = useRef<HTMLButtonElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const todayIso = todayIsoProp ?? formatDateInput(new Date());
+  const [fallbackTodayIso] = useState(() => formatDateInput(new Date()));
+  const todayIso = todayIsoProp ?? fallbackTodayIso;
   const isToday = date === todayIso;
   const inlineInfoOpen = compact && open === 'info';
   const inlineDateOpen = compact && open === 'date';
@@ -305,22 +310,39 @@ export function OperationsWorkspaceToolbar({
 
   useEffect(() => {
     if (open === 'none') return;
+    let cancelled = false;
     const t = window.setTimeout(() => {
+      if (cancelled) return;
+      if (open === 'search') {
+        const focusSearchField = () => {
+          const panel = document.getElementById(`${baseId}-search-panel`);
+          const input = panel?.querySelector<HTMLInputElement>('input[type="search"]');
+          input?.focus();
+          return Boolean(input);
+        };
+        if (!focusSearchField()) {
+          requestAnimationFrame(() => {
+            if (!cancelled) focusSearchField();
+          });
+        }
+        return;
+      }
       const container = inlineDateOpen
         ? datePopoverRef.current
         : inlineInfoOpen
           ? infoPopoverRef.current
           : inlineControlsOpen
             ? controlsPopoverRef.current
-            : inlineSearchOpen
-              ? searchPopoverRef.current
-              : inlineTimelineOpen
-                ? timelinePopoverRef.current
-                : sheetRef.current;
+            : inlineTimelineOpen
+              ? timelinePopoverRef.current
+              : sheetRef.current;
       container?.querySelector<HTMLElement>('button, [href], input, select, textarea')?.focus();
     }, 0);
-    return () => window.clearTimeout(t);
-  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [open, inlineInfoOpen, inlineDateOpen, inlineControlsOpen, inlineSearchOpen, inlineTimelineOpen, baseId]);
 
   useEffect(() => {
     if (!inlineInfoOpen && !inlineDateOpen && !inlineControlsOpen && !inlineSearchOpen && !inlineTimelineOpen) return;
@@ -527,11 +549,11 @@ export function OperationsWorkspaceToolbar({
             horizontalCenter={compact}
             gapPx={4}
             align="end"
-            maxWidthPx={352}
+            maxWidthPx={400}
             id={`${baseId}-search-panel`}
             onDismiss={close}
             aria-label={searchAriaLabel}
-            className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+            className="animate-fade-in z-50 w-[min(100vw-2rem,24rem)] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >
             {searchPanel}
           </ClampedFixedDropdown>

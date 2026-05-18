@@ -71,9 +71,11 @@ export function LinkedAccountAuditModal({
   onClose: () => void;
 }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [action, setAction] = useState('');
+  const [actingUserId, setActingUserId] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [loading, setLoading] = useState(false);
@@ -88,19 +90,21 @@ export function LinkedAccountAuditModal({
         pageSize: String(PAGE_SIZE),
       });
       if (action) qs.set('action', action);
+      if (actingUserId) qs.set('actingUserId', actingUserId);
       if (fromDate) qs.set('from', fromDate);
       if (toDate) qs.set('to', toDate);
       const res = await fetch(`/api/venue/account-links/${linkId}/audit?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load audit log.');
       setEntries(data.entries ?? []);
+      setUsers(data.users ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit log.');
     } finally {
       setLoading(false);
     }
-  }, [linkId, page, action, fromDate, toDate]);
+  }, [linkId, page, action, actingUserId, fromDate, toDate]);
 
   useEffect(() => {
     if (open) void load();
@@ -108,13 +112,14 @@ export function LinkedAccountAuditModal({
 
   useEffect(() => {
     if (open) setPage(1);
-  }, [open, action, fromDate, toDate]);
+  }, [open, action, actingUserId, fromDate, toDate]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const exportCsv = () => {
     const qs = new URLSearchParams({ format: 'csv' });
     if (action) qs.set('action', action);
+    if (actingUserId) qs.set('actingUserId', actingUserId);
     if (fromDate) qs.set('from', fromDate);
     if (toDate) qs.set('to', toDate);
     window.open(`/api/venue/account-links/${linkId}/audit?${qs}`, '_blank');
@@ -156,6 +161,22 @@ export function LinkedAccountAuditModal({
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
           />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-slate-600">User</span>
+          <select
+            className={inputCls}
+            value={actingUserId}
+            onChange={(e) => setActingUserId(e.target.value)}
+            disabled={users.length === 0}
+          >
+            <option value="">All users</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
         </label>
         <button type="button" className={btnSecondary} onClick={exportCsv}>
           Export CSV

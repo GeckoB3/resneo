@@ -31,7 +31,21 @@ function isNonPersistingVenuePath(p: string): boolean {
   return false;
 }
 
+/** Public embed iframe: allow framing on any parent origin (overrides any stray X-Frame-Options). */
+function embedFrameHeadersResponse(request: NextRequest): NextResponse {
+  const response = NextResponse.next({ request });
+  response.headers.delete('X-Frame-Options');
+  response.headers.set('Content-Security-Policy', 'frame-ancestors *');
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith('/embed')) {
+    return embedFrameHeadersResponse(request);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -66,7 +80,6 @@ export async function middleware(request: NextRequest) {
   // Refresh session; required so server and client stay in sync
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
   const isDashboard = pathname.startsWith('/dashboard');
   const isAccount = pathname.startsWith('/account');
   const isChooseDestination = pathname.startsWith('/auth/choose-destination');

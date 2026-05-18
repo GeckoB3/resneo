@@ -104,6 +104,8 @@ const createBookingSchema = z.object({
   capacity_used: z.number().int().min(1).max(50).optional(),
   /** Public online/widget/booking_page: venue marketing consent from booking form. */
   marketing_consent: z.boolean().optional(),
+  /** §7.7: set when the booking was routed through a venue collective page (attribution only). */
+  collective_id: z.string().uuid().optional(),
 });
 
 /**
@@ -593,6 +595,7 @@ async function handleNonTableBooking(
     resource_id, booking_end_time,
     event_session_id,
     capacity_used,
+    collective_id,
   } = data;
 
   const routeAuthClient = await createRouteHandlerClient(request);
@@ -1144,6 +1147,20 @@ async function handleNonTableBooking(
 
   if (effectiveModel === 'unified_scheduling' && !event_session_id) {
     bookingInsert.processing_time_blocks = appointmentProcessingSnapshot ?? [];
+  }
+
+  // §7.7: attribute the booking to a venue collective when it was routed
+  // through one — but only if this venue is genuinely an active member, so a
+  // forged collective_id cannot tag bookings to an unrelated collective.
+  if (collective_id) {
+    const { data: membership } = await supabase
+      .from('venue_collective_members')
+      .select('id')
+      .eq('collective_id', collective_id)
+      .eq('venue_id', venue_id)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (membership) bookingInsert.collective_id = collective_id;
   }
 
   const { data: booking, error: bookErr } = await supabase

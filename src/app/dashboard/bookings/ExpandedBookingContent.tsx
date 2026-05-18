@@ -71,6 +71,20 @@ import {
   BOOKING_START_PRIMARY_BUTTON_CLASSES,
 } from '@/lib/table-management/booking-status-visual';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
+import { useOptionalDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
+import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
+import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact-guest-history';
+import { guestStubFromBookingRow } from '@/lib/booking/booking-row-guest-stub';
+import { bookingDetailLiteFromListRow, bookingDisplayEndHm } from '@/lib/booking/booking-detail-from-row';
+import {
+  mergeBookingRowOverlay,
+  overlayFromPatchBody,
+  overlayFromPatchPayloadForBody,
+  overlayFromStatusTransition,
+  pruneBookingRowOverlay,
+  retainBookingRowOverlay,
+  type BookingRowOverlay,
+} from '@/lib/booking/booking-row-overlay';
 
 export interface BookingRow {
   id: string;
@@ -85,12 +99,15 @@ export interface BookingRow {
   deposit_amount_pence: number | null;
   dietary_notes: string | null;
   occasion: string | null;
+  special_requests?: string | null;
+  internal_notes?: string | null;
   guest_name: string;
   guest_first_name?: string | null;
   guest_last_name?: string | null;
   guest_email: string | null;
   guest_phone: string | null;
   guest_id?: string;
+  guest_visit_count?: number | null;
   table_assignments?: Array<{ id: string; name: string }>;
   service_id?: string | null;
   group_booking_id?: string | null;
@@ -243,6 +260,8 @@ export function ExpandedBookingContent({
   >(null);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
+  const [statusActionPending, setStatusActionPending] = useState(false);
+  const [refCopied, setRefCopied] = useState(false);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
   const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
   /**
@@ -251,18 +270,47 @@ export function ExpandedBookingContent({
    * until rows match or a short timeout (state so clearing re-renders).
    */
   const [suppressPatchCancelAfterUndoConfirm, setSuppressPatchCancelAfterUndoConfirm] = useState(false);
+  /** Optimistic list-row patch so action buttons update before parent refetch completes. */
+  const [rowOverlay, setRowOverlay] = useState<BookingRowOverlay>({});
 
   useEffect(() => {
     setSuppressPatchCancelAfterUndoConfirm(false);
+    setStatusActionPending(false);
+    setRefCopied(false);
+    setRowOverlay({});
   }, [booking.id]);
 
   useEffect(() => {
+    setRowOverlay((prev) => retainBookingRowOverlay(prev, booking));
+  }, [
+    booking.status,
+    booking.client_arrived_at,
+    booking.staff_attendance_confirmed_at,
+    booking.guest_attendance_confirmed_at,
+    booking.deposit_status,
+    booking.deposit_amount_pence,
+  ]);
+
+  useEffect(() => {
+    setStatusActionPending(false);
+  }, [
+    booking.status,
+    booking.staff_attendance_confirmed_at,
+    booking.guest_attendance_confirmed_at,
+    booking.client_arrived_at,
+    rowOverlay.status,
+    rowOverlay.staff_attendance_confirmed_at,
+    rowOverlay.guest_attendance_confirmed_at,
+  ]);
+
+  useEffect(() => {
     if (!suppressPatchCancelAfterUndoConfirm) return;
+    const row = { ...booking, ...rowOverlay };
     if (
       !isAttendanceConfirmed({
-        status: booking.status,
-        guest_attendance_confirmed_at: booking.guest_attendance_confirmed_at ?? null,
-        staff_attendance_confirmed_at: booking.staff_attendance_confirmed_at ?? null,
+        status: row.status,
+        guest_attendance_confirmed_at: row.guest_attendance_confirmed_at ?? null,
+        staff_attendance_confirmed_at: row.staff_attendance_confirmed_at ?? null,
       })
     ) {
       setSuppressPatchCancelAfterUndoConfirm(false);
@@ -275,6 +323,9 @@ export function ExpandedBookingContent({
     booking.status,
     booking.guest_attendance_confirmed_at,
     booking.staff_attendance_confirmed_at,
+    rowOverlay.status,
+    rowOverlay.guest_attendance_confirmed_at,
+    rowOverlay.staff_attendance_confirmed_at,
   ]);
 
   useEffect(() => {
@@ -343,10 +394,36 @@ export function ExpandedBookingContent({
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
+  const detailCache = useOptionalDashboardDetailCache();
+  const activeDetail = useMemo(
+    () =>
+      detail ??
+      bookingDetailLiteFromCachePayload(booking.id, detailCache?.peekVenueBookingDetail(booking.id)) ??
+      bookingDetailLiteFromListRow(booking),
+    [booking, detail, detailCache],
+  );
+  const detailHydrating = detailLoading && !detail && !detailCache?.peekVenueBookingDetail(booking.id);
+
+  const guestHistoryInitialRows = useMemo(() => {
+    const guestIdForHistory = activeDetail?.guest?.id ?? booking.guest_id ?? null;
+    if (!guestIdForHistory || !detailCache) return undefined;
+    const cachedGuest = detailCache.peekGuestDetail(guestIdForHistory);
+    if (!cachedGuest?.booking_history?.length) return undefined;
+    return mapContactGuestHistoryToAccordionRows(cachedGuest.booking_history);
+  }, [activeDetail?.guest?.id, booking.guest_id, detailCache]);
+
   const inferredBookingModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
   const tableStyle = inferredBookingModel === 'table_reservation';
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
-  const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(booking.status));
+
+  const effectiveBooking = useMemo(
+    () => ({ ...booking, ...rowOverlay }),
+    [booking, rowOverlay],
+  );
+
+  const canStaffModifyBooking = ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(
+    String(effectiveBooking.status),
+  );
 
   const staffNewBookingPrimary = venueStaffBookingModel ?? inferredBookingModel;
   const staffNewBookingEnabledModels = useMemo(
@@ -361,30 +438,30 @@ export function ExpandedBookingContent({
 
   const staffNewBookingGuestContacts = useMemo<StaffRebookGuestPrefill>(
     () => ({
-      firstName: detail?.guest?.first_name ?? booking.guest_first_name ?? undefined,
-      lastName: detail?.guest?.last_name ?? booking.guest_last_name ?? undefined,
-      email: detail?.guest?.email ?? booking.guest_email,
-      phone: detail?.guest?.phone ?? booking.guest_phone,
+      firstName: activeDetail?.guest?.first_name ?? booking.guest_first_name ?? undefined,
+      lastName: activeDetail?.guest?.last_name ?? booking.guest_last_name ?? undefined,
+      email: activeDetail?.guest?.email ?? booking.guest_email,
+      phone: activeDetail?.guest?.phone ?? booking.guest_phone,
       dietaryNotes: booking.dietary_notes,
       occasion: booking.occasion,
-      specialRequests: detail?.special_requests ?? null,
-      internalNotes: detail?.internal_notes ?? null,
-      customerProfileNotes: detail?.guest?.customer_profile_notes ?? null,
+      specialRequests: activeDetail?.special_requests ?? null,
+      internalNotes: activeDetail?.internal_notes ?? null,
+      customerProfileNotes: activeDetail?.guest?.customer_profile_notes ?? null,
     }),
     [
+      activeDetail?.guest?.customer_profile_notes,
+      activeDetail?.guest?.email,
+      activeDetail?.guest?.first_name,
+      activeDetail?.guest?.last_name,
+      activeDetail?.guest?.phone,
+      activeDetail?.internal_notes,
+      activeDetail?.special_requests,
       booking.dietary_notes,
       booking.guest_email,
       booking.guest_first_name,
       booking.guest_last_name,
       booking.guest_phone,
       booking.occasion,
-      detail?.guest?.customer_profile_notes,
-      detail?.guest?.email,
-      detail?.guest?.first_name,
-      detail?.guest?.last_name,
-      detail?.guest?.phone,
-      detail?.internal_notes,
-      detail?.special_requests,
     ],
   );
 
@@ -395,51 +472,49 @@ export function ExpandedBookingContent({
     [booking, staffNewBookingGuestContacts],
   );
 
-  if (detailLoading) {
-    return (
-      <div id={`booking-expand-${booking.id}`} className="mt-2 animate-pulse space-y-2.5 px-1 pb-3" onClick={(e) => e.stopPropagation()}>
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="h-28 rounded-2xl bg-slate-100" />
-          <div className="h-28 rounded-2xl bg-slate-100" />
-        </div>
-        <div className="h-16 rounded-2xl bg-slate-100" />
-        <div className="h-10 rounded-2xl bg-slate-100" />
-      </div>
-    );
-  }
 
-  const guestName = detail?.guest
-    ? formatGuestDisplayName(detail.guest.first_name, detail.guest.last_name)
+  const profileGuest = activeDetail?.guest ?? guestStubFromBookingRow(booking);
+  const profileGuestId = profileGuest?.id ?? booking.guest_id ?? null;
+
+  const guestName = profileGuest
+    ? formatGuestDisplayName(profileGuest.first_name, profileGuest.last_name)
     : booking.guest_name;
-  const guestPhone = detail?.guest?.phone ?? booking.guest_phone;
-  const guestEmail = detail?.guest?.email ?? booking.guest_email;
-  const contactsGuestId = detail?.guest?.id ?? booking.guest_id ?? null;
+  const guestPhone = profileGuest?.phone ?? booking.guest_phone;
+  const guestEmail = profileGuest?.email ?? booking.guest_email;
+  const contactsGuestId = profileGuestId;
   const contactsHref = contactsGuestId
     ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
     : null;
-  const visitCount = detail?.guest?.visit_count ?? 0;
-  const previousVisitDate = detail?.guest?.last_visit_date ?? null;
-  const tableNames = (detail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
-  const depositAmtStr = booking.deposit_amount_pence ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}` : null;
-  const endTime = booking.estimated_end_time
-    ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+  const visitCount =
+    activeDetail?.guest?.visit_count ?? booking.guest_visit_count ?? profileGuest?.visit_count ?? 0;
+  const previousVisitDate = activeDetail?.guest?.last_visit_date ?? profileGuest?.last_visit_date ?? null;
+  const tableNames = (activeDetail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
+  const depositAmtStr = effectiveBooking.deposit_amount_pence
+    ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
-  const serviceLine = booking.service_name ?? detail?.cde_context?.title ?? null;
+  const endTime = bookingDisplayEndHm(booking);
+  const serviceLine = booking.service_name ?? activeDetail?.cde_context?.title ?? null;
   const guestProfileAndNotesCount = [
-    ...(detail?.guest?.tags ?? []),
-    detail?.guest?.customer_profile_notes,
+    ...(activeDetail?.guest?.tags ?? []),
+    activeDetail?.guest?.customer_profile_notes,
     booking.dietary_notes,
     booking.occasion,
-    detail?.special_requests,
-    detail?.internal_notes,
+    activeDetail?.special_requests,
+    activeDetail?.internal_notes,
   ].filter(Boolean).length;
-  const confirmationSentAt = detail?.communications.find(
+  const confirmationSentAt = activeDetail?.communications.find(
     (comm) => comm.message_type === 'booking_confirmation_email' || comm.message_type === 'booking_confirmation_sms',
   )?.created_at;
 
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
     setInlineActionError(null);
+    if (body.staff_attendance_confirmed === false) {
+      setSuppressPatchCancelAfterUndoConfirm(true);
+    }
+    setRowOverlay((prev) =>
+      mergeBookingRowOverlay(prev, overlayFromPatchBody(body, { ...booking, ...prev })),
+    );
     try {
       const res = await fetch(`/api/venue/bookings/${booking.id}`, {
         method: 'PATCH',
@@ -449,12 +524,22 @@ export function ExpandedBookingContent({
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
         setInlineActionError(payload.error ?? 'Update failed');
+        setRowOverlay({});
+        setSuppressPatchCancelAfterUndoConfirm(false);
         return;
+      }
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (payload && typeof payload === 'object' && !('error' in payload)) {
+        setRowOverlay((prev) =>
+          mergeBookingRowOverlay(prev, overlayFromPatchPayloadForBody(body, payload)),
+        );
       }
       setInlineActionError(null);
       onDetailUpdated();
     } catch {
       setInlineActionError('Update failed');
+      setRowOverlay({});
+      setSuppressPatchCancelAfterUndoConfirm(false);
     } finally {
       setInlineActionLoading(null);
     }
@@ -463,6 +548,17 @@ export function ExpandedBookingContent({
   const runDepositAction = async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
     setInlineActionLoading(`deposit:${action}`);
     setInlineActionError(null);
+    const depositOverlay: BookingRowOverlay =
+      action === 'waive'
+        ? { deposit_status: 'Waived' }
+        : action === 'record_cash'
+          ? { deposit_status: 'Paid' }
+          : action === 'refund'
+            ? { deposit_status: 'Refunded' }
+            : {};
+    if (Object.keys(depositOverlay).length > 0) {
+      setRowOverlay((prev) => mergeBookingRowOverlay(prev, depositOverlay));
+    }
     try {
       const res = await fetch(`/api/venue/bookings/${booking.id}/deposit`, {
         method: 'POST',
@@ -472,6 +568,7 @@ export function ExpandedBookingContent({
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
         setInlineActionError(payload.error ?? 'Deposit action failed');
+        setRowOverlay((prev) => pruneBookingRowOverlay(prev, booking));
         return;
       }
       setInlineActionError(null);
@@ -497,9 +594,9 @@ export function ExpandedBookingContent({
     }
   };
 
-  const canCancel = canTransitionBookingStatus(booking.status, 'Cancelled');
-  const canNoShow = canTransitionBookingStatus(booking.status, 'No-Show');
-  const revertFromBookingStatus = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+  const canCancel = canTransitionBookingStatus(effectiveBooking.status, 'Cancelled');
+  const canNoShow = canTransitionBookingStatus(effectiveBooking.status, 'No-Show');
+  const revertFromBookingStatus = BOOKING_REVERT_ACTIONS[effectiveBooking.status as BookingStatus];
   /** Suppress rarely-used Booked → Pending (“Mark pending”) in this dense inline bar. */
   const revertAction =
     revertFromBookingStatus?.target === 'Pending' ? undefined : revertFromBookingStatus;
@@ -512,7 +609,7 @@ export function ExpandedBookingContent({
     if (!revertAction) return '';
     if (
       revertAction.target === 'Booked' &&
-      booking.status === 'Seated' &&
+      effectiveBooking.status === 'Seated' &&
       !tableStyle
     ) {
       return 'Undo Start';
@@ -528,39 +625,64 @@ export function ExpandedBookingContent({
       BOOKING_PRIMARY_ACTIONS.Seated,
     ] as Array<{ label: string; target: BookingStatus } | undefined>
   ).reduce<Array<{ label: string; target: BookingStatus }>>((actions, action) => {
-    if (!action || !canTransitionBookingStatus(booking.status, action.target)) return actions;
+    if (!action || !canTransitionBookingStatus(effectiveBooking.status, action.target)) return actions;
     /** Do not treat lifecycle reverts as “forward” primaries (e.g. Confirmed→Booked reused Pending’s {Confirm,Booked} row). */
-    if (isRevertTransition(booking.status as BookingStatus, action.target)) return actions;
+    if (isRevertTransition(effectiveBooking.status as BookingStatus, action.target)) return actions;
     if (actions.some((existing) => existing.target === action.target)) return actions;
     return [...actions, action];
   }, []);
 
-  const staffIndicatorRow = { ...booking, status: booking.status };
+  const staffIndicatorRow = { ...effectiveBooking, status: effectiveBooking.status };
   const showStaffAttendanceConfirm = canShowConfirmBookingAttendanceAction(staffIndicatorRow);
   /** Attendance undo via PATCH; skip when status revert already offers “Undo confirm” (Confirmed → Booked). */
   const showUndoAttendanceViaPatch =
     canShowCancelStaffAttendanceConfirmationAction(staffIndicatorRow) &&
-    !(booking.status === 'Confirmed' && revertAction?.target === 'Booked') &&
+    !(effectiveBooking.status === 'Confirmed' && revertAction?.target === 'Booked') &&
     !suppressPatchCancelAfterUndoConfirm;
-  const arrived = Boolean(booking.client_arrived_at);
+  const arrived = Boolean(effectiveBooking.client_arrived_at);
   const showArrivedClear =
-    booking.status === 'Pending' || booking.status === 'Booked' || booking.status === 'Confirmed';
+    effectiveBooking.status === 'Pending' ||
+    effectiveBooking.status === 'Booked' ||
+    effectiveBooking.status === 'Confirmed';
+
+  const toolbarBusy =
+    inlineActionLoading !== null || statusActionPending || sendingMessage || confirmAction !== null;
+
+  const copyBookingRef = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(booking.id);
+      setRefCopied(true);
+      window.setTimeout(() => setRefCopied(false), 2000);
+    } catch (e) {
+      console.error('[ExpandedBookingContent] copy booking ref', e);
+    }
+  }, [booking.id]);
 
   const handleStatusClick = (status: BookingStatus, label: string) => {
+    if (toolbarBusy) return;
+    const fromStatus = effectiveBooking.status as BookingStatus;
     /** Label fallback when `tableStyle` mis-infers reservation (still “Undo start / undo confirm”). */
     if (
       (status === 'Booked' && (label === 'Undo Start' || label === 'Undo confirm')) ||
-      isBookingInstantRevertTransition(booking.status as BookingStatus, status, tableStyle)
+      isBookingInstantRevertTransition(fromStatus, status, tableStyle)
     ) {
-      if (booking.status === 'Confirmed' && status === 'Booked') {
+      if (fromStatus === 'Confirmed' && status === 'Booked') {
         setSuppressPatchCancelAfterUndoConfirm(true);
       }
+      setRowOverlay((prev) =>
+        mergeBookingRowOverlay(prev, overlayFromStatusTransition(fromStatus, status, tableStyle)),
+      );
+      setStatusActionPending(true);
       onStatusAction(status);
       return;
     }
-    if (isDestructiveBookingStatus(status) || isRevertTransition(booking.status as BookingStatus, status)) {
+    if (isDestructiveBookingStatus(status) || isRevertTransition(fromStatus, status)) {
       setConfirmAction({ status, label });
     } else {
+      setRowOverlay((prev) =>
+        mergeBookingRowOverlay(prev, overlayFromStatusTransition(fromStatus, status, tableStyle)),
+      );
+      setStatusActionPending(true);
       onStatusAction(status);
     }
   };
@@ -575,11 +697,11 @@ export function ExpandedBookingContent({
 
   const revertToolbarButtonClass =
     revertAction &&
-    booking.status === 'Seated' &&
+    effectiveBooking.status === 'Seated' &&
     revertAction.target === 'Booked' &&
     !tableStyle
       ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`
-      : revertAction && booking.status === 'Confirmed' && revertAction.target === 'Booked'
+      : revertAction && effectiveBooking.status === 'Confirmed' && revertAction.target === 'Booked'
         ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`
         : EXP_BOOKING_REVERT;
 
@@ -590,7 +712,10 @@ export function ExpandedBookingContent({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <SectionCard className="rounded-xl ring-1 ring-slate-900/[0.04]">
+      <SectionCard
+        className={`rounded-xl ring-1 ring-slate-900/[0.04] ${detailHydrating ? 'opacity-[0.98]' : ''}`}
+        aria-busy={detailHydrating}
+      >
         <SectionCard.Body className="p-2.5 sm:p-3">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2.5">
@@ -613,7 +738,9 @@ export function ExpandedBookingContent({
                     </Link>
                   ) : null}
                   <Pill variant="neutral" size="sm">{visitCount > 0 ? `${visitCount} visit${visitCount !== 1 ? 's' : ''}` : 'First visit'}</Pill>
-                  {detail?.guest?.customer_profile_notes ? <Pill variant="info" size="sm">Guest note</Pill> : null}
+                  {(activeDetail?.guest?.customer_profile_notes ?? profileGuest?.customer_profile_notes) ? (
+                    <Pill variant="info" size="sm">Guest note</Pill>
+                  ) : null}
                 </div>
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   <span className="font-medium text-slate-700">{formatDateNice(booking.booking_date)}</span>
@@ -627,12 +754,12 @@ export function ExpandedBookingContent({
                       <span className="font-medium text-slate-700">{serviceLine}</span>
                     </>
                   ) : null}
-                  {showDepositPendingPill(booking) ? (
+                  {showDepositPendingPill(effectiveBooking) ? (
                     <Pill variant="warning" size="sm" dot>
                       Deposit pending
                     </Pill>
                   ) : null}
-                  {showAttendanceConfirmedSupplementPill(booking) ? (
+                  {showAttendanceConfirmedSupplementPill(effectiveBooking) ? (
                     <BookingStatusPill statusKey="Confirmed" dot className="shrink-0">
                       Confirmed
                     </BookingStatusPill>
@@ -677,15 +804,53 @@ export function ExpandedBookingContent({
             </div>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
+              {guestEmail ? (
+                <a
+                  href={`mailto:${guestEmail}`}
+                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                >
+                  {guestEmail}
+                </a>
+              ) : (
+                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
+              {guestPhone ? (
+                <a
+                  href={`tel:${guestPhone}`}
+                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 tabular-nums [overflow-wrap:anywhere] hover:text-brand-700"
+                >
+                  {guestPhone}
+                </a>
+              ) : (
+                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
+              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+                {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
+              </p>
+            </div>
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
+              <p className="truncate text-xs font-bold leading-snug text-slate-800">
+                {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
+              </p>
+            </div>
             {tableStyle ? (
               <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
                 <p className={`truncate text-xs font-bold ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
                   {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
                 </p>
-                {detail?.combination_staff_notes ? (
+                {activeDetail?.combination_staff_notes ? (
                   <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-emerald-800">
-                    {detail.combination_staff_notes}
+                    {activeDetail.combination_staff_notes}
                   </p>
                 ) : null}
               </div>
@@ -697,18 +862,18 @@ export function ExpandedBookingContent({
             ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
-              <p className={`truncate text-xs font-bold ${booking.deposit_status === 'Paid' ? 'text-emerald-700' : booking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
-                {booking.deposit_status === 'Not Required'
+              <p className={`truncate text-xs font-bold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
+                {effectiveBooking.deposit_status === 'Not Required'
                   ? 'None'
-                  : booking.deposit_status === 'Paid' && depositAmtStr
+                  : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
                     ? `${depositAmtStr} paid`
-                    : booking.deposit_status}
+                    : effectiveBooking.deposit_status}
               </p>
             </div>
-            {detail?.checked_in_at ? (
+            {activeDetail?.checked_in_at ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Checked in</p>
-                <p className="truncate text-xs font-bold text-slate-700">{formatRelative(detail.checked_in_at)}</p>
+                <p className="truncate text-xs font-bold text-slate-700">{formatRelative(activeDetail.checked_in_at)}</p>
               </div>
             ) : null}
             {confirmationSentAt ? (
@@ -725,11 +890,12 @@ export function ExpandedBookingContent({
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Ref</p>
               <button
                 type="button"
-                onClick={() => navigator.clipboard?.writeText(booking.id)}
+                onClick={() => { void copyBookingRef(); }}
                 className="truncate text-left text-xs font-bold text-slate-700 hover:text-brand-700"
-                title="Copy booking reference"
+                title={refCopied ? 'Copied!' : 'Copy booking reference'}
+                aria-label={refCopied ? 'Booking reference copied' : 'Copy booking reference'}
               >
-                #{booking.id.slice(0, 8)}
+                #{booking.id.slice(0, 8)}{refCopied ? ' ✓' : ''}
               </button>
             </div>
           </div>
@@ -737,13 +903,18 @@ export function ExpandedBookingContent({
       </SectionCard>
 
       {/* Actions bar */}
-      <div className={bookingExpandActionsBarClass}>
+      <div
+        className={bookingExpandActionsBarClass}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         <div className="rounded-b-xl bg-gradient-to-b from-white to-slate-50/40 px-2 py-2 sm:px-3 sm:py-2.5">
           <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
             {forwardActions.map((action) => (
               <button
                 key={action.target}
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => handleStatusClick(action.target, forwardPrimaryLabel(action.target, action.label))}
                 className={forwardActionButtonClass(action)}
               >
@@ -760,7 +931,7 @@ export function ExpandedBookingContent({
             {showStaffAttendanceConfirm ? (
               <button
                 type="button"
-                disabled={inlineActionLoading !== null}
+                disabled={toolbarBusy}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: true }, 'staff-attendance')}
                 className={`${EXP_BOOKING_BTN} font-semibold ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
               >
@@ -777,7 +948,7 @@ export function ExpandedBookingContent({
             {showUndoAttendanceViaPatch ? (
               <button
                 type="button"
-                disabled={inlineActionLoading !== null}
+                disabled={toolbarBusy}
                 onClick={() => void patchBookingQuick({ staff_attendance_confirmed: false }, 'staff-attendance-cancel')}
                 className={`${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`}
               >
@@ -792,7 +963,7 @@ export function ExpandedBookingContent({
               !arrived ? (
                 <button
                   type="button"
-                  disabled={inlineActionLoading !== null}
+                  disabled={toolbarBusy}
                   onClick={() => void patchBookingQuick({ client_arrived: true }, 'client-arrived')}
                   className={EXP_BOOKING_AMBER_ATTN}
                 >
@@ -804,7 +975,7 @@ export function ExpandedBookingContent({
               ) : (
                 <button
                   type="button"
-                  disabled={inlineActionLoading !== null}
+                  disabled={toolbarBusy}
                   onClick={() => void patchBookingQuick({ client_arrived: false }, 'client-arrived-clear')}
                   className={EXP_BOOKING_SOFT}
                 >
@@ -817,7 +988,7 @@ export function ExpandedBookingContent({
             ) : null}
 
             {onRequestChangeTable && (
-              <button type="button" onClick={onRequestChangeTable} className={EXP_BOOKING_NEUTRAL}>
+              <button type="button" disabled={toolbarBusy} onClick={onRequestChangeTable} className={EXP_BOOKING_NEUTRAL}>
                 Change table
               </button>
             )}
@@ -825,6 +996,7 @@ export function ExpandedBookingContent({
             {revertAction && (
               <button
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => handleStatusClick(revertAction.target, revertButtonLabel())}
                 className={revertToolbarButtonClass}
               >
@@ -836,6 +1008,7 @@ export function ExpandedBookingContent({
             <button
               type="button"
               aria-label="New booking"
+              disabled={toolbarBusy}
               onClick={() => {
                 setStaffBookingModal({
                   mode: 'new',
@@ -859,6 +1032,7 @@ export function ExpandedBookingContent({
             {canExpandStaffRebook && (
               <button
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => {
                   const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill);
                   if (!payload) return;
@@ -875,6 +1049,7 @@ export function ExpandedBookingContent({
             {canStaffModifyBooking && (
               <button
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => {
                   setModifyBookingOpen(true);
                   setShowMessageBox(false);
@@ -888,6 +1063,7 @@ export function ExpandedBookingContent({
             {canCancel && (
               <button
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => handleStatusClick('Cancelled', 'Cancel Booking')}
                 className={EXP_BOOKING_DANGER}
               >
@@ -897,6 +1073,7 @@ export function ExpandedBookingContent({
             {canNoShow && (
               <button
                 type="button"
+                disabled={toolbarBusy}
                 onClick={() => handleStatusClick('No-Show', 'Mark No-Show')}
                 className={EXP_BOOKING_DANGER_ROSE}
               >
@@ -907,63 +1084,27 @@ export function ExpandedBookingContent({
         </div>
       </div>
 
-      {detail?.guest?.id ? (
+      {profileGuestId ? (
         <details className={bookingExpandAccordionDetailsClass}>
           <summary className={bookingExpandAccordionSummaryClass}>
-            <span>Guest profile and notes</span>
+            <span>Notes</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
               {guestProfileAndNotesCount > 0
                 ? `${guestProfileAndNotesCount} item${guestProfileAndNotesCount === 1 ? '' : 's'}`
-                : 'Profile and booking notes'}
+                : 'Tags and booking notes'}
             </span>
             <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
           <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
-            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(min(100%,11.5rem),1fr))]">
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Name</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">{guestName}</p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
-                {guestEmail ? (
-                  <a href={`mailto:${guestEmail}`} className="block min-w-0 text-xs font-bold leading-snug text-slate-800 break-words [overflow-wrap:anywhere] hover:text-brand-700">
-                    {guestEmail}
-                  </a>
-                ) : (
-                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
-                )}
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
-                {guestPhone ? (
-                  <a href={`tel:${guestPhone}`} className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700">
-                    {guestPhone}
-                  </a>
-                ) : (
-                  <p className="break-words text-xs font-bold leading-snug text-slate-400">Not provided</p>
-                )}
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">
-                  {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
-                </p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-800">
-                  {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
-                </p>
-              </div>
-            </div>
             <GuestTagEditor
-              tags={Array.isArray(detail.guest.tags) ? detail.guest.tags : []}
+              tags={Array.isArray(activeDetail?.guest?.tags) ? activeDetail!.guest!.tags : []}
               venueId={venueId}
+              disabled={!profileGuestId || detailHydrating}
               onTagsChange={async (nextTags) => {
-                const res = await fetch(`/api/venue/guests/${detail.guest!.id}`, {
+                if (!profileGuestId) return;
+                const res = await fetch(`/api/venue/guests/${profileGuestId}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ tags: nextTags }),
@@ -977,9 +1118,9 @@ export function ExpandedBookingContent({
             />
             <CustomerProfileNotesCard
               embedded
-              guestId={detail.guest.id}
-              value={detail.guest.customer_profile_notes}
-              disabled={detailLoading}
+              guestId={profileGuestId}
+              value={activeDetail?.guest?.customer_profile_notes ?? profileGuest?.customer_profile_notes ?? null}
+              disabled={!profileGuestId || detailHydrating}
               onSaved={onDetailUpdated}
             />
             <div className="border-t border-slate-100 pt-2">
@@ -994,8 +1135,8 @@ export function ExpandedBookingContent({
               <BookingNotesEditablePanel
                 bookingId={booking.id}
                 dietaryNotes={booking.dietary_notes}
-                guestRequests={detail.special_requests}
-                staffNotes={detail.internal_notes}
+                guestRequests={activeDetail?.special_requests}
+                staffNotes={activeDetail?.internal_notes}
                 onSaved={onDetailUpdated}
                 notesVariant={notesVariant}
                 compact
@@ -1006,10 +1147,12 @@ export function ExpandedBookingContent({
         </details>
       ) : null}
 
-      {detail?.guest?.id && !detailLoading ? (
+      {(activeDetail?.guest?.id ?? booking.guest_id) ? (
         <div className="px-0 sm:px-0.5">
           <GuestBookingsForGuestAccordion
-            guestId={detail.guest.id}
+            guestId={profileGuestId!}
+            initialRows={guestHistoryInitialRows}
+            fetchWhenOpen
             currentBookingId={booking.id}
             guestDisplayNameForSnapshots={guestName}
             venueTimeZone={venueTimezone}
@@ -1036,8 +1179,8 @@ export function ExpandedBookingContent({
         <summary className={bookingExpandAccordionSummaryClass}>
           <span>SMS / email guest</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-            {(detail?.communications ?? []).length > 0
-              ? `${detail!.communications.length} sent`
+            {(activeDetail?.communications ?? []).length > 0
+              ? `${activeDetail!.communications.length} sent`
               : guestPhone && guestEmail
                 ? 'SMS + email'
                 : guestPhone
@@ -1053,9 +1196,9 @@ export function ExpandedBookingContent({
         <div className={bookingExpandAccordionMessagingBodyClass}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-slate-700">Message {guestName.split(' ')[0]}</p>
-            {(detail?.communications ?? []).length > 0 && (
+            {(activeDetail?.communications ?? []).length > 0 && (
               <span className="text-[10px] text-slate-400">
-                {detail!.communications.length} sent · last via {detail!.communications[0]?.channel}
+                {activeDetail!.communications.length} sent · last via {activeDetail!.communications[0]?.channel}
               </span>
             )}
           </div>
@@ -1123,27 +1266,27 @@ export function ExpandedBookingContent({
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
           <span>Payments and confirmation</span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{booking.deposit_status}</span>
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{effectiveBooking.deposit_status}</span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
           <div className="flex flex-wrap gap-1">
-            {booking.deposit_status !== 'Paid' && booking.deposit_status !== 'Refunded' ? (
+            {effectiveBooking.deposit_status !== 'Paid' && effectiveBooking.deposit_status !== 'Refunded' ? (
               <>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Send payment link</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Waive</button>
-                <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Record cash</button>
+                <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Send payment link</button>
+                <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Waive</button>
+                <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Record cash</button>
               </>
             ) : null}
-            {booking.deposit_status === 'Paid' ? (
-              <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Refund deposit</button>
+            {effectiveBooking.deposit_status === 'Paid' ? (
+              <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Refund deposit</button>
             ) : null}
-            <button type="button" disabled={inlineActionLoading !== null} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Resend confirmation</button>
+            <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Resend confirmation</button>
           </div>
-          {detail?.cancellation_deadline ? (
-            <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(detail.cancellation_deadline)}</p>
+          {activeDetail?.cancellation_deadline ? (
+            <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(activeDetail.cancellation_deadline)}</p>
           ) : null}
           {inlineActionError ? (
             <p className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] font-medium text-red-700">{inlineActionError}</p>
@@ -1151,12 +1294,12 @@ export function ExpandedBookingContent({
         </div>
       </details>
 
-      {!detail?.guest?.id ? (
+      {!profileGuestId ? (
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Notes and preferences</span>
+          <span>Notes</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-            {[booking.dietary_notes, booking.occasion, detail?.special_requests, detail?.internal_notes].filter(Boolean).length || 'None'}
+            {[booking.dietary_notes, booking.occasion, activeDetail?.special_requests, activeDetail?.internal_notes].filter(Boolean).length || 'None'}
           </span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
@@ -1166,8 +1309,8 @@ export function ExpandedBookingContent({
           <BookingNotesEditablePanel
             bookingId={booking.id}
             dietaryNotes={booking.dietary_notes}
-            guestRequests={detail?.special_requests}
-            staffNotes={detail?.internal_notes}
+            guestRequests={activeDetail?.special_requests}
+            staffNotes={activeDetail?.internal_notes}
             onSaved={onDetailUpdated}
             notesVariant={notesVariant}
             compact
@@ -1182,7 +1325,7 @@ export function ExpandedBookingContent({
       ) : null}
 
       {/* CDE context — omitted when title already appears in the summary row */}
-      {detail?.cde_context && !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) && (
+      {activeDetail?.cde_context && !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) && (
         <SectionCard className="border-emerald-200 bg-emerald-50/30">
           <SectionCard.Body className="p-4">
             <div className="flex items-start gap-3">
@@ -1190,9 +1333,9 @@ export function ExpandedBookingContent({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">{detail.cde_context.title}</p>
-                {detail.cde_context.subtitle && (
-                  <p className="mt-0.5 text-xs text-slate-600">{detail.cde_context.subtitle}</p>
+                <p className="text-sm font-semibold text-slate-900">{activeDetail.cde_context.title}</p>
+                {activeDetail.cde_context.subtitle && (
+                  <p className="mt-0.5 text-xs text-slate-600">{activeDetail.cde_context.subtitle}</p>
                 )}
               </div>
             </div>
@@ -1227,24 +1370,23 @@ export function ExpandedBookingContent({
         </SectionCard>
       )}
 
-      {/* Communications and booking activity */}
-      {((detail?.communications ?? []).length > 0 || (detail?.events ?? []).length > 0) && (
-        <details className={bookingExpandAccordionDetailsClass}>
+      {/* Communications and booking activity — header always present to avoid layout shift when data arrives */}
+      <details className={bookingExpandAccordionDetailsClass}>
           <summary className={bookingExpandAccordionSummaryClass}>
             <span>Activity</span>
             <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-              {(detail?.communications ?? []).length} comms · {(detail?.events ?? []).length} events
+              {`${(activeDetail?.communications ?? []).length} comms · ${(activeDetail?.events ?? []).length} events`}
             </span>
             <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
             </svg>
           </summary>
           <div className={`${bookingExpandAccordionBodyClass} space-y-3`}>
-            {(detail?.communications ?? []).length > 0 ? (
+            {(activeDetail?.communications ?? []).length > 0 ? (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Communications</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {(detail?.communications ?? []).slice(0, 6).map((comm) => (
+                  {(activeDetail?.communications ?? []).slice(0, 6).map((comm) => (
                     <div key={comm.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
                       <span className="min-w-0 truncate">
                         <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${comm.status === 'sent' ? 'bg-emerald-400' : comm.status === 'failed' ? 'bg-red-400' : 'bg-amber-400'}`} />
@@ -1256,11 +1398,11 @@ export function ExpandedBookingContent({
                 </div>
               </div>
             ) : null}
-            {(detail?.events ?? []).length > 0 ? (
+            {(activeDetail?.events ?? []).length > 0 ? (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Timeline</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {(detail?.events ?? []).slice(0, 6).map((event) => (
+                  {(activeDetail?.events ?? []).slice(0, 6).map((event) => (
                     <div key={event.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]">
                       <span className="min-w-0 truncate font-medium">{event.event_type.replace(/_/g, ' ')}</span>
                       <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
@@ -1271,7 +1413,6 @@ export function ExpandedBookingContent({
             ) : null}
           </div>
         </details>
-      )}
 
       {/* Inline confirmation dialog */}
       {confirmAction && (
@@ -1285,7 +1426,18 @@ export function ExpandedBookingContent({
             <div className="mt-3 flex gap-1.5">
               <button
                 type="button"
-                onClick={() => { onStatusAction(confirmAction.status); setConfirmAction(null); }}
+                onClick={() => {
+                  const fromStatus = effectiveBooking.status as BookingStatus;
+                  setRowOverlay((prev) =>
+                    mergeBookingRowOverlay(
+                      prev,
+                      overlayFromStatusTransition(fromStatus, confirmAction.status, tableStyle),
+                    ),
+                  );
+                  setStatusActionPending(true);
+                  onStatusAction(confirmAction.status);
+                  setConfirmAction(null);
+                }}
                 className="rounded-xl bg-red-600 px-[15px] py-2 text-xs font-semibold text-white hover:bg-red-700"
               >
                 {confirmAction.label}
@@ -1315,16 +1467,16 @@ export function ExpandedBookingContent({
           tableManagementEnabled={tableManagementEnabled}
           booking={booking}
           detail={
-            detail
+            activeDetail
               ? {
-                  special_requests: detail.special_requests,
-                  internal_notes: detail.internal_notes,
-                  guest: detail.guest
+                  special_requests: activeDetail.special_requests,
+                  internal_notes: activeDetail.internal_notes,
+                  guest: activeDetail.guest
                     ? {
-                        first_name: detail.guest.first_name,
-                        last_name: detail.guest.last_name,
-                        email: detail.guest.email,
-                        phone: detail.guest.phone,
+                        first_name: activeDetail.guest.first_name,
+                        last_name: activeDetail.guest.last_name,
+                        email: activeDetail.guest.email,
+                        phone: activeDetail.guest.phone,
                       }
                     : null,
                 }

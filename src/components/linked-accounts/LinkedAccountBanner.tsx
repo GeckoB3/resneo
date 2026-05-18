@@ -54,10 +54,10 @@ export function LinkedAccountBanner() {
   const [visible, setVisible] = useState<IncomingItem[]>([]);
 
   useEffect(() => {
-    const initial = loadDismissals();
-    setDismissed(initial);
+    setDismissed(loadDismissals());
+
     let cancelled = false;
-    (async () => {
+    const refresh = async () => {
       try {
         const res = await fetch('/api/venue/account-links/incoming');
         if (!res.ok) return;
@@ -77,9 +77,22 @@ export function LinkedAccountBanner() {
       } catch {
         // The banner is best-effort; stay silent on failure.
       }
-    })();
+    };
+
+    void refresh();
+
+    // Re-check when the tab regains focus so a request that arrives while the
+    // dashboard is open surfaces without a manual reload (§8.3).
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, []);
 

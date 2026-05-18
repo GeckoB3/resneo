@@ -38,12 +38,75 @@ import {
 } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
 import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
+import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact-guest-history';
 
 const accordionChevron = (
   <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
     <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
   </svg>
 );
+
+function ContactDetailListRowShell({
+  id,
+  listRow,
+  clientLower,
+  editError,
+}: {
+  id: string;
+  listRow: GuestListRow;
+  clientLower: string;
+  editError: string | null;
+}) {
+  const isAnonRow = listRow.identifiability_tier === 'anonymous';
+  const displayName = isAnonRow
+    ? 'Anonymous'
+    : formatGuestDisplayName(listRow.first_name, listRow.last_name);
+  const email = listRow.email?.trim() || null;
+  const phone = listRow.phone?.trim() || null;
+  const nextVisitLabel = formatNextBookingSummary(listRow.next_booking_date, listRow.next_booking_time);
+  const lastVisitCal = formatCalendarDayShort(listRow.last_visit_date);
+
+  return (
+    <div
+      id={id}
+      className="mt-1.5 flex flex-col gap-2.5 px-0.5 pb-2.5 sm:px-1"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {editError ? <p className="px-1 text-sm text-red-600">{editError}</p> : null}
+      <p className="px-1 text-[11px] font-medium text-slate-500">Loading {clientLower} details…</p>
+      <SectionCard className="rounded-xl ring-1 ring-slate-900/[0.04]">
+        <SectionCard.Body className="p-2.5 sm:p-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-900">{displayName}</p>
+              <p className="truncate text-xs text-slate-600">
+                {[email, phone].filter(Boolean).join(' · ') || 'No contact details on file'}
+              </p>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
+              <p className="font-semibold text-slate-800">{listRow.visit_count ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Last visit</p>
+              <p className="font-semibold text-slate-800">{lastVisitCal ?? '—'}</p>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Next booking</p>
+              <p className="font-semibold text-slate-800">{nextVisitLabel ?? 'None scheduled'}</p>
+            </div>
+          </div>
+        </SectionCard.Body>
+      </SectionCard>
+    </div>
+  );
+}
 
 function SubBlock({ title, children, className = '' }: { title: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -206,25 +269,27 @@ export function ContactDetailPanel({
     setContactDetailsEditing(false);
   }, [selectedId]);
 
-  if (detailLoading) {
+  const hasFullDetail = detail != null && detail.guest.id === selectedId;
+  const guestHistoryInitialRows = useMemo(
+    () =>
+      hasFullDetail && detail.booking_history.length > 0
+        ? mapContactGuestHistoryToAccordionRows(detail.booking_history)
+        : undefined,
+    [detail, hasFullDetail],
+  );
+
+  if (detailLoading && !hasFullDetail) {
     return (
-      <div
+      <ContactDetailListRowShell
         id={id}
-        className="mt-1.5 animate-pulse space-y-2.5 px-1 pb-3 sm:px-1.5"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="h-28 rounded-2xl bg-slate-100" />
-          <div className="h-28 rounded-2xl bg-slate-100" />
-        </div>
-        <div className="h-16 rounded-2xl bg-slate-100" />
-        <div className="h-10 rounded-2xl bg-slate-100" />
-      </div>
+        listRow={listRow}
+        clientLower={clientLower}
+        editError={editError}
+      />
     );
   }
 
-  if (!detail || detail.guest.id !== selectedId) {
+  if (!hasFullDetail) {
     return (
       <div id={id} className="px-3 py-4 sm:px-4" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         {editError ? <p className="text-sm text-red-600">{editError}</p> : (
@@ -261,6 +326,9 @@ export function ContactDetailPanel({
       onKeyDown={(e) => e.stopPropagation()}
     >
       {editError ? <p className="px-1 text-sm text-red-600">{editError}</p> : null}
+      {detailLoading ? (
+        <p className="px-1 text-[11px] font-medium text-slate-500">Updating {clientLower} details…</p>
+      ) : null}
 
       <SectionCard className="rounded-xl ring-1 ring-slate-900/[0.04]">
         <SectionCard.Body className="p-2.5 sm:p-3">
@@ -524,6 +592,8 @@ export function ContactDetailPanel({
       <div className="px-0 sm:px-0.5">
         <GuestBookingsForGuestAccordion
           guestId={g.id}
+          initialRows={guestHistoryInitialRows}
+          fetchWhenOpen
           currentBookingId=""
           guestDisplayNameForSnapshots={displayName}
           venueTimeZone={venueTimezone}

@@ -5,6 +5,7 @@ import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
 import { describeGrant, isReductionOnly, normaliseGrant } from '@/lib/linked-accounts/permissions';
 import type { AccountLinkRow, LinkGrant } from '@/lib/linked-accounts/types';
 import { notifyPermissionReduced } from '@/lib/linked-accounts/notifications';
+import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
 
 /**
  * POST /api/venue/account-links/[id]/reduce — unilaterally reduce the access my
@@ -93,6 +94,13 @@ export async function POST(
         };
 
     await ctx.admin.from('account_links').update(column).eq('id', id);
+
+    // Reducing visibility below full_details invalidates any collective that
+    // depends on this link (§7.5).
+    await reconcileCollectivesAfterLinkChange(ctx.admin, [
+      link.venue_low_id,
+      link.venue_high_id,
+    ]);
 
     const otherVenueId = iAmLow ? link.venue_high_id : link.venue_low_id;
     await notifyPermissionReduced(

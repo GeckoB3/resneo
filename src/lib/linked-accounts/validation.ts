@@ -65,6 +65,18 @@ export const linkedBookingChangeSchema = z.object({
     .refine((c) => Object.keys(c).length > 0, { message: 'No changes supplied.' }),
 });
 
+export const linkedBookingCreateSchema = z.object({
+  ownerVenueId: z.string().uuid(),
+  guestId: z.string().uuid(),
+  practitionerId: z.string().uuid().nullable().optional(),
+  appointmentServiceId: z.string().uuid().nullable().optional(),
+  bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  bookingTime: z.string().regex(TIME_RE),
+  bookingEndTime: z.string().regex(TIME_RE).optional(),
+  partySize: z.number().int().min(1).max(99).optional(),
+  specialRequests: z.string().max(2000).optional(),
+});
+
 // ---- Venue collectives (Phase 2) -------------------------------------------
 
 export const collectiveSlugSchema = z

@@ -149,6 +149,28 @@ export async function notifyLinkUnlinked(
   });
 }
 
+/** §6.6 — a linked venue was removed from ReserveNI; the surviving partner is notified. */
+export async function notifyLinkPartnerVenueDeleted(
+  admin: SupabaseClient,
+  survivorVenueId: string,
+  deletedVenueName: string,
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    survivorVenueId,
+    `${deletedVenueName} is no longer on ReserveNI`,
+    {
+      heading: 'Linked venue removed',
+      paragraphs: [
+        `${deletedVenueName} has been removed from ReserveNI. Your link with that venue has ended and all cross-venue calendar and booking access has stopped immediately.`,
+        'Your bookings and client data are unchanged. You can view the historical audit log for past links in Linked Accounts settings.',
+      ],
+      ctaLabel: 'View linked accounts',
+      ctaUrl: settingsUrl(),
+    },
+  );
+}
+
 export async function notifyPermissionChangeProposed(
   admin: SupabaseClient,
   venueId: string,
@@ -180,6 +202,27 @@ export async function notifyPermissionReduced(
       'A venue can reduce the access it grants at any time. Your updated access is shown below.',
     ],
     bullets: changeBullets,
+    ctaLabel: 'View linked accounts',
+    ctaUrl: settingsUrl(),
+  });
+}
+
+/**
+ * §6.7 foreseeable-lapse warning: sent ~7 days before a linked venue's
+ * subscription is expected to lapse, to every venue linked to it.
+ */
+export async function notifyLinkLapseWarning(
+  admin: SupabaseClient,
+  venueId: string,
+  lapsingVenueName: string,
+  effectiveDateLabel: string,
+): Promise<void> {
+  await notifyVenue(admin, venueId, 'A linked account may be suspended soon', {
+    heading: 'Linked account at risk of suspension',
+    paragraphs: [
+      `${lapsingVenueName}'s ReserveNI subscription is due to lapse on ${effectiveDateLabel}.`,
+      `If it is not renewed, the link with your venue will be suspended and cross-venue calendar and booking access will pause. The link resumes automatically if ${lapsingVenueName}'s subscription is restored within 30 days.`,
+    ],
     ctaLabel: 'View linked accounts',
     ctaUrl: settingsUrl(),
   });

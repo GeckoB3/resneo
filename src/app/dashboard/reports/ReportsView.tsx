@@ -1,12 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid,
-} from 'recharts';
 import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
@@ -123,6 +119,42 @@ const DEFAULT_LOG_SCHEDULE: BookingLogEmailScheduleEntry[] = [
 /** Brand-aligned chart segments: brand-600, brand-400, emerald-500, amber-500, slate. */
 const COLORS = ['#4E6B78', '#6B8A9A', '#059669', '#f59e0b', '#d97706', '#64748b'];
 
+type RechartsModule = typeof import('recharts');
+
+function useDeferredRecharts(shouldLoad: boolean): RechartsModule | null {
+  const [mod, setMod] = useState<RechartsModule | null>(null);
+  useEffect(() => {
+    if (!shouldLoad) return;
+    let cancelled = false;
+    void import('recharts').then((loaded) => {
+      if (!cancelled) setMod(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldLoad]);
+  return mod;
+}
+
+function ChartViewport({
+  recharts,
+  className = 'h-64',
+  children,
+}: {
+  recharts: RechartsModule | null;
+  className?: string;
+  children: (R: RechartsModule) => ReactNode;
+}) {
+  if (!recharts) {
+    return (
+      <div className={className}>
+        <DashboardChartSkeleton kpiCount={0} />
+      </div>
+    );
+  }
+  return <>{children(recharts)}</>;
+}
+
 function last7Days(): { from: string; to: string } {
   const to = new Date();
   const from = new Date(to);
@@ -230,6 +262,7 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
   );
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
   const activeTab = searchParams.get('tab') === 'clients' ? 'clients' : 'overview';
+  const recharts = useDeferredRecharts(activeTab === 'overview' && Boolean(data));
 
   const setActiveTab = useCallback(
     (tab: 'overview' | 'clients') => {
@@ -588,15 +621,19 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
                   {appointmentDashboardExperience ? 'How they booked (when created)' : 'By source (when created)'}
                 </p>
                 {sourcePieData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={sourcePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => `${e.name}: ${e.value}`}>
-                        {sourcePieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <ChartViewport recharts={recharts} className="h-full min-h-[12rem]">
+                    {(R) => (
+                      <R.ResponsiveContainer width="100%" height="100%">
+                        <R.PieChart>
+                          <R.Pie data={sourcePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => `${e.name}: ${e.value}`}>
+                            {sourcePieData.map((_, i) => <R.Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                          </R.Pie>
+                          <R.Tooltip />
+                          <R.Legend />
+                        </R.PieChart>
+                      </R.ResponsiveContainer>
+                    )}
+                  </ChartViewport>
                 ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
               <div className="h-64">
@@ -604,15 +641,19 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
                   {appointmentDashboardExperience ? 'Appointment status (latest)' : 'By status (latest)'}
                 </p>
                 {statusBarData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={statusBarData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="source" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Bar dataKey="count" fill="#4E6B78" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <ChartViewport recharts={recharts} className="h-full min-h-[12rem]">
+                    {(R) => (
+                      <R.ResponsiveContainer width="100%" height="100%">
+                        <R.BarChart data={statusBarData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                          <R.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <R.XAxis dataKey="source" tick={{ fontSize: 12 }} />
+                          <R.YAxis tick={{ fontSize: 12 }} />
+                          <R.Tooltip />
+                          <R.Bar dataKey="count" fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                        </R.BarChart>
+                      </R.ResponsiveContainer>
+                    )}
+                  </ChartViewport>
                 ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
             </div>
@@ -661,22 +702,26 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
                     By {staffWord.toLowerCase()}
                   </p>
                   <div className="h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={pracPerformanceData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="shortName" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
-                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                        <Tooltip formatter={(value: number, name: string) => [value, name]} />
-                        <Legend />
-                        <Bar dataKey="bookings" name={`${bookingWord}s`} fill="#4E6B78" radius={[6, 6, 0, 0]} />
-                        <Bar
-                          dataKey="completed"
-                          name="Arrived or completed"
-                          fill="#059669"
-                          radius={[6, 6, 0, 0]}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <ChartViewport recharts={recharts} className="h-full">
+                      {(R) => (
+                        <R.ResponsiveContainer width="100%" height="100%">
+                          <R.BarChart data={pracPerformanceData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                            <R.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <R.XAxis dataKey="shortName" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
+                            <R.YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                            <R.Tooltip formatter={(value: number, name: string) => [value, name]} />
+                            <R.Legend />
+                            <R.Bar dataKey="bookings" name={`${bookingWord}s`} fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                            <R.Bar
+                              dataKey="completed"
+                              name="Arrived or completed"
+                              fill="#059669"
+                              radius={[6, 6, 0, 0]}
+                            />
+                          </R.BarChart>
+                        </R.ResponsiveContainer>
+                      )}
+                    </ChartViewport>
                   </div>
                 </div>
               )}
@@ -686,24 +731,28 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
                     Top services by volume
                   </p>
                   <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        layout="vertical"
-                        data={svcVolumeData}
-                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                        <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          tick={{ fontSize: 11 }}
-                        />
-                        <Tooltip formatter={(value: number) => [value, `${bookingWord}s`]} />
-                        <Bar dataKey="count" fill="#4E6B78" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <ChartViewport recharts={recharts} className="h-full">
+                      {(R) => (
+                        <R.ResponsiveContainer width="100%" height="100%">
+                          <R.BarChart
+                            layout="vertical"
+                            data={svcVolumeData}
+                            margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                          >
+                            <R.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                            <R.XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
+                            <R.YAxis
+                              type="category"
+                              dataKey="name"
+                              width={120}
+                              tick={{ fontSize: 11 }}
+                            />
+                            <R.Tooltip formatter={(value: number) => [value, `${bookingWord}s`]} />
+                            <R.Bar dataKey="count" fill="#4E6B78" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
+                          </R.BarChart>
+                        </R.ResponsiveContainer>
+                      )}
+                    </ChartViewport>
                   </div>
                 </div>
               )}
@@ -713,25 +762,29 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
                     How {clientLower}s booked (channel mix)
                   </p>
                   <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={channelPieData}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={88}
-                          label={(e) => `${e.name}: ${e.value}`}
-                        >
-                          {channelPieData.map((_, i) => (
-                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <ChartViewport recharts={recharts} className="h-full">
+                      {(R) => (
+                        <R.ResponsiveContainer width="100%" height="100%">
+                          <R.PieChart>
+                            <R.Pie
+                              data={channelPieData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={88}
+                              label={(e) => `${e.name}: ${e.value}`}
+                            >
+                              {channelPieData.map((_, i) => (
+                                <R.Cell key={i} fill={COLORS[i % COLORS.length]} />
+                              ))}
+                            </R.Pie>
+                            <R.Tooltip />
+                            <R.Legend />
+                          </R.PieChart>
+                        </R.ResponsiveContainer>
+                      )}
+                    </ChartViewport>
                   </div>
                 </div>
               )}
@@ -760,15 +813,19 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
         </p>
         {r2.length > 0 ? (
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={r2} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="period_start" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                <Tooltip formatter={(value: number) => [`${value}%`, 'Rate']} />
-                <Line type="monotone" dataKey="rate_pct" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="No-show %" />
-              </LineChart>
-            </ResponsiveContainer>
+            <ChartViewport recharts={recharts} className="h-full">
+              {(R) => (
+                <R.ResponsiveContainer width="100%" height="100%">
+                  <R.LineChart data={r2} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <R.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <R.XAxis dataKey="period_start" tick={{ fontSize: 11 }} />
+                    <R.YAxis tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                    <R.Tooltip formatter={(value: number) => [`${value}%`, 'Rate']} />
+                    <R.Line type="monotone" dataKey="rate_pct" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="No-show %" />
+                  </R.LineChart>
+                </R.ResponsiveContainer>
+              )}
+            </ChartViewport>
           </div>
         ) : <p className="text-sm text-slate-400">No data for this period</p>}
       </ReportSection>

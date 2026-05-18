@@ -9,27 +9,32 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   },
   async headers() {
-    const globalSecurity: { key: string; value: string }[] = [
+    const sharedSecurity: { key: string; value: string }[] = [
       { key: 'X-Content-Type-Options', value: 'nosniff' },
-      { key: 'X-Frame-Options', value: 'DENY' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
     ];
     if (process.env.VERCEL_ENV === 'production') {
-      globalSecurity.push({
+      sharedSecurity.push({
         key: 'Strict-Transport-Security',
         value: 'max-age=63072000; includeSubDomains; preload',
       });
     }
     return [
       {
-        source: '/:path*',
-        headers: globalSecurity,
-      },
-      {
+        // Booking widget iframe — must not inherit X-Frame-Options: DENY from the catch-all below.
         source: '/embed/:path*',
         headers: [
-          { key: 'X-Frame-Options', value: 'ALLOWALL' },
-          { key: 'Content-Security-Policy', value: "frame-ancestors *;" },
+          ...sharedSecurity,
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
+      {
+        // All routes except /embed/* (negative lookahead). Next.js cannot unset a header once set by a broader rule.
+        source: '/((?!embed/).*)',
+        headers: [
+          ...sharedSecurity,
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
         ],
       },
     ];

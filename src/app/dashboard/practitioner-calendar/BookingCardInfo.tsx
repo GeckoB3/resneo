@@ -11,12 +11,11 @@ import {
 /**
  * Vertical layout tiers for booking info (full card: name + 4 meta fields).
  *
- * - **Shortest (`1`)** — one horizontal line: name + service + phone + time + pill.
- *   Narrow containers drop least-important fields first (see `cqPacked`).
- * - **Tallest (`5`)** — one field per row (name, service, phone, time, pill each
- *   get a full row). No width-based dropping on those dedicated rows (truncate only).
- * - **Between** — fields “move up” into fewer rows from the bottom: the bottom row
- *   stays packed until it merges upward as height increases (see `fullBody`).
+ * Calendar priority: **name → service → phone → time → status** (most useful when space is tight).
+ *
+ * - **Shortest (`1`)** — one horizontal line; narrow widths drop lowest-priority fields first.
+ * - **Tallest (`5`)** — one field per row (name, service, phone, time, status).
+ * - **Between** — fields merge upward from the bottom as height increases.
  *
  * @param itemCount `5` = full booking; `4` = multi-service segment (no name row).
  */
@@ -30,7 +29,7 @@ export function pickInfoRowCount(contentHeightPx: number, itemCount: 4 | 5 = 5):
   return Math.min(raw, itemCount);
 }
 
-const INFO_GAP_PX = 6;
+const INFO_GAP_PX = 8;
 const MIN_NAME_INLINE_PX = 72;
 const DEFAULT_WIDTHS: Record<InfoKey, number> = {
   name: 112,
@@ -39,6 +38,9 @@ const DEFAULT_WIDTHS: Record<InfoKey, number> = {
   time: 74,
   pill: 82,
 };
+
+/** Inline packing order — earlier keys win when horizontal space is limited. */
+export const INLINE_INFO_FIELD_ORDER: InfoKey[] = ['name', 'service', 'phone', 'time', 'pill'];
 
 type InfoKey = 'name' | 'service' | 'phone' | 'time' | 'pill';
 type WidthMap = Partial<Record<InfoKey, number>>;
@@ -53,28 +55,26 @@ export interface BookingCardInfoProps {
   pill: ReactNode | null;
   contentHeightPx: number;
   hideName?: boolean;
+  /** Width reserved beside this block for the action tray (wide lanes). */
+  actionsReservePx?: number;
 }
 
 function metaTextClass(micro: boolean): string {
   return micro
-    ? 'text-[9px] font-medium leading-snug text-slate-600/90'
-    : 'text-[10px] font-medium leading-snug text-slate-600/90';
-}
-
-function timeChipClass(): string {
-  return 'inline-flex shrink-0 items-center rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5';
+    ? 'text-[10px] font-medium leading-snug text-slate-600/90'
+    : 'text-[11px] font-medium leading-snug text-slate-600/90';
 }
 
 export function groupInfoRows(rowCount: number, hideName: boolean): InfoKey[][] {
   if (hideName) {
     if (rowCount <= 1) return [['service', 'phone', 'time', 'pill']];
-    if (rowCount === 2) return [['service'], ['phone', 'time', 'pill']];
+    if (rowCount === 2) return [['service', 'phone'], ['time', 'pill']];
     if (rowCount === 3) return [['service'], ['phone'], ['time', 'pill']];
     return [['service'], ['phone'], ['time'], ['pill']];
   }
-  if (rowCount <= 1) return [['name', 'service', 'phone', 'time', 'pill']];
+  if (rowCount <= 1) return [INLINE_INFO_FIELD_ORDER];
   if (rowCount === 2) return [['name'], ['service', 'phone', 'time', 'pill']];
-  if (rowCount === 3) return [['name'], ['service'], ['phone', 'time', 'pill']];
+  if (rowCount === 3) return [['name'], ['service', 'phone'], ['time', 'pill']];
   if (rowCount === 4) return [['name'], ['service'], ['phone'], ['time', 'pill']];
   return [['name'], ['service'], ['phone'], ['time'], ['pill']];
 }
@@ -92,9 +92,12 @@ export function pickVisibleInfoRows({
   return rows
     .map((row) => {
       if (row.length === 1) return row;
+      const ordered = [...row].sort(
+        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
+      );
       const visible: InfoKey[] = [];
       let used = 0;
-      for (const key of row) {
+      for (const key of ordered) {
         const itemWidth =
           key === 'name'
             ? Math.min(Math.max(widthFor('name'), MIN_NAME_INLINE_PX), Math.max(MIN_NAME_INLINE_PX, availableWidth))
@@ -105,7 +108,9 @@ export function pickVisibleInfoRows({
           used = next;
         }
       }
-      return visible;
+      return visible.sort(
+        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
+      );
     })
     .filter((row) => row.length > 0);
 }
@@ -137,13 +142,14 @@ export function BookingCardInfo({
   pill,
   contentHeightPx,
   hideName = false,
+  actionsReservePx = 0,
 }: BookingCardInfoProps) {
   const itemCount: 4 | 5 = hideName ? 4 : 5;
   const rows = pickInfoRowCount(contentHeightPx, itemCount);
   const micro = contentHeightPx < 28;
   const mt = metaTextClass(micro);
   const timeRange = `${start}–${end}`;
-  const [containerRef, availableWidth] = useMeasuredWidth<HTMLDivElement>();
+  const [containerRef, containerWidth] = useMeasuredWidth<HTMLDivElement>();
   const [nameRef, nameWidth] = useMeasuredWidth<HTMLDivElement>();
   const [serviceRef, serviceWidth] = useMeasuredWidth<HTMLSpanElement>();
   const [phoneRef, phoneWidth] = useMeasuredWidth<HTMLSpanElement>();
@@ -170,6 +176,11 @@ export function BookingCardInfo({
     return keys;
   }, [hideName, phone, pill, service]);
 
+  const availableWidth = Math.max(
+    0,
+    (containerWidth > 0 ? containerWidth : 0) - Math.max(0, actionsReservePx),
+  );
+
   const visibleRows = useMemo(() => {
     const grouped = groupInfoRows(rows, hideName).map((row) => row.filter((key) => availableKeys.has(key)));
     return pickVisibleInfoRows({
@@ -186,7 +197,9 @@ export function BookingCardInfo({
           key="name"
           className={`flex min-w-0 items-center gap-1.5 ${dedicated ? 'w-full' : 'max-w-full shrink'}`}
         >
-          <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight">{name}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold tracking-tight text-slate-900">
+            {name}
+          </span>
           {nameAccessory ? <div className="flex shrink-0 items-center gap-1">{nameAccessory}</div> : null}
         </div>
       );
@@ -215,14 +228,21 @@ export function BookingCardInfo({
     }
     if (key === 'time') {
       return (
-        <span key="time" className={timeChipClass()} title={timeRange}>
+        <span
+          key="time"
+          className={`${dedicated ? 'block w-full' : 'inline-flex max-w-full shrink'} min-w-0 truncate tabular-nums ${mt}`}
+          title={timeRange}
+        >
           {timeRange}
         </span>
       );
     }
     if (key === 'pill' && pill) {
       return (
-        <span key="pill" className="min-w-0 max-w-full shrink-0">
+        <span
+          key="pill"
+          className={`${dedicated ? 'flex w-full min-w-0' : 'inline-flex min-w-0 max-w-full shrink-0'} items-center`}
+        >
           {pill}
         </span>
       );
@@ -231,8 +251,8 @@ export function BookingCardInfo({
   };
 
   return (
-    <div ref={containerRef} className="relative min-w-0 w-full max-w-full">
-      <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-1.5 overflow-hidden whitespace-nowrap">
+    <div ref={containerRef} className="@container relative min-w-0 w-full max-w-full">
+      <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-2 overflow-hidden whitespace-nowrap">
         <div ref={nameRef} className="flex items-center gap-1.5 text-[13px] font-extrabold tracking-tight">
           <span>{name}</span>
           {nameAccessory ? <span>{nameAccessory}</span> : null}
@@ -247,7 +267,7 @@ export function BookingCardInfo({
             {phone}
           </span>
         ) : null}
-        <span ref={timeRef} className={timeChipClass()}>
+        <span ref={timeRef} className={`tabular-nums ${mt}`}>
           {timeRange}
         </span>
         {pill ? (
@@ -256,12 +276,12 @@ export function BookingCardInfo({
           </span>
         ) : null}
       </div>
-      <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-y-0.5">
+      <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-y-1">
         {visibleRows.map((row, idx) => (
           <div
             key={`${idx}-${row.join('-')}`}
             className={`flex min-h-0 min-w-0 w-full items-center overflow-hidden ${
-              row.length === 1 ? '' : 'gap-x-1.5'
+              row.length === 1 ? '' : 'gap-x-2'
             }`}
           >
             {row.map((key) => renderField(key, row.length === 1))}

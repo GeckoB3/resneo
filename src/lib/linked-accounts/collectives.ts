@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAcceptedLinkBetween } from './queries';
+import { notifyCollectiveDissolved, notifyCollectiveRemoval } from './notifications';
 
 export type CollectiveStatus = 'active' | 'dissolved';
 export type CollectiveMemberStatus = 'invited' | 'active' | 'left' | 'removed';
@@ -208,6 +209,71 @@ export async function reconcileCollective(
   return { removedVenueIds, dissolved: false };
 }
 
+/**
+ * Re-evaluate every collective that could be affected by a pairwise-link change
+ * touching `venueIds` (§7.5). A broken or reduced link between two collective
+ * members must auto-remove them and may dissolve the collective. Notifies
+ * removed venues and — on dissolution — the remaining members. Safe to call
+ * from any link-change path (unlink, reduce, accepted-change, the maintenance
+ * cron); failures are logged and never thrown.
+ */
+export async function reconcileCollectivesAfterLinkChange(
+  admin: SupabaseClient,
+  venueIds: string[],
+): Promise<void> {
+  const ids = [...new Set(venueIds.filter(Boolean))];
+  if (ids.length === 0) return;
+
+  const { data: memberRows } = await admin
+    .from('venue_collective_members')
+    .select('collective_id')
+    .in('venue_id', ids)
+    .eq('status', 'active');
+  const collectiveIds = [
+    ...new Set((memberRows ?? []).map((m) => m.collective_id as string)),
+  ];
+
+  for (const collectiveId of collectiveIds) {
+    try {
+      // Snapshot the active membership and name before reconcile so we know
+      // who to notify afterwards.
+      const [{ data: beforeRows }, { data: collectiveRow }] = await Promise.all([
+        admin
+          .from('venue_collective_members')
+          .select('venue_id')
+          .eq('collective_id', collectiveId)
+          .eq('status', 'active'),
+        admin
+          .from('venue_collectives')
+          .select('name')
+          .eq('id', collectiveId)
+          .maybeSingle(),
+      ]);
+      const beforeVenues = (beforeRows ?? []).map((m) => m.venue_id as string);
+      const collectiveName = (collectiveRow?.name as string) ?? 'a venue collective';
+
+      const { removedVenueIds, dissolved } = await reconcileCollective(admin, collectiveId);
+      if (removedVenueIds.length === 0 && !dissolved) continue;
+
+      await Promise.allSettled(
+        removedVenueIds.map((v) => notifyCollectiveRemoval(admin, v, collectiveName)),
+      );
+      if (dissolved) {
+        const remaining = beforeVenues.filter((v) => !removedVenueIds.includes(v));
+        await Promise.allSettled(
+          remaining.map((v) => notifyCollectiveDissolved(admin, v, collectiveName)),
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[linked-accounts] reconcileCollectivesAfterLinkChange failed:',
+        collectiveId,
+        err,
+      );
+    }
+  }
+}
+
 export interface PublicCollectiveMember {
   venueId: string;
   venueName: string;
@@ -218,6 +284,7 @@ export interface PublicCollectiveMember {
 }
 
 export interface PublicCollective {
+  id: string;
   name: string;
   slug: string;
   branding: CollectiveBranding;
@@ -325,6 +392,7 @@ export async function loadPublicCollective(
   }
 
   return {
+    id: collective.id,
     name: collective.name,
     slug: collective.slug,
     branding: collective.branding ?? {},

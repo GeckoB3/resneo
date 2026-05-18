@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   BOOKING_STATUS_TRANSITIONS,
   BOOKING_REVERT_ACTIONS,
@@ -35,6 +35,14 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+import {
+  bookingDisplayEndHm,
+  estimatedEndIsoFromSchedule,
+} from '@/lib/booking/booking-detail-from-row';
+import {
+  useOptionalDashboardDetailCache,
+  type VenueBookingDetailPayload,
+} from '@/components/providers/DashboardDetailCacheProvider';
 
 export type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import {
@@ -222,7 +230,7 @@ function buildPlaceholderDetail(
     estimated_end_time: Number.isNaN(estimatedEndDate.getTime()) ? null : estimatedEndIso,
     party_size: snap.partySize,
     status: snap.status,
-    source: '-',
+    source: snap.source?.trim() ? snap.source : '-',
     deposit_status: snap.depositStatus ?? 'Pending',
     deposit_amount_pence: null,
     dietary_notes: snap.dietaryNotes ?? null,
@@ -231,20 +239,31 @@ function buildPlaceholderDetail(
     internal_notes: null,
     cancellation_deadline: null,
     guest: (() => {
+      if (!snap.guestId) return null;
       const sp = splitLegacyGuestName(snap.guestName);
       return {
-        id: '',
+        id: snap.guestId,
         first_name: sp.first || null,
         last_name: sp.last || null,
-        email: null,
-        phone: null,
-        visit_count: 0,
+        email: snap.guestEmail ?? null,
+        phone: snap.guestPhone ?? null,
+        visit_count: snap.guestVisitCount ?? 0,
         tags: [],
       };
     })(),
     events: [],
     communications: [],
-    table_assignments: [],
+    table_assignments: (snap.tableNames ?? []).map((name, index) => ({
+      id: `snapshot-table-${index}`,
+      name,
+    })),
+    inferred_booking_model: snap.inferredBookingModel,
+    booking_model: snap.inferredBookingModel ?? null,
+    practitioner_id: snap.practitionerId ?? null,
+    appointment_service_id: snap.appointmentServiceId ?? null,
+    service_item_id: snap.serviceItemId ?? null,
+    calendar_id: snap.calendarId ?? null,
+    service_variant_name: snap.serviceName ?? null,
   };
 }
 
@@ -279,6 +298,7 @@ export function BookingDetailPanel({
   venueTimezone?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const detailCache = useOptionalDashboardDetailCache();
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -317,8 +337,9 @@ export function BookingDetailPanel({
   }, [bookingId, venueId, initialSnapshot]);
 
   const viewport = useViewportBounds();
-  const displayDetail = detail ?? optimisticDetail;
-  const isHydrated = detail !== null;
+  const hydratedDetail = detail?.id === bookingId ? detail : null;
+  const displayDetail = hydratedDetail ?? optimisticDetail;
+  const isHydrated = hydratedDetail !== null;
   const isPopover = presentation === 'popover';
   const popoverStyle = useMemo((): CSSProperties | undefined => {
     if (!isPopover) return undefined;
@@ -377,26 +398,82 @@ export function BookingDetailPanel({
     };
   }, [isHydrated, displayDetail]);
 
-  const load = useCallback(async () => {
-    const bookingPromise = fetch(`/api/venue/bookings/${bookingId}`);
-    const tablesPromise = fetch('/api/venue/tables').catch(() => null);
-    const bookingRes = await bookingPromise;
+  const resolveSeededDetail = useCallback((): BookingDetail | null => {
+    const raw = detailCache?.peekVenueBookingDetail(bookingId);
+    if (
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as { id?: unknown }).id === 'string' &&
+      (raw as { id: string }).id === bookingId
+    ) {
+      return raw as unknown as BookingDetail;
+    }
+    if (initialSnapshot && venueId) {
+      return buildPlaceholderDetail(bookingId, venueId, initialSnapshot);
+    }
+    return null;
+  }, [bookingId, detailCache, initialSnapshot, venueId]);
+
+  const loadBookingCore = useCallback(async () => {
+    const cached = detailCache?.peekVenueBookingDetail(bookingId);
+    if (
+      cached &&
+      typeof cached === 'object' &&
+      typeof (cached as { id?: unknown }).id === 'string' &&
+      (cached as { id: string }).id === bookingId
+    ) {
+      const data = cached as unknown as BookingDetail;
+      setDetail(data);
+      setAssignedTables(data.table_assignments ?? []);
+      return data;
+    }
+
+    const summaryRes = await fetch(`/api/venue/bookings/${bookingId}/summary`, {
+      credentials: 'same-origin',
+    });
+    if (summaryRes.ok) {
+      const summary = (await summaryRes.json()) as BookingDetail;
+      if (summary.id === bookingId) {
+        setDetail(summary);
+        setAssignedTables(summary.table_assignments ?? []);
+        detailCache?.primeVenueBookingDetail(bookingId, summary as unknown as VenueBookingDetailPayload);
+      }
+    }
+
+    const bookingRes = await fetch(`/api/venue/bookings/${bookingId}`, { credentials: 'same-origin' });
 
     if (!bookingRes.ok) {
-      setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
-      return;
+      if (!summaryRes.ok) {
+        setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
+      }
+      return null;
     }
 
     const data = (await bookingRes.json()) as BookingDetail;
     setDetail(data);
+    detailCache?.primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
     setGuestHistoryListRefresh((k) => k + 1);
 
+    setAssignedTables(data.table_assignments ?? []);
+
+    return data;
+  }, [bookingId, detailCache]);
+
+  const loadTableContext = useCallback(async (data: BookingDetail) => {
     try {
-      const tablesRes = await tablesPromise;
-      if (tablesRes?.ok) {
+      const tablesRes = await fetch('/api/venue/tables');
+      if (tablesRes.ok) {
         const tablesData = await tablesRes.json();
         setTableManagementEnabled(tablesData.settings?.table_management_enabled ?? false);
-        setAllTables((tablesData.tables ?? []).filter((t: { is_active: boolean }) => t.is_active).map((t: { id: string; name: string; max_covers: number }) => ({ id: t.id, name: t.name, max_covers: t.max_covers })));
+        setAllTables(
+          (tablesData.tables ?? [])
+            .filter((t: { is_active: boolean }) => t.is_active)
+            .map((t: { id: string; name: string; max_covers: number }) => ({
+              id: t.id,
+              name: t.name,
+              max_covers: t.max_covers,
+            })),
+        );
 
         if (data.table_assignments) {
           setAssignedTables(data.table_assignments);
@@ -419,14 +496,21 @@ export function BookingDetailPanel({
             .map((cell: { table_id: string }) => cell.table_id),
         );
         const fitting = (availability.tables ?? [])
-          .filter((table: { id: string; max_covers: number }) => availableAtTime.has(table.id) && table.max_covers >= data.party_size)
+          .filter(
+            (table: { id: string; max_covers: number }) =>
+              availableAtTime.has(table.id) && table.max_covers >= data.party_size,
+          )
           .map((table: { id: string }) => table.id);
         setRecommendedTableIds(fitting);
       }
     } catch {
       setRecommendedTableIds([]);
     }
-  }, [bookingId]);
+  }, []);
+
+  const load = useCallback(async () => {
+    await loadBookingCore();
+  }, [loadBookingCore]);
 
   const loadAssignmentSuggestions = useCallback(async () => {
     if (!detail) return;
@@ -460,21 +544,78 @@ export function BookingDetailPanel({
     void loadAssignmentSuggestions();
   }, [showAssignModal, loadAssignmentSuggestions]);
 
-  useEffect(() => {
-    setDetail(null);
+  useLayoutEffect(() => {
     setCustomMessage('');
     setModifyBookingOpen(false);
     setShowAssignModal(false);
     setNestedBookingOpen(null);
-    setLoading(true);
+    setAllTables([]);
+    setRecommendedTableIds([]);
+    setAssignmentSuggestions([]);
+    setTableManagementEnabled(false);
     setError(null);
+
+    const seeded = resolveSeededDetail();
+    setDetail(seeded);
+    setAssignedTables(seeded?.table_assignments ?? []);
+    setLoading(!seeded);
+
     void load().finally(() => setLoading(false));
-  }, [load]);
+  }, [bookingId, load, resolveSeededDetail]);
 
   useEffect(() => {
     if (!detail) return;
     setProcessingBlocksDraft(parseProcessingTimeBlocksFromDb(detail.processing_time_blocks));
   }, [detail?.id, detail?.processing_time_blocks, detail]);
+
+  /** Keep popover/detail schedule in sync when calendar drag-resize updates the list row. */
+  useEffect(() => {
+    if (!initialSnapshot) return;
+    const startHm = initialSnapshot.startTime.slice(0, 5);
+    const endHm = initialSnapshot.endTime.slice(0, 5);
+    const timeForStore = startHm.length === 5 ? `${startHm}:00` : startHm;
+    const endForStore = `${endHm}:00`;
+    const estimatedEndIso = estimatedEndIsoFromSchedule(
+      initialSnapshot.bookingDate,
+      startHm,
+      endHm,
+    );
+
+    setDetail((prev) => {
+      if (!prev || prev.id !== bookingId) return prev;
+      const prevEnd =
+        bookingDisplayEndHm({
+          booking_time: prev.booking_time,
+          booking_end_time: prev.booking_end_time ?? null,
+          estimated_end_time: prev.estimated_end_time,
+        }) ?? '';
+      if (
+        prev.booking_date === initialSnapshot.bookingDate &&
+        (prev.booking_time?.slice(0, 5) ?? '') === startHm &&
+        prevEnd === endHm
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        booking_date: initialSnapshot.bookingDate,
+        booking_time: timeForStore,
+        booking_end_time: endForStore,
+        estimated_end_time: estimatedEndIso,
+      };
+    });
+
+    const cached = detailCache?.peekVenueBookingDetail(bookingId);
+    if (cached && typeof cached === 'object' && detailCache) {
+      detailCache.primeVenueBookingDetail(bookingId, {
+        ...(cached as VenueBookingDetailPayload),
+        booking_date: initialSnapshot.bookingDate,
+        booking_time: timeForStore,
+        booking_end_time: endForStore,
+        estimated_end_time: estimatedEndIso,
+      });
+    }
+  }, [bookingId, detailCache, initialSnapshot]);
 
   useEffect(() => {
     if (stackDepth === 0 && nestedBookingOpen) {
@@ -532,7 +673,17 @@ export function BookingDetailPanel({
     const previous = snapshot.status as BookingStatus;
     setActionLoading(true);
     if (detail) {
-      setDetail((prev) => (prev ? { ...prev, status: newStatus } : prev));
+      setDetail((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, status: newStatus };
+        if (previous === 'Confirmed' && newStatus === 'Booked') {
+          updated.staff_attendance_confirmed_at = null;
+          updated.guest_attendance_confirmed_at = null;
+        } else if (newStatus === 'Confirmed' && previous !== 'Confirmed') {
+          updated.staff_attendance_confirmed_at = new Date().toISOString();
+        }
+        return updated;
+      });
     }
     try {
       if (onStatusChange) {
@@ -763,7 +914,7 @@ export function BookingDetailPanel({
   }
 
   const d = displayDetail;
-  const shouldHoldPopoverForFullDetail = isPopover && !isHydrated;
+  const shouldHoldPopoverForFullDetail = isPopover && !displayDetail;
   const optimisticTableLabel =
     !isHydrated && initialSnapshot?.tableNames && initialSnapshot.tableNames.length > 0
       ? initialSnapshot.tableNames.join(' + ')
@@ -805,7 +956,12 @@ export function BookingDetailPanel({
       comm.message_type === 'booking_confirmation_sms',
   )?.created_at;
   const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
-  const endTime = endHHMMOrFallback(d.estimated_end_time, startTime, 90);
+  const endTime =
+    bookingDisplayEndHm({
+      booking_time: d.booking_time,
+      booking_end_time: d.booking_end_time ?? null,
+      estimated_end_time: d.estimated_end_time,
+    }) ?? endHHMMOrFallback(d.estimated_end_time, startTime, 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
   const showAppointmentProcessingEditor =
     isHydrated &&
@@ -886,7 +1042,7 @@ export function BookingDetailPanel({
                 event_session_id: d.event_session_id,
               }}
               detail={undefined}
-              detailLoading
+              detailLoading={!isHydrated}
               tableManagementEnabled={tableManagementEnabled}
               venueId={d.venue_id || venueId || ''}
               venueCurrency={venueCurrency ?? 'GBP'}
@@ -923,10 +1079,9 @@ export function BookingDetailPanel({
       guest_email: d.guest?.email ?? null,
       guest_phone: d.guest?.phone ?? null,
       guest_id: d.guest?.id,
-      table_assignments:
-        assignedTables.length > 0
-          ? assignedTables
-          : initialSnapshot?.tableNames?.map((name, index) => ({ id: `snapshot-table-${index}`, name })),
+      table_assignments: isHydrated
+        ? assignedTables
+        : (d.table_assignments ?? []),
       service_id: d.service_id,
       service_name: serviceLine,
       area_id: d.area_id,
@@ -955,8 +1110,8 @@ export function BookingDetailPanel({
       special_requests: d.special_requests,
       internal_notes: d.internal_notes,
       cancellation_deadline: d.cancellation_deadline,
-      table_assignments: assignedTables,
-      guest: d.guest
+      table_assignments: isHydrated ? assignedTables : [],
+      guest: d.guest?.id
         ? {
             id: d.guest.id,
             first_name: d.guest.first_name,
@@ -1009,8 +1164,8 @@ export function BookingDetailPanel({
             ) : null}
             <ExpandedBookingContent
               booking={bookingForExpanded}
-              detail={detailForExpanded}
-              detailLoading={false}
+              detail={isHydrated ? detailForExpanded : undefined}
+              detailLoading={!isHydrated}
               tableManagementEnabled={tableManagementEnabled}
               venueId={d.venue_id || venueId || ''}
               venueCurrency={venueCurrency ?? 'GBP'}

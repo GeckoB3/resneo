@@ -33,8 +33,37 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neut
   return 'neutral';
 }
 
-export function LinkedCalendarView() {
-  const [date, setDate] = useState(todayIso());
+/**
+ * Best-effort ping recording that a linked-venue booking's detail was opened
+ * (§4.2 `viewed_booking`). The server debounces to a 5-minute window, so the
+ * modals can fire this freely on every open. Failures are swallowed — an audit
+ * ping must never disrupt the detail the user already opened.
+ */
+function pingLinkedBookingView(bookingId: string): void {
+  void fetch('/api/venue/linked-calendar/booking/view', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bookingId }),
+  }).catch(() => {});
+}
+
+export function LinkedCalendarView({
+  hideWhenEmpty = false,
+  title,
+  /** When set, the date picker is hidden and this date drives fetches (e.g. day-sheet sync). */
+  date: controlledDate,
+  onDateChange,
+  hideDatePicker = false,
+}: {
+  hideWhenEmpty?: boolean;
+  title?: string;
+  date?: string;
+  onDateChange?: (isoDate: string) => void;
+  hideDatePicker?: boolean;
+} = {}) {
+  const [internalDate, setInternalDate] = useState(todayIso());
+  const date = controlledDate ?? internalDate;
+  const setDate = onDateChange ?? setInternalDate;
   const [venues, setVenues] = useState<LinkedVenueCalendar[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +71,7 @@ export function LinkedCalendarView() {
   const [editing, setEditing] = useState<{ venue: LinkedVenueCalendar; booking: LinkedBooking } | null>(
     null,
   );
+  const [creating, setCreating] = useState<LinkedVenueCalendar | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,25 +106,41 @@ export function LinkedCalendarView() {
     [venues, hidden],
   );
 
+  // When embedded in a calendar page, stay invisible unless the venue actually
+  // has linked calendars, so venues without linked accounts see no change.
+  if (hideWhenEmpty && venues.length === 0 && !error) return null;
+
   return (
     <div className="space-y-4">
+      {title ? (
+        <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <span className="font-medium">Date</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-        </label>
-        <button
-          type="button"
-          className={btnSecondary}
-          onClick={() => setDate(todayIso())}
-        >
-          Today
-        </button>
+        {!hideDatePicker && controlledDate === undefined ? (
+          <>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <span className="font-medium">Date</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </label>
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => setDate(todayIso())}
+            >
+              Today
+            </button>
+          </>
+        ) : controlledDate ? (
+          <p className="text-xs text-slate-500">
+            Linked calendars for{' '}
+            <span className="font-semibold text-slate-700">{date}</span> (same date as this page).
+          </p>
+        ) : null}
       </div>
 
       {/* Legend ------------------------------------------------------- */}
@@ -147,6 +193,7 @@ export function LinkedCalendarView() {
               key={venue.venueId}
               venue={venue}
               onEdit={(booking) => setEditing({ venue, booking })}
+              onCreate={() => setCreating(venue)}
             />
           ))}
         </div>
@@ -156,9 +203,22 @@ export function LinkedCalendarView() {
         <EditLinkedBookingModal
           venueName={editing.venue.venueName}
           booking={editing.booking}
+          canCancel={editing.venue.action === 'create_edit_cancel'}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
+            await load();
+          }}
+        />
+      ) : null}
+
+      {creating ? (
+        <CreateLinkedBookingModal
+          venue={creating}
+          date={date}
+          onClose={() => setCreating(null)}
+          onSaved={async () => {
+            setCreating(null);
             await load();
           }}
         />
@@ -170,11 +230,14 @@ export function LinkedCalendarView() {
 function VenueCalendarBlock({
   venue,
   onEdit,
+  onCreate,
 }: {
   venue: LinkedVenueCalendar;
   onEdit: (booking: LinkedBooking) => void;
+  onCreate: () => void;
 }) {
   const timeOnly = venue.visibility === 'time_only';
+  const canCreate = venue.action === 'create_edit_cancel';
   const byPractitioner = new Map<string, LinkedBooking[]>();
   for (const b of venue.bookings) {
     const key = b.practitionerId ?? 'unassigned';
@@ -188,7 +251,7 @@ function VenueCalendarBlock({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/40 p-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-bold text-slate-900">{venue.venueName}</h3>
         <Pill variant="neutral" size="sm">
           Linked
@@ -197,6 +260,15 @@ function VenueCalendarBlock({
           <Pill variant="neutral" size="sm">
             Time blocks only
           </Pill>
+        ) : null}
+        {canCreate ? (
+          <button
+            type="button"
+            onClick={onCreate}
+            className="ml-auto rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+          >
+            + New booking
+          </button>
         ) : null}
       </div>
 
@@ -294,14 +366,17 @@ function LinkedBookingChip({
   );
 }
 
-function EditLinkedBookingModal({
+export function EditLinkedBookingModal({
   venueName,
   booking,
+  canCancel,
   onClose,
   onSaved,
 }: {
   venueName: string;
   booking: LinkedBooking;
+  /** True only when the link grants `create_edit_cancel` (§5.3). */
+  canCancel: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -311,6 +386,10 @@ function EditLinkedBookingModal({
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    pingLinkedBookingView(booking.id);
+  }, [booking.id]);
 
   const save = async (overrideStatus?: string) => {
     setBusy(true);
@@ -375,7 +454,9 @@ function EditLinkedBookingModal({
             value={status}
             onChange={(e) => setStatus(e.target.value)}
           >
-            {BOOKING_STATUSES.map((s) => (
+            {BOOKING_STATUSES.filter(
+              (s) => canCancel || s !== 'Cancelled' || s === booking.status,
+            ).map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -395,14 +476,18 @@ function EditLinkedBookingModal({
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>
         ) : null}
         <div className="flex flex-wrap justify-between gap-2 pt-1">
-          <button
-            type="button"
-            className={btnDanger}
-            disabled={busy || booking.status === 'Cancelled'}
-            onClick={() => save('Cancelled')}
-          >
-            Cancel booking
-          </button>
+          {canCancel ? (
+            <button
+              type="button"
+              className={btnDanger}
+              disabled={busy || booking.status === 'Cancelled'}
+              onClick={() => save('Cancelled')}
+            >
+              Cancel booking
+            </button>
+          ) : (
+            <span />
+          )}
           <div className="flex gap-2">
             <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
               Close
@@ -411,6 +496,336 @@ function EditLinkedBookingModal({
               {busy ? 'Saving…' : 'Save changes'}
             </button>
           </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Read-only detail for a linked-venue booking the viewer cannot edit — a
+ * `time_only` link, or a `full_details` link granting `act = none` (§4.3).
+ * Carries no edit controls; it exists so a click on the calendar grid always
+ * does something rather than silently nothing.
+ */
+export function LinkedBookingDetailModal({
+  venueName,
+  visibility,
+  booking,
+  onClose,
+}: {
+  venueName: string;
+  visibility: LinkedVenueCalendar['visibility'];
+  booking: LinkedBooking;
+  onClose: () => void;
+}) {
+  const timeOnly = visibility === 'time_only';
+  const timeLabel = booking.bookingEndTime
+    ? `${fmtTime(booking.bookingTime)}–${fmtTime(booking.bookingEndTime)}`
+    : fmtTime(booking.bookingTime);
+
+  useEffect(() => {
+    pingLinkedBookingView(booking.id);
+  }, [booking.id]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Booking in ${venueName}`}
+      description="Read-only — this link does not grant you permission to edit this booking."
+    >
+      <div className="space-y-3">
+        <dl className="space-y-2 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="font-medium text-slate-500">Date</dt>
+            <dd className="text-slate-800">{booking.bookingDate}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="font-medium text-slate-500">Time</dt>
+            <dd className="tabular-nums text-slate-800">{timeLabel}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="font-medium text-slate-500">Status</dt>
+            <dd>
+              <Pill variant={statusVariant(booking.status)} size="sm">
+                {booking.status}
+              </Pill>
+            </dd>
+          </div>
+          {!timeOnly ? (
+            <>
+              <div className="flex justify-between gap-3">
+                <dt className="font-medium text-slate-500">Client</dt>
+                <dd className="text-slate-800">{booking.guestName ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="font-medium text-slate-500">Service</dt>
+                <dd className="text-slate-800">{booking.serviceName ?? '—'}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+        {timeOnly ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            {venueName} shares time blocks only. Client and service detail are not visible on
+            this link.
+          </p>
+        ) : null}
+        <div className="flex justify-end">
+          <button type="button" className={btnSecondary} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface GuestOption {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
+/**
+ * Create a booking in a linked venue. Available only on links granting
+ * `create_edit_cancel` (§5.3). The client is chosen from the linked venue's
+ * own guests — no guest row is ever copied between venues.
+ */
+export function CreateLinkedBookingModal({
+  venue,
+  date,
+  practitionerId: prefillPractitionerId,
+  time: prefillTime,
+  onClose,
+  onSaved,
+}: {
+  venue: LinkedVenueCalendar;
+  date: string;
+  /** Pre-select this calendar — e.g. the linked column the user clicked. */
+  practitionerId?: string;
+  /** Pre-fill the start time — e.g. the empty slot the user clicked (§4.3). */
+  time?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [practitionerId, setPractitionerId] = useState(
+    (prefillPractitionerId &&
+    venue.practitioners.some((p) => p.id === prefillPractitionerId)
+      ? prefillPractitionerId
+      : venue.practitioners.find((p) => p.isActive)?.id) ?? '',
+  );
+  const [serviceId, setServiceId] = useState('');
+  const [bookingDate, setBookingDate] = useState(date);
+  const [time, setTime] = useState(prefillTime ?? '09:00');
+  const [endTime, setEndTime] = useState('');
+  const [notes, setNotes] = useState('');
+  const [guestQuery, setGuestQuery] = useState('');
+  const [guestResults, setGuestResults] = useState<GuestOption[]>([]);
+  const [guest, setGuest] = useState<GuestOption | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (guest) return;
+    let cancelled = false;
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/venue/linked-calendar/guests?venueId=${venue.venueId}&q=${encodeURIComponent(
+            guestQuery,
+          )}`,
+        );
+        const json = await res.json();
+        if (!cancelled) setGuestResults(res.ok ? json.guests ?? [] : []);
+      } catch {
+        if (!cancelled) setGuestResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [guestQuery, guest, venue.venueId]);
+
+  const save = async () => {
+    if (!guest) {
+      setError('Choose a client for the booking.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/venue/linked-calendar/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ownerVenueId: venue.venueId,
+          guestId: guest.id,
+          practitionerId: practitionerId || null,
+          appointmentServiceId: serviceId || null,
+          bookingDate,
+          bookingTime: time,
+          bookingEndTime: endTime || undefined,
+          specialRequests: notes.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed to create the booking.');
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create the booking.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      busy={busy}
+      title={`New booking in ${venue.venueName}`}
+      description="The booking is created in the linked venue and recorded in the cross-venue audit log visible to both venues."
+    >
+      <div className="space-y-3">
+        <div>
+          <span className="block text-sm font-medium text-slate-700">Client</span>
+          {guest ? (
+            <div className="mt-1 flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <span>
+                {guest.name}
+                {guest.email ? (
+                  <span className="ml-1 text-slate-400">{guest.email}</span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                className="text-xs font-medium text-brand-700 hover:underline"
+                onClick={() => {
+                  setGuest(null);
+                  setGuestQuery('');
+                }}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <input
+                type="search"
+                className={`mt-1 ${inputCls}`}
+                placeholder="Search the venue’s clients by name or email"
+                value={guestQuery}
+                onChange={(e) => setGuestQuery(e.target.value)}
+              />
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200">
+                {searching ? (
+                  <p className="px-3 py-2 text-xs text-slate-400">Searching…</p>
+                ) : guestResults.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-slate-400">No clients found.</p>
+                ) : (
+                  guestResults.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="block w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                      onClick={() => setGuest(g)}
+                    >
+                      {g.name}
+                      {g.email ? (
+                        <span className="ml-1 text-xs text-slate-400">{g.email}</span>
+                      ) : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <label className="block">
+          <span className="block text-sm font-medium text-slate-700">Calendar</span>
+          <select
+            className={`mt-1 ${inputCls}`}
+            value={practitionerId}
+            onChange={(e) => setPractitionerId(e.target.value)}
+          >
+            <option value="">Unassigned</option>
+            {venue.practitioners.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.isActive ? '' : ' (inactive)'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="block text-sm font-medium text-slate-700">Service (optional)</span>
+          <select
+            className={`mt-1 ${inputCls}`}
+            value={serviceId}
+            onChange={(e) => setServiceId(e.target.value)}
+          >
+            <option value="">No service</option>
+            {venue.services.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700">Date</span>
+            <input
+              type="date"
+              className={`mt-1 ${inputCls}`}
+              value={bookingDate}
+              onChange={(e) => setBookingDate(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700">Start</span>
+            <input
+              type="time"
+              className={`mt-1 ${inputCls}`}
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700">End</span>
+            <input
+              type="time"
+              className={`mt-1 ${inputCls}`}
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+            />
+          </label>
+        </div>
+        <label className="block">
+          <span className="block text-sm font-medium text-slate-700">Add a note (optional)</span>
+          <textarea
+            className={`mt-1 ${inputCls}`}
+            rows={2}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </label>
+        {error ? (
+          <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className={btnPrimary} disabled={busy} onClick={save}>
+            {busy ? 'Creating…' : 'Create booking'}
+          </button>
         </div>
       </div>
     </Modal>

@@ -8,7 +8,7 @@ export const EXP_BOOKING_ICO = 'h-3.5 w-3.5 shrink-0';
 
 /** Shared shape / motion for ExpandedBookingContent action toolbar. */
 export const EXP_BOOKING_BTN =
-  'inline-flex min-h-8 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg px-[11px] py-1.5 text-[11px] leading-none tracking-tight shadow-sm outline-none transition-colors duration-150 [-webkit-tap-highlight-color:transparent] disabled:pointer-events-none disabled:opacity-45';
+  'inline-flex min-h-8 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg px-[11px] py-1.5 text-[11px] leading-none tracking-tight shadow-sm outline-none transition-colors duration-150 [-webkit-tap-highlight-color:transparent] disabled:cursor-not-allowed disabled:opacity-45';
 
 export const EXP_BOOKING_ST_FOCUS =
   'focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-1 focus-visible:ring-offset-white';

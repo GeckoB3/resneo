@@ -28,6 +28,7 @@ const PATHS = [
   '/api/cron/dietary-digest',
   '/api/cron/auto-cancel-bookings',
   '/api/cron/reconciliation',
+  '/api/cron/account-link-maintenance',
 ];
 
 let exitCode = 0;

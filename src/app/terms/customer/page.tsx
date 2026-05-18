@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'Customer subscription terms governing your use of the ReserveNI platform as a business customer, operated by JAR 26 LTD trading as ReserveNI.',
 };
 
-const LAST_UPDATED = '03 May 2026';
+const LAST_UPDATED = '18 May 2026';
 
 export default function CustomerTermsPage() {
   return (
@@ -218,6 +218,25 @@ export default function CustomerTermsPage() {
                   Data Processing Agreement
                 </Link>
                 , which forms part of these Terms.
+              </p>
+              <h3 className="mb-2 mt-6 text-base font-semibold text-slate-900">Linked Accounts</h3>
+              <p>
+                ReserveNI may offer an optional &ldquo;Linked Accounts&rdquo; feature for eligible appointment-based
+                venues. This lets two or more independent venues that each hold their own ReserveNI subscription
+                grant each other controlled visibility into calendars and (where agreed) limited booking actions.
+                Linking does not merge your data: each venue remains the owner of its own guest records and bookings.
+              </p>
+              <p className="mt-3">
+                If you use Linked Accounts, you act as an independent data controller for your own client data. A
+                link is a controller-to-controller arrangement between you and the other venue. You must have a
+                lawful basis to share the access you grant, keep your own privacy policy accurate, and only accept
+                links you trust. You can reduce access you grant or end a link at any time; the other venue may do
+                the same.
+              </p>
+              <p className="mt-3">
+                Cross-venue actions taken under a link may be recorded in an audit log visible to both venues. If a
+                linked venue ends its subscription or is removed from the platform, cross-venue access ends
+                automatically. ReserveNI is not responsible for how a linked venue uses access you grant.
               </p>
             </section>
 

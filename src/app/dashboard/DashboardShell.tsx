@@ -68,6 +68,7 @@ export function DashboardShell({
   const {
     bookingModel: serverBookingModel = 'table_reservation',
     enabledModels: serverEnabledModels = [],
+    isAdmin = false,
     ...sidebarRestWithoutBookingNav
   } = sidebarRest;
 
@@ -130,15 +131,43 @@ export function DashboardShell({
   useEffect(() => {
     if (!venueId) return;
     const today = new Date().toISOString().slice(0, 10);
+    router.prefetch('/dashboard');
     router.prefetch('/dashboard/bookings');
     router.prefetch('/dashboard/bookings/new');
     router.prefetch('/dashboard/contacts');
     router.prefetch('/dashboard/calendar');
     router.prefetch('/dashboard/day-sheet');
+    router.prefetch('/dashboard/settings');
+    if (isAdmin) {
+      router.prefetch('/dashboard/reports');
+      router.prefetch('/dashboard/appointment-services');
+      router.prefetch('/dashboard/calendar-availability');
+    }
+
+    const hasAppointmentSurface =
+      serverBookingModel === 'unified_scheduling' ||
+      serverBookingModel === 'practitioner_appointment' ||
+      (serverEnabledModels ?? []).some(
+        (m) => m === 'unified_scheduling' || m === 'practitioner_appointment',
+      );
+
+    const warmAppointmentLists = () => {
+      void fetch('/api/venue/appointment-services', { credentials: 'same-origin' }).catch(() => {});
+      void fetch('/api/venue/practitioners?roster=1', { credentials: 'same-origin' }).catch(() => {});
+    };
+
+    if (hasAppointmentSurface) {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(warmAppointmentLists, { timeout: 4000 });
+      } else {
+        window.setTimeout(warmAppointmentLists, 2000);
+      }
+    }
+
     void fetch(`/api/venue/bookings/list?date=${encodeURIComponent(today)}`, { credentials: 'same-origin' }).catch(
       () => {},
     );
-  }, [venueId, router]);
+  }, [venueId, router, isAdmin, serverBookingModel, serverEnabledModels]);
 
   useEffect(() => {
     function onDocumentClick(event: MouseEvent) {

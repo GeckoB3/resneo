@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
@@ -315,6 +315,8 @@ export function GuestBookingsForGuestAccordion({
   listRefreshKey,
   rebookGuestPrefill,
   onStaffBookingCreated,
+  initialRows,
+  fetchWhenOpen = true,
 }: {
   guestId: string | null | undefined;
   currentBookingId: string;
@@ -329,11 +331,19 @@ export function GuestBookingsForGuestAccordion({
   rebookGuestPrefill?: StaffRebookGuestPrefill;
   /** After a booking is created from the Rebook modal (refresh parent lists / detail). */
   onStaffBookingCreated?: () => void;
+  /** Preloaded rows (e.g. contact detail) — defers list fetch until accordion opens. */
+  initialRows?: GuestBookingHistoryRow[];
+  /** When true, defer list fetch until the guest-bookings accordion is expanded. */
+  fetchWhenOpen?: boolean;
 }) {
   const router = useRouter();
-  const [rows, setRows] = useState<GuestBookingHistoryRow[] | null>(null);
+  const [rows, setRows] = useState<GuestBookingHistoryRow[] | null>(
+    () => (initialRows?.length ? initialRows : null),
+  );
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const skipInitialFetchRef = useRef(Boolean(initialRows?.length));
   const [staffVenueDefaults, setStaffVenueDefaults] = useState<GuestBookingsStaffVenueDefaults | null>(null);
   const [rebookModalBootstrap, setRebookModalBootstrap] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
   const [rebookModalEpoch, setRebookModalEpoch] = useState(0);
@@ -404,11 +414,35 @@ export function GuestBookingsForGuestAccordion({
   );
 
   useEffect(() => {
+    if (initialRows?.length) {
+      setRows(initialRows);
+      skipInitialFetchRef.current = true;
+    }
+  }, [initialRows]);
+
+  useEffect(() => {
+    setDetailsOpen(false);
+    skipInitialFetchRef.current = Boolean(initialRows?.length);
+    if (initialRows?.length) {
+      setRows(initialRows);
+    } else {
+      setRows(null);
+    }
+    setFetchError(null);
+  }, [guestId, initialRows]);
+
+  useEffect(() => {
     if (!guestId) {
       setRows(null);
       setFetchError(null);
       return;
     }
+    if (fetchWhenOpen && !detailsOpen) return;
+    if (skipInitialFetchRef.current) {
+      skipInitialFetchRef.current = false;
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setFetchError(null);
@@ -444,7 +478,7 @@ export function GuestBookingsForGuestAccordion({
     return () => {
       cancelled = true;
     };
-  }, [guestId, listRefreshKey]);
+  }, [guestId, listRefreshKey, detailsOpen, fetchWhenOpen]);
 
   const { upcomingRows, previousRows } = useMemo(() => {
     if (!rows?.length) {
@@ -477,7 +511,12 @@ export function GuestBookingsForGuestAccordion({
 
   return (
     <>
-      <details className={bookingExpandAccordionDetailsClass}>
+      <details
+        className={bookingExpandAccordionDetailsClass}
+        onToggle={(event) => {
+          setDetailsOpen(event.currentTarget.open);
+        }}
+      >
       <summary className={bookingExpandAccordionSummaryClass}>
         <span>Guest bookings</span>
         <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{summaryHint}</span>

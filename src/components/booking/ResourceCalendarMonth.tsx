@@ -105,7 +105,7 @@ export function ResourceCalendarMonth({
           if (disabled) {
             cellClass += isPast ? 'cursor-not-allowed text-slate-300 ' : 'cursor-not-allowed bg-slate-50 text-slate-400 ';
           } else if (isSelected) {
-            cellClass += 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-600 ring-offset-1 ';
+            cellClass += 'ap-cal-selected ';
           } else if (hasAvail) {
             cellClass +=
               'cursor-pointer bg-emerald-50 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-100 ';

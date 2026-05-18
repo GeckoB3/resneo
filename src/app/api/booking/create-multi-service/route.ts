@@ -56,6 +56,8 @@ const createMultiServiceSchema = z.object({
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
   marketing_consent: z.boolean().optional(),
+  /** §7.7: set when the booking was routed through a venue collective page. */
+  collective_id: z.string().uuid().optional(),
 });
 
 /**
@@ -85,6 +87,7 @@ export async function POST(request: NextRequest) {
       dietary_notes,
       occasion,
       marketing_consent: marketingConsentRaw,
+      collective_id,
     } = parsed.data;
     const authClient = await createClient();
     const {
@@ -381,6 +384,20 @@ export async function POST(request: NextRequest) {
       policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
     };
 
+    // §7.7: attribute to a venue collective only when this venue is genuinely
+    // an active member, so a forged collective_id cannot be attached.
+    let collectiveIdForInsert: string | null = null;
+    if (collective_id) {
+      const { data: membership } = await supabase
+        .from('venue_collective_members')
+        .select('id')
+        .eq('collective_id', collective_id)
+        .eq('venue_id', venue_id)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (membership) collectiveIdForInsert = collective_id;
+    }
+
     for (const seg of validated) {
       const timeForDb = seg.booking_time + ':00';
       const insert: Record<string, unknown> = {
@@ -409,6 +426,7 @@ export async function POST(request: NextRequest) {
         service_variant_id: seg.service_variant_id,
         group_booking_id: groupBookingId,
         person_label: null,
+        collective_id: collectiveIdForInsert,
         processing_time_blocks: seg.processing_time_blocks,
         ...(useUnifiedBookingRows
           ? {

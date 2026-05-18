@@ -33,6 +33,9 @@ export interface PractitionerCalendarToolbarProps {
     pending: boolean;
     onUndo: () => void;
   };
+  searchPanel?: ReactNode;
+  searchActive?: boolean;
+  searchAriaLabel?: string;
 }
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -98,6 +101,9 @@ export function PractitionerCalendarToolbar({
   summaryContent,
   todayIso,
   scheduleUndo,
+  searchPanel,
+  searchActive = false,
+  searchAriaLabel = 'Search bookings',
 }: PractitionerCalendarToolbarProps) {
   const periodLabel = formatCalendarPeriodLabel(viewMode, date, weekStart, monthAnchor);
   const viewModePanelId = useId();
@@ -226,6 +232,9 @@ export function PractitionerCalendarToolbar({
       datePickerPanel={datePickerPanel}
       controlsPanel={controlsPanel}
       controlsLabel={controlsLabel}
+      searchPanel={searchPanel}
+      searchActive={searchActive}
+      searchAriaLabel={searchAriaLabel}
       compact
       toolbarLeadingTools={viewModeSwitcher}
       toolbarTools={

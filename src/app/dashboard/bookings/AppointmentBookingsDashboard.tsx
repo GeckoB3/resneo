@@ -12,8 +12,13 @@ import {
 } from './ExpandedBookingContent';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
+import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
+import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
+import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
@@ -28,6 +33,10 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import {
+  applyBookingRowOverlayFields,
+  overlayFromPatchPayload,
+} from '@/lib/booking/booking-row-overlay';
 import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
@@ -39,6 +48,13 @@ import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModa
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { LinkedBookingsPanel } from '@/components/linked-accounts/LinkedBookingsPanel';
+import {
+  useDashboardDetailCache,
+  type VenueBookingDetailPayload,
+} from '@/components/providers/DashboardDetailCacheProvider';
+
+type SourceScope = 'all' | 'own' | 'linked';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -107,7 +123,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   }
   if (mode === 'week') {
     const end = new Date(`${addDays(date, 6)}T12:00:00`);
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} â€“ ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return '';
@@ -144,7 +160,7 @@ function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel(rowForInference(b));
 }
 
-/** Left-edge status strip — same palette as table grid / main bookings list. */
+/** Left-edge status strip â€” same palette as table grid / main bookings list. */
 function statusBorderClass(b: RegistryAppointment): string {
   return bookingStatusVisualForKey(b.status).listBorderLeft;
 }
@@ -306,6 +322,7 @@ export function AppointmentBookingsDashboard({
   enabledModels = [],
   defaultPractitionerFilter = 'all',
   linkedPractitionerIds = [],
+  initialTodayIso,
 }: {
   venueId: string;
   currency?: string;
@@ -315,14 +332,23 @@ export function AppointmentBookingsDashboard({
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages. */
   linkedPractitionerIds?: string[];
+  /** yyyy-mm-dd from the server render â€” keeps â€œtodayâ€ aligned between SSR and hydration. */
+  initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const {
+    peekVenueBookingDetail,
+    primeVenueBookingDetail,
+    invalidateVenueBookingDetail,
+    warmVenueBookingDetail,
+  } = useDashboardDetailCache();
   const myCalendarIds = useMemo(() => linkedPractitionerIds, [linkedPractitionerIds]);
   const sym = currencySymbolFromCode(currency);
+  const todayIso = initialTodayIso ?? todayISO();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
-  const [anchorDate, setAnchorDate] = useState(todayISO);
-  const [customFrom, setCustomFrom] = useState(todayISO);
-  const [customTo, setCustomTo] = useState(addDays(todayISO(), 7));
+  const [anchorDate, setAnchorDate] = useState(todayIso);
+  const [customFrom, setCustomFrom] = useState(todayIso);
+  const [customTo, setCustomTo] = useState(addDays(todayIso, 7));
   const [viewRangePopoverOpen, setViewRangePopoverOpen] = useState(false);
   const viewRangeTriggerRef = useRef<HTMLButtonElement>(null);
   const viewRangeWrapRef = useRef<HTMLDivElement>(null);
@@ -333,7 +359,7 @@ export function AppointmentBookingsDashboard({
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [bookings, setBookings] = useState<RegistryAppointment[]>([]);
   /** All statuses in range - used for summary tiles (list may be status-filtered). */
   const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
@@ -368,6 +394,10 @@ export function AppointmentBookingsDashboard({
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
+  /** Own / linked-in / all source filter (Â§8.2). */
+  const [sourceScope, setSourceScope] = useState<SourceScope>('all');
+  /** True once the venue is known to hold at least one linked calendar. */
+  const [linkedAvailable, setLinkedAvailable] = useState(false);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -414,29 +444,65 @@ export function AppointmentBookingsDashboard({
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
 
-  const loadBookingDetail = useCallback(async (bookingId: string, force = false) => {
-    if (!force && detailById[bookingId]) return;
-    setDetailLoadingIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as BookingDetailLite;
-      setDetailById((prev) => ({ ...prev, [bookingId]: data }));
-      setGuestHistoryRevisionById((prev) => ({
-        ...prev,
-        [bookingId]: (prev[bookingId] ?? 0) + 1,
-      }));
-      setBookings((rows) =>
-        rows.map((booking) =>
-          booking.id === bookingId && data.inferred_booking_model
-            ? { ...booking, booking_model: data.inferred_booking_model }
-            : booking,
-        ),
-      );
-    } finally {
-      setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
-    }
-  }, [detailById]);
+  const loadBookingDetail = useCallback(
+    async (bookingId: string, force = false) => {
+      if (!force && detailById[bookingId]) return;
+
+      const cachedRaw = !force ? peekVenueBookingDetail(bookingId) : undefined;
+      const fromCache =
+        cachedRaw &&
+        typeof cachedRaw === 'object' &&
+        typeof (cachedRaw as unknown as BookingDetailLite).id === 'string' &&
+        (cachedRaw as unknown as BookingDetailLite).id === bookingId
+          ? (cachedRaw as unknown as BookingDetailLite)
+          : undefined;
+
+      if (fromCache && !detailById[bookingId]) {
+        setDetailById((prev) => ({ ...prev, [bookingId]: fromCache }));
+      }
+
+      const blockingSpinner = force || !fromCache;
+      if (detailLoadingIds.includes(bookingId)) return;
+      if (blockingSpinner) {
+        setDetailLoadingIds((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]));
+      }
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as BookingDetailLite;
+        primeVenueBookingDetail(bookingId, data as unknown as VenueBookingDetailPayload);
+        setDetailById((prev) => ({ ...prev, [bookingId]: data }));
+        setGuestHistoryRevisionById((prev) => ({
+          ...prev,
+          [bookingId]: (prev[bookingId] ?? 0) + 1,
+        }));
+        setBookings((rows) =>
+          rows.map((booking) =>
+            booking.id === bookingId && data.inferred_booking_model
+              ? { ...booking, booking_model: data.inferred_booking_model }
+              : booking,
+          ),
+        );
+      } finally {
+        if (blockingSpinner) {
+          setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
+        }
+      }
+    },
+    [detailById, detailLoadingIds, peekVenueBookingDetail, primeVenueBookingDetail],
+  );
+
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => {
+      void (async () => {
+        await warmVenueBookingDetail(bookingId);
+        const lite = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
+        if (!lite) return;
+        setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: lite }));
+      })();
+    },
+    [peekVenueBookingDetail, warmVenueBookingDetail],
+  );
 
   /** Legacy filter label before "Started" rename. */
   useEffect(() => {
@@ -465,7 +531,7 @@ export function AppointmentBookingsDashboard({
   useEffect(() => {
     const ob = searchParams.get('openBooking');
     if (ob && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ob)) {
-      setExpandedIds((prev) => (prev.includes(ob) ? prev : [...prev, ob]));
+      setExpandedIds((prev) => (prev.includes(ob) ? prev : [ob]));
       void loadBookingDetail(ob);
       const next = new URLSearchParams(searchParams.toString());
       next.delete('openBooking');
@@ -493,7 +559,7 @@ export function AppointmentBookingsDashboard({
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
       if (invalidCustomRange) {
-        setError('Custom date range is invalid. “From” must be before or equal to “To”.');
+        setError('Custom date range is invalid. â€œFromâ€ must be before or equal to â€œToâ€.');
         setLoading(false);
         return;
       }
@@ -641,11 +707,11 @@ export function AppointmentBookingsDashboard({
         bookings,
         practitionerFilter,
         serviceFilter,
-        searchQuery,
+        '',
         primaryBookingModel,
         enabledModels,
       ),
-    [bookings, practitionerFilter, serviceFilter, searchQuery, primaryBookingModel, enabledModels],
+    [bookings, practitionerFilter, serviceFilter, primaryBookingModel, enabledModels],
   );
 
   const filteredBookings = useMemo(() => {
@@ -668,7 +734,7 @@ export function AppointmentBookingsDashboard({
       allStatusBookings,
       practitionerFilter,
       serviceFilter,
-      searchQuery,
+      '',
       primaryBookingModel,
       enabledModels,
     );
@@ -681,7 +747,6 @@ export function AppointmentBookingsDashboard({
     allStatusBookings,
     practitionerFilter,
     serviceFilter,
-    searchQuery,
     primaryBookingModel,
     enabledModels,
     modelFilter,
@@ -757,10 +822,45 @@ export function AppointmentBookingsDashboard({
     return list;
   }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
 
+  useEffect(() => {
+    if (sortedBookings.length === 0) return;
+    const ids = sortedBookings
+      .filter((b) => b.status !== 'Cancelled')
+      .slice(0, 28)
+      .map((b) => b.id);
+    const scheduleIdle =
+      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback.bind(window)
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
+    const idleHandle = scheduleIdle(() => {
+      void warmIdsWithConcurrency(ids, warmVenueBookingDetail);
+    });
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
+  }, [sortedBookings, warmVenueBookingDetail]);
+
   async function updateRowStatus(bookingId: string, nextStatus: string) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev) return;
-    setBookings((rows) => rows.map((r) => (r.id === bookingId ? { ...r, status: nextStatus } : r)));
+    setBookings((rows) =>
+      rows.map((r) => {
+        if (r.id !== bookingId) return r;
+        const updated: RegistryAppointment = { ...r, status: nextStatus };
+        if (prev.status === 'Confirmed' && nextStatus === 'Booked') {
+          updated.staff_attendance_confirmed_at = null;
+          updated.guest_attendance_confirmed_at = null;
+        } else if (nextStatus === 'Confirmed' && prev.status !== 'Confirmed') {
+          updated.staff_attendance_confirmed_at = new Date().toISOString();
+        }
+        return updated;
+      }),
+    );
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -773,7 +873,16 @@ export function AppointmentBookingsDashboard({
         setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
         return;
       }
-      void fetchBookings({ silent: true });
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (payload && typeof payload === 'object' && !('error' in payload)) {
+        setBookings((rows) =>
+          rows.map((r) =>
+            r.id === bookingId
+              ? applyBookingRowOverlayFields(r, overlayFromPatchPayload(payload))
+              : r,
+          ),
+        );
+      }
       void fetchBookingsForStats();
     } catch {
       addToast('Could not update status', 'error');
@@ -873,7 +982,7 @@ export function AppointmentBookingsDashboard({
           addToast(`Message sent to ${okCount} guest(s)`, 'success');
         } else if (okCount > 0) {
           setError(
-            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
+            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
           );
           addToast(`Sent to ${okCount}/${ids.length}`, 'error');
         } else {
@@ -916,16 +1025,18 @@ export function AppointmentBookingsDashboard({
         if (payload.errors && payload.errors.length > 0) {
           const w = payload.errors.join('; ');
           setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+          invalidateVenueBookingDetail(bookingId);
           setDetailById((prev) => {
             const next = { ...prev };
             delete next[bookingId];
             return next;
           });
           void loadBookingDetail(bookingId, true);
-          addToast(`Sent with issues — ${w}`, 'error');
+          addToast(`Sent with issues â€” ${w}`, 'error');
           return { ok: true, warning: `Sent with issues: ${w}` };
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
+        invalidateVenueBookingDetail(bookingId);
         setDetailById((prev) => {
           const next = { ...prev };
           delete next[bookingId];
@@ -941,15 +1052,26 @@ export function AppointmentBookingsDashboard({
         setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
       }
     },
-    [addToast, loadBookingDetail],
+    [addToast, invalidateVenueBookingDetail, loadBookingDetail],
   );
 
-  function toggleExpanded(id: string) {
-    setExpandedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-    void loadBookingDetail(id);
-  }
+  const toggleExpanded = useCallback(
+    (id: string) => {
+      setExpandedIds((prev) => {
+        if (prev.includes(id)) return [];
+        return [id];
+      });
+      const row = bookings.find((b) => b.id === id);
+      const fromCache = bookingDetailLiteFromCachePayload(id, peekVenueBookingDetail(id));
+      const fromRow = row ? bookingDetailLiteFromListRow(row) : undefined;
+      const seed = fromCache ?? fromRow;
+      if (seed) {
+        setDetailById((prev) => (prev[id] ? prev : { ...prev, [id]: seed }));
+      }
+      void loadBookingDetail(id);
+    },
+    [bookings, loadBookingDetail, peekVenueBookingDetail],
+  );
 
   function SortControl() {
     const options: Array<{ key: SortKey; label: string }> = [
@@ -962,7 +1084,7 @@ export function AppointmentBookingsDashboard({
       { key: 'deposit', label: 'Deposit' },
       { key: 'type', label: 'Type' },
     ];
-    /** Matches OperationsWorkspaceToolbar compact “Today” control sizing and weight. */
+    /** Matches OperationsWorkspaceToolbar compact â€œTodayâ€ control sizing and weight. */
     const sortTriggerClass =
       'min-h-8 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-xs';
     return (
@@ -990,7 +1112,7 @@ export function AppointmentBookingsDashboard({
             className={`${sortTriggerClass} inline-flex shrink-0 items-center gap-1`}
             aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
           >
-            <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>
+            <span aria-hidden>{sortDir === 'asc' ? 'â†‘' : 'â†“'}</span>
             <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
           </button>
         </div>
@@ -1068,6 +1190,7 @@ export function AppointmentBookingsDashboard({
         aria-expanded={expanded}
         aria-controls={`appt-expand-${b.id}`}
         onClick={() => toggleExpanded(b.id)}
+        {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -1102,7 +1225,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1120,7 +1243,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 sm:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1138,7 +1261,7 @@ export function AppointmentBookingsDashboard({
                     : 'hidden shrink-0 text-slate-300 md:inline'
                 }
               >
-                ·
+                Â·
               </span>
               <span
                 className={
@@ -1196,7 +1319,7 @@ export function AppointmentBookingsDashboard({
               {priceDisplay && (
                 <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                   <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
-                    {priceDisplay} · {b.deposit_status}
+                    {priceDisplay} Â· {b.deposit_status}
                   </Pill>
                 </span>
               )}
@@ -1217,6 +1340,7 @@ export function AppointmentBookingsDashboard({
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
             className={expandedBookingRowShellClass}
           >
             <ExpandedBookingContent
@@ -1242,6 +1366,7 @@ export function AppointmentBookingsDashboard({
               onSendMessage={(channel) => sendGuestMessage(b.id, draftMessage, channel)}
               onStatusAction={(status) => { void updateRowStatus(b.id, status); }}
               onDetailUpdated={() => {
+                invalidateVenueBookingDetail(b.id);
                 setDetailById((prev) => {
                   const next = { ...prev };
                   delete next[b.id];
@@ -1474,39 +1599,6 @@ export function AppointmentBookingsDashboard({
     </div>
   );
 
-  const appointmentSearchPanel = (
-    <div className="space-y-2">
-      <label htmlFor="appointment-toolbar-search" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Search
-      </label>
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-        </div>
-        <input
-          id="appointment-toolbar-search"
-          type="search"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search client, phone, email..."
-          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-          autoComplete="off"
-        />
-      </div>
-      {searchQuery.trim() ? (
-        <button
-          type="button"
-          onClick={() => setSearchQuery('')}
-          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-        >
-          Clear search
-        </button>
-      ) : null}
-    </div>
-  );
-
   const appointmentToolbarLeadingTools = useCallback(
     (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
       <div ref={viewRangeWrapRef} className="relative shrink-0">
@@ -1576,7 +1668,7 @@ export function AppointmentBookingsDashboard({
       <div className="min-w-0 space-y-6">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Updates may be delayed. Reconnecting…
+          Updates may be delayed. Reconnectingâ€¦
         </div>
       )}
       {error && (
@@ -1610,6 +1702,7 @@ export function AppointmentBookingsDashboard({
         summary={toolbarSummary}
         summaryContent={appointmentSummaryContent}
         date={anchorDate}
+        todayIso={todayIso}
         dateLabel={viewMode === 'custom' ? `${customFrom} - ${customTo}` : formatDateLabel(anchorDate, viewMode)}
         onDateChange={setAnchorDate}
         onPreviousDate={() => navigate(-1)}
@@ -1626,8 +1719,18 @@ export function AppointmentBookingsDashboard({
         controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
         controlsPanel={appointmentFilterPanel}
         datePickerPanel={appointmentDatePanel}
-        searchActive={searchQuery.trim().length > 0}
-        searchPanel={appointmentSearchPanel}
+        searchActive={guestToolbarSearchQuery.trim().length > 0}
+        searchAriaLabel="Search contacts"
+        searchPanel={(
+          <OperationsToolbarGuestSearchPanel
+            onQueryChange={setGuestToolbarSearchQuery}
+            initialDate={viewMode === 'day' ? anchorDate : undefined}
+            onBookingCreated={() => {
+              void fetchBookings({ silent: true });
+              void fetchBookingsForStats();
+            }}
+          />
+        )}
       />
       <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
         <div
@@ -1636,7 +1739,30 @@ export function AppointmentBookingsDashboard({
         />
       </div>
 
-      {loading ? (
+      {linkedAvailable ? (
+        <div
+          className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm"
+          role="group"
+          aria-label="Booking source"
+        >
+          {(['all', 'own', 'linked'] as SourceScope[]).map((scope) => (
+            <button
+              key={scope}
+              type="button"
+              onClick={() => setSourceScope(scope)}
+              className={`rounded-lg px-3 py-1.5 transition-colors ${
+                sourceScope === scope
+                  ? 'bg-brand-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {scope === 'all' ? 'All' : scope === 'own' ? 'My venue' : 'Linked-in'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {sourceScope !== 'linked' && (loading ? (
         <div className="space-y-3" role="status" aria-label="Loading bookings">
           {[1, 2, 3, 4, 5].map((i) => (
             <Skeleton.Card key={i} className="py-4">
@@ -1692,7 +1818,11 @@ export function AppointmentBookingsDashboard({
               </section>
             ))}
         </div>
-      )}
+      ))}
+
+      {sourceScope !== 'own' ? (
+        <LinkedBookingsPanel from={from} to={to} onAvailabilityChange={setLinkedAvailable} />
+      ) : null}
 
       {bulkGuestMessageOpen && (
         <BulkGuestMessageModal

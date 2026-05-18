@@ -11,6 +11,8 @@ interface Props {
   monthAnchor: string;
   monthCells: string[];
   monthDayScheduleCounts: Record<string, MonthDayScheduleCounts>;
+  /** Linked-venue booking counts per ISO date (§8.2); adjacent to native totals. */
+  linkedCountByDate?: Record<string, number>;
   showMergedFeeds: boolean;
   /** Venue business hours (Settings); used for Open/Closed on days with no bookings. */
   openingHours: OpeningHours | null;
@@ -25,6 +27,7 @@ export function MonthScheduleGrid({
   monthAnchor,
   monthCells,
   monthDayScheduleCounts,
+  linkedCountByDate,
   showMergedFeeds,
   openingHours,
   venueTimezone,
@@ -63,6 +66,7 @@ export function MonthScheduleGrid({
             daySummary.class_session +
             daySummary.resource_booking;
           const intensity = total === 0 ? 0 : Math.min(1, total / maxTotalForIntensity);
+          const linkedCount = linkedCountByDate?.[cell] ?? 0;
           const bookingTip = [
             daySummary.appointments > 0
               ? `${daySummary.appointments} team appointment${daySummary.appointments === 1 ? '' : 's'}`
@@ -70,6 +74,9 @@ export function MonthScheduleGrid({
             daySummary.event_ticket > 0 ? `${daySummary.event_ticket} event(s)` : null,
             daySummary.class_session > 0 ? `${daySummary.class_session} class(es)` : null,
             daySummary.resource_booking > 0 ? `${daySummary.resource_booking} resource(s)` : null,
+            linkedCount > 0
+              ? `${linkedCount} linked booking${linkedCount === 1 ? '' : 's'}`
+              : null,
           ]
             .filter(Boolean)
             .join(' · ');
@@ -98,13 +105,23 @@ export function MonthScheduleGrid({
                 >
                   {Number(cell.slice(8, 10))}
                 </span>
-                {total > 0 && (
-                  <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700 shadow-sm ring-1 ring-black/5">
-                    {total}
-                  </span>
-                )}
+                <div className="flex shrink-0 items-center gap-1">
+                  {linkedCount > 0 ? (
+                    <span
+                      className="rounded-full bg-slate-100 px-1.5 py-1 text-[10px] font-bold text-slate-500 shadow-sm ring-1 ring-black/5 saturate-50"
+                      title={`${linkedCount} linked booking${linkedCount === 1 ? '' : 's'}`}
+                    >
+                      +{linkedCount}
+                    </span>
+                  ) : null}
+                  {total > 0 ? (
+                    <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700 shadow-sm ring-1 ring-black/5">
+                      {total}
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              {total > 0 ? (
+              {total > 0 || linkedCount > 0 ? (
                 <div className="flex min-h-[6px] flex-wrap justify-start gap-1" aria-hidden>
                   {daySummary.appointments > 0 ? (
                     <span
@@ -120,6 +137,12 @@ export function MonthScheduleGrid({
                   ) : null}
                   {showMergedFeeds && daySummary.resource_booking > 0 ? (
                     <span className="h-2 w-5 rounded-full bg-slate-500 shadow-sm" title="Resources" />
+                  ) : null}
+                  {linkedCount > 0 ? (
+                    <span
+                      className="h-2 w-5 rounded-full bg-slate-300 shadow-sm saturate-50"
+                      title="Linked venues"
+                    />
                   ) : null}
                 </div>
               ) : (

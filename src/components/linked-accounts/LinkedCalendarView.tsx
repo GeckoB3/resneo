@@ -477,20 +477,29 @@ interface GuestOption {
 export function CreateLinkedBookingModal({
   venue,
   date,
+  practitionerId: prefillPractitionerId,
+  time: prefillTime,
   onClose,
   onSaved,
 }: {
   venue: LinkedVenueCalendar;
   date: string;
+  /** Pre-select this calendar — e.g. the linked column the user clicked. */
+  practitionerId?: string;
+  /** Pre-fill the start time — e.g. the empty slot the user clicked (§4.3). */
+  time?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [practitionerId, setPractitionerId] = useState(
-    venue.practitioners.find((p) => p.isActive)?.id ?? '',
+    (prefillPractitionerId &&
+    venue.practitioners.some((p) => p.id === prefillPractitionerId)
+      ? prefillPractitionerId
+      : venue.practitioners.find((p) => p.isActive)?.id) ?? '',
   );
   const [serviceId, setServiceId] = useState('');
   const [bookingDate, setBookingDate] = useState(date);
-  const [time, setTime] = useState('09:00');
+  const [time, setTime] = useState(prefillTime ?? '09:00');
   const [endTime, setEndTime] = useState('');
   const [notes, setNotes] = useState('');
   const [guestQuery, setGuestQuery] = useState('');

@@ -1,6 +1,6 @@
 # ReserveNI: Linked-Calendar Grid Integration — Scope
 
-**Status:** Scoped, not started
+**Status:** Partly implemented.
 **Parent spec:** `Docs/reserveni-linked-accounts-spec.md` §8.2
 **Depends on:** Linked Accounts Phase 1 (shipped — PRs #28, #30, plus the action-tier /
 create-endpoint / RLS-test follow-up)

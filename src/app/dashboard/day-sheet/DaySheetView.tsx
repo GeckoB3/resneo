@@ -296,7 +296,7 @@ function depositBadge(status: string, amountPence: number | null) {
 }
 
 /**
- * Confirm attendance when nobody has confirmed yet; â€œundoâ€ clears guest + staff
+ * Confirm attendance when nobody has confirmed yet; "undo" clears guest + staff
  * attendance markers (same PATCH as bookings dashboard lists).
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
@@ -457,7 +457,7 @@ export function DaySheetView({
   currency?: string;
   bookingModel?: BookingModel;
   enabledModels?: BookingModel[];
-  /** When true, linked calendars follow this page's selected date (Â§8.2). */
+  /** When true, linked calendars follow this page's selected date (section 8.2). */
   linkFeature?: boolean;
 }) {
   const { addToast } = useToast();
@@ -1280,7 +1280,7 @@ export function DaySheetView({
       {/* Capacity not configured banner */}
       {!data.capacity_configured && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 print:hidden">
-          Set your venue capacity in Settings â†’ Availability for accurate cover tracking.
+          Set your venue capacity in Settings {'\u2192'} Availability for accurate cover tracking.
         </div>
       )}
 
@@ -1359,7 +1359,7 @@ export function DaySheetView({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-slate-800">{period.label}</span>
-                    <span className="text-xs text-slate-500">{period.start_time} â€“ {period.end_time}</span>
+                    <span className="text-xs text-slate-500">{period.start_time} {'\u2013'} {period.end_time}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {period.max_covers != null ? (

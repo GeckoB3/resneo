@@ -290,7 +290,7 @@ export function BookingDetailPanel({
   venueCurrency?: string;
   initialSnapshot?: BookingDetailPanelSnapshot | null;
   isAppointment?: boolean;
-  presentation?: 'drawer' | 'popover';
+  presentation?: 'drawer' | 'popover' | 'modal';
   anchor?: { x: number; y: number } | null;
   /** Nested detail panels use a higher z-index and swallow Escape / outside-click first. */
   stackDepth?: number;
@@ -341,6 +341,8 @@ export function BookingDetailPanel({
   const displayDetail = hydratedDetail ?? optimisticDetail;
   const isHydrated = hydratedDetail !== null;
   const isPopover = presentation === 'popover';
+  const isModal = presentation === 'modal';
+  const useExpandedContentLayout = isPopover || isModal;
   const popoverStyle = useMemo((): CSSProperties | undefined => {
     if (!isPopover) return undefined;
 
@@ -868,7 +870,9 @@ export function BookingDetailPanel({
           className={
             isPopover
               ? 'fixed'
-              : 'fixed inset-0 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'
+              : isModal
+                ? 'fixed inset-0 flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4'
+                : 'fixed inset-0 flex justify-end bg-slate-900/25 backdrop-blur-[2px]'
           }
           style={panelShellStyle}
           onClick={isPopover ? undefined : nestedBookingOpen ? undefined : onClose}
@@ -881,7 +885,9 @@ export function BookingDetailPanel({
             className={
               isPopover
                 ? 'flex max-h-[inherit] min-w-0 max-w-full w-full flex-col overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
-                : 'flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
+                : isModal
+                  ? 'flex h-[min(85dvh,85vh)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl'
+                  : 'flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl'
             }
             onClick={(e) => e.stopPropagation()}
           >
@@ -1060,7 +1066,7 @@ export function BookingDetailPanel({
     );
   }
 
-  if (isPopover) {
+  if (useExpandedContentLayout) {
     const bookingForExpanded = {
       id: d.id,
       booking_date: d.booking_date,
@@ -1133,19 +1139,225 @@ export function BookingDetailPanel({
       inferred_booking_model: d.inferred_booking_model,
     };
 
+    const expandedBody = (
+      <>
+        <ExpandedBookingContent
+          booking={bookingForExpanded}
+          detail={isHydrated ? detailForExpanded : undefined}
+          detailLoading={!isHydrated}
+          tableManagementEnabled={tableManagementEnabled}
+          venueId={d.venue_id || venueId || ''}
+          venueCurrency={venueCurrency ?? 'GBP'}
+          draftMessage={customMessage}
+          sendingMessage={actionLoading}
+          onMessageDraftChange={setCustomMessage}
+          onSendMessage={async (channel): Promise<GuestMessageSendResult> => {
+            setActionLoading(true);
+            try {
+              const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: customMessage, channel }),
+              });
+              const payload = (await res.json().catch(() => ({}))) as {
+                success?: boolean;
+                error?: string;
+                errors?: string[];
+              };
+              if (!res.ok || !payload.success) {
+                const errMsg = payload.errors?.join('; ') ?? payload.error ?? 'Failed to send message';
+                setError(errMsg);
+                return { ok: false, error: errMsg };
+              }
+              if (payload.errors?.length) {
+                const w = payload.errors.join('; ');
+                setError(null);
+                setCustomMessage('');
+                await load();
+                return { ok: true, warning: `Sent with issues: ${w}` };
+              }
+              setError(null);
+              setCustomMessage('');
+              await load();
+              return { ok: true };
+            } catch {
+              const errMsg = 'Failed to send message.';
+              setError(errMsg);
+              return { ok: false, error: errMsg };
+            } finally {
+              setActionLoading(false);
+            }
+          }}
+          onStatusAction={(status) => {
+            if (status === 'No-Show' && !canMarkNoShowForSlot(d.booking_date, d.booking_time?.slice(0, 5) ?? '12:00', 0)) {
+              setError('No-show can only be marked after the booking start time');
+              return;
+            }
+            void executeStatusChange(status);
+          }}
+          onDetailUpdated={() => {
+            void (async () => {
+              await load();
+              onUpdated();
+            })();
+          }}
+          onRequestChangeTable={
+            bookingStyleIsTable && d.status === 'Seated'
+              ? () => setShowAssignModal(true)
+              : undefined
+          }
+          venueTimezone={venueTimezone}
+          guestHistoryListRefresh={guestHistoryListRefresh}
+          relatedBookingsStackDepth={stackDepth}
+          onOpenRelatedGuestBooking={(payload) => {
+            setNestedBookingOpen({
+              id: payload.bookingId,
+              snapshot: payload.snapshot,
+              isAppointment: !isTableReservationBooking(payload.row),
+            });
+          }}
+        />
+        {showAssignModal ? (
+          <div className="mx-2 mb-2 rounded-xl border border-brand-200 bg-brand-50/30 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-900">Table assignment</p>
+              <button
+                type="button"
+                onClick={() => setShowAssignModal(false)}
+                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-white/70"
+              >
+                Close
+              </button>
+            </div>
+            {suggestionsLoading ? (
+              <p className="mb-3 text-xs text-slate-500">Finding best table options...</p>
+            ) : assignmentSuggestions.length > 0 ? (
+              <div className="mb-3 space-y-2">
+                {assignmentSuggestions.slice(0, 6).map((suggestion, idx) => (
+                  <button
+                    key={`${suggestion.table_ids.join('|')}-${suggestion.source}`}
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={async () => {
+                      setActionLoading(true);
+                      try {
+                        const assignRes = await fetch('/api/venue/tables/assignments', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(assignedTables.length > 0
+                            ? {
+                                action: 'reassign',
+                                booking_id: bookingId,
+                                old_table_ids: assignedTables.map((x) => x.id),
+                                new_table_ids: suggestion.table_ids,
+                              }
+                            : { booking_id: bookingId, table_ids: suggestion.table_ids }
+                          ),
+                        });
+                        if (!assignRes.ok) {
+                          const payload = await assignRes.json().catch(() => ({}));
+                          setError(payload.error ?? 'Failed to assign tables');
+                          return;
+                        }
+                        setShowAssignModal(false);
+                        await load();
+                        onUpdated();
+                      } finally {
+                        setActionLoading(false);
+                      }
+                    }}
+                    className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                      idx === 0
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold">{suggestion.table_names.join(' + ')}</span>
+                      <span className="text-[10px] uppercase">
+                        {suggestion.source === 'manual' ? 'Pre-configured' : suggestion.source === 'auto' ? 'Auto-detected' : 'Single'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px]">
+                      Capacity {suggestion.combined_capacity} - Spare {suggestion.spare_covers}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-3 text-xs text-slate-500">No ranked suggestions available. Choose manually below.</p>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              {allTables.map((table) => (
+                <button
+                  key={table.id}
+                  type="button"
+                  onClick={async () => {
+                    setActionLoading(true);
+                    try {
+                      const assignRes = await fetch('/api/venue/tables/assignments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(assignedTables.length > 0
+                          ? { action: 'reassign', booking_id: bookingId, old_table_ids: assignedTables.map((x) => x.id), new_table_ids: [table.id] }
+                          : { booking_id: bookingId, table_ids: [table.id] }
+                        ),
+                      });
+                      if (!assignRes.ok) {
+                        const payload = await assignRes.json().catch(() => ({}));
+                        setError(payload.error ?? 'Failed to assign table');
+                        return;
+                      }
+                      setShowAssignModal(false);
+                      await load();
+                      onUpdated();
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  disabled={actionLoading}
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    assignedTables.some((assigned) => assigned.id === table.id)
+                      ? 'border-brand-300 bg-brand-50 text-brand-700'
+                      : recommendedTableIds.includes(table.id)
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {table.name} ({table.max_covers}){recommendedTableIds.includes(table.id) ? ' - Recommended' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
+
     return (
       <>
         {popoverDismissLayer}
-        <div className="fixed" style={panelShellStyle}>
+        <div
+          className={
+            isModal
+              ? 'fixed inset-0 flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4'
+              : 'fixed'
+          }
+          style={panelShellStyle}
+          onClick={isModal ? (nestedBookingOpen ? undefined : onClose) : undefined}
+        >
           <div
             ref={panelRef}
             role="dialog"
-            aria-modal={false}
+            aria-modal={isModal}
             aria-label="Booking detail panel"
-            className="max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+            className={
+              isModal
+                ? 'flex h-[min(85dvh,85vh)] w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl'
+                : 'max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100'
+            }
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-end border-b border-slate-100 bg-white/95 px-2 py-1.5 backdrop-blur">
+            <div className={`sticky top-0 z-10 flex items-center justify-end border-b border-slate-100 bg-white/95 backdrop-blur ${isModal ? 'px-4 py-3' : 'px-2 py-1.5'}`}>
               <button
                 type="button"
                 aria-label="Close booking detail"
@@ -1158,199 +1370,15 @@ export function BookingDetailPanel({
               </button>
             </div>
             {error ? (
-              <div className="mx-2 mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <div className={`rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 ${isModal ? 'mx-4 mt-3' : 'mx-2 mt-2'}`}>
                 {error}
               </div>
             ) : null}
-            <ExpandedBookingContent
-              booking={bookingForExpanded}
-              detail={isHydrated ? detailForExpanded : undefined}
-              detailLoading={!isHydrated}
-              tableManagementEnabled={tableManagementEnabled}
-              venueId={d.venue_id || venueId || ''}
-              venueCurrency={venueCurrency ?? 'GBP'}
-              draftMessage={customMessage}
-              sendingMessage={actionLoading}
-              onMessageDraftChange={setCustomMessage}
-              onSendMessage={async (channel): Promise<GuestMessageSendResult> => {
-                setActionLoading(true);
-                try {
-                  const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: customMessage, channel }),
-                  });
-                  const payload = (await res.json().catch(() => ({}))) as {
-                    success?: boolean;
-                    error?: string;
-                    errors?: string[];
-                  };
-                  if (!res.ok || !payload.success) {
-                    const errMsg = payload.errors?.join('; ') ?? payload.error ?? 'Failed to send message';
-                    setError(errMsg);
-                    return { ok: false, error: errMsg };
-                  }
-                  if (payload.errors?.length) {
-                    const w = payload.errors.join('; ');
-                    setError(null);
-                    setCustomMessage('');
-                    await load();
-                    return { ok: true, warning: `Sent with issues: ${w}` };
-                  }
-                  setError(null);
-                  setCustomMessage('');
-                  await load();
-                  return { ok: true };
-                } catch {
-                  const errMsg = 'Failed to send message.';
-                  setError(errMsg);
-                  return { ok: false, error: errMsg };
-                } finally {
-                  setActionLoading(false);
-                }
-              }}
-              onStatusAction={(status) => {
-                if (status === 'No-Show' && !canMarkNoShowForSlot(d.booking_date, d.booking_time?.slice(0, 5) ?? '12:00', 0)) {
-                  setError('No-show can only be marked after the booking start time');
-                  return;
-                }
-                void executeStatusChange(status);
-              }}
-              onDetailUpdated={() => {
-                void (async () => {
-                  await load();
-                  onUpdated();
-                })();
-              }}
-              onRequestChangeTable={
-                bookingStyleIsTable && d.status === 'Seated'
-                  ? () => setShowAssignModal(true)
-                  : undefined
-              }
-              venueTimezone={venueTimezone}
-              guestHistoryListRefresh={guestHistoryListRefresh}
-              relatedBookingsStackDepth={stackDepth}
-              onOpenRelatedGuestBooking={(payload) => {
-                setNestedBookingOpen({
-                  id: payload.bookingId,
-                  snapshot: payload.snapshot,
-                  isAppointment: !isTableReservationBooking(payload.row),
-                });
-              }}
-            />
-            {showAssignModal ? (
-              <div className="mx-2 mb-2 rounded-xl border border-brand-200 bg-brand-50/30 p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-900">Table assignment</p>
-                  <button
-                    type="button"
-                    onClick={() => setShowAssignModal(false)}
-                    className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-white/70"
-                  >
-                    Close
-                  </button>
-                </div>
-                {suggestionsLoading ? (
-                  <p className="mb-3 text-xs text-slate-500">Finding best table options...</p>
-                ) : assignmentSuggestions.length > 0 ? (
-                  <div className="mb-3 space-y-2">
-                    {assignmentSuggestions.slice(0, 6).map((suggestion, idx) => (
-                      <button
-                        key={`${suggestion.table_ids.join('|')}-${suggestion.source}`}
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={async () => {
-                          setActionLoading(true);
-                          try {
-                            const assignRes = await fetch('/api/venue/tables/assignments', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(assignedTables.length > 0
-                                ? {
-                                    action: 'reassign',
-                                    booking_id: bookingId,
-                                    old_table_ids: assignedTables.map((x) => x.id),
-                                    new_table_ids: suggestion.table_ids,
-                                  }
-                                : { booking_id: bookingId, table_ids: suggestion.table_ids }
-                              ),
-                            });
-                            if (!assignRes.ok) {
-                              const payload = await assignRes.json().catch(() => ({}));
-                              setError(payload.error ?? 'Failed to assign tables');
-                              return;
-                            }
-                            setShowAssignModal(false);
-                            await load();
-                            onUpdated();
-                          } finally {
-                            setActionLoading(false);
-                          }
-                        }}
-                        className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
-                          idx === 0
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold">{suggestion.table_names.join(' + ')}</span>
-                          <span className="text-[10px] uppercase">
-                            {suggestion.source === 'manual' ? 'Pre-configured' : suggestion.source === 'auto' ? 'Auto-detected' : 'Single'}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[11px]">
-                          Capacity {suggestion.combined_capacity} - Spare {suggestion.spare_covers}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mb-3 text-xs text-slate-500">No ranked suggestions available. Choose manually below.</p>
-                )}
-                <div className="flex flex-wrap gap-1.5">
-                  {allTables.map((table) => (
-                    <button
-                      key={table.id}
-                      type="button"
-                      onClick={async () => {
-                        setActionLoading(true);
-                        try {
-                          const assignRes = await fetch('/api/venue/tables/assignments', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(assignedTables.length > 0
-                              ? { action: 'reassign', booking_id: bookingId, old_table_ids: assignedTables.map((x) => x.id), new_table_ids: [table.id] }
-                              : { booking_id: bookingId, table_ids: [table.id] }
-                            ),
-                          });
-                          if (!assignRes.ok) {
-                            const payload = await assignRes.json().catch(() => ({}));
-                            setError(payload.error ?? 'Failed to assign table');
-                            return;
-                          }
-                          setShowAssignModal(false);
-                          await load();
-                          onUpdated();
-                        } finally {
-                          setActionLoading(false);
-                        }
-                      }}
-                      disabled={actionLoading}
-                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                        assignedTables.some((assigned) => assigned.id === table.id)
-                          ? 'border-brand-300 bg-brand-50 text-brand-700'
-                          : recommendedTableIds.includes(table.id)
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      {table.name} ({table.max_covers}){recommendedTableIds.includes(table.id) ? ' - Recommended' : ''}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            {isModal ? (
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{expandedBody}</div>
+            ) : (
+              expandedBody
+            )}
           </div>
         </div>
         {confirmDialog && (

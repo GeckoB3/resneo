@@ -552,7 +552,7 @@ export function TableGridView({
   const [validDropCombos, setValidDropCombos] = useState<Map<string, string> | null>(null);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBookingAnchor, setSelectedBookingAnchor] = useState<{ x: number; y: number } | null>(null);
-  /** Bumps every minute while viewing today so â€œcovers in useâ€ stays current. */
+  /** Bumps every minute while viewing today so "covers in use" stays current. */
   const [coversClockTick, setCoversClockTick] = useState(0);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
   const [cellContext, setCellContext] = useState<{ tableId: string; time: string; x: number; y: number } | null>(null);

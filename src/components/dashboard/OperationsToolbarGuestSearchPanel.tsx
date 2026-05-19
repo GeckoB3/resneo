@@ -7,7 +7,7 @@ import {
   guestSearchResultLabel,
   guestSearchResultSubtitle,
 } from '@/components/dashboard/toolbar-guest-search/guest-search-helpers';
-import { ToolbarContactDetailPopover } from '@/components/dashboard/toolbar-guest-search/ToolbarContactDetailPopover';
+import { ToolbarContactDetailModal } from '@/components/dashboard/toolbar-guest-search/ToolbarContactDetailModal';
 import { useDashboardToolbarVenue } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 import { useGuestToolbarSearch } from '@/components/dashboard/toolbar-guest-search/useGuestToolbarSearch';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
@@ -28,16 +28,15 @@ function GuestSearchResultRow({
   row,
   onBook,
   viewOpen,
-  onToggleView,
+  onView,
   onPrefetch,
 }: {
   row: GuestListRow;
   onBook: (row: GuestListRow) => void;
   viewOpen: boolean;
-  onToggleView: (row: GuestListRow) => void;
+  onView: (row: GuestListRow) => void;
   onPrefetch: (guestId: string) => void;
 }) {
-  const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const label = guestSearchResultLabel(row);
   const subtitle = guestSearchResultSubtitle(row);
   const initial = label.charAt(0).toUpperCase();
@@ -54,7 +53,7 @@ function GuestSearchResultRow({
         <p className="truncate text-sm font-semibold text-slate-900">{label}</p>
         <p className="truncate text-[11px] text-slate-500">{subtitle}</p>
       </div>
-      <div className="relative flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <button
           type="button"
           onClick={() => onBook(row)}
@@ -63,27 +62,19 @@ function GuestSearchResultRow({
           Book
         </button>
         <button
-          ref={viewTriggerRef}
           type="button"
-          onClick={() => onToggleView(row)}
+          onClick={() => onView(row)}
           onFocus={() => onPrefetch(row.id)}
           className={`inline-flex h-7 items-center justify-center rounded-md border px-2 text-[11px] font-semibold shadow-sm ${
             viewOpen
               ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
               : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
+          aria-haspopup="dialog"
           aria-expanded={viewOpen}
         >
           View
         </button>
-        {viewOpen ? (
-          <ToolbarContactDetailPopover
-            row={row}
-            open
-            triggerRef={viewTriggerRef}
-            onDismiss={() => onToggleView(row)}
-          />
-        ) : null}
       </div>
     </li>
   );
@@ -109,7 +100,7 @@ export function OperationsToolbarGuestSearchPanel({
 
   const [bookingBootstrap, setBookingBootstrap] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
   const [bookingModalEpoch, setBookingModalEpoch] = useState(0);
-  const [viewingGuestId, setViewingGuestId] = useState<string | null>(null);
+  const [viewingGuest, setViewingGuest] = useState<GuestListRow | null>(null);
 
   const handleQueryChange = useCallback(
     (value: string) => {
@@ -121,15 +112,15 @@ export function OperationsToolbarGuestSearchPanel({
 
   const handleBook = useCallback(
     (row: GuestListRow) => {
-      setViewingGuestId(null);
+      setViewingGuest(null);
       setBookingModalEpoch((e) => e + 1);
       setBookingBootstrap(buildToolbarBookBootstrap(row, venue.bookingModel, venue.enabledModels));
     },
     [venue.bookingModel, venue.enabledModels],
   );
 
-  const handleToggleView = useCallback((row: GuestListRow) => {
-    setViewingGuestId((prev) => (prev === row.id ? null : row.id));
+  const handleView = useCallback((row: GuestListRow) => {
+    setViewingGuest(row);
   }, []);
 
   const handlePrefetch = useCallback(
@@ -200,14 +191,22 @@ export function OperationsToolbarGuestSearchPanel({
                 key={row.id}
                 row={row}
                 onBook={handleBook}
-                viewOpen={viewingGuestId === row.id}
-                onToggleView={handleToggleView}
+                viewOpen={viewingGuest?.id === row.id}
+                onView={handleView}
                 onPrefetch={handlePrefetch}
               />
             ))}
           </ul>
         ) : null}
       </div>
+
+      {viewingGuest ? (
+        <ToolbarContactDetailModal
+          row={viewingGuest}
+          open
+          onClose={() => setViewingGuest(null)}
+        />
+      ) : null}
 
       {bookingBootstrap ? (
         <DashboardStaffBookingModal

@@ -28,6 +28,8 @@ import {
   bookingExpandAccordionSummaryClass,
   bookingExpandActionsBarClass,
 } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import {
   EXP_BOOKING_ICO,
   EXP_BOOKING_NEUTRAL_PROMINENT,
@@ -39,6 +41,7 @@ import {
 import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/lib/booking/staff-rebook-bootstrap';
 import { defaultStaffBookingSurfaceTab } from '@/lib/booking/staff-booking-modal-options';
 import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact-guest-history';
+import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 
 const accordionChevron = (
   <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -148,7 +151,6 @@ export function ContactDetailPanel({
   venueStaffBookingModel,
   venueStaffEnabledBookingModels,
   venueTimezone,
-  onOpenRelatedGuestBooking,
 }: {
   id: string;
   clientLower: string;
@@ -180,7 +182,6 @@ export function ContactDetailPanel({
   venueStaffBookingModel: BookingModel;
   venueStaffEnabledBookingModels: BookingModel[];
   venueTimezone: string;
-  onOpenRelatedGuestBooking: (payload: GuestHistoryRelatedBookingPayload) => void;
 }) {
   const { addToast } = useToast();
   const [newBookingModal, setNewBookingModal] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
@@ -255,6 +256,19 @@ export function ContactDetailPanel({
   const [messageSending, setMessageSending] = useState(false);
   const [eraseConfirmOpen, setEraseConfirmOpen] = useState(false);
   const [contactDetailsEditing, setContactDetailsEditing] = useState(false);
+  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
+    bookingId: string;
+    snapshot: BookingDetailPanelSnapshot;
+    isAppointment: boolean;
+  } | null>(null);
+
+  const handleOpenRelatedGuestBooking = useCallback((payload: GuestHistoryRelatedBookingPayload) => {
+    setRelatedGuestHistoryBooking({
+      bookingId: payload.bookingId,
+      snapshot: payload.snapshot,
+      isAppointment: !isTableReservationBooking(payload.row),
+    });
+  }, []);
 
   const handleSaveContactDetails = useCallback(async () => {
     const ok = await onSaveGuestDetails();
@@ -597,8 +611,8 @@ export function ContactDetailPanel({
           currentBookingId=""
           guestDisplayNameForSnapshots={displayName}
           venueTimeZone={venueTimezone}
-          canOpenNested={Boolean(onOpenRelatedGuestBooking)}
-          onOpenBookingDetail={onOpenRelatedGuestBooking}
+          canOpenNested
+          onOpenBookingDetail={handleOpenRelatedGuestBooking}
           listRefreshKey={guestBookingsListRefreshKey}
           rebookGuestPrefill={contactRebookGuestPrefill}
           onStaffBookingCreated={() => void loadDetail(g.id)}
@@ -718,6 +732,25 @@ export function ContactDetailPanel({
         </div>
       </details>
     </div>
+
+      {relatedGuestHistoryBooking ? (
+        <BookingDetailPanel
+          key={relatedGuestHistoryBooking.bookingId}
+          bookingId={relatedGuestHistoryBooking.bookingId}
+          venueId={venueId}
+          venueCurrency={venueCurrency}
+          initialSnapshot={relatedGuestHistoryBooking.snapshot}
+          isAppointment={relatedGuestHistoryBooking.isAppointment}
+          presentation="modal"
+          stackDepth={0}
+          venueTimezone={venueTimezone}
+          onClose={() => setRelatedGuestHistoryBooking(null)}
+          onUpdated={() => {
+            void loadDetail(g.id);
+            void loadList();
+          }}
+        />
+      ) : null}
 
       {newBookingModal ? (
         <StaffSurfaceBookingModal

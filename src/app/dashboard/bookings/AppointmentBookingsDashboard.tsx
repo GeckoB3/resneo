@@ -123,7 +123,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   }
   if (mode === 'week') {
     const end = new Date(`${addDays(date, 6)}T12:00:00`);
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} â€“ ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} \u2013 ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return '';
@@ -160,7 +160,7 @@ function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel(rowForInference(b));
 }
 
-/** Left-edge status strip â€” same palette as table grid / main bookings list. */
+/** Left-edge status strip - same palette as table grid / main bookings list. */
 function statusBorderClass(b: RegistryAppointment): string {
   return bookingStatusVisualForKey(b.status).listBorderLeft;
 }
@@ -332,7 +332,7 @@ export function AppointmentBookingsDashboard({
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages. */
   linkedPractitionerIds?: string[];
-  /** yyyy-mm-dd from the server render â€” keeps â€œtodayâ€ aligned between SSR and hydration. */
+  /** yyyy-mm-dd from the server render - keeps "today" aligned between SSR and hydration. */
   initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
@@ -394,7 +394,7 @@ export function AppointmentBookingsDashboard({
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
-  /** Own / linked-in / all source filter (Â§8.2). */
+  /** Own / linked-in / all source filter (section 8.2). */
   const [sourceScope, setSourceScope] = useState<SourceScope>('all');
   /** True once the venue is known to hold at least one linked calendar. */
   const [linkedAvailable, setLinkedAvailable] = useState(false);
@@ -559,7 +559,7 @@ export function AppointmentBookingsDashboard({
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
       if (invalidCustomRange) {
-        setError('Custom date range is invalid. â€œFromâ€ must be before or equal to â€œToâ€.');
+        setError('Custom date range is invalid. "From" must be before or equal to "To".');
         setLoading(false);
         return;
       }
@@ -1032,7 +1032,7 @@ export function AppointmentBookingsDashboard({
             return next;
           });
           void loadBookingDetail(bookingId, true);
-          addToast(`Sent with issues â€” ${w}`, 'error');
+          addToast(`Sent with issues \u2014 ${w}`, 'error');
           return { ok: true, warning: `Sent with issues: ${w}` };
         }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
@@ -1084,7 +1084,7 @@ export function AppointmentBookingsDashboard({
       { key: 'deposit', label: 'Deposit' },
       { key: 'type', label: 'Type' },
     ];
-    /** Matches OperationsWorkspaceToolbar compact â€œTodayâ€ control sizing and weight. */
+    /** Matches OperationsWorkspaceToolbar compact "Today" control sizing and weight. */
     const sortTriggerClass =
       'min-h-8 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-xs';
     return (
@@ -1112,7 +1112,7 @@ export function AppointmentBookingsDashboard({
             className={`${sortTriggerClass} inline-flex shrink-0 items-center gap-1`}
             aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
           >
-            <span aria-hidden>{sortDir === 'asc' ? 'â†‘' : 'â†“'}</span>
+            <span aria-hidden>{sortDir === 'asc' ? '\u2191' : '\u2193'}</span>
             <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
           </button>
         </div>
@@ -1668,7 +1668,7 @@ export function AppointmentBookingsDashboard({
       <div className="min-w-0 space-y-6">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Updates may be delayed. Reconnectingâ€¦
+          Updates may be delayed. Reconnecting&hellip;
         </div>
       )}
       {error && (

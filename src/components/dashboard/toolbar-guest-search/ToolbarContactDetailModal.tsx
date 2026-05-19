@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
-import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
-import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { useDashboardToolbarVenue } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
+import { guestSearchResultLabel } from '@/components/dashboard/toolbar-guest-search/guest-search-helpers';
+import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import type { GuestDetailGuest, GuestDetailResponse, GuestListRow } from '@/types/contacts';
 
 function mergeGuestDetailFromSavedGuest(prev: GuestDetailResponse, saved: GuestDetailGuest): GuestDetailResponse {
@@ -18,22 +18,15 @@ function mergeGuestDetailFromSavedGuest(prev: GuestDetailResponse, saved: GuestD
   };
 }
 
-import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
-import { guestSearchResultLabel } from '@/components/dashboard/toolbar-guest-search/guest-search-helpers';
-
-export function ToolbarContactDetailPopover({
+export function ToolbarContactDetailModal({
   row,
   open,
-  triggerRef,
-  verticalAnchorRef,
-  onDismiss,
+  onClose,
   onGuestUpdated,
 }: {
   row: GuestListRow;
   open: boolean;
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  verticalAnchorRef?: RefObject<HTMLDivElement | null>;
-  onDismiss: () => void;
+  onClose: () => void;
   onGuestUpdated?: () => void;
 }) {
   const venue = useDashboardToolbarVenue();
@@ -98,6 +91,15 @@ export function ToolbarContactDetailPopover({
     void warmGuestDetail(row.id);
   }, [open, row.id, warmGuestDetail]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   const onSaveGuestDetails = useCallback(async (): Promise<boolean> => {
     if (!detail) return false;
     setEditSaving(true);
@@ -160,7 +162,7 @@ export function ToolbarContactDetailPopover({
         if (!res.ok) {
           throw new Error(typeof j.error === 'string' ? j.error : 'Erase failed');
         }
-        onDismiss();
+        onClose();
         onGuestUpdated?.();
         return true;
       } catch (e) {
@@ -170,31 +172,41 @@ export function ToolbarContactDetailPopover({
         setEraseLoadingId(null);
       }
     },
-    [onDismiss, onGuestUpdated],
+    [onClose, onGuestUpdated],
   );
 
-  const noopRelatedBooking = useCallback((_payload: GuestHistoryRelatedBookingPayload) => {
-    /* Toolbar popover: open full bookings page for related history if needed. */
-  }, []);
+  if (!open) return null;
+
+  const title = guestSearchResultLabel(row);
 
   return (
-    <ClampedFixedDropdown
-      open={open}
-      triggerRef={triggerRef}
-      verticalAnchorRef={verticalAnchorRef}
-      horizontalCenter={false}
-      gapPx={6}
-      align="end"
-      maxWidthPx={420}
-      onDismiss={onDismiss}
-      aria-label={`${guestSearchResultLabel(row)} contact details`}
-      className="animate-fade-in z-[60] max-h-[min(72dvh,32rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4"
+      onClick={onClose}
     >
-      <div className="flex max-h-[min(72dvh,32rem)] flex-col">
-        <div className="shrink-0 border-b border-slate-100 px-3 py-2">
-          <p className="truncate text-sm font-semibold text-slate-900">{guestSearchResultLabel(row)}</p>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="toolbar-contact-detail-modal-title"
+        className="flex h-[min(85dvh,85vh)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
+          <h2 id="toolbar-contact-detail-modal-title" className="min-w-0 truncate text-base font-semibold text-slate-900 sm:text-lg">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 sm:px-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4">
           <ContactDetailPanel
             id={`toolbar-contact-${row.id}`}
             clientLower={venue.clientLower}
@@ -227,10 +239,9 @@ export function ToolbarContactDetailPopover({
             venueStaffBookingModel={venue.bookingModel}
             venueStaffEnabledBookingModels={venue.enabledModels}
             venueTimezone={venue.venueTimezone}
-            onOpenRelatedGuestBooking={noopRelatedBooking}
           />
         </div>
       </div>
-    </ClampedFixedDropdown>
+    </div>
   );
 }

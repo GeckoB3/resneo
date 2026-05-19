@@ -30,9 +30,6 @@ import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetai
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
-import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
-import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
-import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { useToast } from '@/components/ui/Toast';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { formatGuestDisplayName } from '@/lib/guests/name';
@@ -437,11 +434,6 @@ export function ContactsDashboard({
   const [eraseLoadingId, setEraseLoadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
-  const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
-    bookingId: string;
-    snapshot: BookingDetailPanelSnapshot;
-    isAppointment: boolean;
-  } | null>(null);
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1752,13 +1744,6 @@ export function ContactsDashboard({
                               venueStaffBookingModel={venueBookingModel}
                               venueStaffEnabledBookingModels={venueEnabledBookingModels}
                               venueTimezone={venueTimezone}
-                              onOpenRelatedGuestBooking={(payload) => {
-                                setRelatedGuestHistoryBooking({
-                                  bookingId: payload.bookingId,
-                                  snapshot: payload.snapshot,
-                                  isAppointment: !isTableReservationBooking(payload.row),
-                                });
-                              }}
                             />
                           </div>
                         ) : null}
@@ -1823,26 +1808,6 @@ export function ContactsDashboard({
             void loadDetail(expandedGuestId);
             void loadList();
             setMergeOpen(false);
-          }}
-        />
-      ) : null}
-
-      {relatedGuestHistoryBooking ? (
-        <BookingDetailPanel
-          key={relatedGuestHistoryBooking.bookingId}
-          bookingId={relatedGuestHistoryBooking.bookingId}
-          venueId={venueId}
-          venueCurrency={currency}
-          initialSnapshot={relatedGuestHistoryBooking.snapshot}
-          isAppointment={relatedGuestHistoryBooking.isAppointment}
-          presentation="popover"
-          anchor={null}
-          stackDepth={0}
-          venueTimezone={venueTimezone}
-          onClose={() => setRelatedGuestHistoryBooking(null)}
-          onUpdated={() => {
-            if (expandedGuestId) void loadDetail(expandedGuestId);
-            void loadList();
           }}
         />
       ) : null}

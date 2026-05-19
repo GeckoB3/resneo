@@ -33,6 +33,7 @@ export interface PractitionerCalendarToolbarProps {
     pending: boolean;
     onUndo: () => void;
   };
+  liveState?: 'live' | 'reconnecting';
   searchPanel?: ReactNode;
   searchActive?: boolean;
   searchAriaLabel?: string;
@@ -101,6 +102,7 @@ export function PractitionerCalendarToolbar({
   summaryContent,
   todayIso,
   scheduleUndo,
+  liveState = 'live',
   searchPanel,
   searchActive = false,
   searchAriaLabel = 'Search bookings',
@@ -225,7 +227,7 @@ export function PractitionerCalendarToolbar({
       onDateChange={onDateChange}
       onPreviousDate={() => onNavigateDay(-1)}
       onNextDate={() => onNavigateDay(1)}
-      liveState="live"
+      liveState={liveState}
       onRefresh={onRefresh}
       onNewBooking={onNewBooking}
       onWalkIn={onWalkIn}

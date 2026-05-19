@@ -1845,6 +1845,7 @@ export function PractitionerCalendarView({
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
   const [resourceBookingResourceId, setResourceBookingResourceId] = useState<string | undefined>();
@@ -2437,7 +2438,9 @@ export function PractitionerCalendarView({
           scheduleSilentCalendarRefetch();
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        setRealtimeConnected(status === 'SUBSCRIBED');
+      });
     return () => {
       if (silentRefetchTimerRef.current) clearTimeout(silentRefetchTimerRef.current);
       void supabase.removeChannel(channel);
@@ -3771,6 +3774,11 @@ export function PractitionerCalendarView({
   return (
     <div className="flex min-w-[320px] flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
+        {realtimeConnected === false && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Updates may be delayed. Reconnecting&hellip;
+          </div>
+        )}
         <PractitionerCalendarToolbar
           viewMode={viewMode}
           onViewModeChange={setViewMode}
@@ -3811,6 +3819,7 @@ export function PractitionerCalendarView({
             pending: scheduleUndoPending,
             onUndo: () => void undoLastScheduleEdit(),
           }}
+          liveState={realtimeConnected === false ? 'reconnecting' : 'live'}
           searchActive={guestToolbarSearchQuery.trim().length > 0}
           searchAriaLabel="Search contacts"
           searchPanel={(

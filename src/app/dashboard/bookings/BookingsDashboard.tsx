@@ -175,8 +175,8 @@ interface StatusFilterOption {
 
 /**
  * Filter UI labels.
- *  - `Booked`    â€” `status === 'Booked'` and not attendance-confirmed.
- *  - `Confirmed` â€” guest or staff confirmed attendance, including legacy `status === 'Confirmed'`.
+ *  - `Booked` - `status === 'Booked'` and not attendance-confirmed.
+ *  - `Confirmed` - guest or staff confirmed attendance, including legacy `status === 'Confirmed'`.
  */
 const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
   { label: 'All', apiStatus: null },
@@ -311,7 +311,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   }
   if (mode === 'week') {
     const end = new Date(addDays(date, 6) + 'T12:00:00');
-    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} â€“ ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} \u2013 ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   return '';
@@ -362,7 +362,7 @@ export function BookingsDashboard({
   currency?: string;
   primaryBookingModel?: BookingModel;
   enabledModels?: BookingModel[];
-  /** yyyy-mm-dd from the server render â€” keeps â€œtodayâ€ aligned between SSR and hydration. */
+  /** yyyy-mm-dd from the server render - keeps "today" aligned between SSR and hydration. */
   initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
@@ -1060,7 +1060,7 @@ export function BookingsDashboard({
         }
         if (payload.errors && payload.errors.length > 0) {
           const w = payload.errors.join('; ');
-          addToast(`Sent with issues â€” ${w}`, 'error');
+          addToast(`Sent with issues \u2014 ${w}`, 'error');
           setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
           invalidateVenueBookingDetail(bookingId);
           setDetailById((prev) => {
@@ -1312,7 +1312,7 @@ export function BookingsDashboard({
     const skipped = selectedIds.length - bulkCancelEligibleIds.length;
     const skipNote =
       skipped > 0
-        ? ` (${skipped} selected ${skipped === 1 ? 'booking cannot' : 'bookings cannot'} be cancelled â€” only active bookings will be updated).`
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking cannot' : 'bookings cannot'} be cancelled \u2014 only active bookings will be updated).`
         : '';
     setConfirmDialog({
       title: 'Cancel bookings',
@@ -1375,7 +1375,7 @@ export function BookingsDashboard({
     const skipped = selectedIds.length - bulkDeleteEligibleIds.length;
     const skipNote =
       skipped > 0
-        ? ` (${skipped} selected ${skipped === 1 ? 'booking is' : 'bookings are'} not cancelled â€” only cancelled bookings will be removed).`
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking is' : 'bookings are'} not cancelled \u2014 only cancelled bookings will be removed).`
         : '';
     setConfirmDialog({
       title: 'Delete bookings permanently?',
@@ -1720,7 +1720,7 @@ export function BookingsDashboard({
           aria-expanded={viewRangePopoverOpen}
           aria-haspopup="dialog"
           aria-controls={viewRangePanelId}
-          aria-label="View â€” Day, week, month, or custom range"
+          aria-label="View \u2014 Day, week, month, or custom range"
         >
           <span className="max-w-[4.75rem] truncate sm:max-w-none">
             {VIEW_MODE_OPTIONS.find((o) => o.id === viewMode)?.label ?? 'Day'}
@@ -1803,7 +1803,7 @@ export function BookingsDashboard({
         summaryContent={bookingSummaryContent}
         date={anchorDate}
         todayIso={todayIso}
-        dateLabel={viewMode === 'custom' ? `${customFrom} â€“ ${customTo}` : formatDateLabel(anchorDate, viewMode)}
+        dateLabel={viewMode === 'custom' ? `${customFrom} \u2013 ${customTo}` : formatDateLabel(anchorDate, viewMode)}
         onDateChange={setAnchorDate}
         onPreviousDate={() => navigate(-1)}
         onNextDate={() => navigate(1)}
@@ -2036,7 +2036,7 @@ export function BookingsDashboard({
               Select table(s) for {changeTableBooking.guest_name}. Tables already assigned to this booking are treated as free so you can move or keep them.
             </p>
             {changeTableDayLoading && (
-              <p className="mt-2 text-xs text-slate-500">Loading table occupancy for this dateâ€¦</p>
+              <p className="mt-2 text-xs text-slate-500">Loading table occupancy for this date&hellip;</p>
             )}
             {changeTableSelectorTables.length === 0 ? (
               <p className="mt-4 text-sm text-amber-700">No active tables are configured. Add tables in venue settings.</p>
@@ -2048,7 +2048,7 @@ export function BookingsDashboard({
                   partySize={changeTableBooking.party_size}
                   selectedIds={changeTableSelectedIds}
                   onChange={setChangeTableSelectedIds}
-                  confirmLabel={changeTableSaving ? 'Savingâ€¦' : 'Save'}
+                  confirmLabel={changeTableSaving ? 'Saving\u2026' : 'Save'}
                   skipLabel="Cancel"
                   onConfirm={(ids) => { void confirmChangeTableAssignment(ids); }}
                   onSkip={() => { if (!changeTableSaving) closeChangeTableModal(); }}
@@ -2100,7 +2100,7 @@ export function BookingsDashboard({
       )}
       </div>
 
-      {/* Floating bulk-actions tray â€” appears when rows are selected */}
+      {/* Floating bulk-actions tray - appears when rows are selected */}
       {selectedIds.length > 0 && (
         <div className="fixed left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">
           <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100 sm:flex-nowrap sm:px-4 sm:py-2.5">

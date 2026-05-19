@@ -59,7 +59,7 @@ Only if you want guests to pay **online** (deposit or full payment) before confi
 **Admins** see full **Settings** (Profile, Business hours, Plan, Payments, Communications, Staff, Data import). **Staff** see **Account** at the same URL for their own name, email, phone, and password, not the whole venue.
 
 **Where did the old “Widget” menu go?**  
-Embeds and QR now live on **Settings → Profile** in **Booking widget & QR code** (old \`/dashboard/settings/widget\` URLs redirect there).
+Embeds and QR now live on **Settings → Booking Page** (old \`/dashboard/settings/widget\` URLs redirect there).
 `.trim(),
       markdownRestaurant: `
 # Welcome to ReserveNI

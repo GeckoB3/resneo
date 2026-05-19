@@ -15,6 +15,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
+import { BookingPageSection } from './sections/BookingPageSection';
 import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
@@ -75,7 +76,12 @@ const TABS = [
   {
     key: 'profile',
     label: 'Profile',
-    description: 'Your account, venue details, booking models, and embeds for your public page.',
+    description: 'Your account, business contact details, and which booking types guests can use.',
+  },
+  {
+    key: 'booking-page',
+    label: 'Booking Page',
+    description: 'Public URL, branding, website embed, and QR code for your guest-facing booking page.',
   },
   {
     key: 'business-hours',
@@ -116,8 +122,6 @@ const TABS = [
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
-type SettingsWarmupKey = 'profile-account' | 'business-closures' | 'payments' | 'comms' | 'staff';
-
 function resolveInitialTab(
   initialTab: string | undefined,
   isAdmin: boolean,
@@ -1092,8 +1096,8 @@ function SettingsViewInner({
   );
   const settingsScrollAnchorRef = useRef<HTMLDivElement>(null);
   const skipScrollOnTabChangeRef = useRef(true);
-  const [completedWarmup, setCompletedWarmup] = useState<Set<SettingsWarmupKey>>(() => new Set());
-  const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
+  const previousSelectedTabRef = useRef<TabKey | null>(null);
+  const [currentTimeMs] = useState(() => Date.now());
   const showRestaurantTableProfileSections =
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(
@@ -1115,59 +1119,16 @@ function SettingsViewInner({
     [searchParams, initialTab, isAdmin, linkedAccountsAvailable],
   );
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
-  const warmupKeys = useMemo<SettingsWarmupKey[]>(() => {
-    if (!venue) return [];
-    const keys: SettingsWarmupKey[] = ['business-closures', 'comms'];
-    if (isAppointmentsProduct && isAdmin) keys.push('profile-account');
-    if (isAdmin) keys.push('staff');
-    if (venue.stripe_connected_account_id) keys.push('payments');
-    return keys;
-  }, [isAdmin, isAppointmentsProduct, venue]);
-  const settingsReady = venue ? warmupKeys.every((key) => completedWarmup.has(key)) : false;
-  const markWarmupComplete = useCallback((key: SettingsWarmupKey) => {
-    setCompletedWarmup((current) => {
-      if (current.has(key)) return current;
-      const next = new Set(current);
-      next.add(key);
-      return next;
-    });
-  }, []);
-  const markProfileWarmupComplete = useCallback(
-    () => markWarmupComplete('profile-account'),
-    [markWarmupComplete],
-  );
-  const markBusinessClosuresWarmupComplete = useCallback(
-    () => markWarmupComplete('business-closures'),
-    [markWarmupComplete],
-  );
-  const markPaymentsWarmupComplete = useCallback(
-    () => markWarmupComplete('payments'),
-    [markWarmupComplete],
-  );
-  const markCommsWarmupComplete = useCallback(
-    () => markWarmupComplete('comms'),
-    [markWarmupComplete],
-  );
-  const markStaffWarmupComplete = useCallback(
-    () => markWarmupComplete('staff'),
-    [markWarmupComplete],
-  );
-
   const replaceWithTab = useCallback(
     (tab: TabKey) => {
       if (tab === selectedTab) return;
       setSelectedTab(tab);
-      const p =
-        typeof window === 'undefined'
-          ? new URLSearchParams(searchParams.toString())
-          : new URLSearchParams(window.location.search);
+      const p = new URLSearchParams(searchParams.toString());
       p.set('tab', tab);
       const qs = p.toString();
-      if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`);
-      }
+      router.replace(qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`, { scroll: false });
     },
-    [selectedTab, pathname, searchParams],
+    [selectedTab, pathname, searchParams, router],
   );
 
   /**
@@ -1177,33 +1138,25 @@ function SettingsViewInner({
    * silently revert from a freshly-synced billing snapshot to whatever the
    * server-rendered HTML happened to contain.
    */
-  useEffect(() => {
-    setVenue((current) => {
-      if (!initialVenue) return null;
-      if (!current || current.id !== initialVenue.id) return initialVenue;
-      return current;
-    });
-  }, [initialVenue]);
+  if (initialVenue && (!venue || venue.id !== initialVenue.id)) {
+    setVenue(initialVenue);
+  }
 
-  useEffect(() => {
-    setCompletedWarmup(new Set());
-  }, [initialVenue?.id, isAdmin, bookingModel, venue?.pricing_tier]);
-
-  useEffect(() => {
+  if (selectedTab !== activeTabFromUrl) {
     setSelectedTab(activeTabFromUrl);
-  }, [activeTabFromUrl]);
+  }
 
   useLayoutEffect(() => {
     if (skipScrollOnTabChangeRef.current) {
       skipScrollOnTabChangeRef.current = false;
+      previousSelectedTabRef.current = selectedTab;
       return;
     }
-    scrollNearestScrollParentToTop(settingsScrollAnchorRef.current);
+    if (previousSelectedTabRef.current !== null && previousSelectedTabRef.current !== selectedTab) {
+      scrollNearestScrollParentToTop(settingsScrollAnchorRef.current);
+    }
+    previousSelectedTabRef.current = selectedTab;
   }, [selectedTab]);
-
-  useEffect(() => {
-    setCurrentTimeMs(Date.now());
-  }, []);
 
   /** Refresh Appointments plan row from Stripe after checkout (webhook may lag behind redirect). */
   useEffect(() => {
@@ -1246,37 +1199,55 @@ function SettingsViewInner({
   useEffect(() => {
     const raw = searchParams.get('tab');
     if (!isAdmin && (raw === 'staff' || raw === 'data-import')) {
-      replaceWithTab('profile');
+      queueMicrotask(() => replaceWithTab('profile'));
     }
     if (raw === 'linked-accounts' && !linkedAccountsAvailable) {
-      replaceWithTab('profile');
+      queueMicrotask(() => replaceWithTab('profile'));
     }
   }, [isAdmin, linkedAccountsAvailable, searchParams, replaceWithTab]);
 
   useEffect(() => {
-    if (selectedTab !== 'profile') return;
-    const timer = window.setTimeout(() => {
-      if (typeof window === 'undefined') return;
-      const hash = window.location.hash;
-      if (hash === '#additional-booking-types') {
-        document.getElementById('additional-booking-types')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        });
-      } else if (hash === '#booking-widget') {
-        document.getElementById('booking-widget')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        });
-      }
-    }, 150);
-    return () => window.clearTimeout(timer);
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (hash === '#booking-widget' && selectedTab === 'profile') {
+      queueMicrotask(() => replaceWithTab('booking-page'));
+    }
+  }, [selectedTab, replaceWithTab]);
+
+  useEffect(() => {
+    if (selectedTab === 'profile') {
+      const timer = window.setTimeout(() => {
+        if (typeof window === 'undefined') return;
+        if (window.location.hash === '#additional-booking-types') {
+          document.getElementById('additional-booking-types')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+    if (selectedTab === 'booking-page') {
+      const timer = window.setTimeout(() => {
+        if (typeof window === 'undefined') return;
+        if (window.location.hash === '#booking-widget') {
+          document.getElementById('booking-widget')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
   }, [selectedTab]);
 
   useEffect(() => {
     if (!planCheckoutReturn) return;
-    setPlanBannerDismissed(false);
-    setSelectedTab('plan');
+    queueMicrotask(() => {
+      setPlanBannerDismissed(false);
+      setSelectedTab('plan');
+    });
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
       p.set('tab', 'plan');
@@ -1325,8 +1296,7 @@ function SettingsViewInner({
 
   return (
     <>
-      {!settingsReady ? <SettingsPageSkeleton tabCount={visibleTabs.length} /> : null}
-      <div ref={settingsScrollAnchorRef} className={settingsReady ? 'space-y-8' : 'hidden'}>
+      <div ref={settingsScrollAnchorRef} className="space-y-8">
       <header className="space-y-5">
         <PageHeader
           eyebrow="Venue"
@@ -1391,7 +1361,7 @@ function SettingsViewInner({
               title="Personal details & security"
               description="Your display name, sign-in email, phone, and password apply only to your login. Venue-wide options are in the sections below."
             >
-              <StaffPersonalSettingsSection onInitialLoadComplete={markProfileWarmupComplete} />
+              <StaffPersonalSettingsSection />
             </SettingsProfileGroup>
           ) : (
             <SettingsProfileGroup
@@ -1405,8 +1375,8 @@ function SettingsViewInner({
 
           <SettingsProfileGroup
             eyebrow="Business identity"
-            title="Venue profile & public details"
-            description="Business name, booking URL slug, address, contact channels, and cover image. These power your public booking page and guest communications."
+            title="Venue profile & contact details"
+            description="Business name, address, phone, email, and operational settings used across the dashboard and guest communications."
           >
             <VenueProfileSection
               venue={venue}
@@ -1431,7 +1401,7 @@ function SettingsViewInner({
             <FeatureFlagsSection
               initialRaw={initialFeatureFlagsRaw}
               initialResolved={initialFeatureFlagsResolved}
-              onSaved={() => router.refresh()}
+              onSaved={() => {}}
             />
           ) : null}
 
@@ -1458,11 +1428,27 @@ function SettingsViewInner({
             </SettingsProfileGroup>
           )}
 
+        </div>
+
+        <div className={selectedTab === 'booking-page' ? 'space-y-10' : 'hidden'} aria-hidden={selectedTab !== 'booking-page'}>
+          <SettingsProfileGroup
+            eyebrow="Guest-facing page"
+            title="URL & branding"
+            description="Your public booking page address, logo, and cover photo — what guests see before they book."
+          >
+            <BookingPageSection
+              venue={venue}
+              onUpdate={onUpdate}
+              isAdmin={isAdmin}
+              publicBaseUrl={publicBaseUrl}
+            />
+          </SettingsProfileGroup>
+
           <SettingsProfileGroup
             id="booking-widget"
-            eyebrow="Public booking page"
-            title="Widget, embed & QR"
-            description="Share your booking page on your website with a snippet or printable QR code."
+            eyebrow="Share & embed"
+            title="Website widget & QR code"
+            description="Add booking to your own website or print a QR code for your reception desk."
           >
             <SectionCard elevated>
               <SectionCard.Header
@@ -1483,7 +1469,6 @@ function SettingsViewInner({
             onUpdate={onUpdate}
             isAdmin={isAdmin}
             bookingModel={bookingModel ?? 'table_reservation'}
-            onInitialLoadComplete={markBusinessClosuresWarmupComplete}
           />
         </div>
 
@@ -1501,7 +1486,6 @@ function SettingsViewInner({
           <StripeConnectSection
             stripeAccountId={venue.stripe_connected_account_id}
             isAdmin={isAdmin}
-            onInitialLoadComplete={markPaymentsWarmupComplete}
           />
         </div>
 
@@ -1515,7 +1499,6 @@ function SettingsViewInner({
             depositConfig={venue.deposit_config}
             serviceEngineTable={showRestaurantTableProfileSections && !isAppointmentsProduct && hasServiceConfig}
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
-            onInitialLoadComplete={markCommsWarmupComplete}
           />
         </div>
 
@@ -1527,7 +1510,6 @@ function SettingsViewInner({
               bookingModel={bookingModel}
               enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
               pricingTier={venue.pricing_tier ?? null}
-              onInitialLoadComplete={markStaffWarmupComplete}
             />
           </div>
         ) : null}

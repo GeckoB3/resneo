@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 
-/** Legacy URL: widget settings now live on Settings → Profile → Booking widget & QR code. */
+/** Legacy URL: widget settings now live on Settings → Booking Page. */
 export default async function WidgetPage() {
   const supabase = await createClient();
   const {
@@ -15,5 +15,5 @@ export default async function WidgetPage() {
     redirect('/dashboard');
   }
 
-  redirect('/dashboard/settings?tab=profile#booking-widget');
+  redirect('/dashboard/settings?tab=booking-page#booking-widget');
 }

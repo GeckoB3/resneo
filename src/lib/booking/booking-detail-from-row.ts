@@ -76,13 +76,35 @@ function guestDisplayName(row: BookingListRowSeed): string {
   return row.guest_name?.trim() || 'Guest';
 }
 
+/** Service / offering label for expanded booking header — stable across detail hydration. */
+export function resolveExpandedBookingServiceLine(
+  row: Pick<BookingListRowSeed, 'service_name' | 'booking_item_name'>,
+  detail?: {
+    cde_context?: { title?: string | null } | null;
+    service_variant_name?: string | null;
+  } | null,
+): string | null {
+  const fromRow =
+    (typeof row.service_name === 'string' && row.service_name.trim()) ||
+    (typeof row.booking_item_name === 'string' && row.booking_item_name.trim()) ||
+    null;
+  if (fromRow) return fromRow;
+  const fromVariant =
+    typeof detail?.service_variant_name === 'string' && detail.service_variant_name.trim()
+      ? detail.service_variant_name.trim()
+      : null;
+  if (fromVariant) return fromVariant;
+  const fromCde =
+    typeof detail?.cde_context?.title === 'string' && detail.cde_context.title.trim()
+      ? detail.cde_context.title.trim()
+      : null;
+  return fromCde;
+}
+
 /** Synchronous expanded-row detail from list data — avoids placeholder flash before GET. */
 export function bookingDetailLiteFromListRow(row: BookingListRowSeed): BookingDetailLite {
   const inferred = row.inferred_booking_model ?? inferBookingRowModel(row);
-  const serviceLabel =
-    (typeof row.booking_item_name === 'string' && row.booking_item_name.trim()) ||
-    (typeof row.service_name === 'string' && row.service_name.trim()) ||
-    null;
+  const serviceLabel = resolveExpandedBookingServiceLine(row, null);
   const guest = guestStubFromBookingRow({
     guest_id: row.guest_id,
     guest_first_name: row.guest_first_name,

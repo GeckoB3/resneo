@@ -14,6 +14,8 @@ import { loadWaitlistVenueCapabilities } from '@/lib/booking/load-waitlist-venue
 import { logWaitlistConvertedEvent } from '@/lib/booking/log-waitlist-converted-event';
 import { notifyAppointmentWaitlistOfferForEntry } from '@/lib/booking/notify-appointment-waitlist-offer';
 import { enrichWaitlistEntriesForDisplay } from '@/lib/booking/waitlist-entry-display';
+import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
+import { formatWaitlistTimeWindowLabel } from '@/lib/booking/waitlist-time-window';
 import {
   isWaitlistKindAllowed,
   normalizeWaitlistKindQuery,
@@ -80,24 +82,59 @@ export async function GET(request: NextRequest) {
       })),
     );
 
-    const entries = rows.map((row) => {
-      const r = row as {
-        id: string;
-        guest_first_name?: string | null;
-        guest_last_name?: string | null;
-        guest_name?: string | null;
-      };
-      const guest_name =
-        r.guest_name ??
-        formatGuestDisplayName(r.guest_first_name, r.guest_last_name, 'guest');
-      const display = displayById.get(r.id);
-      return {
-        ...row,
-        guest_name,
-        service_name: display?.service_name ?? null,
-        practitioner_name: display?.practitioner_name ?? null,
-      };
-    });
+    const entries = await Promise.all(
+      rows.map(async (row) => {
+        const r = row as {
+          id: string;
+          waitlist_kind?: string;
+          status?: string;
+          guest_first_name?: string | null;
+          guest_last_name?: string | null;
+          guest_name?: string | null;
+          desired_date?: string;
+          desired_time?: string | null;
+          desired_time_end?: string | null;
+          appointment_service_id?: string | null;
+          service_item_id?: string | null;
+          practitioner_id?: string | null;
+        };
+        const guest_name =
+          r.guest_name ??
+          formatGuestDisplayName(r.guest_first_name, r.guest_last_name, 'guest');
+        const display = displayById.get(r.id);
+        const time_window_label = formatWaitlistTimeWindowLabel({
+          desired_time: r.desired_time ?? null,
+          desired_time_end: r.desired_time_end ?? null,
+        });
+
+        let can_offer: boolean | undefined;
+        let offer_unavailable_reason: string | null = null;
+        if (r.waitlist_kind === 'appointment' && r.status === 'waiting') {
+          const availability = await findAppointmentWaitlistAvailability(admin, staff.venue_id, {
+            desired_date: String(r.desired_date),
+            desired_time: r.desired_time ?? null,
+            desired_time_end: r.desired_time_end ?? null,
+            appointment_service_id: r.appointment_service_id ?? null,
+            service_item_id: r.service_item_id ?? null,
+            practitioner_id: r.practitioner_id ?? null,
+          });
+          can_offer = availability.available;
+          offer_unavailable_reason = availability.available
+            ? null
+            : (availability.reason ?? 'No matching availability.');
+        }
+
+        return {
+          ...row,
+          guest_name,
+          service_name: display?.service_name ?? null,
+          practitioner_name: display?.practitioner_name ?? null,
+          time_window_label,
+          can_offer,
+          offer_unavailable_reason,
+        };
+      }),
+    );
 
     return NextResponse.json({ entries });
   } catch (err) {
@@ -142,6 +179,35 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Waitlist type is not available for this venue' }, { status: 403 });
     }
 
+    if (entryKind === 'appointment' && status === 'offered') {
+      const availability = await findAppointmentWaitlistAvailability(admin, staff.venue_id, {
+        desired_date: String(existingEntry.desired_date),
+        desired_time: existingEntry.desired_time
+          ? String(existingEntry.desired_time)
+          : null,
+        desired_time_end: (existingEntry as { desired_time_end?: string | null }).desired_time_end
+          ? String((existingEntry as { desired_time_end?: string | null }).desired_time_end)
+          : null,
+        appointment_service_id:
+          (existingEntry as { appointment_service_id?: string | null }).appointment_service_id ??
+          null,
+        service_item_id:
+          (existingEntry as { service_item_id?: string | null }).service_item_id ?? null,
+        practitioner_id:
+          (existingEntry as { practitioner_id?: string | null }).practitioner_id ?? null,
+      });
+      if (!availability.available) {
+        return NextResponse.json(
+          {
+            error:
+              availability.reason ??
+              'No appointment availability matches this guest’s requested date and time window.',
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     if (entryKind === 'appointment' && (status === 'offered' || status === 'confirmed')) {
       const { data: venueFlagsRow } = await admin
         .from('venues')
@@ -179,6 +245,10 @@ export async function PATCH(request: NextRequest) {
             desired_date: String(existingEntry.desired_date),
             desired_time: existingEntry.desired_time
               ? String(existingEntry.desired_time)
+              : null,
+            desired_time_end: (existingEntry as { desired_time_end?: string | null })
+              .desired_time_end
+              ? String((existingEntry as { desired_time_end?: string | null }).desired_time_end)
               : null,
             appointment_service_id:
               (existingEntry as { appointment_service_id?: string | null }).appointment_service_id ??

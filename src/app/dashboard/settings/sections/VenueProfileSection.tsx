@@ -15,19 +15,8 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
 import { readResponseJson } from '@/lib/http/read-response-json';
 
-const BOOKING_SLUG_TAKEN_MESSAGE =
-  'That booking page address is already taken by another venue. Choose a different slug (letters, numbers, and hyphens only).';
-
-class SlugConflictError extends Error {
-  constructor() {
-    super(BOOKING_SLUG_TAKEN_MESSAGE);
-    this.name = 'SlugConflictError';
-  }
-}
-
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
-  slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers and hyphens only'),
   address_name: z.string().max(200).optional(),
   address_street: z.string().max(200).optional(),
   address_town: z.string().max(100).optional(),
@@ -65,15 +54,6 @@ interface VenueProfileSectionProps {
   isAppointmentsProduct?: boolean;
 }
 
-function slugFromName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '') || 'venue';
-}
-
 function buildRequestBody(data: ProfileForm) {
   const combinedAddress = buildAddress({
     name: data.address_name ?? '',
@@ -83,7 +63,6 @@ function buildRequestBody(data: ProfileForm) {
   });
   return {
     name: data.name,
-    slug: data.slug,
     address: combinedAddress || undefined,
     phone: data.phone?.trim() ? normalizeToE164(data.phone.trim(), 'GB') ?? undefined : undefined,
     email: data.email || undefined,
@@ -109,21 +88,10 @@ export function VenueProfileSection({
 }: VenueProfileSectionProps) {
   const isAppointmentsProduct =
     isAppointmentsProductProp ?? isAppointmentsProductVenue(venue.pricing_tier ?? null);
-  const [logoSaving, setLogoSaving] = useState(false);
-  const [logoRemoving, setLogoRemoving] = useState(false);
-  const [logoError, setLogoError] = useState<string | null>(null);
-  const [coverSaving, setCoverSaving] = useState(false);
-  const [coverRemoving, setCoverRemoving] = useState(false);
-  const [coverError, setCoverError] = useState<string | null>(null);
-  /** Proactive slug check (GET /api/venue/slug-available); avoids double-reading any `Response`. */
-  type SlugHint = 'idle' | 'checking' | 'current' | 'available' | 'taken';
-  const [slugHint, setSlugHint] = useState<SlugHint>('idle');
   const { integerProps } = useNumericField();
   const int = integerProps();
   const { report } = useSettingsSave();
   const lastSavedFingerprint = useRef<string | null>(null);
-  /** When set, autosave skips while the form payload matches this fingerprint (avoids repeat PATCH after slug conflict). */
-  const slugConflictFingerprintRef = useRef<string | null>(null);
   const venueIdRef = useRef<string | null>(null);
 
   const parsedAddr = parseAddress(venue.address);
@@ -142,7 +110,6 @@ export function VenueProfileSection({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       name: venue.name ?? '',
-      slug: venue.slug ?? '',
       address_name: parsedAddr.name,
       address_street: parsedAddr.street,
       address_town: parsedAddr.town,
@@ -158,14 +125,7 @@ export function VenueProfileSection({
     },
   });
 
-  const nameValue = watch('name');
-  const slugInput = watch('slug');
   const watched = useWatch({ control });
-
-  const handleNameBlur = useCallback(() => {
-    const slug = slugFromName(nameValue);
-    if (slug) setValue('slug', slug);
-  }, [nameValue, setValue]);
 
   const persistProfile = useCallback(
     async (data: ProfileForm) => {
@@ -191,19 +151,15 @@ export function VenueProfileSection({
       }>(res);
       if (!res.ok) {
         const apiError = body.error ?? 'Failed to save';
-        if (res.status === 409 && /slug/i.test(apiError)) {
-          throw new SlugConflictError();
-        }
         throw new Error(apiError);
       }
-      if (typeof body.name !== 'string' || typeof body.slug !== 'string') {
+      if (typeof body.name !== 'string') {
         console.error('[VenueProfileSection] PATCH /api/venue: unexpected JSON shape', body);
         throw new Error('Unexpected response from server. Please refresh and try again.');
       }
-      const { name: savedName, slug: savedSlug, ...savedFields } = body;
+      const { name: savedName, ...savedFields } = body;
       setValue('website_url', savedFields.website_url ?? '');
       setValue('name', savedName);
-      setValue('slug', savedSlug);
       setValue('email', savedFields.email ?? '');
       setValue('phone', savedFields.phone ?? '');
       setValue('cuisine_type', savedFields.cuisine_type ?? '');
@@ -218,7 +174,6 @@ export function VenueProfileSection({
       setValue('address_postcode', addr.postcode);
       onUpdate({
         name: savedName,
-        slug: savedSlug,
         address: savedFields.address ?? null,
         phone: savedFields.phone ?? null,
         email: savedFields.email ?? null,
@@ -234,7 +189,6 @@ export function VenueProfileSection({
       if (synced.success) {
         lastSavedFingerprint.current = payloadFingerprint(synced.data);
       }
-      slugConflictFingerprintRef.current = null;
     },
     [onUpdate, setValue, venue.timezone, getValues],
   );
@@ -246,13 +200,9 @@ export function VenueProfileSection({
     }
     if (venueIdRef.current === venue.id) return;
     venueIdRef.current = venue.id;
-    slugConflictFingerprintRef.current = null;
-    setSlugHint('idle');
-    clearErrors('slug');
     const pa = parseAddress(venue.address);
     reset({
       name: venue.name ?? '',
-      slug: venue.slug ?? '',
       address_name: pa.name,
       address_street: pa.street,
       address_town: pa.town,
@@ -270,7 +220,7 @@ export function VenueProfileSection({
     if (parsed.success) {
       lastSavedFingerprint.current = payloadFingerprint(parsed.data);
     }
-  }, [venue.id, venue, reset, getValues, clearErrors]);
+  }, [venue.id, venue, reset, getValues]);
 
   useLayoutEffect(() => {
     const parsed = profileSchema.safeParse(getValues());
@@ -281,87 +231,18 @@ export function VenueProfileSection({
   }, []);
 
   useEffect(() => {
-    const subscription = watch((_, info) => {
-      if (info?.name === 'slug') {
-        clearErrors('slug');
-        slugConflictFingerprintRef.current = null;
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [watch, clearErrors]);
-
-  useEffect(() => {
-    if (!isAdmin) {
-      setSlugHint('idle');
-      return;
-    }
-    const norm = slugInput.trim().toLowerCase();
-    const saved = (venue.slug ?? '').trim().toLowerCase();
-    if (!norm) {
-      setSlugHint('idle');
-      return;
-    }
-    if (!/^[a-z0-9-]+$/.test(norm) || norm.length > 100) {
-      setSlugHint('idle');
-      return;
-    }
-    if (norm === saved) {
-      setSlugHint('current');
-      return;
-    }
-
-    const ac = new AbortController();
-    setSlugHint('checking');
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/venue/slug-available?slug=${encodeURIComponent(norm)}`, {
-          signal: ac.signal,
-        });
-        const data = await readResponseJson<{ available?: boolean }>(res);
-        if (ac.signal.aborted) return;
-        if (!res.ok) {
-          setSlugHint('idle');
-          return;
-        }
-        setSlugHint(data.available ? 'available' : 'taken');
-      } catch (e) {
-        if (e instanceof Error && e.name === 'AbortError') return;
-        if (!ac.signal.aborted) setSlugHint('idle');
-      }
-    }, 420);
-    return () => {
-      window.clearTimeout(timer);
-      ac.abort();
-    };
-  }, [slugInput, isAdmin, venue.slug]);
-
-  useEffect(() => {
     if (!isAdmin) return;
     const timer = window.setTimeout(() => {
       const parsed = profileSchema.safeParse(getValues());
       if (!parsed.success) return;
-      const normSlug = parsed.data.slug.trim().toLowerCase();
-      const savedSlug = (venue.slug ?? '').trim().toLowerCase();
-      if (normSlug !== savedSlug && slugHint === 'taken') {
-        return;
-      }
       const next = payloadFingerprint(parsed.data);
       if (next === lastSavedFingerprint.current) return;
-      if (slugConflictFingerprintRef.current !== null && next === slugConflictFingerprintRef.current) {
-        return;
-      }
       void (async () => {
         report({ status: 'saving', message: null });
         try {
           await persistProfile(parsed.data);
           report({ status: 'saved', message: 'Venue profile saved.' });
         } catch (err) {
-          if (err instanceof SlugConflictError) {
-            slugConflictFingerprintRef.current = next;
-            setError('slug', { type: 'server', message: err.message });
-            report({ status: 'error', message: err.message });
-            return;
-          }
           report({
             status: 'error',
             message: err instanceof Error ? err.message : 'Failed to save profile',
@@ -370,145 +251,7 @@ export function VenueProfileSection({
       })();
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [watched, isAdmin, persistProfile, report, getValues, setError, slugHint, venue.slug]);
-
-  const onLogoChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !isAdmin) return;
-      setLogoSaving(true);
-      setLogoError(null);
-      report({ status: 'saving', message: null });
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch('/api/venue/logo', { method: 'POST', body: form });
-        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
-        if (!res.ok) {
-          throw new Error(uploadJson.error ?? 'Upload failed');
-        }
-        if (!uploadJson.url) {
-          throw new Error('Upload failed');
-        }
-        const patchRes = await fetch('/api/venue', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logo_url: uploadJson.url }),
-        });
-        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
-        if (!patchRes.ok) {
-          throw new Error(patchJson.error ?? 'Failed to update logo URL');
-        }
-        onUpdate({ logo_url: uploadJson.url });
-        report({ status: 'saved', message: 'Logo updated.' });
-      } catch (err) {
-        setLogoError(err instanceof Error ? err.message : 'Upload failed');
-        report({
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Upload failed',
-        });
-      } finally {
-        setLogoSaving(false);
-        e.target.value = '';
-      }
-    },
-    [isAdmin, onUpdate, report],
-  );
-
-  const onLogoRemove = useCallback(async () => {
-    if (!isAdmin || logoRemoving) return;
-    setLogoRemoving(true);
-    setLogoError(null);
-    report({ status: 'saving', message: null });
-    try {
-      const res = await fetch('/api/venue', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logo_url: null }),
-      });
-      const body = await readResponseJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(body.error ?? 'Failed to remove logo');
-      onUpdate({ logo_url: null });
-      report({ status: 'saved', message: 'Logo removed.' });
-    } catch (err) {
-      setLogoError(err instanceof Error ? err.message : 'Failed to remove');
-      report({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Failed to remove logo',
-      });
-    } finally {
-      setLogoRemoving(false);
-    }
-  }, [isAdmin, logoRemoving, onUpdate, report]);
-
-  const onCoverChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !isAdmin) return;
-      setCoverSaving(true);
-      setCoverError(null);
-      report({ status: 'saving', message: null });
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch('/api/venue/cover', { method: 'POST', body: form });
-        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
-        if (!res.ok) {
-          throw new Error(uploadJson.error ?? 'Upload failed');
-        }
-        if (!uploadJson.url) {
-          throw new Error('Upload failed');
-        }
-        const patchRes = await fetch('/api/venue', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cover_photo_url: uploadJson.url }),
-        });
-        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
-        if (!patchRes.ok) {
-          throw new Error(patchJson.error ?? 'Failed to update cover URL');
-        }
-        onUpdate({ cover_photo_url: uploadJson.url });
-        report({ status: 'saved', message: 'Cover photo updated.' });
-      } catch (err) {
-        setCoverError(err instanceof Error ? err.message : 'Upload failed');
-        report({
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Upload failed',
-        });
-      } finally {
-        setCoverSaving(false);
-        e.target.value = '';
-      }
-    },
-    [isAdmin, onUpdate, report],
-  );
-
-  const onCoverRemove = useCallback(async () => {
-    if (!isAdmin || coverRemoving) return;
-    setCoverRemoving(true);
-    setCoverError(null);
-    report({ status: 'saving', message: null });
-    try {
-      const res = await fetch('/api/venue', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cover_photo_url: null }),
-      });
-      const body = await readResponseJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(body.error ?? 'Failed to remove cover photo');
-      onUpdate({ cover_photo_url: null });
-      report({ status: 'saved', message: 'Cover photo removed.' });
-    } catch (err) {
-      setCoverError(err instanceof Error ? err.message : 'Failed to remove');
-      report({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Failed to remove cover photo',
-      });
-    } finally {
-      setCoverRemoving(false);
-    }
-  }, [isAdmin, coverRemoving, onUpdate, report]);
+  }, [watched, isAdmin, persistProfile, report, getValues]);
 
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50';
@@ -525,101 +268,6 @@ export function VenueProfileSection({
         }
       />
       <SectionCard.Body>
-        <div className="mb-6">
-          <span className="mb-2 block text-sm font-medium text-slate-700">Logo</span>
-          <div className="flex items-center gap-4">
-            <div className="flex-shrink-0">
-              {venue.logo_url ? (
-                <div className="h-16 w-16 rounded-full bg-white p-1 ring-1 ring-slate-200 shadow-[0_2px_10px_rgba(15,23,42,0.08)]">
-                  <img src={venue.logo_url} alt="Logo" className="h-full w-full rounded-full object-cover bg-white" />
-                </div>
-              ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400 ring-1 ring-slate-200">
-                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-                  </svg>
-                </div>
-              )}
-            </div>
-            {isAdmin && (
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label
-                    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${logoSaving || logoRemoving ? 'pointer-events-none opacity-50' : ''}`}
-                  >
-                    <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                    </svg>
-                    {venue.logo_url ? 'Change logo' : 'Upload logo'}
-                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onLogoChange} disabled={logoSaving || logoRemoving} className="sr-only" />
-                  </label>
-                  {venue.logo_url && (
-                    <button
-                      type="button"
-                      onClick={onLogoRemove}
-                      disabled={logoSaving || logoRemoving}
-                      className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                      </svg>
-                      {logoRemoving ? 'Removing…' : 'Remove logo'}
-                    </button>
-                  )}
-                </div>
-                {logoSaving && <p className="text-sm text-amber-700">Uploading…</p>}
-                {logoError && <p className="text-sm text-red-600">{logoError}</p>}
-                <p className="text-xs text-slate-500">Logo is shown on your booking page and in emails.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Cover photo</span>
-          {venue.cover_photo_url ? (
-            <img src={venue.cover_photo_url} alt="Cover" className="mb-2 h-40 w-full rounded-xl object-cover" />
-          ) : (
-            <div className="mb-2 flex h-40 w-full items-center justify-center rounded-xl bg-slate-100 text-slate-500">
-              No cover photo
-            </div>
-          )}
-          {isAdmin && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <label
-                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${coverSaving || coverRemoving ? 'pointer-events-none opacity-50' : ''}`}
-                >
-                  <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-                    />
-                  </svg>
-                  {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
-                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverChange} disabled={coverSaving || coverRemoving} className="sr-only" />
-                </label>
-                {venue.cover_photo_url && (
-                  <button
-                    type="button"
-                    onClick={onCoverRemove}
-                    disabled={coverSaving || coverRemoving}
-                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                    </svg>
-                    {coverRemoving ? 'Removing…' : 'Remove photo'}
-                  </button>
-                )}
-              </div>
-              {coverSaving && <p className="mt-2 text-sm text-amber-700">Uploading…</p>}
-              {coverError && <p className="mt-2 text-sm text-red-600">{coverError}</p>}
-            </>
-          )}
-        </div>
-
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -630,37 +278,8 @@ export function VenueProfileSection({
             <label htmlFor="name" className="mb-1 block text-sm font-medium text-slate-700">
               Name
             </label>
-            <input id="name" {...register('name')} onBlur={handleNameBlur} disabled={!isAdmin} className={inputClass} />
+            <input id="name" {...register('name')} disabled={!isAdmin} className={inputClass} />
             {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
-          </div>
-          <div>
-            <label htmlFor="slug" className="mb-1 block text-sm font-medium text-slate-700">
-              Slug (URL)
-            </label>
-            <input
-              id="slug"
-              {...register('slug')}
-              disabled={!isAdmin}
-              className={`${inputClass}${errors.slug ? ' border-red-300 focus:border-red-500 focus:ring-red-500/20' : ''}`}
-              placeholder="my-venue"
-              aria-invalid={errors.slug ? true : undefined}
-            />
-            <p className="mt-1 text-xs text-slate-500">Used in booking URL: /book/[slug]</p>
-            {errors.slug && <p className="mt-1 text-sm text-red-600">{errors.slug.message}</p>}
-            {!errors.slug && isAdmin && slugHint === 'checking' && (
-              <p className="mt-1 text-xs text-slate-500">Checking whether this address is available…</p>
-            )}
-            {!errors.slug && isAdmin && slugHint === 'current' && (
-              <p className="mt-1 text-xs text-emerald-700">This is your current public booking page address.</p>
-            )}
-            {!errors.slug && isAdmin && slugHint === 'available' && (
-              <p className="mt-1 text-xs text-emerald-700">This booking page address is available.</p>
-            )}
-            {!errors.slug && isAdmin && slugHint === 'taken' && (
-              <p className="mt-1 text-xs text-amber-800">
-                This address is already in use. Choose a different slug before it can be saved.
-              </p>
-            )}
           </div>
           <fieldset>
             <legend className="mb-2 block text-sm font-medium text-slate-700">Address</legend>

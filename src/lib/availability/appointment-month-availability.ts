@@ -46,6 +46,7 @@ import {
   isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
+import { listPractitionerIdsForAppointmentService } from '@/lib/availability/appointment-any-practitioner';
 
 interface VenueClockRow {
   timezone?: string | null;
@@ -809,34 +810,11 @@ export async function computeAnyAvailableAppointmentDatesInMonth(
   month: number,
   options: ComputeAppointmentMonthOptions = {},
 ): Promise<string[]> {
-  const practitionerIds = new Set<string>();
-
-  const { data: legacyLinks } = await supabase
-    .from('practitioner_services')
-    .select('practitioner_id, practitioners!inner(venue_id, is_active)')
-    .eq('service_id', serviceId)
-    .eq('practitioners.venue_id', venueId)
-    .eq('practitioners.is_active', true);
-  for (const row of legacyLinks ?? []) {
-    const id = (row as { practitioner_id?: string }).practitioner_id;
-    if (id) practitionerIds.add(id);
-  }
-
-  const { data: unifiedAssignments } = await supabase
-    .from('calendar_service_assignments')
-    .select('calendar_id, unified_calendars!inner(venue_id, is_active)')
-    .eq('service_item_id', serviceId)
-    .eq('unified_calendars.venue_id', venueId)
-    .eq('unified_calendars.is_active', true);
-  for (const row of unifiedAssignments ?? []) {
-    const id = (row as { calendar_id?: string }).calendar_id;
-    if (id) practitionerIds.add(id);
-  }
-
-  if (practitionerIds.size === 0) return [];
+  const practitionerIds = await listPractitionerIdsForAppointmentService(supabase, venueId, serviceId);
+  if (practitionerIds.length === 0) return [];
 
   const dateSets = await Promise.all(
-    [...practitionerIds].map((practitionerId) =>
+    practitionerIds.map((practitionerId) =>
       computeAppointmentAvailableDatesInMonth(
         supabase,
         venueId,

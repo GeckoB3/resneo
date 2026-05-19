@@ -10,6 +10,10 @@ import {
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { notifyAppointmentWaitlistOfferForEntry } from '@/lib/booking/notify-appointment-waitlist-offer';
 import { APPOINTMENT_WAITLIST_OFFER_TTL_MS } from '@/lib/booking/waitlist-offer-constants';
+import {
+  waitlistTimeMatchesFreedSlot,
+  type WaitlistTimeFields,
+} from '@/lib/booking/waitlist-time-window';
 import type { BookingModel } from '@/types/booking-models';
 
 export interface CancelledBookingForWaitlistOffer {
@@ -32,6 +36,7 @@ export interface WaitlistEntryCandidate {
   id: string;
   desired_date: string;
   desired_time: string | null;
+  desired_time_end?: string | null;
   practitioner_id: string | null;
   appointment_service_id: string | null;
   service_item_id: string | null;
@@ -89,14 +94,6 @@ export function waitlistPractitionerMatchesFreedSlot(
   return entryPractitionerId === freedPractitioner;
 }
 
-export function waitlistTimeMatchesFreedSlot(
-  entryDesiredTime: string | null,
-  freedTimeHm: string,
-): boolean {
-  if (!entryDesiredTime) return true;
-  return String(entryDesiredTime).slice(0, 5) === freedTimeHm;
-}
-
 export function pickFirstMatchingWaitlistEntry(
   entries: WaitlistEntryCandidate[],
   booking: CancelledBookingForWaitlistOffer,
@@ -109,7 +106,11 @@ export function pickFirstMatchingWaitlistEntry(
   for (const entry of entries) {
     if (!waitlistServiceMatchesFreedSlot(entry, serviceIds)) continue;
     if (!waitlistPractitionerMatchesFreedSlot(entry.practitioner_id, practitioner)) continue;
-    if (!waitlistTimeMatchesFreedSlot(entry.desired_time, freedTimeHm)) continue;
+    const timeFields: WaitlistTimeFields = {
+      desired_time: entry.desired_time,
+      desired_time_end: entry.desired_time_end ?? null,
+    };
+    if (!waitlistTimeMatchesFreedSlot(timeFields, freedTimeHm)) continue;
     return entry;
   }
   return null;
@@ -183,7 +184,7 @@ export async function offerAppointmentWaitlistOnCancel(
   const { data: waitingRows, error: listErr } = await admin
     .from('waitlist_entries')
     .select(
-      'id, desired_date, desired_time, practitioner_id, appointment_service_id, service_item_id, guest_first_name, guest_last_name, guest_email, guest_phone, created_at',
+      'id, desired_date, desired_time, desired_time_end, practitioner_id, appointment_service_id, service_item_id, guest_first_name, guest_last_name, guest_email, guest_phone, created_at',
     )
     .eq('venue_id', booking.venue_id)
     .eq('waitlist_kind', 'appointment')

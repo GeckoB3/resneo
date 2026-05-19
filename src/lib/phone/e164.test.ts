@@ -5,6 +5,7 @@ import {
   composeNationalAndCountry,
   normalizeToE164Lenient,
   formatPhoneForDisplay,
+  phoneToTelHref,
 } from './e164';
 
 describe('normalizeToE164', () => {
@@ -64,5 +65,20 @@ describe('formatPhoneForDisplay', () => {
     const s = formatPhoneForDisplay('+447725002232');
     expect(s).toBeTruthy();
     expect(s).toContain('7725');
+  });
+});
+
+describe('phoneToTelHref', () => {
+  it('returns E.164 tel link for UK national numbers', () => {
+    expect(phoneToTelHref('07725 002232')).toBe('tel:+447725002232');
+  });
+
+  it('strips spaces from stored E.164', () => {
+    expect(phoneToTelHref('+44 7725 002232')).toBe('tel:+447725002232');
+  });
+
+  it('returns null when no dialable digits', () => {
+    expect(phoneToTelHref(null)).toBeNull();
+    expect(phoneToTelHref('abc')).toBeNull();
   });
 });

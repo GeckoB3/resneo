@@ -1240,7 +1240,7 @@ export function BookingsDashboard({
         addToast(`Message sent to ${okCount} booking(s)`, 'success');
       } else if (okCount > 0) {
         setError(
-          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' Â· ')}`,
+          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
         );
         addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
       } else {
@@ -2162,7 +2162,7 @@ function sourceBadge(s: string) {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required') return null;
-  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -2302,7 +2302,7 @@ function BookingsAccordionList({
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
                     {booking.booking_item_name?.trim() ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="min-w-0 max-w-[11rem] truncate text-[11px] font-semibold text-slate-800 sm:max-w-[16rem] sm:text-xs">
                           {booking.booking_item_name.trim()}
                         </span>
@@ -2310,14 +2310,14 @@ function BookingsAccordionList({
                     ) : null}
                     {isTableBooking ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}
                         </span>
                       </>
                     ) : booking.party_size > 1 ? (
                       <>
-                        <span className="shrink-0 text-slate-300">Â·</span>
+                        <span className="shrink-0 text-slate-300">·</span>
                         <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                           {booking.party_size} people
                         </span>
@@ -2330,7 +2330,7 @@ function BookingsAccordionList({
                           : 'hidden shrink-0 text-slate-300 sm:inline'
                       }
                     >
-                      Â·
+                      ·
                     </span>
                     <span
                       className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}
@@ -2376,7 +2376,7 @@ function BookingsAccordionList({
                     {booking.group_booking_id && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="neutral" size="sm">
-                          {booking.person_label ? `Group Â· ${booking.person_label}` : 'Group'}
+                          {booking.person_label ? `Group · ${booking.person_label}` : 'Group'}
                         </Pill>
                       </span>
                     )}

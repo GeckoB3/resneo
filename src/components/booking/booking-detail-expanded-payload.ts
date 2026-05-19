@@ -88,5 +88,13 @@ export function buildDetailForExpanded(
     })),
     combination_staff_notes: d.combination_staff_notes,
     inferred_booking_model: d.inferred_booking_model,
+    cde_context: d.cde_context
+      ? {
+          inferred_model: d.inferred_booking_model ?? 'table_reservation',
+          title: d.cde_context.title ?? '',
+          subtitle: d.cde_context.subtitle ?? null,
+        }
+      : null,
+    service_variant_name: d.service_variant_name ?? null,
   };
 }

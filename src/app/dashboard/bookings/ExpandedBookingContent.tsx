@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -21,6 +21,7 @@ import {
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
+import { phoneToTelHref } from '@/lib/phone/e164';
 import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
@@ -75,7 +76,11 @@ import { useOptionalDashboardDetailCache } from '@/components/providers/Dashboar
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact-guest-history';
 import { guestStubFromBookingRow } from '@/lib/booking/booking-row-guest-stub';
-import { bookingDetailLiteFromListRow, bookingDisplayEndHm } from '@/lib/booking/booking-detail-from-row';
+import {
+  bookingDetailLiteFromListRow,
+  bookingDisplayEndHm,
+  resolveExpandedBookingServiceLine,
+} from '@/lib/booking/booking-detail-from-row';
 import {
   mergeBookingRowOverlay,
   overlayFromPatchBody,
@@ -128,6 +133,7 @@ export interface BookingRow {
   processing_time_blocks?: unknown | null;
   booking_model?: string | null;
   service_name?: string | null;
+  booking_item_name?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   /** Practitioner calendar / day-sheet "Arrived" indicator; PATCH via `client_arrived`. */
@@ -162,6 +168,7 @@ export interface BookingDetailLite {
     subtitle?: string | null;
   } | null;
   inferred_booking_model?: BookingModel;
+  service_variant_name?: string | null;
 }
 
 function formatRelative(value: string | null | undefined): string {
@@ -182,11 +189,16 @@ function formatDateNice(value: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** CDE context repeats the expanded header summary (service line / title) for these models. */
+/**
+ * CDE context card is omitted when the title already appears in the header summary row,
+ * or when the model always surfaces the offering in the list row header.
+ */
 const BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD: ReadonlySet<BookingModel> = new Set([
   'class_session',
   'event_ticket',
   'resource_booking',
+  'practitioner_appointment',
+  'unified_scheduling',
 ]);
 
 function guestMessageSuccessCaption(channel: GuestMessageChannel): string {
@@ -250,6 +262,7 @@ export function ExpandedBookingContent({
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
+  const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [guestMessageFeedback, setGuestMessageFeedback] = useState<{
     tone: 'success' | 'error' | 'warning';
     text: string;
@@ -481,6 +494,14 @@ export function ExpandedBookingContent({
     : booking.guest_name;
   const guestPhone = profileGuest?.phone ?? booking.guest_phone;
   const guestEmail = profileGuest?.email ?? booking.guest_email;
+  const guestTelHref = useMemo(() => phoneToTelHref(guestPhone), [guestPhone]);
+
+  const openGuestMessageComposer = useCallback((channel: GuestMessageChannel) => {
+    setModifyBookingOpen(false);
+    setGuestMessageChannel(channel);
+    setShowMessageBox(true);
+    window.requestAnimationFrame(() => messageTextareaRef.current?.focus());
+  }, []);
   const contactsGuestId = profileGuestId;
   const contactsHref = contactsGuestId
     ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
@@ -493,7 +514,13 @@ export function ExpandedBookingContent({
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
   const endTime = bookingDisplayEndHm(booking);
-  const serviceLine = booking.service_name ?? activeDetail?.cde_context?.title ?? null;
+  const serviceLine = resolveExpandedBookingServiceLine(booking, activeDetail);
+  const cdeContextForCard =
+    activeDetail?.cde_context &&
+    !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) &&
+    (!serviceLine || activeDetail.cde_context.title.trim() !== serviceLine)
+      ? activeDetail.cde_context
+      : null;
   const guestProfileAndNotesCount = [
     ...(activeDetail?.guest?.tags ?? []),
     activeDetail?.guest?.customer_profile_notes,
@@ -791,15 +818,26 @@ export function ExpandedBookingContent({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0 sm:items-center">
-              {guestPhone ? (
-                <a href={`tel:${guestPhone}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+              {guestTelHref ? (
+                <a
+                  href={guestTelHref}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
                   Call
                 </a>
               ) : null}
               {guestEmail ? (
-                <a href={`mailto:${guestEmail}`} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openGuestMessageComposer('email');
+                  }}
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
                   Email
-                </a>
+                </button>
               ) : null}
             </div>
           </div>
@@ -807,12 +845,16 @@ export function ExpandedBookingContent({
             <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
               <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
               {guestEmail ? (
-                <a
-                  href={`mailto:${guestEmail}`}
-                  className="block min-w-0 break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openGuestMessageComposer('email');
+                  }}
+                  className="block min-w-0 break-words text-left text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
                 >
                   {guestEmail}
-                </a>
+                </button>
               ) : (
                 <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
               )}
@@ -1203,6 +1245,7 @@ export function ExpandedBookingContent({
             )}
           </div>
           <textarea
+            ref={messageTextareaRef}
             value={draftMessage}
             onChange={(e) => onMessageDraftChange(e.target.value)}
             rows={3}
@@ -1325,7 +1368,7 @@ export function ExpandedBookingContent({
       ) : null}
 
       {/* CDE context — omitted when title already appears in the summary row */}
-      {activeDetail?.cde_context && !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) && (
+      {cdeContextForCard ? (
         <SectionCard className="border-emerald-200 bg-emerald-50/30">
           <SectionCard.Body className="p-4">
             <div className="flex items-start gap-3">
@@ -1333,15 +1376,15 @@ export function ExpandedBookingContent({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">{activeDetail.cde_context.title}</p>
-                {activeDetail.cde_context.subtitle && (
-                  <p className="mt-0.5 text-xs text-slate-600">{activeDetail.cde_context.subtitle}</p>
-                )}
+                <p className="text-sm font-semibold text-slate-900">{cdeContextForCard.title}</p>
+                {cdeContextForCard.subtitle ? (
+                  <p className="mt-0.5 text-xs text-slate-600">{cdeContextForCard.subtitle}</p>
+                ) : null}
               </div>
             </div>
           </SectionCard.Body>
         </SectionCard>
-      )}
+      ) : null}
 
       {/* Group booking */}
       {booking.group_booking_id && (

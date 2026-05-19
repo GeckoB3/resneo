@@ -9,12 +9,15 @@ import {
   featureFlagDisabledResponse,
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
+import { validateGuestWaitlistTimeInput } from '@/lib/booking/waitlist-time-window';
 
 const joinSchema = z.object({
   venue_id: z.string().uuid(),
   service_id: z.string().uuid(),
   desired_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  preferred_window: z.enum(['all_day', 'time_range']),
   desired_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  desired_time_end: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   practitioner_id: z.string().uuid().optional(),
   first_name: z.string().min(1).max(100),
   last_name: z.string().min(1).max(100),
@@ -96,6 +99,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const timeParsed = validateGuestWaitlistTimeInput({
+      preferred_window: parsed.data.preferred_window,
+      desired_time: parsed.data.desired_time,
+      desired_time_end: parsed.data.desired_time_end,
+    });
+    if (!timeParsed.ok) {
+      return NextResponse.json({ error: timeParsed.error }, { status: 400 });
+    }
+
     const { data, error } = await supabase
       .from('waitlist_entries')
       .insert({
@@ -105,7 +117,8 @@ export async function POST(request: NextRequest) {
         service_item_id: serviceItemId,
         practitioner_id: parsed.data.practitioner_id ?? null,
         desired_date: parsed.data.desired_date,
-        desired_time: parsed.data.desired_time ?? null,
+        desired_time: timeParsed.desired_time,
+        desired_time_end: timeParsed.desired_time_end,
         party_size: 1,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,

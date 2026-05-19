@@ -2,6 +2,7 @@ import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlags,
 } from '@/lib/feature-flags';
+import { parseAnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
 import type { VenuePublic } from '@/components/booking/types';
 
 /**
@@ -37,5 +38,6 @@ export function mapVenueFeatureFlagsForPublic(
       guest_self_reschedule: resolved.guest_self_reschedule,
       waitlist_v2: resolved.waitlist_v2,
     },
+    any_available_practitioner_config: parseAnyAvailablePractitionerConfig(raw),
   };
 }

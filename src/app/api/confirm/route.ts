@@ -42,7 +42,6 @@ import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlags,
 } from "@/lib/feature-flags";
-import { guestAppointmentModifyBlockedReason } from "@/lib/booking/guest-appointment-modify-policy";
 import { offerAppointmentWaitlistOnCancel } from "@/lib/booking/offer-appointment-waitlist-on-cancel";
 
 /**
@@ -710,38 +709,6 @@ export async function POST(request: NextRequest) {
             },
             { status: 403 },
           );
-        }
-
-        const rulesParsed = parseExtendedBookingRules(
-          (venueFlagsRow as { booking_rules?: unknown } | null)?.booking_rules,
-        );
-        const modifyNoticeHours = getCancellationNoticeHoursForBooking(
-          rulesParsed,
-          currentBookingModel,
-          48,
-        );
-        const venueTzForModify =
-          typeof (venueFlagsRow as { timezone?: string | null } | null)?.timezone ===
-            "string" &&
-          String(
-            (venueFlagsRow as { timezone?: string | null }).timezone,
-          ).trim() !== ""
-            ? String(
-                (venueFlagsRow as { timezone?: string | null }).timezone,
-              ).trim()
-            : "Europe/London";
-        const currentTimeStr =
-          typeof booking.booking_time === "string"
-            ? booking.booking_time.slice(0, 5)
-            : "";
-        const modifyBlocked = guestAppointmentModifyBlockedReason({
-          bookingDate: String(booking.booking_date),
-          bookingTime: currentTimeStr,
-          venueTimezone: venueTzForModify,
-          modifyNoticeHours,
-        });
-        if (modifyBlocked) {
-          return NextResponse.json({ error: modifyBlocked }, { status: 400 });
         }
 
         if (

@@ -4,6 +4,7 @@ import type { VenuePublic } from '@/components/booking/types';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 
 /** Loads a venue for the public /book/[slug] pages (admin client; slug is public). */
 export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePublic | null> {
@@ -11,7 +12,7 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source',
+      'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, feature_flags',
     )
     .eq('slug', slug)
     .single();
@@ -34,6 +35,9 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   (data as VenuePublic).active_booking_models = venueMode.activeBookingModels;
   (data as VenuePublic).enabled_models = venueMode.enabledModels;
   (data as VenuePublic).terminology = venueMode.terminology;
+  (data as VenuePublic).feature_flags = mapVenueFeatureFlagsForPublic(
+    (data as { feature_flags?: unknown }).feature_flags,
+  );
 
   if (venueMode.bookingModel === 'table_reservation') {
     (data as VenuePublic).areas = await listActiveAreasForVenue(supabase, data.id);

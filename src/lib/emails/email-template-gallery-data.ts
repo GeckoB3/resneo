@@ -6,6 +6,7 @@ import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confir
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
+import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
 
 /** Rich venue sample so confirmation hero buttons (website, directions) render. */
 export const EMAIL_GALLERY_DEMO_VENUE: VenueEmailData = {
@@ -205,6 +206,25 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     subtitle: 'Same-day / tonight copy',
     subject: dayOf.subject,
     html: dayOf.html,
+  });
+
+  const waitlistOffer = renderAppointmentWaitlistOfferEmail({
+    venueName: EMAIL_GALLERY_DEMO_VENUE.name,
+    venueLogoUrl: EMAIL_GALLERY_DEMO_VENUE.logo_url,
+    venueAddress: EMAIL_GALLERY_DEMO_VENUE.address,
+    venuePhone: EMAIL_GALLERY_DEMO_VENUE.phone,
+    guestName: 'Alex Smith',
+    desiredDate: '2026-06-15',
+    timeWindowLabel: '10:00 – 14:00',
+    expiresAtLabel: '15 Jun, 14:30',
+    bookingPageUrl: EMAIL_GALLERY_DEMO_VENUE.booking_page_url ?? null,
+  });
+  items.push({
+    id: 'appointment-waitlist-offer',
+    title: 'Appointment waitlist offer',
+    subtitle: 'Slot opened — book before expiry',
+    subject: waitlistOffer.subject,
+    html: waitlistOffer.html,
   });
 
   return items;

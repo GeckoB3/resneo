@@ -23,6 +23,10 @@ interface WaitlistEntry {
   waitlist_kind?: WaitlistKind;
   desired_date: string;
   desired_time: string | null;
+  desired_time_end?: string | null;
+  time_window_label?: string | null;
+  can_offer?: boolean;
+  offer_unavailable_reason?: string | null;
   party_size: number;
   guest_name: string;
   guest_first_name?: string | null;
@@ -100,7 +104,8 @@ function entrySubtitle(entry: WaitlistEntry): string {
     kind === 'appointment' && entry.service_name ? entry.service_name : null,
     kind === 'appointment' ? appointmentStaffLabel(entry) : null,
     formatWaitlistDate(entry.desired_date),
-    entry.desired_time ? entry.desired_time.slice(0, 5) : null,
+    entry.time_window_label ??
+      (entry.desired_time ? entry.desired_time.slice(0, 5) : 'All day'),
     kind === 'table'
       ? `${entry.party_size} ${entry.party_size === 1 ? 'guest' : 'guests'}`
       : null,
@@ -112,6 +117,21 @@ function entrySubtitle(entry: WaitlistEntry): string {
 
 function confirmButtonLabel(entry: WaitlistEntry): string {
   return entryKind(entry) === 'appointment' ? 'Book appointment' : 'Confirm booking';
+}
+
+function entryTimeLabel(entry: WaitlistEntry): string {
+  return (
+    entry.time_window_label ??
+    (entry.desired_time ? entry.desired_time.slice(0, 5) : 'All day')
+  );
+}
+
+function appointmentOfferDisabled(entry: WaitlistEntry): boolean {
+  return (
+    entryKind(entry) === 'appointment' &&
+    entry.status === 'waiting' &&
+    entry.can_offer === false
+  );
 }
 
 function pageSubtitle(capabilities: WaitlistVenueCapabilities): string {
@@ -346,7 +366,7 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                 keyExtractor={(e) => e.id}
                 renderDesktopRow={(entry) => (
                   <ScheduleRow
-                    timeLabel={entry.desired_time ? entry.desired_time.slice(0, 5) : '—'}
+                    timeLabel={entryTimeLabel(entry)}
                     title={entry.guest_name}
                     subtitle={entrySubtitle(entry)}
                     stripClassName={statusStripClass(entry.status)}
@@ -355,6 +375,14 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                         <Pill variant={statusPillVariant(entry.status)} size="sm">
                           {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
                         </Pill>
+                        {appointmentOfferDisabled(entry) && entry.offer_unavailable_reason ? (
+                          <span
+                            className="max-w-[14rem] text-right text-[10px] font-medium text-amber-800"
+                            title={entry.offer_unavailable_reason}
+                          >
+                            {entry.offer_unavailable_reason}
+                          </span>
+                        ) : null}
                         {entry.expires_at && entry.status === 'offered' && (
                           <span className="text-[10px] font-medium text-amber-700">
                             Expires{' '}
@@ -368,7 +396,13 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                           <button
                             type="button"
                             onClick={() => handleOffer(entry)}
-                            className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                            disabled={appointmentOfferDisabled(entry)}
+                            title={
+                              appointmentOfferDisabled(entry)
+                                ? entry.offer_unavailable_reason ?? undefined
+                                : undefined
+                            }
+                            className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Offer spot
                           </button>
@@ -413,7 +447,7 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                 )}
                 renderMobileCard={(entry) => (
                   <ScheduleRow
-                    timeLabel={entry.desired_time ? entry.desired_time.slice(0, 5) : '—'}
+                    timeLabel={entryTimeLabel(entry)}
                     title={entry.guest_name}
                     subtitle={
                       entry.notes
@@ -426,12 +460,23 @@ export function WaitlistPageClient({ capabilities }: { capabilities: WaitlistVen
                         <Pill variant={statusPillVariant(entry.status)} size="sm">
                           {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
                         </Pill>
+                        {appointmentOfferDisabled(entry) && entry.offer_unavailable_reason ? (
+                          <span className="max-w-[14rem] text-right text-[10px] font-medium text-amber-800">
+                            {entry.offer_unavailable_reason}
+                          </span>
+                        ) : null}
                         <div className="flex flex-wrap justify-end gap-1">
                           {entry.status === 'waiting' && (
                             <button
                               type="button"
                               onClick={() => handleOffer(entry)}
-                              className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                              disabled={appointmentOfferDisabled(entry)}
+                              title={
+                                appointmentOfferDisabled(entry)
+                                  ? entry.offer_unavailable_reason ?? undefined
+                                  : undefined
+                              }
+                              className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               Offer
                             </button>

@@ -7,10 +7,12 @@ import {
   sendAppointmentWaitlistOfferNotification,
   type AppointmentWaitlistOfferNotifyResult,
 } from '@/lib/communications/send-appointment-waitlist-offer';
+import { formatWaitlistTimeWindowLabel } from '@/lib/booking/waitlist-time-window';
 
 export interface AppointmentWaitlistOfferEntryNotifyRow {
   desired_date: string;
   desired_time: string | null;
+  desired_time_end?: string | null;
   guest_first_name: string | null;
   guest_last_name: string | null;
   guest_email: string | null;
@@ -35,7 +37,7 @@ export async function notifyAppointmentWaitlistOfferForEntry(
 ): Promise<AppointmentWaitlistOfferNotifyResult & { skipped?: boolean }> {
   const { data: venueRow, error: venueErr } = await admin
     .from('venues')
-    .select('name, phone, slug, feature_flags')
+    .select('name, phone, slug, logo_url, address, feature_flags')
     .eq('id', venueId)
     .maybeSingle();
 
@@ -53,11 +55,16 @@ export async function notifyAppointmentWaitlistOfferForEntry(
     return { emailSent: false, smsSent: false, skipped: true };
   }
 
-  const desiredTimeHm = entry.desired_time ? String(entry.desired_time).slice(0, 5) : '—';
+  const desiredTimeHm = formatWaitlistTimeWindowLabel({
+    desired_time: entry.desired_time,
+    desired_time_end: entry.desired_time_end ?? null,
+  });
 
   return sendAppointmentWaitlistOfferNotification({
     venueId,
     venueName: String(venueRow.name ?? 'Venue'),
+    venueLogoUrl: typeof venueRow.logo_url === 'string' ? venueRow.logo_url : null,
+    venueAddress: typeof venueRow.address === 'string' ? venueRow.address : null,
     venuePhone: typeof venueRow.phone === 'string' ? venueRow.phone : null,
     bookingPageUrl: publicBookingUrl(typeof venueRow.slug === 'string' ? venueRow.slug : null),
     guestFirstName: entry.guest_first_name,

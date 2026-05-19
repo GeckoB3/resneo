@@ -21,10 +21,12 @@ import { normaliseGuestNamePart } from '@/lib/guests/name';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { venueUsesUnifiedAppointmentData, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { BookingModel } from '@/types/booking-models';
+import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
 
 export interface AppointmentWaitlistEntryRow {
   desired_date: string;
   desired_time: string | null;
+  desired_time_end?: string | null;
   appointment_service_id: string | null;
   service_item_id: string | null;
   practitioner_id: string | null;
@@ -81,16 +83,30 @@ export async function createAppointmentBookingFromWaitlistEntry(
   if (!serviceId) {
     return { ok: false, error: 'Appointment waitlist entry is missing a service.', status: 400 };
   }
-  if (!entry.desired_time) {
-    return {
-      ok: false,
-      error: 'Set a preferred time on this waitlist entry before booking.',
-      status: 400,
-    };
+  const bookingDate = entry.desired_date;
+  let timeStr = entry.desired_time ? String(entry.desired_time).slice(0, 5) : null;
+
+  if (!timeStr) {
+    const availability = await findAppointmentWaitlistAvailability(admin, venueId, {
+      desired_date: entry.desired_date,
+      desired_time: entry.desired_time,
+      desired_time_end: entry.desired_time_end ?? null,
+      appointment_service_id: entry.appointment_service_id,
+      service_item_id: entry.service_item_id,
+      practitioner_id: entry.practitioner_id,
+    });
+    if (!availability.available || !availability.sampleSlotStartHm) {
+      return {
+        ok: false,
+        error:
+          availability.reason ??
+          'No appointment slots are available in this guest’s requested window.',
+        status: 409,
+      };
+    }
+    timeStr = availability.sampleSlotStartHm;
   }
 
-  const bookingDate = entry.desired_date;
-  const timeStr = String(entry.desired_time).slice(0, 5);
   const timeForDb = `${timeStr}:00`;
 
   const { data: venue } = await admin

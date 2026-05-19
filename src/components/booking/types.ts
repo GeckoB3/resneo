@@ -41,6 +41,10 @@ export interface VenuePublic {
       guest_self_reschedule?: boolean;
       waitlist_v2?: boolean;
     };
+    any_available_practitioner_config?: {
+      mode: 'priority' | 'random';
+      calendar_order: string[];
+    };
   };
 }
 

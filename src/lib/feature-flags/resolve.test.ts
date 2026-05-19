@@ -51,6 +51,26 @@ describe('mergeVenueFeatureFlagsPatch', () => {
     const next = mergeVenueFeatureFlagsPatch({ waitlist_v2: true }, { waitlist_v2: false });
     expect(next.waitlist_v2).toBeUndefined();
   });
+
+  it('leaves flag on when patch omits the key', () => {
+    const next = mergeVenueFeatureFlagsPatch(
+      { any_available_practitioner: true },
+      { any_available_practitioner_config: { mode: 'priority', calendar_order: [] } },
+    );
+    expect(next.any_available_practitioner).toBe(true);
+  });
+
+  it('clears any-available config when the flag is turned off', () => {
+    const next = mergeVenueFeatureFlagsPatch(
+      {
+        any_available_practitioner: true,
+        any_available_practitioner_config: { mode: 'random', calendar_order: [] },
+      },
+      { any_available_practitioner: false },
+    );
+    expect(next.any_available_practitioner).toBeUndefined();
+    expect(next.any_available_practitioner_config).toBeUndefined();
+  });
 });
 
 describe('venueFeatureFlagsForStorage', () => {
@@ -58,6 +78,14 @@ describe('venueFeatureFlagsForStorage', () => {
     expect(venueFeatureFlagsForStorage({ waitlist_v2: true, guest_self_reschedule: false })).toEqual({
       waitlist_v2: true,
     });
+  });
+
+  it('does not persist any-available config when the flag is off', () => {
+    expect(
+      venueFeatureFlagsForStorage({
+        any_available_practitioner_config: { mode: 'priority', calendar_order: [] },
+      }),
+    ).toEqual({});
   });
 });
 

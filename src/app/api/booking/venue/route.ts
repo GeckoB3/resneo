@@ -5,6 +5,7 @@ import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -55,6 +56,9 @@ export async function GET(request: NextRequest) {
 
     const venueFlags = parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags);
     const resolvedFlags = resolveAppointmentsFeatureFlags(venueFlags);
+    const publicFeatureFlags = mapVenueFeatureFlagsForPublic(
+      (venue as { feature_flags?: unknown }).feature_flags,
+    );
 
     const payload: Record<string, unknown> = {
       ...venue,
@@ -69,6 +73,7 @@ export async function GET(request: NextRequest) {
           guest_self_reschedule: resolvedFlags.guest_self_reschedule,
           waitlist_v2: resolvedFlags.waitlist_v2,
         },
+        any_available_practitioner_config: publicFeatureFlags?.any_available_practitioner_config,
       },
     };
 

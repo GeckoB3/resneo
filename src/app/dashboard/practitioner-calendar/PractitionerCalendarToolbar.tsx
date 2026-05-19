@@ -22,8 +22,6 @@ export interface PractitionerCalendarToolbarProps {
   onRefresh: () => void;
   onNewBooking: () => void;
   onWalkIn: () => void;
-  /** Open block-time modal for the current day view date (optional). */
-  onBlockTime?: () => void;
   controlsPanel: ReactNode;
   controlsLabel?: string;
   summaryContent: ReactNode;
@@ -99,7 +97,6 @@ export function PractitionerCalendarToolbar({
   onRefresh,
   onNewBooking,
   onWalkIn,
-  onBlockTime,
   controlsPanel,
   controlsLabel = 'Filter',
   summaryContent,
@@ -244,18 +241,6 @@ export function PractitionerCalendarToolbar({
       toolbarLeadingTools={viewModeSwitcher}
       toolbarTools={
         <>
-          {onBlockTime ? (
-            <button
-              type="button"
-              onClick={onBlockTime}
-              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 sm:text-xs"
-              aria-label="Block time on calendar"
-              title="Block time"
-            >
-              <span className="hidden sm:inline">Block time</span>
-              <span className="sm:hidden">Block</span>
-            </button>
-          ) : null}
           {scheduleUndo ? (
             <button
               type="button"

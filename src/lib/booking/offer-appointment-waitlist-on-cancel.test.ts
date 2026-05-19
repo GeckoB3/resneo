@@ -4,9 +4,9 @@ import {
   pickFirstMatchingWaitlistEntry,
   waitlistPractitionerMatchesFreedSlot,
   waitlistServiceMatchesFreedSlot,
-  waitlistTimeMatchesFreedSlot,
   type WaitlistEntryCandidate,
 } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
+import { waitlistTimeMatchesFreedSlot } from '@/lib/booking/waitlist-time-window';
 
 const baseBooking = {
   id: 'b1',
@@ -58,9 +58,25 @@ describe('offer-appointment-waitlist-on-cancel matching', () => {
     expect(waitlistPractitionerMatchesFreedSlot(null, 'prac-1')).toBe(true);
     expect(waitlistPractitionerMatchesFreedSlot('prac-1', 'prac-1')).toBe(true);
     expect(waitlistPractitionerMatchesFreedSlot('prac-2', 'prac-1')).toBe(false);
-    expect(waitlistTimeMatchesFreedSlot('14:30:00', '14:30')).toBe(true);
-    expect(waitlistTimeMatchesFreedSlot(null, '14:30')).toBe(true);
-    expect(waitlistTimeMatchesFreedSlot('15:00:00', '14:30')).toBe(false);
+    expect(
+      waitlistTimeMatchesFreedSlot({ desired_time: '14:30:00' }, '14:30'),
+    ).toBe(true);
+    expect(waitlistTimeMatchesFreedSlot({ desired_time: null }, '14:30')).toBe(true);
+    expect(
+      waitlistTimeMatchesFreedSlot({ desired_time: '15:00:00' }, '14:30'),
+    ).toBe(false);
+    expect(
+      waitlistTimeMatchesFreedSlot(
+        { desired_time: '14:00', desired_time_end: '16:00' },
+        '15:00',
+      ),
+    ).toBe(true);
+    expect(
+      waitlistTimeMatchesFreedSlot(
+        { desired_time: '14:00', desired_time_end: '16:00' },
+        '16:00',
+      ),
+    ).toBe(false);
   });
 
   it('picks FIFO first match', () => {

@@ -176,7 +176,7 @@ function dayNameForDate(dateStr: string): string {
   return DAY_NAMES[dow]!;
 }
 
-function getWorkingRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
+export function getWorkingRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
   const dayKey = dayKeyForDate(dateStr);
   const dayName = dayNameForDate(dateStr);
 
@@ -194,7 +194,7 @@ function getWorkingRanges(practitioner: Practitioner, dateStr: string): Array<{ 
   return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
 }
 
-function getBreakRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
+export function getBreakRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
   const byDay = practitioner.break_times_by_day;
   if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
     const dayKey = dayKeyForDate(dateStr);

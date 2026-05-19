@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { anyAvailablePractitionerConfigSchema } from '@/lib/feature-flags/any-available-practitioner-config';
 
 /**
  * Appointments Phase 0 / 1a rollout flags (P0.3).
@@ -18,6 +19,7 @@ export const venueFeatureFlagsSchema = z
     waitlist_v2: z.boolean().optional(),
     guest_self_reschedule: z.boolean().optional(),
     any_available_practitioner: z.boolean().optional(),
+    any_available_practitioner_config: anyAvailablePractitionerConfigSchema.optional(),
   })
   .strip();
 

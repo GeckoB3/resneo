@@ -83,6 +83,7 @@ import {
   groupScheduleBlocksByDate,
   buildMonthDayScheduleCounts,
 } from '@/lib/calendar/schedule-blocks-grouping';
+import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-blocks';
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
@@ -140,6 +141,9 @@ interface Practitioner {
   sort_order?: number;
   /** Per-day template from Calendar availability (Settings). */
   working_hours?: WorkingHours;
+  break_times?: Array<{ start: string; end: string }>;
+  break_times_by_day?: WorkingHours | null;
+  days_off?: string[];
 }
 
 interface CalendarVariantRow {
@@ -289,9 +293,17 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
-/** Manual blocks staff can drag, resize, and edit (not class-tied blocks). */
+function isBreakCalendarBlock(bl: CalendarBlock): boolean {
+  return bl.block_type === 'break';
+}
+
+/** Manual blocks staff can drag, resize, and edit (not class-tied or schedule breaks). */
 function isManualEditableBlock(bl: CalendarBlock): boolean {
-  return bl.block_type !== 'class_session' && !bl.class_instance_id;
+  return !isBreakCalendarBlock(bl) && bl.block_type !== 'class_session' && !bl.class_instance_id;
+}
+
+function calendarBlockHeading(bl: CalendarBlock): string {
+  return isBreakCalendarBlock(bl) ? 'Break' : 'Blocked';
 }
 
 function blockDurationMinutes(bl: CalendarBlock): number {
@@ -1579,11 +1591,19 @@ function DragBlockPreview({
   block: CalendarBlock;
   movePreview?: { label: string; invalid: boolean } | null;
 }) {
-  const label = block.reason?.trim() ? `Blocked: ${block.reason}` : 'Blocked';
+  const label = isBreakCalendarBlock(block)
+    ? 'Break'
+    : block.reason?.trim()
+      ? `Blocked: ${block.reason}`
+      : 'Blocked';
+  const accent = isBreakCalendarBlock(block) ? '#d97706' : '#94a3b8';
+  const shellClass = isBreakCalendarBlock(block)
+    ? 'border-amber-300 bg-amber-50/95'
+    : 'border-slate-400 bg-slate-200/95';
   return (
     <div
-      className="flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed border-slate-400 bg-slate-200/95 shadow-2xl shadow-slate-900/15"
-      style={{ borderLeftWidth: 4, borderLeftColor: '#94a3b8' }}
+      className={`flex max-w-[min(90vw,16rem)] flex-col overflow-hidden rounded-lg border-2 border-dashed shadow-2xl shadow-slate-900/15 ${shellClass}`}
+      style={{ borderLeftWidth: 4, borderLeftColor: accent }}
     >
       {movePreview ? (
         <div
@@ -2037,6 +2057,25 @@ export function PractitionerCalendarView({
     ],
   );
 
+  /** Show notify / skip / undo on the booking bar immediately after a move or resize (before PATCH returns). */
+  const beginScheduleEditFollowUp = useCallback(
+    (bookingId: string) => {
+      setDragMoveConfirmBookingId(bookingId);
+      scheduleDeferredModificationGuestNotify(bookingId);
+    },
+    [scheduleDeferredModificationGuestNotify],
+  );
+
+  const clearScheduleEditFollowUpForBooking = useCallback(
+    (bookingId: string) => {
+      setDragMoveConfirmBookingId((current) => (current === bookingId ? null : current));
+      if (pendingDeferredModificationNotifyBookingIdRef.current === bookingId) {
+        cancelPendingDeferredModificationGuestNotify();
+      }
+    },
+    [cancelPendingDeferredModificationGuestNotify],
+  );
+
   const confirmInlineDragMove = useCallback(async () => {
     clearDeferredModificationGuestNotifyTimer();
     const bid = pendingDeferredModificationNotifyBookingIdRef.current;
@@ -2147,6 +2186,27 @@ export function PractitionerCalendarView({
   /** Fetch schedule feed for events strip (classes render on team columns via `calendar_id`). */
   const showMergedFeeds = showEventsColumn || showClassSessions;
 
+  const listFromTo = useMemo(() => {
+    if (viewMode === 'day') return { from: date, to: date };
+    if (viewMode === 'week') return { from: weekStart, to: addCalendarDays(weekStart, 6) };
+    return monthGridDateRange(monthAnchor);
+  }, [viewMode, date, weekStart, monthAnchor]);
+
+  const practitionerBreakBlocks = useMemo(
+    () =>
+      buildPractitionerBreakBlocks(
+        practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+        listFromTo.from,
+        listFromTo.to,
+      ),
+    [practitioners, listFromTo.from, listFromTo.to],
+  );
+
+  const displayBlocks = useMemo(
+    () => [...blocks, ...practitionerBreakBlocks],
+    [blocks, practitionerBreakBlocks],
+  );
+
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
@@ -2175,7 +2235,7 @@ export function PractitionerCalendarView({
         minM = Math.min(minM, startM);
         maxM = Math.max(maxM, endM);
       }
-      for (const block of blocks) {
+      for (const block of displayBlocks) {
         if (block.block_date !== activeDayDate) continue;
         includeRange(block.start_time, block.end_time, 60);
       }
@@ -2188,7 +2248,7 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, blocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
+    [activeDayDate, displayBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -2255,12 +2315,6 @@ export function PractitionerCalendarView({
     startHourOverride,
     endHourOverride,
   ]);
-
-  const listFromTo = useMemo(() => {
-    if (viewMode === 'day') return { from: date, to: date };
-    if (viewMode === 'week') return { from: weekStart, to: addCalendarDays(weekStart, 6) };
-    return monthGridDateRange(monthAnchor);
-  }, [viewMode, date, weekStart, monthAnchor]);
 
   const fetchData = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -2986,6 +3040,7 @@ export function PractitionerCalendarView({
           : b,
       ),
     );
+    beginScheduleEditFollowUp(booking.id);
 
     const savePromise = (async (): Promise<'ok' | 'failed'> => {
       try {
@@ -3005,17 +3060,17 @@ export function PractitionerCalendarView({
           const j = await res.json().catch(() => ({}));
           addToast((j as { error?: string }).error ?? 'Could not move appointment', 'error');
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-          setLastScheduleEditUndo(null);
+          setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+          clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
         }
-        setDragMoveConfirmBookingId(booking.id);
-        scheduleDeferredModificationGuestNotify(booking.id);
         void fetchData({ silent: true });
         return 'ok';
       } catch {
         addToast('Could not move appointment', 'error');
         setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-        setLastScheduleEditUndo(null);
+        setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+        clearScheduleEditFollowUpForBooking(booking.id);
         return 'failed';
       }
     })();
@@ -3052,6 +3107,7 @@ export function PractitionerCalendarView({
             : b,
         ),
       );
+      beginScheduleEditFollowUp(booking.id);
 
       const savePromise = (async (): Promise<'ok' | 'failed'> => {
         try {
@@ -3068,17 +3124,17 @@ export function PractitionerCalendarView({
             const j = await res.json().catch(() => ({}));
             addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
             setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-            setLastScheduleEditUndo(null);
+            setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+            clearScheduleEditFollowUpForBooking(booking.id);
             return 'failed';
           }
-          setDragMoveConfirmBookingId(booking.id);
-          scheduleDeferredModificationGuestNotify(booking.id);
           void fetchData({ silent: true });
           return 'ok';
         } catch {
           addToast('Could not update duration', 'error');
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
-          setLastScheduleEditUndo(null);
+          setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+          clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
         }
       })();
@@ -3090,7 +3146,12 @@ export function PractitionerCalendarView({
         }
       });
     },
-    [addToast, fetchData, scheduleDeferredModificationGuestNotify],
+    [
+      addToast,
+      beginScheduleEditFollowUp,
+      clearScheduleEditFollowUpForBooking,
+      fetchData,
+    ],
   );
 
   const undoLastScheduleEdit = useCallback(async () => {
@@ -3293,7 +3354,7 @@ export function PractitionerCalendarView({
           dateStr,
           undefined,
           bookings,
-          blocks,
+          displayBlocks,
           serviceMap,
           pracClassBlocks,
           pracEventBlocks,
@@ -3338,7 +3399,7 @@ export function PractitionerCalendarView({
         dateStr,
         b.id,
         bookings,
-        blocks,
+        displayBlocks,
         serviceMap,
         pracClassBlocks,
         pracEventBlocks,
@@ -3920,19 +3981,6 @@ export function PractitionerCalendarView({
             );
             setStaffBookingModal('walk-in');
           }}
-          onBlockTime={
-            viewMode === 'day' || viewMode === 'week'
-              ? () => {
-                  const pracId =
-                    calendarFilterIds?.length === 1
-                      ? calendarFilterIds[0]
-                      : filteredPractitioners[0]?.id;
-                  if (!pracId) return;
-                  const dateStr = viewMode === 'day' ? date : weekStart;
-                  openBlockModal(pracId, dateStr, minutesToTime(startHour * 60));
-                }
-              : undefined
-          }
           controlsPanel={calendarFilterPanel}
           controlsLabel={calendarControlsLabel}
           summaryContent={calendarSummaryContent}
@@ -4045,7 +4093,7 @@ export function PractitionerCalendarView({
                       const dayEventBlocks = eventBlocksForGrid.filter(
                         (b) => b.calendar_id === prac.id && b.date === d,
                       );
-                      const dayManualBlocks = blocks.filter(
+                      const dayManualBlocks = displayBlocks.filter(
                         (bl) =>
                           columnIdForBlock(bl) === prac.id &&
                           bl.block_date === d &&
@@ -4054,20 +4102,28 @@ export function PractitionerCalendarView({
                       return (
                         <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
                           <div className="flex min-h-[80px] flex-col gap-1">
-                            {dayManualBlocks.map((bl) => (
+                            {dayManualBlocks.map((bl) => {
+                              const breakBlock = isBreakCalendarBlock(bl);
+                              return (
                               <button
                                 key={bl.id}
                                 type="button"
                                 onClick={() => openEditBlockModal(bl)}
-                                className="rounded-lg border border-slate-300 bg-slate-200/90 px-2 py-1 text-left text-xs text-slate-800 hover:bg-slate-300/90"
-                                title={bl.reason ?? 'Blocked'}
+                                disabled={breakBlock}
+                                className={`rounded-lg border px-2 py-1 text-left text-xs ${
+                                  breakBlock
+                                    ? 'cursor-default border-amber-200 bg-amber-50/95 text-amber-950'
+                                    : 'border-slate-300 bg-slate-200/90 text-slate-800 hover:bg-slate-300/90'
+                                }`}
+                                title={breakBlock ? 'Break (set in Calendar availability)' : bl.reason ?? 'Blocked'}
                               >
-                                <span className="font-semibold">Blocked</span>
+                                <span className="font-semibold">{calendarBlockHeading(bl)}</span>
                                 <span className="mt-0.5 block text-[10px] tabular-nums text-slate-600">
                                   {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
                                 </span>
                               </button>
-                            ))}
+                              );
+                            })}
                             {dayBookings.map((b) => {
                               const p = bookingCalendarBlockStyle(b);
                               return (
@@ -4401,7 +4457,7 @@ export function PractitionerCalendarView({
                 const pracEventBlocks = eventBlocksForGrid.filter(
                   (b) => b.calendar_id === prac.id && b.date === date,
                 );
-                const pracBlocks = blocks.filter(
+                const pracBlocks = displayBlocks.filter(
                   (bl) =>
                     columnIdForBlock(bl) === prac.id &&
                     bl.block_date === date &&
@@ -4426,7 +4482,7 @@ export function PractitionerCalendarView({
                         const occ = slotOccupied(
                           slotStartMins,
                           bookings,
-                          blocks,
+                          displayBlocks,
                           prac.id,
                           date,
                           serviceMap,
@@ -4493,7 +4549,12 @@ export function PractitionerCalendarView({
                           (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
+                        const breakBlock = isBreakCalendarBlock(bl);
                         const canDrag = isManualEditableBlock(bl);
+                        const blockAccent = breakBlock ? '#d97706' : '#94a3b8';
+                        const blockShellClass = breakBlock
+                          ? 'border-amber-200 bg-amber-50/95 hover:bg-amber-50'
+                          : 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
                         const resizeExtra =
                           blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
                         const displayEndHm =
@@ -4511,8 +4572,8 @@ export function PractitionerCalendarView({
                           >
                             {(handle) => (
                               <div
-                                className="group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 text-left shadow-sm hover:bg-slate-300/90"
-                                style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                                className={`group relative flex h-full min-h-0 flex-row overflow-hidden rounded-lg border text-left shadow-sm ${blockShellClass}`}
+                                style={{ borderLeftWidth: 3, borderLeftColor: blockAccent }}
                               >
                                 {canDrag && handle.listeners && handle.attributes ? (
                                   <button
@@ -4537,13 +4598,22 @@ export function PractitionerCalendarView({
                                     if (justResizedBlockIdRef.current === bl.id) return;
                                     openEditBlockModal(bl);
                                   }}
+                                  disabled={breakBlock}
                                   className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
                                     canDrag ? 'pb-[19px]' : ''
-                                  }`}
-                                  title="Click to edit block"
+                                  } ${breakBlock ? 'cursor-default' : ''}`}
+                                  title={
+                                    breakBlock
+                                      ? 'Break (set in Calendar availability)'
+                                      : 'Click to edit block'
+                                  }
                                 >
-                                  <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">
-                                    Blocked
+                                  <span
+                                    className={`truncate text-[13px] font-extrabold tracking-tight ${
+                                      breakBlock ? 'text-amber-950' : 'text-slate-900'
+                                    }`}
+                                  >
+                                    {calendarBlockHeading(bl)}
                                   </span>
                                   {bl.reason ? (
                                     <span className="mt-0.5 block truncate text-[11px] font-medium leading-snug text-slate-600/90">
@@ -4712,12 +4782,11 @@ export function PractitionerCalendarView({
                               ? resizePreviewEnd.endHm
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
-                          const showInlineScheduleFollowUp =
-                            dragMoveConfirmBookingId === b.id &&
-                            (lastScheduleEditUndo?.kind === 'move' ||
-                              lastScheduleEditUndo?.kind === 'resize') &&
-                            lastScheduleEditUndo.prev.id === b.id;
-                          const scheduleFollowUpKind = lastScheduleEditUndo?.kind ?? 'move';
+                          const showInlineScheduleFollowUp = dragMoveConfirmBookingId === b.id;
+                          const scheduleFollowUpKind =
+                            lastScheduleEditUndo?.prev.id === b.id
+                              ? lastScheduleEditUndo.kind
+                              : 'move';
                           const isOverlapLane = layout.laneCount > 1;
                           const contentHeightPx =
                             blockH - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0);

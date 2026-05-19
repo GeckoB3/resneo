@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   createAppointmentBookingFromWaitlistEntry,
   endHHmmFromDuration,
 } from './create-appointment-from-waitlist';
+import * as waitlistOfferAvailability from './waitlist-offer-availability';
 
 describe('endHHmmFromDuration', () => {
   it('adds duration within the same day', () => {
@@ -12,6 +13,10 @@ describe('endHHmmFromDuration', () => {
 });
 
 describe('createAppointmentBookingFromWaitlistEntry', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('requires a service id', async () => {
     const admin = {} as never;
     const result = await createAppointmentBookingFromWaitlistEntry(admin, 'v1', 's1', {
@@ -33,7 +38,13 @@ describe('createAppointmentBookingFromWaitlistEntry', () => {
     });
   });
 
-  it('requires a preferred time', async () => {
+  it('returns 409 when all-day entry has no slots in window', async () => {
+    vi.spyOn(waitlistOfferAvailability, 'findAppointmentWaitlistAvailability').mockResolvedValue({
+      available: false,
+      sampleSlotStartHm: null,
+      reason: 'No appointment slots are available in this guest’s requested window.',
+    });
+
     const result = await createAppointmentBookingFromWaitlistEntry({} as never, 'v1', 's1', {
       desired_date: '2026-06-15',
       desired_time: null,
@@ -48,8 +59,8 @@ describe('createAppointmentBookingFromWaitlistEntry', () => {
     });
     expect(result).toEqual({
       ok: false,
-      error: 'Set a preferred time on this waitlist entry before booking.',
-      status: 400,
+      error: 'No appointment slots are available in this guest’s requested window.',
+      status: 409,
     });
   });
 

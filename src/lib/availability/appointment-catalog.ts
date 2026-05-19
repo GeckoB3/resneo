@@ -40,6 +40,7 @@ export interface AppointmentCatalogPractitioner {
   services: Array<{
     id: string;
     name: string;
+    description?: string | null;
     duration_minutes: number;
     buffer_minutes: number;
     price_pence: number | null;
@@ -174,6 +175,7 @@ async function fetchUnifiedAppointmentCatalog(
       services: offeredServices.map((svc) => ({
         id: svc.id,
         name: svc.name,
+        description: svc.description ?? null,
         duration_minutes: svc.duration_minutes,
         buffer_minutes: svc.buffer_minutes ?? 0,
         price_pence: svc.price_pence,
@@ -255,6 +257,7 @@ export async function fetchAppointmentCatalog(
       services: offeredServices.map((svc) => ({
         id: svc.id,
         name: svc.name,
+        description: svc.description ?? null,
         duration_minutes: svc.duration_minutes,
         buffer_minutes: svc.buffer_minutes ?? 0,
         price_pence: svc.price_pence,

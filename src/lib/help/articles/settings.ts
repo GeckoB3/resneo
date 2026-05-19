@@ -21,7 +21,8 @@ ReserveNI splits **venue configuration** from **personal login details**. What y
 
 Admins open **Settings** at \`/dashboard/settings\`. Tabs run along the top:
 
-- **Profile**: personal block (varies slightly by product), **venue profile** (name, slug, address, contacts, cover image, **timezone**), which **booking models** are enabled, optional **require account login** for online booking, and **Booking widget & QR code** (iframe snippet, deep link query params, \`/embed/resize.js\`, printable QR).
+- **Profile**: personal block (varies slightly by product), **venue profile** (name, address, contacts, **timezone**), which **booking models** are enabled, and optional **require account login** for online booking.
+- **Booking Page**: public **slug**, logo, cover photo, and **booking widget & QR code** (iframe snippet, deep link query params, \`/embed/resize.js\`, printable QR).
 - **Business hours**: weekly **opening hours** (explicit **Save opening hours**) and **Closures & special days** (availability blocks).
 - **Plan**: subscription tier and status, SMS and calendar usage summaries, Stripe **Manage Billing**, and (on Appointments SKUs) in app moves between Light, Plus, and Pro when billing allows.
 - **Payments**: **Stripe Connect** onboarding for guest card payments to the venue connected account.
@@ -54,9 +55,11 @@ Your venue runs on an **Appointments** subscription (Light, Plus, or Pro). **Set
 
 - **Profile**
   - **Personal details & security** for your own login (name, email, phone, password).
-  - **Venue profile & public details**: trading name, public **slug** and booking URL, address, phone, email, website, imagery, and **timezone** (IANA style value). Timezone drives reminders and exception logic with your wall clock.
+  - **Venue profile & contact details**: trading name, address, phone, email, website, and **timezone** (IANA style value). Timezone drives reminders and exception logic with your wall clock.
   - **Models on your public page**: which experiences are active (for example services, classes, events, resources) and whether guests must use a **ReserveNI account** before booking online.
-  - **Booking widget & QR code**: copy the **iframe** snippet, optional tab deep links (\`?tab=appointments\`, \`events\`, \`classes\`, \`resources\` as your venue exposes), the **resize.js** script from \`/embed/resize.js\`, and a QR that opens your public page.
+- **Booking Page**
+  - **URL & branding**: public **slug**, logo, cover photo, and a link to preview \`/book/[slug]\`.
+  - **Website widget & QR code**: copy the **iframe** snippet, optional tab deep links (\`?tab=appointments\`, \`events\`, \`classes\`, \`resources\` as your venue exposes), the **resize.js** script from \`/embed/resize.js\`, and a QR that opens your public page.
 - **Business hours**: weekly grid with a dedicated **Save opening hours** strip, then **Closures & special days** for venue wide blocks (see the Business hours help article).
 - **Plan**: tier name, subscription state, period dates, **SMS segments** (included bundle vs pay as you go on Light), **calendar usage** against your tier cap, **Manage Billing** (Stripe Customer Portal for card, invoices, cancellation), and **Change Appointments plan** when Stripe shows an active subscription that is not stuck in a blocked state. After checkout or portal return you may see banners or \`?upgraded=\`, \`?downgraded=\`, \`?resubscribed=\`, \`?card_updated=\`, or \`?plan_changed=\` style query params; read them before navigating away. Returning from the portal may also sync via \`portal_return=1\`.
 - **Payments**: **Stripe Connect** onboarding so **guests** pay the **venue**; ReserveNI does not hold deposits (see Payments help).
@@ -73,8 +76,8 @@ Same URL, different page: **Account settings** with only personal fields. They s
 ## Useful deep links
 
 - \`/dashboard/settings?tab=profile\` (default)
-- \`/dashboard/settings?tab=business-hours\`, \`plan\`, \`payments\`, \`comms\`, \`staff\`, \`data-import\`
-- Hashes on Profile: \`#additional-booking-types\`, \`#booking-widget\` (scroll to those cards)
+- \`/dashboard/settings?tab=booking-page\`, \`business-hours\`, \`plan\`, \`payments\`, \`comms\`, \`staff\`, \`data-import\`
+- Hashes: Profile \`#additional-booking-types\`; Booking Page \`#booking-widget\` (scroll to widget & QR)
 
 ## Where related work lives
 
@@ -90,9 +93,9 @@ Your venue is on a **Restaurant** or **Founding Partner** subscription. **Settin
 
 - **Profile**
   - **Personal profile** for your own display name and sign in details on this admin login (this block is the non Appointments product layout).
-  - **Venue profile & public details**: name, **slug**, address, contact channels, imagery, **timezone**, enabled **booking models**, optional **require account login** for online booking.
+  - **Venue profile & contact details**: name, address, contact channels, **timezone**, enabled **booking models**, optional **require account login** for online booking.
   - **Dining** card (when your tier is a table product and the venue is not on an Appointments SKU): short explanation with a link to **Dining Availability → Table Management** at \`/dashboard/availability?tab=table\` for floor plan, combinations, and related table configuration that sits outside this tabs list.
-  - **Booking widget & QR code** as for other plans: iframe, \`/embed/resize.js\`, deep links, QR.
+- **Booking Page**: public **slug**, logo, cover photo, **booking widget & QR code** (iframe, \`/embed/resize.js\`, deep links).
 - **Business hours**: weekly hours plus closures. Restaurant tiers unlock an extra closure type, **Reduced capacity**, tied to table bookings (see Business hours article).
 - **Plan**: shows **Restaurant** or **Founding Partner**, subscription status, SMS usage where applicable, calendar usage (no practical cap on this tier), **Manage Billing** for Stripe Customer Portal, **Resubscribe** if the subscription has fully lapsed, and past due handling. Tier changes for this product go through Stripe checkout or portal flows, not the Appointments “change plan” cards.
 - **Payments**: **Stripe Connect** for guest card charges into the venue account.
@@ -106,7 +109,7 @@ Staff visiting \`/dashboard/settings\` get **Account settings** only (personal d
 
 ## Deep links
 
-Same query pattern as other plans: \`?tab=profile\`, \`business-hours\`, \`plan\`, \`payments\`, \`comms\`, \`staff\`, \`data-import\`, plus Profile hashes \`#additional-booking-types\` and \`#booking-widget\`.
+Same query pattern as other plans: \`?tab=profile\`, \`booking-page\`, \`business-hours\`, \`plan\`, \`payments\`, \`comms\`, \`staff\`, \`data-import\`, plus hashes \`#additional-booking-types\` (Profile) and \`#booking-widget\` (Booking Page).
 
 ## Related routes outside Settings
 

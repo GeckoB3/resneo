@@ -7,8 +7,15 @@ Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Functionality-Re
 | Key | Purpose | Phase |
 |-----|---------|-------|
 | `waitlist_v2` | Appointment schedule waitlist (guest join, staff offer with guest notify, staff book/confirm, auto-offer on appointment cancel, `waitlist_converted` audit event) | P1a.3 |
-| `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify) with min-notice policy (same window as cancellation). **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
+| `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify). Cancellation notice applies to refunds on cancel, not to whether reschedule is allowed. **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
+
+When `any_available_practitioner` is on, venues can set `any_available_practitioner_config` in the same JSONB:
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `mode` | `priority` (default) or `random` | How to choose a calendar when several are free at the same time |
+| `calendar_order` | UUID[] | Priority list (Settings → Beta features → calendar order UI) |
 
 All flags default to **off** until enabled per venue or via environment override.
 

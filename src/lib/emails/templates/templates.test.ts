@@ -7,6 +7,8 @@ import { renderReminder56h } from "./reminder-56h";
 import { renderDayOfReminderEmail } from "./day-of-reminder-email";
 import { renderDayOfReminderSms } from "./day-of-reminder-sms";
 import { renderPostVisitEmail } from "./post-visit";
+import { renderAppointmentWaitlistOfferEmail } from "./appointment-waitlist-offer-email";
+import { renderAppointmentWaitlistOfferSms } from "./appointment-waitlist-offer-sms";
 import { formatDate, formatTime, formatDepositAmount } from "./base-template";
 import type { BookingEmailData, VenueEmailData } from "../types";
 
@@ -242,6 +244,39 @@ describe("renderPostVisitEmail", () => {
   });
 });
 
+describe("renderAppointmentWaitlistOfferEmail", () => {
+  it("uses the transactional card layout with book CTA", () => {
+    const result = renderAppointmentWaitlistOfferEmail({
+      venueName: SAMPLE_VENUE.name,
+      venueLogoUrl: null,
+      venueAddress: SAMPLE_VENUE.address,
+      venuePhone: "028 9000 0000",
+      guestName: "Alex Smith",
+      desiredDate: "2026-06-15",
+      timeWindowLabel: "10:00 – 14:00",
+      expiresAtLabel: "15 Jun, 14:30",
+      bookingPageUrl: "https://www.reserveni.com/book/golden-whisk",
+    });
+    expect(result.subject).toContain("Appointment available");
+    expect(result.html).toContain("<!DOCTYPE html>");
+    expect(result.html).toContain("An appointment is available");
+    expect(result.html).toContain("Book appointment");
+    expect(result.html).toContain("10:00 – 14:00");
+    expect(result.text).toContain("Book online:");
+    expect(result.text).toContain("028 9000 0000");
+  });
+});
+
+describe("renderAppointmentWaitlistOfferSms", () => {
+  it("returns only the booking page URL", () => {
+    const url = "https://www.reserveni.com/book/golden-whisk";
+    const result = renderAppointmentWaitlistOfferSms(url);
+    expect(result.body).toBe(url);
+    expect(result.body).not.toContain("028");
+    expect(result.body).not.toContain("Call");
+  });
+});
+
 describe("all templates produce valid structure", () => {
   const allRenderers = [
     () => renderBookingConfirmation(SAMPLE_BOOKING, SAMPLE_VENUE),
@@ -271,9 +306,12 @@ describe("all templates produce valid structure", () => {
       "https://pay.link",
     );
     const sms2 = renderDayOfReminderSms(SAMPLE_BOOKING, SAMPLE_VENUE);
+    const sms3 = renderAppointmentWaitlistOfferSms("https://www.reserveni.com/book/demo");
     expect(typeof sms1.body).toBe("string");
     expect(sms1.body.length).toBeGreaterThan(0);
     expect(typeof sms2.body).toBe("string");
     expect(sms2.body.length).toBeGreaterThan(0);
+    expect(typeof sms3.body).toBe("string");
+    expect(sms3.body.length).toBeGreaterThan(0);
   });
 });

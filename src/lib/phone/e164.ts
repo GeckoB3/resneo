@@ -146,3 +146,15 @@ export function formatPhoneForDisplay(stored: string | null | undefined): string
   if (parsedGb?.isValid()) return parsedGb.formatNational();
   return trimmed;
 }
+
+/**
+ * `tel:` URI for click-to-call. Prefer E.164; fall back to dial-safe digits from raw storage.
+ */
+export function phoneToTelHref(stored: string | null | undefined): string | null {
+  if (!stored?.trim()) return null;
+  const e164 = normalizeToE164Lenient(stored.trim(), 'GB');
+  if (e164) return `tel:${e164}`;
+  const digits = stored.replace(/[^\d+]/g, '');
+  if (digits.length >= 6) return `tel:${digits}`;
+  return null;
+}

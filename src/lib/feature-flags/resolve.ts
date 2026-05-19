@@ -70,13 +70,24 @@ export function mergeVenueFeatureFlagsPatch(
       delete next[key];
     }
   }
+  if (patch.any_available_practitioner === false) {
+    delete next.any_available_practitioner_config;
+  } else if (patch.any_available_practitioner_config !== undefined) {
+    next.any_available_practitioner_config = patch.any_available_practitioner_config;
+  }
   return next;
 }
 
-export function venueFeatureFlagsForStorage(flags: VenueFeatureFlags): Record<string, boolean> {
-  const stored: Record<string, boolean> = {};
+export function venueFeatureFlagsForStorage(flags: VenueFeatureFlags): Record<string, unknown> {
+  const stored: Record<string, unknown> = {};
   for (const key of APPOINTMENTS_FEATURE_FLAG_KEYS) {
     if (flags[key] === true) stored[key] = true;
+  }
+  if (
+    flags.any_available_practitioner === true &&
+    flags.any_available_practitioner_config
+  ) {
+    stored.any_available_practitioner_config = flags.any_available_practitioner_config;
   }
   return stored;
 }

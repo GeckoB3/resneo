@@ -2,10 +2,14 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
 import { assertSmsSendWithinFreeAccessQuota, estimateSmsSegments, recordOutboundSms } from '@/lib/sms-usage';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
+import { renderAppointmentWaitlistOfferSms } from '@/lib/emails/templates/appointment-waitlist-offer-sms';
 
 export interface AppointmentWaitlistOfferNotifyInput {
   venueId: string;
   venueName: string;
+  venueLogoUrl?: string | null;
+  venueAddress?: string | null;
   venuePhone: string | null;
   bookingPageUrl: string | null;
   guestFirstName: string | null;
@@ -22,14 +26,6 @@ export interface AppointmentWaitlistOfferNotifyResult {
   smsSent: boolean;
 }
 
-function formatOfferDate(dateIso: string): string {
-  return new Date(`${dateIso}T12:00:00`).toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-}
-
 function formatOfferExpiry(iso: string): string {
   return new Date(iso).toLocaleString('en-GB', {
     day: 'numeric',
@@ -39,30 +35,6 @@ function formatOfferExpiry(iso: string): string {
   });
 }
 
-function buildOfferMessage(input: AppointmentWaitlistOfferNotifyInput): {
-  subject: string;
-  emailText: string;
-  smsText: string;
-} {
-  const guestName = formatGuestDisplayName(input.guestFirstName, input.guestLastName, 'guest');
-  const dateLabel = formatOfferDate(input.desiredDate);
-  const expiryLabel = formatOfferExpiry(input.expiresAtIso);
-  const contactHint = input.venuePhone
-    ? `Call ${input.venuePhone} to secure this slot`
-    : 'Contact the venue to secure this slot';
-  const bookHint = input.bookingPageUrl
-    ? ` You can also book online: ${input.bookingPageUrl}`
-    : '';
-
-  const body = `Hi ${guestName}, good news — an appointment slot opened at ${input.venueName} on ${dateLabel} at ${input.desiredTimeHm}. ${contactHint} before ${expiryLabel}.${bookHint}`;
-
-  return {
-    subject: `Appointment available at ${input.venueName}`,
-    emailText: body,
-    smsText: `${input.venueName}: Slot available ${dateLabel} ${input.desiredTimeHm}. ${contactHint} by ${expiryLabel}.${bookHint ? ` Book: ${input.bookingPageUrl}` : ''}`,
-  };
-}
-
 /**
  * Notifies a waitlisted guest that a slot opened (Phase 1a.3 offer-on-cancel).
  * Uses direct email/SMS — not tied to a booking row yet.
@@ -70,7 +42,21 @@ function buildOfferMessage(input: AppointmentWaitlistOfferNotifyInput): {
 export async function sendAppointmentWaitlistOfferNotification(
   input: AppointmentWaitlistOfferNotifyInput,
 ): Promise<AppointmentWaitlistOfferNotifyResult> {
-  const { subject, emailText, smsText } = buildOfferMessage(input);
+  const guestName = formatGuestDisplayName(input.guestFirstName, input.guestLastName, 'guest');
+  const expiresAtLabel = formatOfferExpiry(input.expiresAtIso);
+
+  const { subject, html, text } = renderAppointmentWaitlistOfferEmail({
+    venueName: input.venueName,
+    venueLogoUrl: input.venueLogoUrl,
+    venueAddress: input.venueAddress,
+    venuePhone: input.venuePhone,
+    guestName,
+    desiredDate: input.desiredDate,
+    timeWindowLabel: input.desiredTimeHm,
+    expiresAtLabel,
+    bookingPageUrl: input.bookingPageUrl,
+  });
+
   let emailSent = false;
   let smsSent = false;
 
@@ -79,8 +65,8 @@ export async function sendAppointmentWaitlistOfferNotification(
       await sendEmail({
         to: input.guestEmail.trim(),
         subject,
-        text: emailText,
-        html: `<html><body style="font-family:Arial,sans-serif;line-height:1.5"><p>${emailText.replace(/\n/g, '<br/>')}</p></body></html>`,
+        text,
+        html,
       });
       emailSent = true;
     } catch (err) {
@@ -90,7 +76,9 @@ export async function sendAppointmentWaitlistOfferNotification(
     }
   }
 
-  if (input.guestPhone?.trim()) {
+  const bookingUrl = input.bookingPageUrl?.trim();
+  if (input.guestPhone?.trim() && bookingUrl) {
+    const { body: smsText } = renderAppointmentWaitlistOfferSms(bookingUrl);
     try {
       const quota = await assertSmsSendWithinFreeAccessQuota({
         venueId: input.venueId,

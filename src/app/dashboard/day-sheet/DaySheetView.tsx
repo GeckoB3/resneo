@@ -276,7 +276,7 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
 
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required' || status === 'N/A') return null;
-  const amt = amountPence ? `Â£${(amountPence / 100).toFixed(2)}` : null;
+  const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
   const variantMap: Record<string, PillVariant> = {
     Paid: 'success',
     Refunded: 'brand',
@@ -1346,7 +1346,7 @@ export function DaySheetView({
                       </>
                     ) : (
                       <span className="text-xs text-slate-500">
-                        {period.booked_covers} covers Â· {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
+                        {period.booked_covers} covers · {period.bookings.filter((b) => !isTerminal(b.status)).length} bookings
                       </span>
                     )}
                   </div>
@@ -1404,20 +1404,20 @@ export function DaySheetView({
                               <span className="shrink-0 font-semibold tabular-nums text-slate-700">{b.booking_time.slice(0, 5)}</span>
                               {isTableBooking ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">Â·</span>
+                                  <span className="shrink-0 text-slate-300">·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} {b.party_size === 1 ? 'cover' : 'covers'}
                                   </span>
                                 </>
                               ) : b.party_size > 1 ? (
                                 <>
-                                  <span className="shrink-0 text-slate-300">Â·</span>
+                                  <span className="shrink-0 text-slate-300">·</span>
                                   <span className="shrink-0 text-[11px] font-medium text-slate-600 sm:text-xs">
                                     {b.party_size} people
                                   </span>
                                 </>
                               ) : null}
-                              <span className="hidden shrink-0 text-slate-300 sm:inline">Â·</span>
+                              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
                               <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
                               <BookingStatusPill statusKey={b.status}>{displayStatus}</BookingStatusPill>
                               {isTableBooking && b.area_name ? (

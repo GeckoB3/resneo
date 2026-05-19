@@ -21,12 +21,17 @@ import {
   validateAppointmentCustomInterval,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
-import { buildAnyAvailableAvailabilityPayload } from '@/lib/availability/appointment-any-practitioner';
+import {
+  buildAnyAvailableAvailabilityPayload,
+  listVenueCalendarSortOrder,
+  listPractitionerIdsForAppointmentService,
+} from '@/lib/availability/appointment-any-practitioner';
 import {
   assertAppointmentsFeatureEnabled,
   featureFlagDisabledResponse,
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
+import { parseAnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
@@ -504,6 +509,7 @@ async function handleAppointmentAvailability(
   const anyAvailable =
     searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
 
+  let anyAvailableVenueFlags: ReturnType<typeof parseVenueFeatureFlags> | null = null;
   if (anyAvailable) {
     if (!serviceId) {
       return NextResponse.json(
@@ -516,11 +522,11 @@ async function handleAppointmentAvailability(
       .select('feature_flags')
       .eq('id', venueId)
       .maybeSingle();
-    const venueFlags = parseVenueFeatureFlags(
+    anyAvailableVenueFlags = parseVenueFeatureFlags(
       (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
     );
     try {
-      assertAppointmentsFeatureEnabled('any_available_practitioner', venueFlags);
+      assertAppointmentsFeatureEnabled('any_available_practitioner', anyAvailableVenueFlags);
     } catch {
       return featureFlagDisabledResponse('any_available_practitioner');
     }
@@ -536,34 +542,24 @@ async function handleAppointmentAvailability(
     }
   }
 
-  const input = await fetchAppointmentInput({
-    supabase,
-    venueId,
-    date,
-    practitionerId: anyAvailable ? undefined : practitionerId,
-    serviceId,
-  });
-  if (phantomBookings.length > 0) {
-    input.phantomBookings = phantomBookings;
-  }
-
   const variantId = searchParams.get('variant_id');
   const durationParam = searchParams.get('duration_minutes');
   const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
   if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
     return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
   }
+
+  let variantOverride: Awaited<ReturnType<typeof loadActiveVariantForService>> = null;
   if (variantId && serviceId) {
-    const variant = await loadActiveVariantForService({
+    variantOverride = await loadActiveVariantForService({
       admin: supabase,
       venueId,
       serviceId,
       variantId,
     });
-    if (!variant) {
+    if (!variantOverride) {
       return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
     }
-    applyVariantToAppointmentInput({ services: input.services, serviceId, variant });
   }
 
   const { data: venueClock } = await supabase
@@ -575,30 +571,62 @@ async function handleAppointmentAvailability(
   const bookingWindow = serviceId
     ? await loadServiceEntityBookingWindow(supabase, venueId, venueMode.bookingModel, serviceId)
     : DEFAULT_ENTITY_BOOKING_WINDOW;
-  attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
-  const result = computeAppointmentAvailability(input);
-  if (customDurationMinutes != null && serviceId) {
-    result.practitioners = result.practitioners.map((practitioner) => ({
-      ...practitioner,
-      slots: practitioner.slots.filter((slot) => {
-        if (slot.service_id !== serviceId) return true;
-        const startMin = toMinutes(slot.start_time);
-        const endMinutes = startMin + customDurationMinutes;
-        const endHHmm = `${String(Math.floor((endMinutes % (24 * 60)) / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
-        return validateAppointmentCustomInterval(
-          input,
-          practitioner.id,
-          serviceId,
-          slot.start_time,
-          endHHmm,
-        ).ok;
-      }),
-    }));
-  }
 
-  const payload = anyAvailable && serviceId
-    ? buildAnyAvailableAvailabilityPayload(result, serviceId)
-    : result;
+  const computeForPractitioner = async (pid: string) => {
+    const input = await fetchAppointmentInput({
+      supabase,
+      venueId,
+      date,
+      practitionerId: pid,
+      serviceId,
+    });
+    if (phantomBookings.length > 0) {
+      input.phantomBookings = phantomBookings;
+    }
+    if (variantOverride && serviceId) {
+      applyVariantToAppointmentInput({ services: input.services, serviceId, variant: variantOverride });
+    }
+    attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
+    const result = computeAppointmentAvailability(input);
+    if (customDurationMinutes != null && serviceId) {
+      result.practitioners = result.practitioners.map((practitioner) => ({
+        ...practitioner,
+        slots: practitioner.slots.filter((slot) => {
+          if (slot.service_id !== serviceId) return true;
+          const startMin = toMinutes(slot.start_time);
+          const endMinutes = startMin + customDurationMinutes;
+          const endHHmm = `${String(Math.floor((endMinutes % (24 * 60)) / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+          return validateAppointmentCustomInterval(
+            input,
+            practitioner.id,
+            serviceId,
+            slot.start_time,
+            endHHmm,
+          ).ok;
+        }),
+      }));
+    }
+    return result;
+  };
+
+  let payload;
+  if (anyAvailable && serviceId) {
+    const practitionerIds = await listPractitionerIdsForAppointmentService(supabase, venueId, serviceId);
+    const mergedPractitioners = (
+      await Promise.all(practitionerIds.map((pid) => computeForPractitioner(pid)))
+    ).flatMap((r) => r.practitioners);
+    const assignmentConfig = parseAnyAvailablePractitionerConfig(anyAvailableVenueFlags);
+    const calendarOrder = await listVenueCalendarSortOrder(supabase, venueId);
+    payload = buildAnyAvailableAvailabilityPayload({ practitioners: mergedPractitioners }, serviceId, {
+      assignment: assignmentConfig,
+      calendarOrder,
+    });
+  } else {
+    if (!practitionerId) {
+      return NextResponse.json({ error: 'practitioner_id is required' }, { status: 400 });
+    }
+    payload = await computeForPractitioner(practitionerId);
+  }
 
   return NextResponse.json({ date, venue_id: venueId, ...payload, any_available: anyAvailable || undefined });
 }

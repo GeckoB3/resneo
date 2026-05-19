@@ -9,6 +9,7 @@ import {
 } from './detail-sheet-primitives';
 import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
+import { Sheet } from '@/components/ui/primitives/Sheet';
 
 interface ClassTypePayload {
   id: string;
@@ -457,15 +458,19 @@ export function ClassInstanceDetailSheet({
   }
 
   return (
-    <>
-      <button
-        type="button"
-        className="fixed inset-0 z-50 bg-black/40 lg:bg-black/20"
-        aria-label="Close panel"
-        onClick={onClose}
-      />
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title={title}
+      hideHeader
+      showClose={false}
+      side="right"
+      contentClassName="flex max-h-[90dvh] flex-col overflow-hidden p-0 lg:max-h-none lg:max-w-lg"
+    >
       <aside
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white shadow-2xl animate-slide-in-bottom lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-full lg:max-w-lg lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:animate-slide-in-right"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
         role="dialog"
         aria-labelledby="class-detail-title"
         aria-modal="true"
@@ -615,6 +620,6 @@ export function ClassInstanceDetailSheet({
           ) : null}
         </div>
       </aside>
-    </>
+    </Sheet>
   );
 }

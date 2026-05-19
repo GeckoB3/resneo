@@ -7,7 +7,16 @@ import {
   isUnifiedSchedulingVenue,
   venueUsesUnifiedAppointmentData,
 } from '@/lib/booking/unified-scheduling';
-import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
+import {
+  computeAnyAvailableAppointmentDatesInMonth,
+  computeAppointmentAvailableDatesInMonth,
+} from '@/lib/availability/appointment-month-availability';
+import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import {
+  assertAppointmentsFeatureEnabled,
+  featureFlagDisabledResponse,
+  parseVenueFeatureFlags,
+} from '@/lib/feature-flags';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 
 /**
@@ -25,6 +34,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const practitionerId = searchParams.get('practitioner_id');
     const serviceId = searchParams.get('service_id');
+    const anyAvailable =
+      searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
     const yearParam = searchParams.get('year');
     const monthParam = searchParams.get('month');
     const variantId = searchParams.get('variant_id');
@@ -74,24 +85,50 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
     }
 
-    const available_dates = await computeAppointmentAvailableDatesInMonth(
-      admin,
-      staff.venue_id,
-      practitionerId,
-      serviceId,
-      year,
-      month,
-      { audience: 'staff', variantOverride, customDurationMinutes },
-    );
+    if (anyAvailable) {
+      const { data: venueFlagsRow } = await admin
+        .from('venues')
+        .select('feature_flags')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const venueFlags = parseVenueFeatureFlags(
+        (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+      );
+      try {
+        assertAppointmentsFeatureEnabled('any_available_practitioner', venueFlags);
+      } catch {
+        return featureFlagDisabledResponse('any_available_practitioner');
+      }
+    }
+
+    const available_dates = anyAvailable
+      ? await computeAnyAvailableAppointmentDatesInMonth(
+          admin,
+          staff.venue_id,
+          serviceId,
+          year,
+          month,
+          { audience: 'staff', variantOverride, customDurationMinutes },
+        )
+      : await computeAppointmentAvailableDatesInMonth(
+          admin,
+          staff.venue_id,
+          practitionerId!,
+          serviceId,
+          year,
+          month,
+          { audience: 'staff', variantOverride, customDurationMinutes },
+        );
 
     return NextResponse.json(
       {
         venue_id: staff.venue_id,
-        practitioner_id: practitionerId,
+        practitioner_id: anyAvailable ? ANY_AVAILABLE_PRACTITIONER_ID : practitionerId,
         service_id: serviceId,
         year,
         month,
         available_dates,
+        any_available: anyAvailable || undefined,
       },
       {
         headers: {

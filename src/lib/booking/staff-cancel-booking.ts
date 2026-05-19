@@ -11,6 +11,7 @@ import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from 
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 
 const CANCELLABLE = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
@@ -231,6 +232,22 @@ export async function cancelStaffBookingWithNotify(
     reply_to_email: (venueRow as { reply_to_email?: string | null } | null)?.reply_to_email ?? null,
   });
 
+  const cancelledBookingForWaitlist = {
+    id: bookingId,
+    venue_id: venueId,
+    booking_date: String(booking.booking_date),
+    booking_time: String(booking.booking_time),
+    practitioner_id: booking.practitioner_id as string | null | undefined,
+    calendar_id: booking.calendar_id as string | null | undefined,
+    appointment_service_id: booking.appointment_service_id as string | null | undefined,
+    service_item_id: booking.service_item_id as string | null | undefined,
+    booking_model: (booking as { booking_model?: string | null }).booking_model,
+    experience_event_id: booking.experience_event_id as string | null | undefined,
+    class_instance_id: booking.class_instance_id as string | null | undefined,
+    resource_id: booking.resource_id as string | null | undefined,
+    event_session_id: booking.event_session_id as string | null | undefined,
+  };
+
   let scheduleNotification: (() => Promise<void>) | undefined;
   if (guestRow && venueRow?.name) {
     scheduleNotification = async () => {
@@ -239,6 +256,19 @@ export async function cancelStaffBookingWithNotify(
         await sendCancellationNotification(enriched, cancelVenueEmail, venueId, refundMsgCombined);
       } catch (commsErr) {
         console.error('[staff-cancel-booking] cancellation notification failed:', commsErr);
+      }
+      try {
+        await offerAppointmentWaitlistOnCancel(admin, cancelledBookingForWaitlist);
+      } catch (waitlistErr) {
+        console.error('[staff-cancel-booking] waitlist offer failed:', waitlistErr, { bookingId });
+      }
+    };
+  } else {
+    scheduleNotification = async () => {
+      try {
+        await offerAppointmentWaitlistOnCancel(admin, cancelledBookingForWaitlist);
+      } catch (waitlistErr) {
+        console.error('[staff-cancel-booking] waitlist offer failed:', waitlistErr, { bookingId });
       }
     };
   }

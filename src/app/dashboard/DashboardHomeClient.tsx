@@ -287,7 +287,13 @@ export function DashboardHomeClient({
           disableClientSetupFetch={disableClientSetupFetch}
         />
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <div
+          className={
+            useAppointmentPhraseology
+              ? 'grid grid-cols-2 gap-3 lg:grid-cols-3 lg:gap-4'
+              : 'grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4'
+          }
+        >
           <DashboardStatCard
             label={useAppointmentPhraseology ? 'Appointments today' : 'Covers today'}
             value={useAppointmentPhraseology ? bookings : covers}
@@ -319,18 +325,18 @@ export function DashboardHomeClient({
                 : undefined
             }
           />
-          <DashboardStatCard
-            label="Arriving soon"
-            value={arrivingSoon}
-            color="violet"
-            subValue={
-              useAppointmentPhraseology
-                ? 'Party sizes due in next 30 min'
-                : tableFocusSecondariesEnabled
+          {!useAppointmentPhraseology ? (
+            <DashboardStatCard
+              label="Arriving soon"
+              value={arrivingSoon}
+              color="violet"
+              subValue={
+                tableFocusSecondariesEnabled
                   ? 'Table covers due in next 30 min'
                   : 'Covers due in next 30 min'
-            }
-          />
+              }
+            />
+          ) : null}
           <DashboardStatCard
             label="Next up"
             value={t.next_booking ? t.next_booking.time : '-'}

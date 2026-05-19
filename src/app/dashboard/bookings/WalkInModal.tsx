@@ -8,6 +8,7 @@ import type { CountryCode } from 'libphonenumber-js';
 import type { TableForSelector, OccupancyMap } from '@/components/table-tracking/TableSelector';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 
 interface Suggestion {
   source: 'single' | 'auto' | 'manual';
@@ -442,15 +443,15 @@ export function WalkInModal({
 
   const inner = (
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Add walk-in booking"
-        className={`w-full rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 ${
-          embedded ? 'mx-auto' : 'my-8'
-        } ${advancedMode ? 'max-w-2xl' : embedded ? 'max-w-lg' : 'max-w-sm'}`}
+        {...(embedded
+          ? { role: 'dialog' as const, 'aria-modal': true, 'aria-label': 'Add walk-in booking' }
+          : {})}
+        className={`w-full ${embedded ? 'rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100' : ''} ${
+          embedded ? 'mx-auto' : ''
+        } ${advancedMode ? 'max-w-2xl' : embedded ? 'max-w-lg' : 'max-w-full'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        {!suppressTitle && (
+        {!suppressTitle && embedded && (
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Add Walk-in</h2>
@@ -967,11 +968,17 @@ export function WalkInModal({
   if (embedded) return inner;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-[2px]"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title="Add walk-in"
+      description="Seat a guest immediately"
+      size="md"
+      contentClassName={`overflow-y-auto ${advancedMode ? 'max-w-2xl' : 'max-w-lg'}`}
     >
       {inner}
-    </div>
+    </Dialog>
   );
 }

@@ -5,6 +5,8 @@ import useSWR from 'swr';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
+import { BaselineMetricsSection } from './BaselineMetricsSection';
+import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { DashboardStatColor } from '@/components/dashboard/dashboard-stat-types';
@@ -89,6 +91,14 @@ interface ReportsData {
     available_hours: number;
   }>;
   report7_appointment_insights?: AppointmentInsightsPayload | null;
+  report8_baseline_metrics?: VenueBaselineMetrics | null;
+  report8_baseline_snapshot?: {
+    period_start: string;
+    period_end: string;
+    snapshot_kind: string;
+    created_at: string;
+    metrics: VenueBaselineMetrics;
+  } | null;
   /** Inferred from booking row FKs - same labels as full export (plan §4.3). */
   report_by_booking_model?: ReportByBookingModelRow[];
   client_summary?: ClientSummary | null;
@@ -671,6 +681,13 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
           </div>
         ) : null}
       </ReportSection>
+
+      {appointmentDashboardExperience ? (
+        <BaselineMetricsSection
+          metrics={data?.report8_baseline_metrics}
+          snapshot={data?.report8_baseline_snapshot ?? null}
+        />
+      ) : null}
 
       {appointmentDashboardExperience && (
         <ReportSection

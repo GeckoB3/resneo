@@ -22,6 +22,8 @@ export interface PractitionerCalendarToolbarProps {
   onRefresh: () => void;
   onNewBooking: () => void;
   onWalkIn: () => void;
+  /** Open block-time modal for the current day view date (optional). */
+  onBlockTime?: () => void;
   controlsPanel: ReactNode;
   controlsLabel?: string;
   summaryContent: ReactNode;
@@ -97,6 +99,7 @@ export function PractitionerCalendarToolbar({
   onRefresh,
   onNewBooking,
   onWalkIn,
+  onBlockTime,
   controlsPanel,
   controlsLabel = 'Filter',
   summaryContent,
@@ -240,25 +243,39 @@ export function PractitionerCalendarToolbar({
       compact
       toolbarLeadingTools={viewModeSwitcher}
       toolbarTools={
-        scheduleUndo ? (
-          <button
-            type="button"
-            disabled={!scheduleUndo.available || scheduleUndo.pending}
-            onClick={scheduleUndo.onUndo}
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 sm:text-xs"
-            aria-label="Undo last appointment time or duration change"
-            title={
-              scheduleUndo.available
-                ? 'Undo last time or duration change'
-                : 'No schedule change to undo'
-            }
-          >
-            <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
-            </svg>
-            <span className="hidden sm:inline">Undo</span>
-          </button>
-        ) : undefined
+        <>
+          {onBlockTime ? (
+            <button
+              type="button"
+              onClick={onBlockTime}
+              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 sm:text-xs"
+              aria-label="Block time on calendar"
+              title="Block time"
+            >
+              <span className="hidden sm:inline">Block time</span>
+              <span className="sm:hidden">Block</span>
+            </button>
+          ) : null}
+          {scheduleUndo ? (
+            <button
+              type="button"
+              disabled={!scheduleUndo.available || scheduleUndo.pending}
+              onClick={scheduleUndo.onUndo}
+              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 sm:text-xs"
+              aria-label="Undo last appointment time or duration change"
+              title={
+                scheduleUndo.available
+                  ? 'Undo last time or duration change'
+                  : 'No schedule change to undo'
+              }
+            >
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+              </svg>
+              <span className="hidden sm:inline">Undo</span>
+            </button>
+          ) : null}
+        </>
       }
     />
   );

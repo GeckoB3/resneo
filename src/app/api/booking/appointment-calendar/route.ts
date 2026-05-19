@@ -5,7 +5,16 @@ import {
   isUnifiedSchedulingVenue,
   venueUsesUnifiedAppointmentData,
 } from '@/lib/booking/unified-scheduling';
-import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
+import {
+  computeAnyAvailableAppointmentDatesInMonth,
+  computeAppointmentAvailableDatesInMonth,
+} from '@/lib/availability/appointment-month-availability';
+import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import {
+  assertAppointmentsFeatureEnabled,
+  featureFlagDisabledResponse,
+  parseVenueFeatureFlags,
+} from '@/lib/feature-flags';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 
@@ -22,14 +31,22 @@ export async function GET(request: NextRequest) {
     const venueId = searchParams.get('venue_id');
     const practitionerId = searchParams.get('practitioner_id');
     const serviceId = searchParams.get('service_id');
+    const anyAvailable =
+      searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
     const yearParam = searchParams.get('year');
     const monthParam = searchParams.get('month');
     const variantId = searchParams.get('variant_id');
     const durationParam = searchParams.get('duration_minutes');
 
-    if (!venueId || !practitionerId || !serviceId) {
+    if (!venueId || !serviceId) {
       return NextResponse.json(
-        { error: 'venue_id, practitioner_id and service_id are required' },
+        { error: 'venue_id and service_id are required' },
+        { status: 400 },
+      );
+    }
+    if (!practitionerId && !anyAvailable) {
+      return NextResponse.json(
+        { error: 'practitioner_id is required unless any_available is set' },
         { status: 400 },
       );
     }
@@ -69,24 +86,50 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
     }
 
-    const available_dates = await computeAppointmentAvailableDatesInMonth(
-      supabase,
-      venueId,
-      practitionerId,
-      serviceId,
-      year,
-      month,
-      { audience: 'public', variantOverride, customDurationMinutes },
-    );
+    if (anyAvailable) {
+      const { data: venueFlagsRow } = await supabase
+        .from('venues')
+        .select('feature_flags')
+        .eq('id', venueId)
+        .maybeSingle();
+      const venueFlags = parseVenueFeatureFlags(
+        (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+      );
+      try {
+        assertAppointmentsFeatureEnabled('any_available_practitioner', venueFlags);
+      } catch {
+        return featureFlagDisabledResponse('any_available_practitioner');
+      }
+    }
+
+    const available_dates = anyAvailable
+      ? await computeAnyAvailableAppointmentDatesInMonth(
+          supabase,
+          venueId,
+          serviceId,
+          year,
+          month,
+          { audience: 'public', variantOverride, customDurationMinutes },
+        )
+      : await computeAppointmentAvailableDatesInMonth(
+          supabase,
+          venueId,
+          practitionerId!,
+          serviceId,
+          year,
+          month,
+          { audience: 'public', variantOverride, customDurationMinutes },
+        );
 
     return NextResponse.json(
       {
         venue_id: venueId,
-        practitioner_id: practitionerId,
+        practitioner_id: anyAvailable ? ANY_AVAILABLE_PRACTITIONER_ID : practitionerId,
         service_id: serviceId,
         year,
         month,
         available_dates,
+        any_available: anyAvailable || undefined,
       },
       {
         headers: {

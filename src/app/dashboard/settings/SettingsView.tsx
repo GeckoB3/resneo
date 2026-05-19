@@ -51,6 +51,8 @@ import { SettingsSaveStrip } from './SettingsSaveStrip';
 import { SettingsProfileGroup } from './SettingsProfileGroup';
 import { WidgetSection } from './widget/WidgetSection';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { FeatureFlagsSection } from './sections/FeatureFlagsSection';
+import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -65,6 +67,8 @@ interface SettingsViewProps {
   initialLightHasPaymentMethod?: boolean;
   /** Normalized origin for embed / QR links (from `NEXT_PUBLIC_BASE_URL`). */
   publicBaseUrl: string;
+  initialFeatureFlagsRaw?: VenueFeatureFlags;
+  initialFeatureFlagsResolved?: ResolvedAppointmentsFeatureFlags;
 }
 
 const TABS = [
@@ -1064,6 +1068,12 @@ function SettingsViewInner({
   bookingModel = 'table_reservation',
   smsCountUsesStripePeriod = false,
   publicBaseUrl,
+  initialFeatureFlagsRaw = {},
+  initialFeatureFlagsResolved = {
+    waitlist_v2: false,
+    guest_self_reschedule: false,
+    any_available_practitioner: false,
+  },
 }: SettingsViewProps) {
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
@@ -1416,6 +1426,14 @@ function SettingsViewInner({
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </SettingsProfileGroup>
+
+          {isAppointmentsProduct && isAdmin ? (
+            <FeatureFlagsSection
+              initialRaw={initialFeatureFlagsRaw}
+              initialResolved={initialFeatureFlagsResolved}
+              onSaved={() => router.refresh()}
+            />
+          ) : null}
 
           {showRestaurantTableProfileSections && !isAppointmentsProduct && (
             <SettingsProfileGroup

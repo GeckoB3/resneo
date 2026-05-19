@@ -26,6 +26,7 @@ import {
   reconcileSmsUsageFromLogsForVenue,
   resolveSmsBillingPeriod,
 } from '@/lib/sms-usage';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 
 export default async function SettingsPage({
   searchParams,
@@ -82,7 +83,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings, feature_flags')
     .eq('id', venueId)
     .single();
 
@@ -221,6 +222,11 @@ export default async function SettingsPage({
 
   const publicBaseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 
+  const featureFlagsRaw = parseVenueFeatureFlags(
+    (venue as { feature_flags?: unknown } | null)?.feature_flags,
+  );
+  const featureFlagsResolved = resolveAppointmentsFeatureFlags(featureFlagsRaw);
+
   return (
     <PageFrame maxWidthClass="max-w-5xl">
       <Suspense
@@ -242,6 +248,8 @@ export default async function SettingsPage({
           smsCountUsesStripePeriod={smsCountUsesStripePeriod}
           initialLightHasPaymentMethod={initialLightHasPaymentMethod}
           publicBaseUrl={publicBaseUrl}
+          initialFeatureFlagsRaw={featureFlagsRaw}
+          initialFeatureFlagsResolved={featureFlagsResolved}
         />
       </Suspense>
     </PageFrame>

@@ -17,9 +17,11 @@ import {
 import type { OpeningHours } from '@/types/availability';
 import {
   activeModelsToLegacyEnabledModels,
+  appointmentPlanDefaultModels,
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import type { BookingModel } from '@/types/booking-models';
 import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 import { SupportSessionControls } from '@/components/dashboard/SupportSessionControls';
@@ -27,6 +29,9 @@ import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRe
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { VenueFeatureFlagsProvider } from '@/components/providers/VenueFeatureFlagsProvider';
+import type { ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -58,6 +63,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let onboardingCompleted = true;
   let venueTerminology: Record<string, unknown> | null = null;
   let venueBootstrap: DashboardVenueBootstrapValue | null = null;
+  let appointmentsFeatureFlags: ResolvedAppointmentsFeatureFlags = {
+    waitlist_v2: false,
+    guest_self_reschedule: false,
+    any_available_practitioner: false,
+  };
   try {
     const staff = await getDashboardStaff(supabase);
     const admin = staff.db;
@@ -92,7 +102,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, timezone, currency, opening_hours, public_booking_area_mode, no_show_grace_minutes, billing_access_source, subscription_current_period_end',
+          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, timezone, currency, opening_hours, public_booking_area_mode, no_show_grace_minutes, billing_access_source, subscription_current_period_end, feature_flags',
         )
         .eq('id', venueId)
         .single();
@@ -101,17 +111,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
         venueSlug = venue.slug ?? undefined;
         tableManagementEnabled = venue.table_management_enabled ?? false;
         pricingTier = (venue.pricing_tier as string) ?? 'appointments';
-        const activeModels = resolveActiveBookingModels({
+        let activeModels = resolveActiveBookingModels({
           pricingTier,
           bookingModel: venue.booking_model as BookingModel | undefined,
           enabledModels: (venue as { enabled_models?: unknown }).enabled_models,
           activeBookingModels: (venue as { active_booking_models?: unknown }).active_booking_models,
         });
+        onboardingCompleted = (venue.onboarding_completed as boolean) ?? true;
+        if (
+          isAppointmentPlanTier(pricingTier) &&
+          activeModels.length === 0 &&
+          onboardingCompleted
+        ) {
+          activeModels = appointmentPlanDefaultModels();
+        }
         bookingModel = getDefaultBookingModelFromActive(
           activeModels,
           (venue.booking_model as BookingModel) ?? 'table_reservation',
         );
         enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
+        appointmentsFeatureFlags = resolveAppointmentsFeatureFlags(
+          parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
+        );
         planStatus = (venue.plan_status as string) ?? 'active';
         subscriptionExpiredCancelled = isVenueSubscriptionExpiredCancelled({
           plan_status: venue.plan_status as string | null,
@@ -119,7 +140,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             .subscription_current_period_end,
           billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
         });
-        onboardingCompleted = (venue.onboarding_completed as boolean) ?? true;
         const rawTerms = (venue as { terminology?: unknown }).terminology;
         venueTerminology =
           rawTerms && typeof rawTerms === 'object' && rawTerms !== null && !Array.isArray(rawTerms)
@@ -265,6 +285,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {isAdmin && !isRestaurantTableProductTier(pricingTier) ? <LinkedAccountBanner /> : null}
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
         <StaffRebookBootstrapRouteCleanup />
+        <VenueFeatureFlagsProvider flags={appointmentsFeatureFlags}>
         <DashboardVenueBootstrapProvider value={venueBootstrap}>
           <DashboardSWRProvider>
             <DashboardDetailCacheProvider>
@@ -295,6 +316,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </DashboardDetailCacheProvider>
           </DashboardSWRProvider>
         </DashboardVenueBootstrapProvider>
+        </VenueFeatureFlagsProvider>
       </main>
       </DashboardShell>
     </div>

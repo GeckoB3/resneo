@@ -43,6 +43,7 @@ import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { communicationService } from '@/lib/communications';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
@@ -611,12 +612,45 @@ export async function PATCH(
           });
           const vid = staff.venue_id;
           const refundMsg = refund_message;
+          const cancelledBookingForWaitlist = {
+            id,
+            venue_id: staff.venue_id,
+            booking_date: String(booking.booking_date),
+            booking_time: String(booking.booking_time),
+            practitioner_id: booking.practitioner_id as string | null | undefined,
+            calendar_id: booking.calendar_id as string | null | undefined,
+            appointment_service_id: booking.appointment_service_id as string | null | undefined,
+            service_item_id: booking.service_item_id as string | null | undefined,
+            booking_model: booking.booking_model as string | null | undefined,
+            experience_event_id: booking.experience_event_id as string | null | undefined,
+            class_instance_id: booking.class_instance_id as string | null | undefined,
+            resource_id: booking.resource_id as string | null | undefined,
+            event_session_id: booking.event_session_id as string | null | undefined,
+          };
           after(async () => {
             try {
               const enriched = await enrichBookingEmailForComms(admin, id, cancelBookingEmail);
               await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
             } catch (commsErr) {
               console.error('Staff cancellation notification failed:', commsErr);
+            }
+            try {
+              const offerResult = await offerAppointmentWaitlistOnCancel(
+                admin,
+                cancelledBookingForWaitlist,
+              );
+              if (offerResult.offered) {
+                console.info('[PATCH booking cancel] waitlist offer sent', {
+                  bookingId: id,
+                  waitlistEntryId: offerResult.waitlistEntryId,
+                  emailSent: offerResult.emailSent,
+                  smsSent: offerResult.smsSent,
+                });
+              }
+            } catch (waitlistErr) {
+              console.error('[PATCH booking cancel] waitlist offer failed:', waitlistErr, {
+                bookingId: id,
+              });
             }
           });
         }
@@ -1329,18 +1363,17 @@ export async function PATCH(
           ? String(bookingUpdate.booking_end_time).slice(0, 5)
           : beforeEndHm;
 
-      await admin.from('events').insert({
+      const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
+      await logBookingModifiedEvent(admin, {
         venue_id: staff.venue_id,
         booking_id: id,
-        event_type: 'booking_modified',
-        payload: {
-          before,
-          after: {
-            booking_date: newDate,
-            booking_time: timeStr,
-            party_size: newPartySize,
-            ...(afterEndHm ? { booking_end_time: afterEndHm } : {}),
-          },
+        modification_actor: 'staff',
+        before,
+        after: {
+          booking_date: newDate,
+          booking_time: timeStr,
+          party_size: newPartySize,
+          ...(afterEndHm ? { booking_end_time: afterEndHm } : {}),
         },
       });
 

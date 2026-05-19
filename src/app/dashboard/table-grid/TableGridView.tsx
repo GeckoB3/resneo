@@ -10,6 +10,8 @@ import { useToast } from '@/components/ui/Toast';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 import type { BookingModel } from '@/types/booking-models';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -2185,101 +2187,108 @@ export function TableGridView({
           .
         </div>
       )}
-      {activeBlockId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
-            {(() => {
+      <Dialog
+        open={activeBlockId != null}
+        onOpenChange={(open) => {
+          if (!open) setActiveBlockId(null);
+        }}
+        title="Block Details"
+        size="sm"
+        footer={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              onClick={() => {
+                if (!activeBlockId) return;
+                openEditBlock(activeBlockId);
+                setActiveBlockId(null);
+              }}
+            >
+              Edit Block
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={async () => {
+                if (!activeBlockId) return;
+                if (!confirm('Remove this block? This will make the slot available for bookings again.')) return;
+                const res = await fetch('/api/venue/tables/blocks', {
+                  method: 'DELETE',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: activeBlockId }),
+                });
+                if (!res.ok) {
+                  addToast('Failed to remove block', 'error');
+                  return;
+                }
+                addToast('Block removed', 'success');
+                setActiveBlockId(null);
+                fetchGrid();
+              }}
+            >
+              Remove Block
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setActiveBlockId(null)}>
+              Close
+            </Button>
+          </div>
+        }
+      >
+        {activeBlockId
+          ? (() => {
               const block = blockDetails.find((item) => item.id === activeBlockId);
-              const tableName = gridData?.tables.find((table) => table.id === block?.table_id)?.name ?? block?.table_id ?? 'Unknown';
+              const tableName =
+                gridData?.tables.find((table) => table.id === block?.table_id)?.name ?? block?.table_id ?? 'Unknown';
               return (
-                <>
-                  <h3 className="text-base font-semibold text-slate-900">Block Details</h3>
-                  <div className="mt-3 space-y-1 text-sm text-slate-700">
-                    <p><span className="font-medium">Table:</span> {tableName}</p>
-                    <p><span className="font-medium">Time:</span> {block ? `${new Date(block.start_at).toISOString().slice(11, 16)}-${new Date(block.end_at).toISOString().slice(11, 16)}` : '-'}</p>
-                    <p><span className="font-medium">Reason:</span> {block?.reason ?? '-'}</p>
-                    <p><span className="font-medium">Created:</span> {block ? new Date(block.created_at).toLocaleString() : '-'}</p>
-                    <p><span className="font-medium">Created by:</span> {block?.created_by ?? '-'}</p>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openEditBlock(activeBlockId);
-                        setActiveBlockId(null);
-                      }}
-                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Edit Block
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!confirm('Remove this block? This will make the slot available for bookings again.')) return;
-                        const res = await fetch('/api/venue/tables/blocks', {
-                          method: 'DELETE',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ id: activeBlockId }),
-                        });
-                        if (!res.ok) {
-                          addToast('Failed to remove block', 'error');
-                          return;
-                        }
-                        addToast('Block removed', 'success');
-                        setActiveBlockId(null);
-                        fetchGrid();
-                      }}
-                      className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
-                    >
-                      Remove Block
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveBlockId(null)}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </>
+                <div className="space-y-1 text-sm text-slate-700">
+                  <p><span className="font-medium">Table:</span> {tableName}</p>
+                  <p><span className="font-medium">Time:</span> {block ? `${new Date(block.start_at).toISOString().slice(11, 16)}-${new Date(block.end_at).toISOString().slice(11, 16)}` : '-'}</p>
+                  <p><span className="font-medium">Reason:</span> {block?.reason ?? '-'}</p>
+                  <p><span className="font-medium">Created:</span> {block ? new Date(block.created_at).toLocaleString() : '-'}</p>
+                  <p><span className="font-medium">Created by:</span> {block?.created_by ?? '-'}</p>
+                </div>
               );
-            })()}
+            })()
+          : null}
+      </Dialog>
+      <Dialog
+        open={rescheduleDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setRescheduleDialog(null);
+        }}
+        title="Reschedule Booking"
+        description="Pick a new start time."
+        size="sm"
+        footer={
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="flex-1"
+              onClick={() => {
+                if (!rescheduleDialog) return;
+                void handleTimeChange(rescheduleDialog.bookingId, rescheduleDialog.time);
+                setRescheduleDialog(null);
+              }}
+            >
+              Save
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setRescheduleDialog(null)}>
+              Cancel
+            </Button>
           </div>
-        </div>
-      )}
-      {rescheduleDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
-            <h3 className="text-base font-semibold text-slate-900">Reschedule Booking</h3>
-            <p className="mt-1 text-xs text-slate-500">Pick a new start time.</p>
-            <input
-              type="time"
-              value={rescheduleDialog.time}
-              onChange={(e) => setRescheduleDialog((prev) => prev ? { ...prev, time: e.target.value } : prev)}
-              className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  void handleTimeChange(rescheduleDialog.bookingId, rescheduleDialog.time);
-                  setRescheduleDialog(null);
-                }}
-                className="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => setRescheduleDialog(null)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        }
+      >
+        {rescheduleDialog ? (
+          <input
+            type="time"
+            value={rescheduleDialog.time}
+            onChange={(e) => setRescheduleDialog((prev) => (prev ? { ...prev, time: e.target.value } : prev))}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        ) : null}
+      </Dialog>
       {newBookingCell && (
         <DashboardStaffBookingModal
           open
@@ -2313,42 +2322,17 @@ export function TableGridView({
           initialTime={walkInCell.time || undefined}
         />
       )}
-      {blockForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
-            <h3 className="text-base font-semibold text-slate-900">{blockForm.id ? 'Edit Table Block' : 'Block Table'}</h3>
-            <div className="mt-4 space-y-3">
-              <input
-                type="datetime-local"
-                value={blockForm.start_at.slice(0, 16)}
-                onChange={(e) => setBlockForm((prev) => prev ? { ...prev, start_at: `${e.target.value}:00.000Z` } : prev)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                type="datetime-local"
-                value={blockForm.end_at.slice(0, 16)}
-                onChange={(e) => setBlockForm((prev) => prev ? { ...prev, end_at: `${e.target.value}:00.000Z` } : prev)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                value={blockForm.reason}
-                onChange={(e) => setBlockForm((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
-                placeholder="Reason (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              {!blockForm.id && (
-                <select
-                  value={blockForm.repeat ?? 'none'}
-                  onChange={(e) => setBlockForm((prev) => prev ? { ...prev, repeat: e.target.value as 'none' | 'week' } : prev)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="none">Repeat: None</option>
-                  <option value="week">Repeat: Every day this week</option>
-                </select>
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button
+      {blockForm ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !blockSaving) setBlockForm(null);
+          }}
+          title={blockForm.id ? 'Edit Table Block' : 'Block Table'}
+          size="md"
+          footer={
+            <div className="flex gap-2">
+              <Button
                 type="button"
                 disabled={blockSaving}
                 onClick={async () => {
@@ -2379,13 +2363,13 @@ export function TableGridView({
                   setNewBookingCell(null);
                   fetchGrid();
                 }}
-                className="flex-1 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60"
               >
                 Save
-              </button>
-              {blockForm.id && (
-                <button
+              </Button>
+              {blockForm.id ? (
+                <Button
                   type="button"
+                  variant="danger"
                   disabled={blockSaving}
                   onClick={async () => {
                     if (!confirm('Remove this block?')) return;
@@ -2405,22 +2389,50 @@ export function TableGridView({
                     setBlockForm(null);
                     fetchGrid();
                   }}
-                  className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
                 >
                   Remove
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setBlockForm(null)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
+                </Button>
+              ) : null}
+              <Button type="button" variant="secondary" onClick={() => setBlockForm(null)}>
                 Cancel
-              </button>
+              </Button>
             </div>
+          }
+        >
+          <div className="space-y-3">
+            <input
+              type="datetime-local"
+              value={blockForm.start_at.slice(0, 16)}
+              onChange={(e) => setBlockForm((prev) => (prev ? { ...prev, start_at: `${e.target.value}:00.000Z` } : prev))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <input
+              type="datetime-local"
+              value={blockForm.end_at.slice(0, 16)}
+              onChange={(e) => setBlockForm((prev) => (prev ? { ...prev, end_at: `${e.target.value}:00.000Z` } : prev))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <input
+              value={blockForm.reason}
+              onChange={(e) => setBlockForm((prev) => (prev ? { ...prev, reason: e.target.value } : prev))}
+              placeholder="Reason (optional)"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            {!blockForm.id ? (
+              <select
+                value={blockForm.repeat ?? 'none'}
+                onChange={(e) =>
+                  setBlockForm((prev) => (prev ? { ...prev, repeat: e.target.value as 'none' | 'week' } : prev))
+                }
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="none">Repeat: None</option>
+                <option value="week">Repeat: Every day this week</option>
+              </select>
+            ) : null}
           </div>
-        </div>
-      )}
+        </Dialog>
+      ) : null}
     </div>
   );
 }

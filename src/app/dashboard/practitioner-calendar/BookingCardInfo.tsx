@@ -19,12 +19,20 @@ import {
  *
  * @param itemCount `5` = full booking; `4` = multi-service segment (no name row).
  */
-export function pickInfoRowCount(contentHeightPx: number, itemCount: 4 | 5 = 5): number {
+export function pickInfoRowCount(
+  contentHeightPx: number,
+  itemCount: 4 | 5 = 5,
+  density: BookingCardDensity = 'comfortable',
+): number {
+  const t =
+    density === 'compact'
+      ? { one: 40, two: 56, three: 72, four: 92 }
+      : { one: 48, two: 66, three: 88, four: 108 };
   let raw: number;
-  if (contentHeightPx < 48) raw = 1;
-  else if (contentHeightPx < 66) raw = 2;
-  else if (contentHeightPx < 88) raw = 3;
-  else if (contentHeightPx < 108) raw = 4;
+  if (contentHeightPx < t.one) raw = 1;
+  else if (contentHeightPx < t.two) raw = 2;
+  else if (contentHeightPx < t.three) raw = 3;
+  else if (contentHeightPx < t.four) raw = 4;
   else raw = 5;
   return Math.min(raw, itemCount);
 }
@@ -39,8 +47,14 @@ const DEFAULT_WIDTHS: Record<InfoKey, number> = {
   pill: 82,
 };
 
-/** Inline packing order — earlier keys win when horizontal space is limited. */
+/** Legacy inline order (name-first). */
 export const INLINE_INFO_FIELD_ORDER: InfoKey[] = ['name', 'service', 'phone', 'time', 'pill'];
+
+/** Reception desk order: time and name first (UI plan §3.1). */
+export const RECEPTION_INFO_FIELD_ORDER: InfoKey[] = ['time', 'name', 'pill', 'service', 'phone'];
+
+export type BookingCardDensity = 'compact' | 'comfortable';
+export type BookingCardLayout = 'reception' | 'legacy';
 
 type InfoKey = 'name' | 'service' | 'phone' | 'time' | 'pill';
 type WidthMap = Partial<Record<InfoKey, number>>;
@@ -57,6 +71,8 @@ export interface BookingCardInfoProps {
   hideName?: boolean;
   /** Width reserved beside this block for the action tray (wide lanes). */
   actionsReservePx?: number;
+  density?: BookingCardDensity;
+  layout?: BookingCardLayout;
 }
 
 function metaTextClass(micro: boolean): string {
@@ -65,13 +81,33 @@ function metaTextClass(micro: boolean): string {
     : 'text-[11px] font-medium leading-snug text-slate-600/90';
 }
 
-export function groupInfoRows(rowCount: number, hideName: boolean): InfoKey[][] {
+export function groupInfoRows(
+  rowCount: number,
+  hideName: boolean,
+  layout: BookingCardLayout = 'legacy',
+  density: BookingCardDensity = 'comfortable',
+): InfoKey[][] {
+  const inlineOrder = layout === 'reception' ? RECEPTION_INFO_FIELD_ORDER : INLINE_INFO_FIELD_ORDER;
+  const compactReceptionOrder: InfoKey[] = ['time', 'name', 'pill', 'service'];
+
   if (hideName) {
     if (rowCount <= 1) return [['service', 'phone', 'time', 'pill']];
     if (rowCount === 2) return [['service', 'phone'], ['time', 'pill']];
     if (rowCount === 3) return [['service'], ['phone'], ['time', 'pill']];
     return [['service'], ['phone'], ['time'], ['pill']];
   }
+
+  if (layout === 'reception') {
+    if (density === 'compact' && rowCount <= 2) {
+      return rowCount <= 1 ? [compactReceptionOrder] : [['time', 'name', 'pill'], ['service']];
+    }
+    if (rowCount <= 1) return [inlineOrder];
+    if (rowCount === 2) return [['time', 'name', 'pill'], ['service', 'phone']];
+    if (rowCount === 3) return [['time', 'name', 'pill'], ['service', 'phone']];
+    if (rowCount === 4) return [['time', 'name', 'pill'], ['service'], ['phone']];
+    return [['time'], ['name'], ['pill'], ['service'], ['phone']];
+  }
+
   if (rowCount <= 1) return [INLINE_INFO_FIELD_ORDER];
   if (rowCount === 2) return [['name'], ['service', 'phone', 'time', 'pill']];
   if (rowCount === 3) return [['name'], ['service', 'phone'], ['time', 'pill']];
@@ -83,17 +119,19 @@ export function pickVisibleInfoRows({
   rows,
   availableWidth,
   widths,
+  fieldOrder = INLINE_INFO_FIELD_ORDER,
 }: {
   rows: InfoKey[][];
   availableWidth: number;
   widths: WidthMap;
+  fieldOrder?: InfoKey[];
 }): InfoKey[][] {
   const widthFor = (key: InfoKey) => widths[key] ?? DEFAULT_WIDTHS[key];
   return rows
     .map((row) => {
       if (row.length === 1) return row;
       const ordered = [...row].sort(
-        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
+        (a, b) => fieldOrder.indexOf(a) - fieldOrder.indexOf(b),
       );
       const visible: InfoKey[] = [];
       let used = 0;
@@ -108,9 +146,7 @@ export function pickVisibleInfoRows({
           used = next;
         }
       }
-      return visible.sort(
-        (a, b) => INLINE_INFO_FIELD_ORDER.indexOf(a) - INLINE_INFO_FIELD_ORDER.indexOf(b),
-      );
+      return visible.sort((a, b) => fieldOrder.indexOf(a) - fieldOrder.indexOf(b));
     })
     .filter((row) => row.length > 0);
 }
@@ -143,9 +179,13 @@ export function BookingCardInfo({
   contentHeightPx,
   hideName = false,
   actionsReservePx = 0,
+  density = 'comfortable',
+  layout = 'legacy',
 }: BookingCardInfoProps) {
   const itemCount: 4 | 5 = hideName ? 4 : 5;
-  const rows = pickInfoRowCount(contentHeightPx, itemCount);
+  const fieldOrder = layout === 'reception' ? RECEPTION_INFO_FIELD_ORDER : INLINE_INFO_FIELD_ORDER;
+  const rows = pickInfoRowCount(contentHeightPx, itemCount, density);
+  const groupedRows = groupInfoRows(rows, hideName, layout, density);
   const micro = contentHeightPx < 28;
   const mt = metaTextClass(micro);
   const timeRange = `${start}–${end}`;
@@ -182,13 +222,14 @@ export function BookingCardInfo({
   );
 
   const visibleRows = useMemo(() => {
-    const grouped = groupInfoRows(rows, hideName).map((row) => row.filter((key) => availableKeys.has(key)));
+    const grouped = groupedRows.map((row) => row.filter((key) => availableKeys.has(key)));
     return pickVisibleInfoRows({
       rows: grouped,
       availableWidth: availableWidth > 0 ? availableWidth : 0,
       widths,
+      fieldOrder,
     });
-  }, [availableKeys, availableWidth, hideName, rows, widths]);
+  }, [availableKeys, availableWidth, fieldOrder, groupedRows, widths]);
 
   const renderField = (key: InfoKey, dedicated: boolean) => {
     if (key === 'name') {

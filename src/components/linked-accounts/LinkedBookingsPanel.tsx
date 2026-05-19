@@ -54,6 +54,8 @@ export function LinkedBookingsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<FlatLinkedBooking | null>(null);
+  /** Only true after a fetch returns at least one linked venue — avoids flash for unlinked venues. */
+  const [showPanel, setShowPanel] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,7 +66,9 @@ export function LinkedBookingsPanel({
       if (!res.ok) throw new Error(json.error ?? 'Failed to load linked-in bookings.');
       const loaded = (json.venues ?? []) as LinkedVenueCalendar[];
       setVenues(loaded);
-      onAvailabilityChange?.(loaded.length > 0);
+      const hasLinked = loaded.length > 0;
+      setShowPanel(hasLinked);
+      onAvailabilityChange?.(hasLinked);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load linked-in bookings.');
     } finally {
@@ -96,8 +100,8 @@ export function LinkedBookingsPanel({
     return flat;
   }, [venues]);
 
-  // No linked calendars at all — render nothing so unlinked venues are untouched.
-  if (!loading && venues.length === 0 && !error) return null;
+  // No linked calendars — render nothing so unlinked venues never see linked-in chrome.
+  if (!showPanel) return null;
 
   return (
     <section

@@ -40,6 +40,7 @@ export function appointmentCalendarUrl(
   month: number,
   variantId?: string | null,
   durationMinutes?: number | null,
+  anyAvailable?: boolean,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -47,6 +48,9 @@ export function appointmentCalendarUrl(
     year: String(year),
     month: String(month),
   });
+  if (anyAvailable) {
+    params.set('any_available', '1');
+  }
   if (variantId) {
     params.set('variant_id', variantId);
   }

@@ -8,6 +8,7 @@ import {
   type StaffBookingSurfaceTabId,
 } from '@/lib/booking/staff-booking-modal-options';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 
 export interface StaffSurfaceBookingModalProps {
   open: boolean;
@@ -76,36 +77,27 @@ export function StaffSurfaceBookingModal({
       ? 'unified_scheduling'
       : undefined);
 
-  if (!open) return null;
-
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-4 sm:items-center"
-      onClick={onClose}
+      className="contents"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title={title}
+      size="lg"
+      contentClassName="flex h-[min(90dvh,90vh)] max-h-[min(90dvh,90vh)] w-full max-w-3xl flex-col overflow-hidden p-0"
     >
       <div
-        role="dialog"
-        aria-modal="true"
+        className="flex h-full min-h-0 flex-col overflow-hidden"
         aria-labelledby={titleId}
-        className="flex h-[min(90dvh,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
+        id={titleId}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-6 py-4">
-          <h2 id={titleId} className="text-lg font-semibold text-slate-900">
-            {title}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:pb-6">
           <StaffSurfaceBookingStack
             key={stackKey ?? 'staff-surface-booking-modal'}
@@ -125,6 +117,7 @@ export function StaffSurfaceBookingModal({
           />
         </div>
       </div>
+    </Dialog>
     </div>
   );
 }

@@ -819,12 +819,47 @@ specific time slots (private function in the early sitting). Blocked
 slots show as unavailable across all booking channels. Blocking does not
 affect existing confirmed bookings --- it only prevents new bookings.
 
+## 3.10 Linked Accounts (Appointments SKUs --- Shipped)
+
+Linked Accounts shipped after the original restaurant MVP for
+**Appointments-family pricing tiers** (`light`, `plus`, `appointments`).
+It is not part of the table-reservation MVP scope and is not listed in
+section 4 as deferred work.
+
+  ---------------------------------------------------------------------------
+  **What We Built**      **Why It Matters**                    **Status**
+  ---------------------- ------------------------------------- --------------
+  **Pairwise venue       Independent venues link to share      **Shipped**
+  links**                calendar visibility and limited
+                         cross-venue booking actions (by
+                         agreement). Each venue keeps its own
+                         guests, bookings, and Stripe account.
+
+  **Linked calendar      Staff see linked partners' bookings   **Shipped**
+  view**                 on `/dashboard/linked-calendar` with
+                         permission boundaries enforced in
+                         APIs and RLS.
+
+  **Venue collectives**  Optional combined public page at      **Shipped**
+                         `/book/c/{slug}`; each booking still
+                         belongs to one venue.
+
+  **Settings and audit** Admins manage links under **Settings  **Shipped**
+                         → Linked Accounts**; actions are
+                         logged for compliance review.
+  ---------------------------------------------------------------------------
+
+Specification: `Docs/reserveni-linked-accounts-spec.md`. Calendar grid
+integration scope: `Docs/reserveni-linked-calendar-grid-integration-scope.md`.
+
 # 4. What Is Not in the MVP
 
 Every feature below has been discussed, evaluated, and deliberately
-excluded from the MVP. Some are planned for specific later phases.
-Others have been set aside indefinitely. The discipline of this list is
-what makes the four-month build timeline achievable.
+excluded from the original restaurant MVP. Some are planned for specific
+later phases. Others have been set aside indefinitely. Capabilities that
+have since shipped (for example Linked Accounts on Appointments SKUs) are
+documented in section 3.10 and are not repeated here. The discipline of
+this list is what makes the four-month build timeline achievable.
 
   -----------------------------------------------------------------------
   **Feature**            **When and Why**
@@ -858,15 +893,15 @@ what makes the four-month build timeline achievable.
   **Multi-venue          Phase 3. No pilot venue operates multiple sites.
   management dashboard** 
 
-  **Linked Accounts      Post-MVP (Appointments SKUs). Pairwise calendar
-  (pairwise links)**     sharing between independent venues; optional
-                         venue collectives for a combined `/book/c/{slug}`
-                         page. Not restaurant table-reservation. See
-                         `Docs/reserveni-linked-accounts-spec.md`.
-
-  **POS integration for  Phase 2 / Phase 3. Valuable for
-  revenue tracking**     revenue-per-cover analytics but not essential
-                         for booking and no-show reduction.
+  **Integrated retail    Deliberately out of scope --- not on the product
+  POS (chair-side        roadmap. Target customers (independents, sole
+  checkout, inventory,  traders, collectives) already use separate
+  stock control)**       terminals (SumUp, Zettle, bank readers).
+                         Reserve NI handles booking deposits and
+                         pre-payments via Stripe Connect; retail at the
+                         chair is kept on existing hardware. See
+                         `Docs/ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md`
+                         section 6.2.
 
   **Advanced analytics   Phase 2. MVP reporting covers the metrics needed
   and custom reports**   to prove the core thesis.
@@ -1807,9 +1842,6 @@ will be adjusted based on what is learned during the pilot.
 -   **Multi-venue management:** Dashboard for restaurant groups managing
     multiple sites from one login.
 
--   **POS integration:** Connect to common NI point-of-sale systems for
-    revenue-per-cover tracking and spend analytics.
-
 -   **Loyalty and rewards:** Guest-facing loyalty programme integrated
     with the consumer booking experience.
 
@@ -1995,12 +2027,13 @@ is disproportionately high relative to the effort required.
                          overbooking when tables from earlier sittings
                          are still occupied.
 
-  **Linked Accounts**    Optional feature for Appointments-family venues:
-                         two or more independent ReserveNI subscriptions
-                         link to share calendar visibility and (by
-                         agreement) limited cross-venue booking actions.
-                         Data is never merged; each venue keeps its own
-                         guests and bookings. See
+  **Linked Accounts**    **Shipped** for Appointments-family venues
+                         (`light`, `plus`, `appointments`). Pairwise links
+                         between independent subscriptions for shared
+                         calendar visibility and agreed cross-venue
+                         actions; optional venue collectives at
+                         `/book/c/{slug}`. Data is never merged. See
+                         section 3.10 and
                          `Docs/reserveni-linked-accounts-spec.md`.
 
   **Venue collective**   A combined public booking page (`/book/c/{slug}`)

@@ -17,6 +17,7 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -140,6 +141,9 @@ export function EventBookingFlow({
   onBookingCreated,
 }: EventBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const acknowledgeStaffBooking = useCallback(() => {
+    onBookingCreated?.();
+  }, [onBookingCreated]);
   const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
@@ -295,7 +299,6 @@ export function EventBookingFlow({
             staffMessage: typeof data.message === 'string' ? data.message : undefined,
           });
           setStep('confirmation');
-          onBookingCreated?.();
           return;
         }
 
@@ -341,7 +344,6 @@ export function EventBookingFlow({
       totalTickets,
       isStaff,
       staffBookingSource,
-      onBookingCreated,
     ],
   );
 
@@ -636,6 +638,7 @@ export function EventBookingFlow({
           ) : (
             <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
           )}
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
     </div>

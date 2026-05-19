@@ -34,6 +34,11 @@ interface BookingDetails {
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
   venue_public?: VenuePublic | null;
+  feature_flags?: {
+    resolved?: {
+      guest_self_reschedule?: boolean;
+    };
+  };
 }
 
 function isCdeModel(m: BookingModel): boolean {
@@ -181,7 +186,13 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
         : details.resource_name
       : null);
 
-  const showGuestModify = canModify && !isCde && (isAppointment || isTableBooking);
+  const guestSelfRescheduleEnabled = Boolean(
+    details.feature_flags?.resolved?.guest_self_reschedule,
+  );
+  const showGuestModify =
+    canModify &&
+    !isCde &&
+    (isTableBooking || (isAppointment && guestSelfRescheduleEnabled));
   const modifyButtonLabel = isAppointment ? 'Change appointment' : 'Modify booking';
   const cancelButtonLabel = isCde ? 'Cancel booking' : isAppointment ? 'Cancel appointment' : 'Cancel reservation';
   const keepButtonLabel = isCde ? 'Keep booking' : isAppointment ? 'Keep appointment' : 'Keep booking';

@@ -1,5 +1,6 @@
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingModel } from '@/types/booking-models';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 
 /** Maps GET /api/venue JSON to {@link VenuePublic} for embedded booking flows. */
 export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePublic {
@@ -22,5 +23,6 @@ export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePu
     currency: data.currency as string | undefined,
     public_booking_area_mode:
       data.public_booking_area_mode === 'manual' ? 'manual' : data.public_booking_area_mode === 'auto' ? 'auto' : undefined,
+    feature_flags: mapVenueFeatureFlagsForPublic(data.feature_flags),
   };
 }

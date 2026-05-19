@@ -8,6 +8,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
+import { staffBookingFlowDurationMs } from '@/lib/metrics/staff-booking-flow-duration';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 
@@ -138,6 +139,7 @@ export function UnifiedBookingForm({
   staffRebookBootstrap = null,
 }: UnifiedBookingFormProps) {
   const isEdit = Boolean(editBookingId && editSnapshot);
+  const staffFlowStartedAtRef = useRef<number>(Date.now());
   const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
   const [venueCurrencyResolved, setVenueCurrencyResolved] = useState<string | null>(venueCurrencyProp ?? null);
@@ -1048,6 +1050,10 @@ export function UnifiedBookingForm({
                 ),
               }
             : {}),
+          ...(staffBookingFlowDurationMs(staffFlowStartedAtRef.current) != null
+            ? { staff_booking_duration_ms: staffBookingFlowDurationMs(staffFlowStartedAtRef.current) }
+            : {}),
+          ...(staffRebookBootstrap?.guest ? { returning_guest: true } : {}),
         }),
       });
 
@@ -1078,6 +1084,7 @@ export function UnifiedBookingForm({
         booking_id: payload.booking_id as string,
         payment_url: payload.payment_url as string | undefined,
       };
+      staffFlowStartedAtRef.current = Date.now();
 
       if (asModal) {
         addToast(

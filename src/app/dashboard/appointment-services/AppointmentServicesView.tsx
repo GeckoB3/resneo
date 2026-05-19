@@ -1,5 +1,7 @@
 'use client';
 
+import { Button } from '@/components/ui/primitives/Button';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
@@ -902,25 +904,26 @@ export function AppointmentServicesView({
         </div>
       )}
 
-      {/* Create / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="service-modal-title"
-            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-          >
-            <div className="mb-5 flex items-center justify-between">
-              <h2 id="service-modal-title" className="text-lg font-semibold text-slate-900">
-                {editingId ? 'Edit Service' : 'Add Service'}
-              </h2>
-              <button onClick={() => setShowModal(false)} aria-label="Close" className="rounded-lg p-1 hover:bg-slate-100">
-                <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12"/></svg>
-              </button>
-            </div>
-
-            {error && (
+      <Dialog
+        open={showModal}
+        onOpenChange={(open) => {
+          if (!open) setShowModal(false);
+        }}
+        title={editingId ? 'Edit Service' : 'Add Service'}
+        size="lg"
+        contentClassName="max-w-4xl"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleSave} loading={saving} disabled={saving}>
+              {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
+            </Button>
+          </div>
+        }
+      >
+        {error && (
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
             )}
 
@@ -1046,147 +1049,106 @@ export function AppointmentServicesView({
               }
             />
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setShowModal(false)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {showAddCalendarModal && isAdmin && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
-          onClick={() => {
+      </Dialog>
+
+
+
+      {isAdmin ? (
+        <Dialog
+          open={showAddCalendarModal}
+          onOpenChange={(open) => {
             if (creatingCalendar) return;
-            setShowAddCalendarModal(false);
-            setAddCalendarModalError(null);
+            if (!open) {
+              setShowAddCalendarModal(false);
+              setAddCalendarModalError(null);
+            }
           }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="appointment-add-calendar-title"
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="appointment-add-calendar-title" className="mb-1 text-lg font-semibold text-slate-900">
-              Add calendar
-            </h2>
-            <p className="mb-4 text-sm text-slate-500">
-              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them later.
-            </p>
-            {addCalendarModalError && (
-              <div
-                role="alert"
-                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              >
-                {addCalendarModalError}
-              </div>
-            )}
-            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
-            <input
-              type="text"
-              value={newCalendarName}
-              onChange={(e) => setNewCalendarName(e.target.value)}
-              placeholder="e.g. Room 2, Senior stylist"
-              disabled={creatingCalendar}
-              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void handleCreateCalendar();
-                }
-              }}
-            />
+          title="Add calendar"
+          description="Same defaults as Calendar availability: weekly hours are set automatically; you can edit them later."
+          size="sm"
+          footer={
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCreateCalendar()}
-                disabled={creatingCalendar}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
+              <Button type="button" onClick={() => void handleCreateCalendar()} loading={creatingCalendar} disabled={creatingCalendar}>
                 {creatingCalendar ? 'Creating…' : 'Create and assign'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => {
                   setShowAddCalendarModal(false);
                   setAddCalendarModalError(null);
                 }}
                 disabled={creatingCalendar}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {serviceToDelete && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
-          onClick={() => {
-            if (!deleteServiceBusy) closeDeleteServiceModal();
-          }}
+          }
         >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-service-title"
-            aria-describedby="delete-service-desc"
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="delete-service-title" className="text-base font-semibold text-slate-900">
-              Delete this service?
-            </h3>
-            <p id="delete-service-desc" className="mt-2 text-sm text-slate-600">
-              <span className="font-medium text-slate-800">{serviceToDelete.name}</span> will be removed. Calendar
-              links to this service will be cleared. This cannot be undone.
-            </p>
-            {deleteServiceModalError ? (
-              <div
-                role="alert"
-                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              >
-                {deleteServiceModalError}
-              </div>
-            ) : null}
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeDeleteServiceModal}
-                disabled={deleteServiceBusy}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void confirmDeleteService()}
-                disabled={deleteServiceBusy}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleteServiceBusy ? 'Deleting…' : 'Delete service'}
-              </button>
+          {addCalendarModalError ? (
+            <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {addCalendarModalError}
             </div>
+          ) : null}
+          <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
+          <input
+            type="text"
+            value={newCalendarName}
+            onChange={(e) => setNewCalendarName(e.target.value)}
+            placeholder="e.g. Room 2, Senior stylist"
+            disabled={creatingCalendar}
+            className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleCreateCalendar();
+              }
+            }}
+          />
+        </Dialog>
+      ) : null}
+
+
+
+      <Dialog
+        open={serviceToDelete != null}
+        onOpenChange={(open) => {
+          if (!open && !deleteServiceBusy) closeDeleteServiceModal();
+        }}
+        title="Delete this service?"
+        description={
+          serviceToDelete
+            ? `${serviceToDelete.name} will be removed. Calendar links to this service will be cleared. This cannot be undone.`
+            : undefined
+        }
+        size="sm"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={closeDeleteServiceModal} disabled={deleteServiceBusy}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => void confirmDeleteService()}
+              loading={deleteServiceBusy}
+              disabled={deleteServiceBusy}
+            >
+              {deleteServiceBusy ? 'Deleting…' : 'Delete service'}
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        {deleteServiceModalError ? (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            {deleteServiceModalError}
+          </div>
+        ) : null}
+      </Dialog>
+
+
 
       {overrideService && linkedPractitionerIds.length > 0 && (
         <StaffServiceOverrideModal

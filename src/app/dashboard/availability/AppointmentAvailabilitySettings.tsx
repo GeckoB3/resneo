@@ -1,5 +1,7 @@
 'use client';
 
+import { Button } from '@/components/ui/primitives/Button';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -806,26 +808,49 @@ export function AppointmentAvailabilitySettings({
               />
 
               {/* Add/Edit modal */}
-              {showForm && isAdmin && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="team-modal-title"
-                    className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6"
-                  >
-                    <h2 id="team-modal-title" className="mb-4 text-lg font-semibold text-slate-900">
-                      {editingId ? 'Edit calendar' : 'Add calendar'}
-                    </h2>
-                    {calendarModalError && (
-                      <div
-                        role="alert"
-                        className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              {isAdmin ? (
+                <Dialog
+                  open={showForm}
+                  onOpenChange={(open) => {
+                    if (!open) {
+                      setShowForm(false);
+                      setCalendarModalError(null);
+                    }
+                  }}
+                  title={editingId ? 'Edit calendar' : 'Add calendar'}
+                  size="md"
+                  footer={
+                    <div className="flex justify-end gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setShowForm(false);
+                          setCalendarModalError(null);
+                        }}
                       >
-                        {calendarModalError}
-                      </div>
-                    )}
-                    <div className="space-y-4">
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void savePractitioner()}
+                        loading={saving}
+                        disabled={saving}
+                      >
+                        {saving ? 'Saving...' : 'Save'}
+                      </Button>
+                    </div>
+                  }
+                >
+                  {calendarModalError ? (
+                    <div
+                      role="alert"
+                      className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                    >
+                      {calendarModalError}
+                    </div>
+                  ) : null}
+                  <div className="space-y-4">
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">Display name *</label>
                         <input
@@ -984,29 +1009,9 @@ export function AppointmentAvailabilitySettings({
                       )}
 
                     </div>
-                    <div className="mt-6 flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForm(false);
-                          setCalendarModalError(null);
-                        }}
-                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void savePractitioner()}
-                        disabled={saving}
-                        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                      >
-                        {saving ? 'Saving...' : 'Save'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+
+                </Dialog>
+              ) : null}
             </div>
           )}
 
@@ -1122,48 +1127,33 @@ export function AppointmentAvailabilitySettings({
         </>
       )}
 
-      {showUpgradeModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="upgrade-modal-title"
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
-          >
-            <h2 id="upgrade-modal-title" className="text-lg font-semibold text-slate-900">
-              Upgrade to add more calendars
-            </h2>
-            <p className="mt-3 text-sm text-slate-600">
-              Your current subscription includes a limited number of calendars (team members). To add another practitioner,
-              visit your plan settings to adjust your calendar allowance.
-            </p>
-            {entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
-              <p className="mt-2 text-sm text-slate-700">
-                You are using{' '}
-                <span className="font-semibold">
-                  {entitlement.active_practitioners} of {entitlement.calendar_limit}
-                </span>{' '}
-                calendar{entitlement.calendar_limit === 1 ? '' : 's'}.
-              </p>
-            )}
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setShowUpgradeModal(false)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Close
-              </button>
-              <Link
-                href="/dashboard/settings?tab=plan"
-                className="inline-flex justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-              >
-                View plans &amp; upgrade
-              </Link>
-            </div>
+      <Dialog
+        open={showUpgradeModal}
+        onOpenChange={setShowUpgradeModal}
+        title="Upgrade to add more calendars"
+        description="Your current subscription includes a limited number of calendars (team members). To add another practitioner, visit your plan settings to adjust your calendar allowance."
+        size="sm"
+        footer={
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="secondary" onClick={() => setShowUpgradeModal(false)}>
+              Close
+            </Button>
+            <Button type="button" asChild>
+              <Link href="/dashboard/settings?tab=plan">View plans &amp; upgrade</Link>
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        {entitlement && !entitlement.unlimited && entitlement.calendar_limit != null ? (
+          <p className="text-sm text-slate-700">
+            You are using{' '}
+            <span className="font-semibold">
+              {entitlement.active_practitioners} of {entitlement.calendar_limit}
+            </span>{' '}
+            calendar{entitlement.calendar_limit === 1 ? '' : 's'}.
+          </p>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

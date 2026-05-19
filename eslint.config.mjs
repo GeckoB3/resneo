@@ -19,7 +19,26 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // Konva floor plan: drag uses refs to avoid re-rendering the full canvas every pointer move.
+  // P0.1: discourage new hand-rolled modal overlays (use Dialog/Sheet primitives).
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/components/ui/primitives/**",
+      "src/components/booking/BookingDetailSurface.tsx",
+      "src/components/practitioner-calendar/ClassInstanceDetailSheet.tsx",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector: "Literal[value=/fixed inset-0/]",
+          message:
+            "Prefer Dialog or Sheet from @/components/ui/primitives/ instead of hand-rolled modal overlays.",
+        },
+      ],
+    },
+  },
+    // Konva floor plan: drag uses refs to avoid re-rendering the full canvas every pointer move.
   {
     files: ["src/app/dashboard/settings/floor-plan/KonvaCanvas.tsx"],
     rules: {

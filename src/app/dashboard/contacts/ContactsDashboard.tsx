@@ -120,6 +120,8 @@ function ContactRow({
   selected,
   visitsLabel,
   onToggleSelected,
+  onToggleExpand,
+  detailPrefetchHandlers,
 }: {
   row: GuestListRow;
   displayNameStr: string;
@@ -128,6 +130,8 @@ function ContactRow({
   selected: boolean;
   visitsLabel: string;
   onToggleSelected: () => void;
+  onToggleExpand: () => void;
+  detailPrefetchHandlers?: ReturnType<typeof bindDetailPrefetchHandlers>;
 }) {
   const email = g.email?.trim() || null;
   const phone = g.phone?.trim() || null;
@@ -157,7 +161,20 @@ function ContactRow({
         </div>
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={onToggleExpand}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
+        {...detailPrefetchHandlers}
+      >
         <div className="flex min-w-0 items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
             <h3
@@ -1669,19 +1686,9 @@ export function ContactsDashboard({
                   return (
                     <div key={g.id} role="listitem" className="min-w-0">
                       <div
-                        role="button"
-                        tabIndex={0}
                         aria-expanded={expanded}
                         aria-controls={`contact-expand-${g.id}`}
-                        onClick={() => toggleContactExpand(g.id)}
-                        {...bindDetailPrefetchHandlers(g.id, prefetchGuestDetail)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            toggleContactExpand(g.id);
-                          }
-                        }}
-                        className={`group/contact relative cursor-pointer overflow-hidden rounded-xl border px-2.5 py-2 pl-3 shadow-sm shadow-slate-900/[0.04] transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 sm:px-3 sm:py-2 sm:pl-4 ${
+                        className={`group/contact relative overflow-hidden rounded-xl border px-2.5 py-2 pl-3 shadow-sm shadow-slate-900/[0.04] transition-all duration-200 sm:px-3 sm:py-2 sm:pl-4 ${
                           selectedIds.includes(g.id)
                             ? 'border-brand-200 bg-gradient-to-br from-brand-50/90 via-white to-white'
                             : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-md hover:shadow-slate-900/[0.06]'
@@ -1710,9 +1717,15 @@ export function ContactsDashboard({
                           selected={selectedIds.includes(g.id)}
                           visitsLabel={visitsLabel}
                           onToggleSelected={() => toggleSelected(g.id)}
+                          onToggleExpand={() => toggleContactExpand(g.id)}
+                          detailPrefetchHandlers={bindDetailPrefetchHandlers(g.id, prefetchGuestDetail)}
                         />
                         {expanded ? (
-                          <div className="mt-3 border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white pt-2">
+                          <div
+                            className="mt-3 border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white pt-2"
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
                             <ContactDetailPanel
                               id={`contact-expand-${g.id}`}
                               clientLower={clientLower}

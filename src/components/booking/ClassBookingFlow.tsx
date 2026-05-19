@@ -19,6 +19,7 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
@@ -175,6 +176,9 @@ export function ClassBookingFlow({
   onBookingCreated,
 }: ClassBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const acknowledgeStaffBooking = useCallback(() => {
+    onBookingCreated?.();
+  }, [onBookingCreated]);
   const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
@@ -344,7 +348,6 @@ export function ClassBookingFlow({
             payment_url: data.payment_url,
           });
           setStep('confirmation');
-          onBookingCreated?.();
           return;
         }
 
@@ -398,7 +401,7 @@ export function ClassBookingFlow({
         setSubmitting(false);
       }
     },
-    [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated, payWithClassCredits],
+    [venue.id, selectedClass, spots, isStaff, staffBookingSource, payWithClassCredits],
   );
 
   const depositPenceForDetails = isStaffWalkIn || payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
@@ -969,6 +972,7 @@ export function ClassBookingFlow({
           ) : (
             <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
           )}
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
 

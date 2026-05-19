@@ -30,6 +30,9 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      - name: Lint modal shells (UI foundation)
+        run: npm run lint:modals
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
@@ -48,6 +51,91 @@ jobs:
 
       - name: Run TypeScript compiler
         run: npm run typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test
+
+  e2e-smoke:
+    name: E2E smoke (Playwright)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.E2E_VENUE_SLUG != '' && secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Build Next.js app
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+          NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
+
+      - name: Seed E2E fixture venue
+        run: node scripts/seed-e2e-smoke-venue.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
+          E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
+          E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
+          E2E_STRIPE_CONNECTED_ACCOUNT_ID: ${{ secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID }}
+          NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
+
+      - name: Run Playwright smoke
+        run: npm run test:e2e
+        env:
+          CI: true
+          E2E_BASE_URL: http://127.0.0.1:3000
+          E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
+          E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
+          E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   build:
     name: Build

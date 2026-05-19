@@ -21,6 +21,12 @@ import {
   validateAppointmentCustomInterval,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import { buildAnyAvailableAvailabilityPayload } from '@/lib/availability/appointment-any-practitioner';
+import {
+  assertAppointmentsFeatureEnabled,
+  featureFlagDisabledResponse,
+  parseVenueFeatureFlags,
+} from '@/lib/feature-flags';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
@@ -330,11 +336,13 @@ export async function GET(request: NextRequest) {
 
     const serviceIdParam = searchParams.get('service_id');
     const practitionerIdParam = searchParams.get('practitioner_id');
-    if (
-      serviceIdParam &&
-      practitionerIdParam &&
-      venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels)
-    ) {
+    const anyAvailableParam =
+      searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
+    const appointmentVenue =
+      isUnifiedSchedulingVenue(venueMode.bookingModel) ||
+      venueMode.bookingModel === 'practitioner_appointment' ||
+      venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
+    if (serviceIdParam && appointmentVenue && (practitionerIdParam || anyAvailableParam)) {
       return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
     }
 
@@ -493,6 +501,30 @@ async function handleAppointmentAvailability(
 ) {
   const practitionerId = searchParams.get('practitioner_id') ?? undefined;
   const serviceId = searchParams.get('service_id') ?? undefined;
+  const anyAvailable =
+    searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
+
+  if (anyAvailable) {
+    if (!serviceId) {
+      return NextResponse.json(
+        { error: 'service_id is required when any_available is set' },
+        { status: 400 },
+      );
+    }
+    const { data: venueFlagsRow } = await supabase
+      .from('venues')
+      .select('feature_flags')
+      .eq('id', venueId)
+      .maybeSingle();
+    const venueFlags = parseVenueFeatureFlags(
+      (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
+    );
+    try {
+      assertAppointmentsFeatureEnabled('any_available_practitioner', venueFlags);
+    } catch {
+      return featureFlagDisabledResponse('any_available_practitioner');
+    }
+  }
 
   const phantomsParam = searchParams.get('phantoms');
   let phantomBookings: PhantomBooking[] = [];
@@ -504,7 +536,13 @@ async function handleAppointmentAvailability(
     }
   }
 
-  const input = await fetchAppointmentInput({ supabase, venueId, date, practitionerId, serviceId });
+  const input = await fetchAppointmentInput({
+    supabase,
+    venueId,
+    date,
+    practitionerId: anyAvailable ? undefined : practitionerId,
+    serviceId,
+  });
   if (phantomBookings.length > 0) {
     input.phantomBookings = phantomBookings;
   }
@@ -558,7 +596,11 @@ async function handleAppointmentAvailability(
     }));
   }
 
-  return NextResponse.json({ date, venue_id: venueId, ...result });
+  const payload = anyAvailable && serviceId
+    ? buildAnyAvailableAvailabilityPayload(result, serviceId)
+    : result;
+
+  return NextResponse.json({ date, venue_id: venueId, ...payload, any_available: anyAvailable || undefined });
 }
 
 // ---------------------------------------------------------------------------

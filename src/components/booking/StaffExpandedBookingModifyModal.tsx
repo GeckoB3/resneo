@@ -11,6 +11,7 @@ import { StaffAppointmentModifyForm } from '@/components/booking/StaffAppointmen
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import type { CountryCode } from 'libphonenumber-js';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 
 /** Same subset as ExpandedBookingContent + fields needed for appointment modify */
 export interface StaffExpandedBookingModifySource {
@@ -317,33 +318,16 @@ export function StaffExpandedBookingModifyModal({
   const serviceId = serviceIdFromBooking(booking);
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4"
-      onClick={onClose}
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title={shellTitle}
+      size="md"
+      contentClassName="flex max-h-[min(90dvh,90vh)] max-w-xl flex-col overflow-hidden p-0"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="staff-expanded-booking-modify-title"
-        className="flex max-h-[min(90dvh,90vh)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
-          <h2 id="staff-expanded-booking-modify-title" className="text-base font-semibold text-slate-900">
-            {shellTitle}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="min-h-0 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 overflow-y-auto px-5 py-4">
           {branch === 'appointment' ? (
             !practitionerId || !serviceId ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -367,8 +351,7 @@ export function StaffExpandedBookingModifyModal({
               onClose={onClose}
             />
           )}
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

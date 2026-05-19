@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { groupInfoRows, pickInfoRowCount, pickVisibleInfoRows } from './BookingCardInfo';
+import {
+  groupInfoRows,
+  pickInfoRowCount,
+  pickVisibleInfoRows,
+  RECEPTION_INFO_FIELD_ORDER,
+} from './BookingCardInfo';
 
 describe('pickInfoRowCount', () => {
   it('returns 1 below 48px height', () => {
@@ -35,6 +40,11 @@ describe('pickInfoRowCount', () => {
     expect(pickInfoRowCount(66, 4)).toBe(3);
     expect(pickInfoRowCount(48, 4)).toBe(2);
     expect(pickInfoRowCount(20, 4)).toBe(1);
+  });
+
+  it('compact density uses tighter height thresholds', () => {
+    expect(pickInfoRowCount(45, 5, 'comfortable')).toBe(1);
+    expect(pickInfoRowCount(45, 5, 'compact')).toBe(2);
   });
 });
 
@@ -80,6 +90,21 @@ describe('groupInfoRows', () => {
       ['pill'],
     ]);
   });
+
+  it('reception layout prioritises time, name, and status on the first row', () => {
+    expect(groupInfoRows(2, false, 'reception')).toEqual([
+      ['time', 'name', 'pill'],
+      ['service', 'phone'],
+    ]);
+    expect(groupInfoRows(1, false, 'reception')).toEqual([RECEPTION_INFO_FIELD_ORDER]);
+  });
+
+  it('compact reception layout drops phone on short bars', () => {
+    expect(groupInfoRows(2, false, 'reception', 'compact')).toEqual([
+      ['time', 'name', 'pill'],
+      ['service'],
+    ]);
+  });
 });
 
 describe('pickVisibleInfoRows', () => {
@@ -97,6 +122,7 @@ describe('pickVisibleInfoRows', () => {
         rows: [['name', 'service', 'phone', 'time', 'pill']],
         availableWidth: 260,
         widths,
+        fieldOrder: ['name', 'service', 'phone', 'time', 'pill'],
       }),
     ).toEqual([['name', 'service', 'phone']]);
   });
@@ -107,8 +133,20 @@ describe('pickVisibleInfoRows', () => {
         rows: [['name', 'service', 'phone', 'time', 'pill']],
         availableWidth: 200,
         widths,
+        fieldOrder: ['name', 'service', 'phone', 'time', 'pill'],
       }),
     ).toEqual([['name', 'service']]);
+  });
+
+  it('reception order keeps time and name before service when space is tight', () => {
+    expect(
+      pickVisibleInfoRows({
+        rows: [['time', 'name', 'pill', 'service', 'phone']],
+        availableWidth: 200,
+        widths,
+        fieldOrder: RECEPTION_INFO_FIELD_ORDER,
+      }),
+    ).toEqual([['time', 'name']]);
   });
 
   it('shows all fields when they have dedicated rows', () => {

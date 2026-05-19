@@ -17,6 +17,8 @@ interface Props {
   /** Venue business hours (Settings); used for Open/Closed on days with no bookings. */
   openingHours: OpeningHours | null;
   venueTimezone: string;
+  /** Venue-local today (from server) — avoids UTC `toISOString()` SSR/client mismatch. */
+  todayIso: string;
   onSelectDay: (isoDate: string) => void;
 }
 
@@ -31,9 +33,9 @@ export function MonthScheduleGrid({
   showMergedFeeds,
   openingHours,
   venueTimezone,
+  todayIso,
   onSelectDay,
 }: Props) {
-  const todayIso = new Date().toISOString().slice(0, 10);
   const maxTotalForIntensity = useMemo(() => {
     const vals = Object.values(monthDayScheduleCounts).map(
       (s) => s.appointments + s.event_ticket + s.class_session + s.resource_booking,

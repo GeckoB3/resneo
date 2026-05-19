@@ -28,6 +28,7 @@ import {
   isBookingInstantRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { BookingActionMenu } from '@/components/table-management/BookingActionMenu';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import { bookingStatusVisualForKey, BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
@@ -1652,42 +1653,22 @@ export function TimelineGrid({
           onUnassign={handleUnassignFromMenu}
         />
       ) : null}
-      {confirmDialog && (
-        <>
-          <div
-            className="fixed inset-0 z-[60] bg-slate-900/25 backdrop-blur-[2px]"
-            onClick={() => {
-              confirmDialog.resolve(false);
-              setConfirmDialog(null);
-            }}
-          />
-          <div className="fixed left-1/2 top-1/2 z-[61] w-[min(calc(100vw-2rem),20rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
-            <p className="text-sm text-slate-800">{confirmDialog.message}</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  confirmDialog.resolve(false);
-                  setConfirmDialog(null);
-                }}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  confirmDialog.resolve(true);
-                  setConfirmDialog(null);
-                }}
-                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      <ConfirmDialog
+        open={confirmDialog != null}
+        onOpenChange={(open) => {
+          if (!open && confirmDialog) {
+            confirmDialog.resolve(false);
+            setConfirmDialog(null);
+          }
+        }}
+        title="Confirm"
+        message={confirmDialog?.message ?? ''}
+        confirmLabel="Confirm"
+        destructive={false}
+        onConfirm={() => {
+          confirmDialog?.resolve(true);
+        }}
+      />
     </DndContext>
   );
 }

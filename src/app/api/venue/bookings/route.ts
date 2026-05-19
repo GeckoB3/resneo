@@ -47,6 +47,7 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-event';
 
 function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
   const [startH, startM] = startHHmm.split(':').map(Number);
@@ -87,6 +88,10 @@ const phoneBookingSchema = z.object({
   area_id: z.string().uuid().optional(),
   /** One-off duration override for staff-created table or appointment bookings. */
   duration_minutes: z.number().int().min(15).max(14 * 60).optional(),
+  /** Wall-clock ms from staff opening the booking form to submit (P0.6 baseline). */
+  staff_booking_duration_ms: z.number().int().min(500).max(30 * 60 * 1000).optional(),
+  /** Client already existed at this venue before this booking (P0.6 returning-client time-to-book). */
+  returning_guest: z.boolean().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -207,7 +212,7 @@ export async function POST(request: NextRequest) {
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
     const guestFirst = normaliseGuestNamePart(first_name);
     const guestLast = normaliseGuestNamePart(last_name);
-    const { guest } = await findOrCreateGuest(
+    const { guest, created: guestCreated } = await findOrCreateGuest(
       admin,
       venueId,
       {
@@ -218,6 +223,9 @@ export async function POST(request: NextRequest) {
       },
       { silentAuthSignup: Boolean(emailNorm) },
     );
+    const returningGuest =
+      parsed.data.returning_guest === true ||
+      (parsed.data.returning_guest !== false && !guestCreated);
     const staffGuestDisplayName = formatGuestDisplayName(guest.first_name, guest.last_name, 'walk-in');
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
@@ -1103,6 +1111,16 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (parsed.data.staff_booking_duration_ms != null) {
+        await logStaffBookingFlowEvent(admin, {
+          venue_id: venueId,
+          booking_id: apptBooking.id,
+          duration_ms: parsed.data.staff_booking_duration_ms,
+          returning_guest: returningGuest,
+          source: bookingSource,
+        });
+      }
+
       return NextResponse.json(
         {
           booking_id: apptBooking.id,
@@ -1383,6 +1401,16 @@ export async function POST(request: NextRequest) {
           }
         });
       }
+    }
+
+    if (parsed.data.staff_booking_duration_ms != null) {
+      await logStaffBookingFlowEvent(admin, {
+        venue_id: venueId,
+        booking_id: booking.id,
+        duration_ms: parsed.data.staff_booking_duration_ms,
+        returning_guest: returningGuest,
+        source: bookingSource,
+      });
     }
 
     return NextResponse.json(

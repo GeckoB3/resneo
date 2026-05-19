@@ -13,7 +13,8 @@ import {
   isVenueScheduleCalendarEligible,
   shouldShowAppointmentAvailabilitySettings,
 } from '@/lib/booking/schedule-calendar-eligibility';
-import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { resolveWaitlistVenueCapabilities } from '@/lib/booking/waitlist-venue-capabilities';
 
 /**
  * Sidebar visibility matrix (maintainers: keep in sync with route guards and `lib/booking/schedule-calendar-eligibility.ts`).
@@ -34,7 +35,7 @@ import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
  * **Model links:** Services, Events, Classes, Resources from `MODEL_NAV_ITEMS` + `mergeModelNavEntries` by primary and `enabled_models`.
  * Placed after **Contacts** (and below New Booking), before Waitlist when present.
  *
- * **Waitlist:** only when `booking_model === 'table_reservation'`.
+ * **Waitlist:** when venue supports table and/or appointment waitlist (`resolveWaitlistVenueCapabilities`).
  */
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -63,8 +64,6 @@ const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
     { href: '/dashboard/resource-timeline', label: 'Resources', icon: CalendarIcon },
   ],
 };
-
-const TABLE_RESERVATION_ONLY = new Set(['/dashboard/waitlist']);
 
 export interface DashboardSidebarProps {
   email: string;
@@ -206,23 +205,49 @@ export function DashboardSidebar({
     bookingModel === 'table_reservation' &&
     isRestaurantPlanTier;
 
-  const calendarEligible = useMemo(
-    () => isVenueScheduleCalendarEligible(bookingModel, enabledModels),
-    [bookingModel, enabledModels],
+  const isAppointment = useMemo(
+    () => isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels),
+    [pricingTier, bookingModel, enabledModels],
   );
+
+  /** Appointments SKU with legacy `table_reservation` primary has no MODEL_NAV_ITEMS row — use USE links. */
+  const navPrimaryBookingModel: BookingModel = useMemo(() => {
+    if (isAppointment && bookingModel === 'table_reservation') {
+      return 'unified_scheduling';
+    }
+    if (isAppointment && !MODEL_NAV_ITEMS[bookingModel]?.length) {
+      return 'unified_scheduling';
+    }
+    return bookingModel;
+  }, [isAppointment, bookingModel]);
+
+  const calendarEligible = useMemo(() => {
+    if (isVenueScheduleCalendarEligible(bookingModel, enabledModels)) return true;
+    if (isVenueScheduleCalendarEligible(navPrimaryBookingModel, enabledModels)) return true;
+    if (isAppointmentPlanTier(pricingTier) && bookingModel === 'table_reservation') return true;
+    return false;
+  }, [bookingModel, enabledModels, navPrimaryBookingModel, pricingTier]);
 
   const isRestaurantTablePrimary = bookingModel === 'table_reservation' && isRestaurantPlanTier;
 
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
     const isRestaurantTablePrimaryInner = isTableReservation && isRestaurantPlanTier;
-    const isAppointment = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels);
     /** Dining covers / Model A — restaurant SKU only (not Appointments or Standard tier). */
     const showDiningAvailability = isTableReservation && isRestaurantPlanTier;
-    const showCalendarAvailability = shouldShowAppointmentAvailabilitySettings(bookingModel, enabledModels);
+    const showCalendarAvailability =
+      shouldShowAppointmentAvailabilitySettings(bookingModel, enabledModels) ||
+      shouldShowAppointmentAvailabilitySettings(navPrimaryBookingModel, enabledModels);
+    const waitlistCapabilities = resolveWaitlistVenueCapabilities({
+      pricingTier,
+      bookingModel,
+      enabledModels,
+    });
+    const showWaitlistNav =
+      waitlistCapabilities.showTableWaitlist || waitlistCapabilities.showAppointmentWaitlist;
 
     let items = BASE_NAV_ITEMS.filter((item) => {
-      if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
+      if (item.href === '/dashboard/waitlist' && !showWaitlistNav) return false;
       if (item.href === '/dashboard/availability') {
         if (!showDiningAvailability) return false;
         if (!isAdmin) return false;
@@ -259,7 +284,7 @@ export function DashboardSidebar({
       });
     }
 
-    const modelItems = mergeModelNavEntries(MODEL_NAV_ITEMS, bookingModel, enabledModels);
+    const modelItems = mergeModelNavEntries(MODEL_NAV_ITEMS, navPrimaryBookingModel, enabledModels);
     if (modelItems.length > 0) {
       const contactsIdx = items.findIndex((i) => i.href === '/dashboard/contacts');
       if (contactsIdx >= 0) {
@@ -293,7 +318,16 @@ export function DashboardSidebar({
     }
 
     return items;
-  }, [isAdmin, bookingModel, enabledModels, isRestaurantPlanTier, calendarEligible, pricingTier]);
+  }, [
+    isAdmin,
+    bookingModel,
+    enabledModels,
+    isRestaurantPlanTier,
+    calendarEligible,
+    pricingTier,
+    isAppointment,
+    navPrimaryBookingModel,
+  ]);
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -379,6 +413,7 @@ export function DashboardSidebar({
         {/* Nav links */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3 pb-4" aria-label="Dashboard">
           {navItems.map((item) => {
+            const navKey = `${item.href}::${item.label}`;
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
                 /** Day Sheet + Bookings: restaurant table venues (with or without schedule calendar secondaries). */
@@ -402,11 +437,11 @@ export function DashboardSidebar({
                 );
               }
 
-              /** Legacy `table_reservation` on Appointments/Standard SKU: single list link. */
-              if (bookingModel === 'table_reservation' && !isRestaurantPlanTier) {
+              /** Appointments SKU with legacy table primary and no schedule models: list only. */
+              if (bookingModel === 'table_reservation' && !isRestaurantPlanTier && !calendarEligible) {
                 return (
                   <NavLinkItem
-                    key={item.href}
+                    key={navKey}
                     href={item.href}
                     label={item.label}
                     icon={item.icon}
@@ -469,7 +504,7 @@ export function DashboardSidebar({
 
             return (
               <NavLinkItem
-                key={item.href}
+                key={navKey}
                 href={item.href}
                 label={item.label}
                 icon={item.icon}

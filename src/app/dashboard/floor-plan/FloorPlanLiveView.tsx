@@ -13,6 +13,10 @@ import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashb
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { DiningAreaPicker } from '@/components/dashboard/DiningAreaPicker';
 import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Sheet } from '@/components/ui/primitives/Sheet';
+import { Button } from '@/components/ui/primitives/Button';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import {
   BOOKING_REVERT_ACTIONS,
@@ -2084,32 +2088,15 @@ export function FloorPlanLiveView({
       </div>
 
       {/* Unassigned bookings — compact host-stand panel */}
-      {unassignedSheetOpen && gridData ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-2 sm:items-center sm:p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="floor-unassigned-title"
-          onClick={() => setUnassignedSheetOpen(false)}
+      {gridData ? (
+        <Sheet
+          open={unassignedSheetOpen}
+          onOpenChange={setUnassignedSheetOpen}
+          title="Unassigned bookings"
+          side="bottom"
+          contentClassName="max-h-[min(85dvh,640px)] w-full max-w-lg"
         >
-          <div
-            className="max-h-[min(85dvh,640px)] w-full max-w-lg overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h2 id="floor-unassigned-title" className="text-sm font-semibold text-slate-900">
-                Unassigned bookings
-              </h2>
-              <button
-                type="button"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-                onClick={() => setUnassignedSheetOpen(false)}
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="max-h-[min(70dvh,520px)] overflow-y-auto px-4 py-3">
+            <div className="max-h-[min(70dvh,520px)] overflow-y-auto">
               {gridData.unassigned_bookings.length === 0 ? (
                 <p className="text-sm text-slate-600">No unassigned bookings for this day.</p>
               ) : (
@@ -2189,8 +2176,7 @@ export function FloorPlanLiveView({
                 </ul>
               )}
             </div>
-          </div>
-        </div>
+        </Sheet>
       ) : null}
 
       {/* Table detail bottom sheet */}
@@ -2370,22 +2356,35 @@ export function FloorPlanLiveView({
         />
       ) : null}
 
-      {rescheduleDialog ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/25 p-4 backdrop-blur-[2px] sm:items-center"
-          onClick={() => setRescheduleDialog(null)}
-          role="presentation"
-        >
-          <div
-            role="dialog"
-            aria-labelledby="floor-reschedule-title"
-            className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="floor-reschedule-title" className="text-base font-semibold text-slate-900">
-              Reschedule booking
-            </h3>
-            <label htmlFor="floor-reschedule-time" className="mt-3 block text-xs font-medium text-slate-700">
+      <Dialog
+        open={rescheduleDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setRescheduleDialog(null);
+        }}
+        title="Reschedule booking"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setRescheduleDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (!rescheduleDialog) return;
+                const { bookingId, time } = rescheduleDialog;
+                setRescheduleDialog(null);
+                void handleFloorTimeChange(bookingId, time);
+              }}
+            >
+              Save
+            </Button>
+          </div>
+        }
+      >
+        {rescheduleDialog ? (
+          <>
+            <label htmlFor="floor-reschedule-time" className="block text-xs font-medium text-slate-700">
               New start time
             </label>
             <input
@@ -2395,29 +2394,9 @@ export function FloorPlanLiveView({
               onChange={(e) => setRescheduleDialog((prev) => (prev ? { ...prev, time: e.target.value } : null))}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRescheduleDialog(null)}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const { bookingId, time } = rescheduleDialog;
-                  setRescheduleDialog(null);
-                  void handleFloorTimeChange(bookingId, time);
-                }}
-                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </Dialog>
 
       {/* New booking form */}
       {showNewBookingForm && (
@@ -2457,22 +2436,38 @@ export function FloorPlanLiveView({
       )}
 
       {/* Block table - start time + duration */}
-      {floorBlockModal && (
-        <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/25 p-4 backdrop-blur-[2px] sm:items-center"
-          onClick={() => !floorBlockSaving && setFloorBlockModal(null)}
-          role="presentation"
+      {floorBlockModal ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !floorBlockSaving) setFloorBlockModal(null);
+          }}
+          title={`Block ${floorBlockModal.tableName}`}
+          size="md"
+          footer={
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                disabled={floorBlockSaving}
+                onClick={() => {
+                  void submitFloorBlock();
+                }}
+                className="flex-1"
+              >
+                {floorBlockSaving ? 'Saving…' : 'Block table'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={floorBlockSaving}
+                onClick={() => setFloorBlockModal(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          }
         >
-          <div
-            role="dialog"
-            aria-labelledby="floor-block-title"
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="floor-block-title" className="text-base font-semibold text-slate-900">
-              Block {floorBlockModal.tableName}
-            </h3>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="text-xs text-slate-500">
               The table will be unavailable for new bookings for the period you set. Existing bookings that overlap this time are not allowed-you’ll need to reschedule them first.
             </p>
             <p className="mt-2 text-xs font-medium text-slate-600">
@@ -2531,46 +2526,24 @@ export function FloorPlanLiveView({
                 />
               </div>
             </div>
-            <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                disabled={floorBlockSaving}
-                onClick={() => { void submitFloorBlock(); }}
-                className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {floorBlockSaving ? 'Saving…' : 'Block table'}
-              </button>
-              <button
-                type="button"
-                disabled={floorBlockSaving}
-                onClick={() => setFloorBlockModal(null)}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        </Dialog>
+      ) : null}
 
       {/* Undo toast */}
       {undoAction && (
         <UndoToast action={undoAction} onUndo={() => { void undoStatusChange(); }} onDismiss={() => setUndoAction(null)} />
       )}
 
-      {/* Confirm dialog */}
-      {confirmDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setConfirmDialog(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
-            <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
-            <div className="mt-4 flex gap-2">
-              <button type="button" onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700">{confirmDialog.confirmLabel}</button>
-              <button type="button" onClick={() => setConfirmDialog(null)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDialog(null);
+        }}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message ?? ''}
+        confirmLabel={confirmDialog?.confirmLabel ?? 'Confirm'}
+        onConfirm={() => confirmDialog?.onConfirm()}
+      />
     </div>
   );
 }

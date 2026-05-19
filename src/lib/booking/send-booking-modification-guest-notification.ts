@@ -11,12 +11,14 @@ import type { BookingEmailData } from '@/lib/emails/types';
 import { sendBookingModificationNotification } from '@/lib/communications/send-templated';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
+import type { BookingModificationNotifyResult } from '@/lib/booking/modification-notify-result';
 
 export async function executeBookingModificationGuestNotification(
   admin: SupabaseClient,
   venueId: string,
   bookingId: string,
-): Promise<void> {
+): Promise<BookingModificationNotifyResult> {
   const { data: bookingRow, error: bkErr } = await admin
     .from('bookings')
     .select('*')
@@ -30,7 +32,17 @@ export async function executeBookingModificationGuestNotification(
       venueId,
       bkErr,
     });
-    return;
+    return { emailSent: false, smsSent: false, skipped: true, skippedReason: 'Booking not found' };
+  }
+
+  const notificationSettings = await getVenueNotificationSettings(venueId);
+  if (!notificationSettings.reschedule_notification_enabled) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'Reschedule notifications are turned off in venue settings.',
+    };
   }
 
   const guestId = (bookingRow as { guest_id: string }).guest_id;
@@ -46,7 +58,14 @@ export async function executeBookingModificationGuestNotification(
     .eq('id', venueId)
     .single();
 
-  if (gErr || !guestRow || !venueRow?.name) return;
+  if (gErr || !guestRow || !venueRow?.name) {
+    return {
+      emailSent: false,
+      smsSent: false,
+      skipped: true,
+      skippedReason: 'Guest or venue details are missing.',
+    };
+  }
 
   const br = bookingRow as {
     booking_time: unknown;
@@ -86,5 +105,10 @@ export async function executeBookingModificationGuestNotification(
   });
 
   const enriched = await enrichBookingEmailForComms(admin, bookingId, bookingEmail);
-  await sendBookingModificationNotification(enriched, venueEmailData, venueId);
+  const { email, sms } = await sendBookingModificationNotification(enriched, venueEmailData, venueId);
+  return {
+    emailSent: email.sent,
+    smsSent: sms.sent,
+    skipped: false,
+  };
 }

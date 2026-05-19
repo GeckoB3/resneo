@@ -5,6 +5,7 @@ import {
   maxAdvanceDaysFromVenueBookingRulesJson,
   mergePublicTableBookingRulesFromRestrictions,
 } from '@/lib/booking/public-table-venue-booking-rules';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 
 /**
  * Builds the same public booking profile shape as GET /api/booking/venue?slug=…, but by venue id.
@@ -15,7 +16,7 @@ export async function buildVenuePublicForBookingById(venueId: string): Promise<V
   const { data: venue, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency',
+      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, feature_flags',
     )
     .eq('id', venueId)
     .single();
@@ -53,5 +54,8 @@ export async function buildVenuePublicForBookingById(venueId: string): Promise<V
     active_booking_models: venueMode.activeBookingModels,
     enabled_models: venueMode.enabledModels,
     terminology: venueMode.terminology,
+    feature_flags: mapVenueFeatureFlagsForPublic(
+      (venue as { feature_flags?: unknown }).feature_flags,
+    ),
   };
 }

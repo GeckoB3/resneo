@@ -14,6 +14,8 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
@@ -875,54 +877,46 @@ export function BookableCalendarsPanel({
         </div>
       </section>
 
-      {deleteCalendarTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
-          onClick={() => setDeleteCalendarTarget(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xl ring-1 ring-slate-900/5"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-labelledby="delete-calendar-title"
-            aria-modal="true"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
-              <TrashIcon className="h-5 w-5" />
-            </div>
-            <h3 id="delete-calendar-title" className="mt-4 text-lg font-semibold text-slate-900">
-              Remove calendar?
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              <span className="font-medium text-slate-800">{deleteCalendarTarget.name}</span> will be removed. Staff
-              linked to this column are unassigned. Existing bookings stay on the diary; the practitioner on each
-              booking may be cleared.
-            </p>
-            {deleteCalendarError && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                {deleteCalendarError}
-              </p>
-            )}
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setDeleteCalendarTarget(null)}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void onDeleteCalendar()}
-                disabled={deletingCalendar}
-                className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {deletingCalendar ? 'Removing…' : 'Remove calendar'}
-              </button>
-            </div>
+      <Dialog
+        open={deleteCalendarTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteCalendarTarget(null);
+        }}
+        title="Remove calendar?"
+        description={
+          deleteCalendarTarget
+            ? `${deleteCalendarTarget.name} will be removed. Staff linked to this column are unassigned. Existing bookings stay on the diary; the practitioner on each booking may be cleared.`
+            : undefined
+        }
+        size="sm"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDeleteCalendarTarget(null)}
+              disabled={deletingCalendar}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => void onDeleteCalendar()}
+              loading={deletingCalendar}
+              disabled={deletingCalendar}
+            >
+              {deletingCalendar ? 'Removing…' : 'Remove calendar'}
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        {deleteCalendarError ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+            {deleteCalendarError}
+          </p>
+        ) : null}
+      </Dialog>
     </>
   );
 }

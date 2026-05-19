@@ -1,4 +1,5 @@
 import type { BookingModel } from '@/types/booking-models';
+import type { VenueFeatureFlags, ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 
 /** Venue shape used by the settings dashboard (matches API). */
@@ -65,6 +66,10 @@ export interface VenueSettings {
    * See `venues.require_account_login_for_bookings`.
    */
   require_account_login_for_bookings?: boolean;
+  /** Per-venue beta flags (appointments Phase 1a rollout). */
+  feature_flags?: VenueFeatureFlags;
+  /** Resolved flags (includes env overrides). */
+  feature_flags_resolved?: ResolvedAppointmentsFeatureFlags;
 }
 
 export type OpeningHoursDaySettings =

@@ -8,6 +8,9 @@ import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infe
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { normalizeBookingLogEmailConfig } from '@/lib/reports/booking-log-email-config';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { computeVenueBaselineMetrics } from '@/lib/metrics/compute-venue-baseline-metrics';
+import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
 
 export interface ReportByBookingModelRow {
   booking_model: BookingModel;
@@ -406,8 +409,47 @@ export async function GET(request: NextRequest) {
     }
 
     let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
+    let report8_baseline_metrics: VenueBaselineMetrics | null = null;
+    let report8_baseline_snapshot: {
+      period_start: string;
+      period_end: string;
+      snapshot_kind: string;
+      created_at: string;
+      metrics: VenueBaselineMetrics;
+    } | null = null;
+
     if (appointmentDashboard) {
       report7_appointment_insights = await buildAppointmentInsights(staff.db, staff.venue_id, from, to);
+      const admin = getSupabaseAdminClient();
+      try {
+        report8_baseline_metrics = await computeVenueBaselineMetrics(
+          admin,
+          staff.venue_id,
+          from,
+          to,
+          { appointmentsOnly: true },
+        );
+        const { data: snapRow, error: snapErr } = await admin
+          .from('venue_baseline_metrics_snapshots')
+          .select('period_start, period_end, snapshot_kind, created_at, metrics')
+          .eq('venue_id', staff.venue_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (snapErr) {
+          console.error('[reports] baseline snapshot load failed:', snapErr.message);
+        } else if (snapRow) {
+          report8_baseline_snapshot = {
+            period_start: String(snapRow.period_start),
+            period_end: String(snapRow.period_end),
+            snapshot_kind: String(snapRow.snapshot_kind),
+            created_at: String(snapRow.created_at),
+            metrics: snapRow.metrics as VenueBaselineMetrics,
+          };
+        }
+      } catch (baselineErr) {
+        console.error('[reports] baseline metrics compute failed:', baselineErr);
+      }
     }
 
     return NextResponse.json({
@@ -423,6 +465,8 @@ export async function GET(request: NextRequest) {
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
       report7_appointment_insights: report7_appointment_insights,
+      report8_baseline_metrics: report8_baseline_metrics,
+      report8_baseline_snapshot: report8_baseline_snapshot,
       report_by_booking_model,
       client_summary,
       booking_log_email_config: bookingLogEmailConfig,

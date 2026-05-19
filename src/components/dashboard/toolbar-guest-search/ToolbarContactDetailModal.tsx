@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
+import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
 import { useDashboardToolbarVenue } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 import { guestSearchResultLabel } from '@/components/dashboard/toolbar-guest-search/guest-search-helpers';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import type { GuestDetailGuest, GuestDetailResponse, GuestListRow } from '@/types/contacts';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 
 function mergeGuestDetailFromSavedGuest(prev: GuestDetailResponse, saved: GuestDetailGuest): GuestDetailResponse {
   return {
@@ -41,6 +43,7 @@ export function ToolbarContactDetailModal({
   const [editPhone, setEditPhone] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [eraseLoadingId, setEraseLoadingId] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const loadDetail = useCallback(
     async (guestId: string) => {
@@ -90,15 +93,6 @@ export function ToolbarContactDetailModal({
     if (!open) return;
     void warmGuestDetail(row.id);
   }, [open, row.id, warmGuestDetail]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
 
   const onSaveGuestDetails = useCallback(async (): Promise<boolean> => {
     if (!detail) return false;
@@ -175,39 +169,21 @@ export function ToolbarContactDetailModal({
     [onClose, onGuestUpdated],
   );
 
-  if (!open) return null;
-
   const title = guestSearchResultLabel(row);
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="toolbar-contact-detail-modal-title"
-        className="flex h-[min(85dvh,85vh)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && mergeOpen) return;
+          if (!next) onClose();
+        }}
+        title={title}
+        size="md"
+        contentClassName="flex max-h-[min(85dvh,85vh)] w-full max-w-lg flex-col overflow-hidden"
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
-          <h2 id="toolbar-contact-detail-modal-title" className="min-w-0 truncate text-base font-semibold text-slate-900 sm:text-lg">
-            {title}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4">
-          <ContactDetailPanel
+        <ContactDetailPanel
             id={`toolbar-contact-${row.id}`}
             clientLower={venue.clientLower}
             bookingWord={venue.bookingWord}
@@ -236,12 +212,26 @@ export function ToolbarContactDetailModal({
             }}
             eraseLoadingId={eraseLoadingId}
             onEraseGuest={onEraseGuest}
+            onOpenMerge={venue.isAdmin ? () => setMergeOpen(true) : undefined}
             venueStaffBookingModel={venue.bookingModel}
             venueStaffEnabledBookingModels={venue.enabledModels}
             venueTimezone={venue.venueTimezone}
           />
-        </div>
-      </div>
-    </div>
+
+      </Dialog>
+
+      {mergeOpen && venue.isAdmin ? (
+        <MergeContactsModal
+          targetGuestId={row.id}
+          clientLower={venue.clientLower}
+          onClose={() => setMergeOpen(false)}
+          onMerged={() => {
+            void loadDetail(row.id);
+            onGuestUpdated?.();
+            setMergeOpen(false);
+          }}
+        />
+      ) : null}
+    </>
   );
 }

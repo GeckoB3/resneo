@@ -731,7 +731,6 @@ export function ContactDetailPanel({
           </SubBlock>
         </div>
       </details>
-    </div>
 
       {relatedGuestHistoryBooking ? (
         <BookingDetailPanel
@@ -784,6 +783,7 @@ export function ContactDetailPanel({
         }}
         onConfirmErase={() => onEraseGuest(g.id)}
       />
+    </div>
     </>
   );
 }

@@ -37,6 +37,29 @@
   --chart-3: #059669;
   --chart-4: #d97706;
   --chart-5: #94a3b8;
+
+  /* Type scale (design system foundation) */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+
+  /* Z-index layers */
+  --z-dropdown: 50;
+  --z-modal: 70;
+  --z-toast: 80;
+
+  /* Motion */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+
+  /* Semantic font (Sora via layout); --font-geist-sans kept for one release */
+  --font-sans: var(--font-geist-sans);
 }
 
 @theme inline {
@@ -75,6 +98,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-modal: var(--z-modal);
+  --z-index-toast: var(--z-toast);
 }
 
 body {

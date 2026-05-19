@@ -130,6 +130,7 @@ export function ModifyTableBookingModal({
 
   return (
     <div
+      data-booking-detail-dismiss-exempt
       className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/30 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-[2px] sm:items-center sm:pb-4"
       onClick={onClose}
     >

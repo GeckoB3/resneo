@@ -33,9 +33,9 @@ export async function POST(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    await executeBookingModificationGuestNotification(admin, staff.venue_id, id);
+    const result = await executeBookingModificationGuestNotification(admin, staff.venue_id, id);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     console.error('POST guest-modification-notify failed:', err);
     return NextResponse.json({ error: 'Could not send notification' }, { status: 500 });

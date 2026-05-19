@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { readResponseJson } from '@/lib/http/read-response-json';
 import type { GuestDetailGuest, GuestDetailResponse, GuestListRow } from '@/types/contacts';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 
 type MergeStep = 1 | 2 | 3 | 4;
 
@@ -312,41 +313,16 @@ export function MergeContactsModal({
     : '…';
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!busy && !next) onClose();
       }}
+      title={`Merge duplicate ${clientLower}s`}
+      description={`Step ${step} of 4 · Admin only · Cannot be undone`}
+      size="lg"
+      contentClassName="max-w-2xl"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="merge-contacts-title"
-        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-5 shadow-xl sm:max-w-2xl sm:rounded-2xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 id="merge-contacts-title" className="text-lg font-semibold text-slate-900">
-              Merge duplicate {clientLower}s
-            </h3>
-            <p className="mt-1 text-xs font-medium text-slate-500">
-              Step {step} of 4 · Admin only · Cannot be undone
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
         {targetLoadErr ? (
           <p className="mt-3 text-sm text-red-600">{targetLoadErr}</p>
         ) : (
@@ -686,7 +662,6 @@ export function MergeContactsModal({
             ) : null}
           </div>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

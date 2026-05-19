@@ -22,6 +22,7 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 
 interface ResourceSlot {
   resource_id: string;
@@ -92,6 +93,9 @@ export function ResourceBookingFlow({
   initialTime,
 }: ResourceBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const acknowledgeStaffBooking = useCallback(() => {
+    onBookingCreated?.();
+  }, [onBookingCreated]);
   const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
@@ -403,7 +407,6 @@ export function ResourceBookingFlow({
             amount_pence_charged: onlineChargePence,
           });
           setStep('confirmation');
-          onBookingCreated?.();
           return;
         }
 
@@ -452,7 +455,6 @@ export function ResourceBookingFlow({
       onlineChargePence,
       isStaff,
       staffBookingSource,
-      onBookingCreated,
     ],
   );
 
@@ -776,6 +778,7 @@ export function ResourceBookingFlow({
             <br />
             {date} &middot; {selectedTime} – {selectedTime ? computeEndTime(selectedTime, duration) : ''}
           </p>
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
     </div>

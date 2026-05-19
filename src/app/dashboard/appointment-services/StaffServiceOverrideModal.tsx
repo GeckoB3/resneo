@@ -5,6 +5,8 @@ import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 
 const COLOUR_OPTIONS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
@@ -54,7 +56,6 @@ interface Props {
   service: ServiceLike;
   link: PractitionerService | null;
   currency?: string;
-  /** When the staff member manages more than one calendar, they pick which to customise. */
   calendarChoices?: CalendarChoice[];
   selectedCalendarId?: string;
   onSelectedCalendarChange?: (calendarId: string) => void;
@@ -191,186 +192,187 @@ export function StaffServiceOverrideModal({
     service.staff_may_customize_deposit ||
     service.staff_may_customize_colour;
 
-  if (!open || !anyField) return null;
+  if (!anyField) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="staff-override-title"
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
-      >
-        <div className="mb-5 flex items-center justify-between">
-          <h2 id="staff-override-title" className="text-lg font-semibold text-slate-900">
-            Your settings: {base.name}
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 hover:bg-slate-100">
-            <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      title={`Your settings: ${base.name}`}
+      size="md"
+      footer={
+        <OverrideModalFooter onClose={onClose} onSave={() => void handleSave()} saving={saving} />
+      }
+    >
+      {calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
+        <div className="mb-4">
+          <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
+          <select
+            value={selectedCalendarId}
+            onChange={(e) => onSelectedCalendarChange(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            {calendarChoices.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </div>
-        {calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
-          <div className="mb-4">
-            <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
-            <select
-              value={selectedCalendarId}
-              onChange={(e) => onSelectedCalendarChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            >
-              {calendarChoices.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+      ) : null}
+      <p className="mb-4 text-sm text-slate-600">
+        {calendarChoices.length > 1
+          ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
+          : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
+      </p>
+      {error ? <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+
+      <div className="space-y-4">
+        {service.staff_may_customize_name ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Display name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">Venue default: {base.name}</p>
           </div>
         ) : null}
-        <p className="mb-4 text-sm text-slate-600">
-          {calendarChoices.length > 1
-            ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
-            : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
-        </p>
-        {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-
-        <div className="space-y-4">
-          {service.staff_may_customize_name && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Display name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <p className="mt-1 text-xs text-slate-500">Venue default: {base.name}</p>
-            </div>
-          )}
-          {service.staff_may_customize_description && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
-          {service.staff_may_customize_duration && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Duration (minutes)</label>
-              <NumericInput
-                min={5}
-                max={480}
-                value={durationMinutes}
-                onChange={setDurationMinutes}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <p className="mt-1 text-xs text-slate-500">Venue default: {base.duration_minutes} min</p>
-            </div>
-          )}
-          {service.staff_may_customize_buffer && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (minutes)</label>
-              <NumericInput
-                min={0}
-                max={120}
-                value={bufferMinutes}
-                onChange={setBufferMinutes}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
-          {service.staff_may_customize_price && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
-              <div className="relative max-w-[200px]">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-          )}
-          {service.staff_may_customize_deposit && (
-            <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setRequireDeposit(!requireDeposit)}
-                  className={`relative h-6 w-11 rounded-full transition-colors ${
-                    requireDeposit ? 'bg-brand-600' : 'bg-slate-300'
+        {service.staff_may_customize_description ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+        ) : null}
+        {service.staff_may_customize_duration ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Duration (minutes)</label>
+            <NumericInput
+              min={5}
+              max={480}
+              value={durationMinutes}
+              onChange={setDurationMinutes}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">Venue default: {base.duration_minutes} min</p>
+          </div>
+        ) : null}
+        {service.staff_may_customize_buffer ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (minutes)</label>
+            <NumericInput
+              min={0}
+              max={120}
+              value={bufferMinutes}
+              onChange={setBufferMinutes}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+        ) : null}
+        {service.staff_may_customize_price ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
+            <CurrencyInput sym={sym} value={price} onChange={setPrice} />
+          </div>
+        ) : null}
+        {service.staff_may_customize_deposit ? (
+          <div className="space-y-3 rounded-lg border border-slate-200 p-4">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setRequireDeposit(!requireDeposit)}
+                className={`relative h-6 w-11 rounded-full transition-colors ${
+                  requireDeposit ? 'bg-brand-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    requireDeposit ? 'translate-x-5' : 'translate-x-0'
                   }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      requireDeposit ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-                <span className="text-sm font-medium text-slate-700">Require deposit</span>
-              </div>
-              {requireDeposit && (
-                <div>
-                  <label className="mb-1 block text-sm text-slate-600">Deposit ({sym})</label>
-                  <div className="relative max-w-[200px]">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={deposit}
-                      onChange={(e) => setDeposit(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm"
-                    />
-                  </div>
-                </div>
-              )}
+                />
+              </button>
+              <span className="text-sm font-medium text-slate-700">Require deposit</span>
             </div>
-          )}
-          {service.staff_may_customize_colour && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>
-              <div className="flex flex-wrap gap-2">
-                {COLOUR_OPTIONS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setColour(c)}
-                    className={`h-8 w-8 rounded-full border-2 transition-all ${
-                      colour === c ? 'border-slate-900 scale-110' : 'border-transparent'
-                    }`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
+            {requireDeposit ? (
+              <div>
+                <label className="mb-1 block text-sm text-slate-600">Deposit ({sym})</label>
+                <CurrencyInput sym={sym} value={deposit} onChange={setDeposit} />
               </div>
+            ) : null}
+          </div>
+        ) : null}
+        {service.staff_may_customize_colour ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>
+            <div className="flex flex-wrap gap-2">
+              {COLOUR_OPTIONS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColour(c)}
+                  className={`h-8 w-8 rounded-full border-2 transition-all ${
+                    colour === c ? 'scale-110 border-slate-900' : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
             </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
+          </div>
+        ) : null}
       </div>
+    </Dialog>
+  );
+}
+
+function OverrideModalFooter({
+  onClose,
+  onSave,
+  saving,
+}: {
+  onClose: () => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="flex justify-end gap-3">
+      <Button type="button" variant="secondary" onClick={onClose}>
+        Cancel
+      </Button>
+      <Button type="button" onClick={onSave} loading={saving} disabled={saving}>
+        {saving ? 'Saving…' : 'Save changes'}
+      </Button>
+    </div>
+  );
+}
+
+function CurrencyInput({
+  sym,
+  value,
+  onChange,
+}: {
+  sym: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative max-w-[200px]">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm"
+      />
     </div>
   );
 }

@@ -47,6 +47,14 @@ import {
   APPOINTMENT_DETAILS_INPUT_CLASS,
 } from './appointment-public-ui';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
+import {
+  ANY_AVAILABLE_PRACTITIONER_ID,
+  isAnyAvailablePractitionerId,
+} from '@/lib/availability/appointment-any-practitioner';
+import { practitionerIdForBookingCreate } from '@/lib/booking/practitioner-id-for-booking-create';
+import { AppointmentWaitlistJoin } from './AppointmentWaitlistJoin';
+import { staffBookingFlowDurationMs } from '@/lib/metrics/staff-booking-flow-duration';
+import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 
 function staffRebookAppointmentInitialDetails(
   bootstrap: StaffRebookBootstrapPayloadV1 | null | undefined,
@@ -186,7 +194,14 @@ interface CatalogPractitioner {
 
 /** Per-date availability from /api/booking/availability. */
 interface SlotPractitioner extends CatalogPractitioner {
-  slots: Array<{ start_time: string; service_id: string; duration_minutes: number; price_pence: number | null }>;
+  slots: Array<{
+    start_time: string;
+    service_id: string;
+    duration_minutes: number;
+    price_pence: number | null;
+    practitioner_id?: string;
+    practitioner_name?: string;
+  }>;
 }
 
 interface PersonSelection {
@@ -319,12 +334,25 @@ export function AppointmentBookingFlow({
   staffRebookBootstrap = null,
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const acknowledgeStaffBooking = useCallback(() => {
+    onBookingCreated?.();
+  }, [onBookingCreated]);
+  const staffFlowStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isStaff && !editBooking) {
+      staffFlowStartedAtRef.current = Date.now();
+    }
+  }, [isStaff, editBooking]);
   const isPublicGuest = bookingAudience === 'public';
   const isEdit = Boolean(editBooking);
   const isStaffWalkInAppointment = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
+  const anyAvailablePractitionerEnabled = Boolean(
+    venue.feature_flags?.resolved?.any_available_practitioner,
+  );
+  const appointmentWaitlistEnabled = Boolean(venue.feature_flags?.resolved?.waitlist_v2);
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
 
   const isLockedPractitionerFlow = Boolean(
@@ -531,7 +559,11 @@ export function AppointmentBookingFlow({
       try {
         const params = new URLSearchParams({ venue_id: venue.id, date });
         params.set('service_id', opts.serviceId);
-        params.set('practitioner_id', opts.practitionerId);
+        if (isAnyAvailablePractitionerId(opts.practitionerId)) {
+          params.set('any_available', '1');
+        } else {
+          params.set('practitioner_id', opts.practitionerId);
+        }
         if (opts.variantId) params.set('variant_id', opts.variantId);
         if (opts.durationMinutes != null) params.set('duration_minutes', String(opts.durationMinutes));
         if (phantomBookings.length > 0) {
@@ -569,6 +601,7 @@ export function AppointmentBookingFlow({
         opts.month,
         opts.variantId ?? null,
         opts.durationMinutes ?? null,
+        isAnyAvailablePractitionerId(opts.practitionerId),
       );
       const res = await fetch(url, { signal: opts.signal });
       const data = (await res.json()) as { available_dates?: string[]; error?: string };
@@ -1030,8 +1063,20 @@ export function AppointmentBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   // Single flow helpers (names/prices from catalog; slots from availability API)
-  const selectedPrac = catalogStaff.find((p) => p.id === selectedPractitionerId);
-  const slotPrac = slotPractitioners.find((p) => p.id === selectedPractitionerId);
+  const selectedPrac = isAnyAvailablePractitionerId(selectedPractitionerId)
+    ? {
+        id: ANY_AVAILABLE_PRACTITIONER_ID,
+        name: `Any available ${terms.staff.toLowerCase()}`,
+        services: selectedServiceId
+          ? catalogStaff
+              .flatMap((p) => p.services.filter((s) => s.id === selectedServiceId))
+              .slice(0, 1)
+          : [],
+      }
+    : catalogStaff.find((p) => p.id === selectedPractitionerId);
+  const slotPrac = slotPractitioners.find(
+    (p) => p.id === selectedPractitionerId || (isAnyAvailablePractitionerId(selectedPractitionerId) && p.id === ANY_AVAILABLE_PRACTITIONER_ID),
+  );
   const availableSlots = slotPrac?.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId) ?? [];
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
   const selectedServiceForPractitioner =
@@ -1367,7 +1412,6 @@ export function AppointmentBookingFlow({
           });
           const needsStripe = Boolean(data.requires_deposit && data.client_secret);
           setStep(needsStripe ? 'payment' : 'confirmation');
-          if (isStaff && !needsStripe) onBookingCreated?.();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Booking failed');
         } finally {
@@ -1378,6 +1422,15 @@ export function AppointmentBookingFlow({
 
       setSubmitting(true);
       try {
+        const practitionerIdForCreate = practitionerIdForBookingCreate(
+          selectedPractitionerId,
+          multiServiceSegments,
+        );
+        if (!practitionerIdForCreate) {
+          setError('Choose a practitioner and time before continuing.');
+          setSubmitting(false);
+          return;
+        }
         if (isStaff) {
           const offerForCharge = effectiveOfferForBooking ?? selectedServiceForPractitioner;
           const online = offerForCharge ? onlineChargeFromCatalogOffer(offerForCharge) : null;
@@ -1400,11 +1453,15 @@ export function AppointmentBookingFlow({
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
               require_deposit,
-              practitioner_id: selectedPractitionerId,
+              practitioner_id: practitionerIdForCreate,
               appointment_service_id: selectedServiceId,
               service_variant_id: selectedVariantId ?? undefined,
               duration_minutes: staffCustomDurationMinutes ?? undefined,
               source: staffBookingSource,
+              ...(staffBookingFlowDurationMs(staffFlowStartedAtRef.current) != null
+                ? { staff_booking_duration_ms: staffBookingFlowDurationMs(staffFlowStartedAtRef.current) }
+                : {}),
+              ...(staffRebookBootstrap?.guest ? { returning_guest: true } : {}),
             }),
           });
           const data = await res.json();
@@ -1417,7 +1474,7 @@ export function AppointmentBookingFlow({
             payment_url: data.payment_url,
           });
           setStep('confirmation');
-          onBookingCreated?.();
+          staffFlowStartedAtRef.current = Date.now();
           return;
         }
 
@@ -1434,7 +1491,7 @@ export function AppointmentBookingFlow({
             email: details.email || undefined,
             phone: details.phone,
             source: 'booking_page',
-            practitioner_id: selectedPractitionerId,
+            practitioner_id: practitionerIdForCreate,
             appointment_service_id: selectedServiceId,
             service_variant_id: selectedVariantId ?? undefined,
             dietary_notes: details.dietary_notes,
@@ -1528,7 +1585,6 @@ export function AppointmentBookingFlow({
         cancellation_notice_hours: refundNoticeHours,
       });
       setStep('confirmation');
-      onBookingCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update appointment');
     } finally {
@@ -1537,7 +1593,6 @@ export function AppointmentBookingFlow({
   }, [
     date,
     editBooking,
-    onBookingCreated,
     refundNoticeHours,
     selectedPractitionerId,
     selectedServiceId,
@@ -1637,13 +1692,12 @@ export function AppointmentBookingFlow({
       });
       const needsStripe = Boolean(data.requires_deposit && data.client_secret);
       setStep(needsStripe ? 'group_payment' : 'group_confirmation');
-      if (isStaff && !needsStripe) onBookingCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Group booking failed');
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, groupPeople, refundNoticeHours, isStaff, onBookingCreated, staffBookingSource]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -2259,6 +2313,38 @@ export function AppointmentBookingFlow({
             </div>
           ) : (
             <div className="space-y-2">
+              {anyAvailablePractitionerEnabled && practitionersForSelectedService.length > 1 && !isEdit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedServiceId) {
+                      const durKey = staffDurationOverrideKey(selectedServiceId, selectedVariantId);
+                      primeSelectedAppointmentCalendar(
+                        ANY_AVAILABLE_PRACTITIONER_ID,
+                        selectedServiceId,
+                        staffDurationOverrides[durKey] ?? null,
+                        selectedVariantId,
+                      );
+                    }
+                    setSelectedPractitionerId(ANY_AVAILABLE_PRACTITIONER_ID);
+                    setStep('slot');
+                  }}
+                  className={choiceCardClass}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                        *
+                      </div>
+                      <div>
+                        <div className="font-medium text-slate-900">Any available</div>
+                        <p className="text-xs text-slate-500">First available time across the team</p>
+                      </div>
+                    </div>
+                    <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                  </div>
+                </button>
+              ) : null}
               {practitionersForSelectedService.map((prac) => {
                 const offer = prac.services.find((s) => s.id === selectedServiceId);
                 return (
@@ -2396,6 +2482,15 @@ export function AppointmentBookingFlow({
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>
               <p className="mt-1 text-xs text-slate-400">Try a different date above.</p>
+              {appointmentWaitlistEnabled && selectedServiceId && isPublicGuest ? (
+                <AppointmentWaitlistJoin
+                  venueId={venue.id}
+                  serviceId={selectedServiceId}
+                  date={date}
+                  practitionerId={isAnyAvailablePractitionerId(selectedPractitionerId) ? null : selectedPractitionerId}
+                  currency={venue.currency}
+                />
+              ) : null}
             </div>
           ) : (
             renderTimeSlots(groupedSlots, (time) => {
@@ -2408,8 +2503,20 @@ export function AppointmentBookingFlow({
                   serviceId: selectedServiceId!,
                   serviceVariantId: selectedVariantId,
                   serviceName: offer?.name ?? '',
-                  practitionerId: selectedPractitionerId!,
-                  practitionerName: selectedPrac?.name ?? '',
+                  practitionerId: (() => {
+                    const picked = availableSlots.find((s) => s.start_time === time.slice(0, 5));
+                    if (isAnyAvailablePractitionerId(selectedPractitionerId) && picked?.practitioner_id) {
+                      return picked.practitioner_id;
+                    }
+                    return selectedPractitionerId!;
+                  })(),
+                  practitionerName: (() => {
+                    const picked = availableSlots.find((s) => s.start_time === time.slice(0, 5));
+                    if (isAnyAvailablePractitionerId(selectedPractitionerId) && picked?.practitioner_name) {
+                      return picked.practitioner_name;
+                    }
+                    return selectedPrac?.name ?? '';
+                  })(),
                   startTime: time,
                   durationMinutes: offer?.duration_minutes ?? 30,
                   bufferMinutes: offer?.buffer_minutes ?? 0,
@@ -2685,6 +2792,7 @@ export function AppointmentBookingFlow({
           <p className="mt-2 text-sm text-green-700">{selectedService?.name} with {selectedPrac?.name}</p>
           <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
           <p className="mt-3 text-xs text-green-700">Your changes have been saved.</p>
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
 
@@ -2753,6 +2861,7 @@ export function AppointmentBookingFlow({
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
           ) : null}
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
 
@@ -3135,6 +3244,7 @@ export function AppointmentBookingFlow({
               No deposit was taken. You can cancel or change these appointments at any time before they start (subject to the venue&apos;s terms).
             </p>
           )}
+          {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
     </div>

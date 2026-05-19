@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
       .eq('venue_id', parsed.data.venue_id)
       .eq('desired_date', parsed.data.desired_date)
       .eq('guest_phone', guestPhoneE164)
+      .eq('waitlist_kind', 'table')
       .eq('status', 'waiting');
 
     if ((count ?? 0) > 0) {
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
       .from('waitlist_entries')
       .insert({
         venue_id: parsed.data.venue_id,
+        waitlist_kind: 'table',
         service_id: parsed.data.service_id ?? null,
         desired_date: parsed.data.desired_date,
         desired_time: parsed.data.desired_time ?? null,

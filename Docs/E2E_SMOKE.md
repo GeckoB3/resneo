@@ -53,13 +53,15 @@ npm run test:e2e
 
 ## CI
 
-The `e2e-smoke` job in `.github/workflows/ci.yml` runs only when repository secrets are configured:
+The `e2e-smoke` job in `.github/workflows/ci.yml` runs only when the repository variable **`RUN_E2E_SMOKE`** is set to `true` (Settings → Secrets and variables → Actions → Variables). GitHub does not allow `secrets` in job-level `if` expressions.
+
+When enabled, configure these **secrets** for the job steps:
 
 - `E2E_VENUE_SLUG`
 - `E2E_STRIPE_CONNECTED_ACCOUNT_ID`
 - Plus standard app secrets (Supabase, Stripe, `PAYMENT_TOKEN_SECRET`)
 
-If secrets are missing, the job is skipped.
+If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 
 ## What the tests assert
 

@@ -74,7 +74,7 @@ jobs:
   e2e-smoke:
     name: E2E smoke (Playwright)
     runs-on: ubuntu-latest
-    if: ${{ secrets.E2E_VENUE_SLUG != '' && secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID != '' }}
+    if: ${{ vars.RUN_E2E_SMOKE == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

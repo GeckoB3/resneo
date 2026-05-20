@@ -284,6 +284,16 @@ function scrollNearestScrollParentToTop(from: HTMLElement | null) {
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }
 
+/** Update ?tab= without Next.js navigation (avoids re-running the settings server page). */
+function replaceSettingsTabInBrowserUrl(pathname: string, tab: TabKey, currentSearch: string): void {
+  if (typeof window === 'undefined') return;
+  const p = new URLSearchParams(currentSearch);
+  p.set('tab', tab);
+  const qs = p.toString();
+  const href = qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`;
+  window.history.replaceState(window.history.state, '', href);
+}
+
 function planPriceLabel(pricingTier: string): string {
   if (pricingTier === 'light') return `£${APPOINTMENTS_LIGHT_PRICE}/month`;
   if (pricingTier === 'plus') return `£${APPOINTMENTS_PLUS_PRICE}/month`;
@@ -1091,6 +1101,12 @@ function SettingsViewInner({
   const [selectedTab, setSelectedTab] = useState<TabKey>(() =>
     resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable),
   );
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => {
+    const initial = resolveInitialTab(initialTab, isAdmin, linkedAccountsAvailable);
+    const tabs = new Set<TabKey>([initial]);
+    if (planCheckoutReturn) tabs.add('plan');
+    return tabs;
+  });
   const settingsScrollAnchorRef = useRef<HTMLDivElement>(null);
   const skipScrollOnTabChangeRef = useRef(true);
   const previousSelectedTabRef = useRef<TabKey | null>(null);
@@ -1111,21 +1127,24 @@ function SettingsViewInner({
       visibleTabs.map((t) => ({ id: t.key, label: t.label, description: t.description })),
     [visibleTabs],
   );
-  const activeTabFromUrl = useMemo(
-    () => resolveInitialTab(searchParams.get('tab') ?? initialTab, isAdmin, linkedAccountsAvailable),
-    [searchParams, initialTab, isAdmin, linkedAccountsAvailable],
-  );
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
+  const markTabVisited = useCallback((tab: TabKey) => {
+    setVisitedTabs((current) => {
+      if (current.has(tab)) return current;
+      const next = new Set(current);
+      next.add(tab);
+      return next;
+    });
+  }, []);
+
   const replaceWithTab = useCallback(
     (tab: TabKey) => {
       if (tab === selectedTab) return;
       setSelectedTab(tab);
-      const p = new URLSearchParams(searchParams.toString());
-      p.set('tab', tab);
-      const qs = p.toString();
-      router.replace(qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`, { scroll: false });
+      markTabVisited(tab);
+      replaceSettingsTabInBrowserUrl(pathname, tab, searchParams.toString());
     },
-    [selectedTab, pathname, searchParams, router],
+    [selectedTab, pathname, searchParams, markTabVisited],
   );
 
   /**
@@ -1139,9 +1158,17 @@ function SettingsViewInner({
     setVenue(initialVenue);
   }
 
-  if (selectedTab !== activeTabFromUrl) {
-    setSelectedTab(activeTabFromUrl);
-  }
+  /** Back/forward and external navigations that change ?tab= without remounting. */
+  useEffect(() => {
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const tab = resolveInitialTab(params.get('tab') ?? undefined, isAdmin, linkedAccountsAvailable);
+      setSelectedTab(tab);
+      markTabVisited(tab);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [isAdmin, linkedAccountsAvailable, markTabVisited]);
 
   useLayoutEffect(() => {
     if (skipScrollOnTabChangeRef.current) {
@@ -1250,16 +1277,20 @@ function SettingsViewInner({
     queueMicrotask(() => {
       setPlanBannerDismissed(false);
       setSelectedTab('plan');
+      setVisitedTabs((current) => {
+        if (current.has('plan')) return current;
+        const next = new Set(current);
+        next.add('plan');
+        return next;
+      });
     });
     if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search);
-      p.set('tab', 'plan');
-      router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+      replaceSettingsTabInBrowserUrl(pathname, 'plan', window.location.search);
     }
     const delays = [400, 2500, 5000];
     const timeouts = delays.map((ms) => setTimeout(() => router.refresh(), ms));
     const cleanUrl = setTimeout(() => {
-      router.replace(`${pathname}?tab=plan`, { scroll: false });
+      replaceSettingsTabInBrowserUrl(pathname, 'plan', window.location.search);
     }, 5200);
     return () => {
       timeouts.forEach(clearTimeout);
@@ -1327,7 +1358,7 @@ function SettingsViewInner({
             type="button"
             onClick={() => {
               setPlanBannerDismissed(true);
-              router.replace(`${pathname}?tab=plan`, { scroll: false });
+              replaceSettingsTabInBrowserUrl(pathname, 'plan', searchParams.toString());
             }}
             className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-100 sm:px-3 sm:py-2 sm:text-xs"
           >
@@ -1357,7 +1388,8 @@ function SettingsViewInner({
       )}
 
       <div className="space-y-10">
-        <div className={selectedTab === 'profile' ? 'space-y-10' : 'hidden'} aria-hidden={selectedTab !== 'profile'}>
+        {visitedTabs.has('profile') && selectedTab === 'profile' ? (
+        <div className="space-y-10">
           {isAppointmentsProduct && isAdmin ? (
             <SettingsProfileGroup
               eyebrow="Your account"
@@ -1434,11 +1466,10 @@ function SettingsViewInner({
           ) : null}
 
         </div>
+        ) : null}
 
-        <div
-          className={selectedTab === 'booking-settings' ? 'space-y-10' : 'hidden'}
-          aria-hidden={selectedTab !== 'booking-settings'}
-        >
+        {visitedTabs.has('booking-settings') && selectedTab === 'booking-settings' ? (
+        <div className="space-y-10">
           <SettingsProfileGroup
             id="additional-booking-types"
             eyebrow="Booking types"
@@ -1457,8 +1488,10 @@ function SettingsViewInner({
             />
           ) : null}
         </div>
+        ) : null}
 
-        <div className={selectedTab === 'booking-page' ? 'space-y-10' : 'hidden'} aria-hidden={selectedTab !== 'booking-page'}>
+        {visitedTabs.has('booking-page') && selectedTab === 'booking-page' ? (
+        <div className="space-y-10">
           <SettingsProfileGroup
             eyebrow="Guest-facing page"
             title="URL & branding"
@@ -1495,17 +1528,18 @@ function SettingsViewInner({
             </SectionCard>
           </SettingsProfileGroup>
         </div>
+        ) : null}
 
-        <div className={selectedTab === 'business-hours' ? '' : 'hidden'} aria-hidden={selectedTab !== 'business-hours'}>
+        {visitedTabs.has('business-hours') && selectedTab === 'business-hours' ? (
           <OpeningHoursSection
             venue={venue}
             onUpdate={onUpdate}
             isAdmin={isAdmin}
             bookingModel={bookingModel ?? 'table_reservation'}
           />
-        </div>
+        ) : null}
 
-        <div className={selectedTab === 'plan' ? '' : 'hidden'} aria-hidden={selectedTab !== 'plan'}>
+        {visitedTabs.has('plan') && selectedTab === 'plan' ? (
           <PlanSection
             key={`plan-${venue.id}`}
             venue={venue}
@@ -1513,16 +1547,16 @@ function SettingsViewInner({
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
           />
-        </div>
+        ) : null}
 
-        <div className={selectedTab === 'payments' ? '' : 'hidden'} aria-hidden={selectedTab !== 'payments'}>
+        {visitedTabs.has('payments') && selectedTab === 'payments' ? (
           <StripeConnectSection
             stripeAccountId={venue.stripe_connected_account_id}
             isAdmin={isAdmin}
           />
-        </div>
+        ) : null}
 
-        <div className={selectedTab === 'comms' ? '' : 'hidden'} aria-hidden={selectedTab !== 'comms'}>
+        {visitedTabs.has('comms') && selectedTab === 'comms' ? (
           <CommunicationTemplatesSection
             venue={venue}
             isAdmin={isAdmin}
@@ -1534,10 +1568,9 @@ function SettingsViewInner({
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
             waitlistV2Enabled={initialFeatureFlagsResolved.waitlist_v2}
           />
-        </div>
+        ) : null}
 
-        {isAdmin ? (
-          <div className={selectedTab === 'staff' ? '' : 'hidden'} aria-hidden={selectedTab !== 'staff'}>
+        {isAdmin && visitedTabs.has('staff') && selectedTab === 'staff' ? (
             <StaffSection
               venueId={venue.id}
               isAdmin={isAdmin}
@@ -1545,18 +1578,10 @@ function SettingsViewInner({
               enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
               pricingTier={venue.pricing_tier ?? null}
             />
-          </div>
         ) : null}
 
-        {linkedAccountsAvailable ? (
-          <div
-            className={selectedTab === 'linked-accounts' ? '' : 'hidden'}
-            aria-hidden={selectedTab !== 'linked-accounts'}
-          >
-            {selectedTab === 'linked-accounts' ? (
+        {linkedAccountsAvailable && visitedTabs.has('linked-accounts') && selectedTab === 'linked-accounts' ? (
               <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
-            ) : null}
-          </div>
         ) : null}
       </div>
       </div>

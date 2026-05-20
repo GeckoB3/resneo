@@ -10,6 +10,7 @@ import {
 } from '@/lib/booking/public-book-tabs';
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
+import { PublicBookingAccountGateProvider } from '@/components/booking/PublicBookingAccountGate';
 import type { VenuePublic } from '@/components/booking/types';
 import {
   appointmentAccentStyle,
@@ -145,20 +146,22 @@ export function BookPublicBookingFlow({
         </div>
       )}
 
-      <BookingFlowRouter
-        key={activeSlug}
-        venue={venue}
-        activeBookingModel={activeModel}
-        lockedPractitioner={lockedPractitioner ?? undefined}
-        embed={embed}
-        onHeightChange={onHeightChange}
-        accentColour={accentColour}
-        collectiveId={collectiveId}
-        waitlistOfferEntryId={waitlistOfferEntryId}
-        preselectedServiceId={waitlistPrefillServiceId}
-        initialDate={waitlistPrefillDate}
-        initialTime={waitlistPrefillTime}
-      />
+      <PublicBookingAccountGateProvider venue={venue}>
+        <BookingFlowRouter
+          key={activeSlug}
+          venue={venue}
+          activeBookingModel={activeModel}
+          lockedPractitioner={lockedPractitioner ?? undefined}
+          embed={embed}
+          onHeightChange={onHeightChange}
+          accentColour={accentColour}
+          collectiveId={collectiveId}
+          waitlistOfferEntryId={waitlistOfferEntryId}
+          preselectedServiceId={waitlistPrefillServiceId}
+          initialDate={waitlistPrefillDate}
+          initialTime={waitlistPrefillTime}
+        />
+      </PublicBookingAccountGateProvider>
     </div>
   );
 }

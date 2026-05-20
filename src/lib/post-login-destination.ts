@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { resolveAuthNextPath, isPublicBookingAuthReturnPath } from '@/lib/safe-auth-redirect';
 import { SET_PASSWORD_PATH } from '@/lib/auth-link';
 
 export interface PostLoginDestinationInput {
@@ -29,7 +29,7 @@ export async function resolvePostLoginDestination(
     needsSetPassword: _needsSetPassword,
   } = input;
 
-  const next = sanitizeAuthNextPath(rawNext ?? undefined);
+  const next = resolveAuthNextPath(rawNext ?? undefined);
 
   if (isPlatformSuperuser) {
     return next.startsWith('/super') ? next : '/super';
@@ -38,7 +38,9 @@ export async function resolvePostLoginDestination(
   const explicitAccount = next === '/account' || next.startsWith('/account/');
   const explicitDashboard = next === '/dashboard' || next.startsWith('/dashboard/');
   const explicitOnboarding = next === '/onboarding' || next.startsWith('/onboarding/');
+  const explicitPublicBooking = isPublicBookingAuthReturnPath(next);
 
+  if (explicitPublicBooking) return next;
   if (explicitOnboarding) return next;
   if (explicitAccount || explicitDashboard) return next;
 

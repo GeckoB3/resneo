@@ -3,7 +3,7 @@ import { getAuthFailurePath, mapAuthErrorMessageToDetail, SET_PASSWORD_PATH } fr
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { sanitizeAuthNextPath, resolveAuthNextPath } from '@/lib/safe-auth-redirect';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   const rawNext = searchParams.get('next');
   const fallbackNext =
     rawNext != null && rawNext !== ''
-      ? sanitizeAuthNextPath(rawNext)
+      ? resolveAuthNextPath(rawNext)
       : type === 'invite' || type === 'recovery'
         ? SET_PASSWORD_PATH
         : sanitizeAuthNextPath(null);

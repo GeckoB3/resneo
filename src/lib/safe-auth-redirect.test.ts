@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeAuthNextPath, sanitizeMagicLinkNextPath } from './safe-auth-redirect';
+import {
+  buildMagicLinkConfirmNextQuery,
+  resolveAuthNextPath,
+  sanitizeAuthNextPath,
+  sanitizeMagicLinkNextPath,
+} from './safe-auth-redirect';
 
 describe('sanitizeAuthNextPath', () => {
   it('allows internal paths', () => {
@@ -22,11 +27,29 @@ describe('sanitizeMagicLinkNextPath', () => {
     expect(sanitizeMagicLinkNextPath('/dashboard/reports')).toBe('/dashboard/reports');
     expect(sanitizeMagicLinkNextPath('/account')).toBe('/account');
     expect(sanitizeMagicLinkNextPath('/account/bookings')).toBe('/account/bookings');
+    expect(sanitizeMagicLinkNextPath('/book/my-venue')).toBe('/book/my-venue');
+    expect(sanitizeMagicLinkNextPath('/book/my-venue?tab=classes')).toBe('/book/my-venue?tab=classes');
+    expect(sanitizeMagicLinkNextPath('/embed/my-venue')).toBe('/embed/my-venue');
   });
 
   it('rejects non-allowlisted paths', () => {
     expect(sanitizeMagicLinkNextPath('/api/venue/export')).toBe('/auth/callback');
     expect(sanitizeMagicLinkNextPath('/help')).toBe('/auth/callback');
     expect(sanitizeMagicLinkNextPath('//evil.com')).toBe('/auth/callback');
+  });
+});
+
+describe('resolveAuthNextPath', () => {
+  it('unwraps callback next query for booking pages', () => {
+    expect(resolveAuthNextPath('/auth/callback?next=%2Fbook%2Fmy-venue')).toBe('/book/my-venue');
+    expect(resolveAuthNextPath('/book/my-venue?tab=classes')).toBe('/book/my-venue?tab=classes');
+  });
+});
+
+describe('buildMagicLinkConfirmNextQuery', () => {
+  it('wraps booking paths for confirm emails', () => {
+    expect(buildMagicLinkConfirmNextQuery('/book/my-venue')).toBe(
+      '/auth/callback?next=%2Fbook%2Fmy-venue',
+    );
   });
 });

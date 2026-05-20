@@ -89,23 +89,6 @@ export async function POST(request: NextRequest) {
       marketing_consent: marketingConsentRaw,
       collective_id,
     } = parsed.data;
-    const authClient = await createClient();
-    const {
-      data: { user },
-    } = await authClient.auth.getUser();
-    if (!user?.email) {
-      return NextResponse.json(
-        { error: 'Sign in is required for multi-service bookings.' },
-        { status: 401 },
-      );
-    }
-    const customerEmail = (email?.trim() || user.email).toLowerCase();
-    if (customerEmail !== user.email.toLowerCase().trim()) {
-      return NextResponse.json(
-        { error: 'Booking email must match the signed-in account for multi-service bookings.' },
-        { status: 403 },
-      );
-    }
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
@@ -119,14 +102,15 @@ export async function POST(request: NextRequest) {
 
     const isOnlineLikeSource =
       source === 'online' || source === 'widget' || source === 'booking_page';
-    if (isOnlineLikeSource && !customerEmail) {
+    if (isOnlineLikeSource && !String(email ?? '').trim()) {
       return NextResponse.json(
         { error: 'Email is required for online bookings.' },
         { status: 400 },
       );
     }
+    const customerEmail = String(email ?? '').trim().toLowerCase();
     const guestLinkOptions = {
-      silentAuthSignup: true,
+      silentAuthSignup: isOnlineLikeSource && Boolean(customerEmail),
     };
 
     const marketingConsentForGuest =
@@ -146,6 +130,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
+    const authClient = await createClient();
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
       requireAccountLogin: Boolean(
         (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,

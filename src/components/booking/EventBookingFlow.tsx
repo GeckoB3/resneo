@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
+import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
@@ -141,6 +142,8 @@ export function EventBookingFlow({
   onBookingCreated,
 }: EventBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isPublicGuest = !isStaff;
+  const accountGate = usePublicBookingAccountGateContext();
   const acknowledgeStaffBooking = useCallback(() => {
     onBookingCreated?.();
   }, [onBookingCreated]);
@@ -153,6 +156,14 @@ export function EventBookingFlow({
   const sym = symForCurrency(currency);
 
   const [step, setStep] = useState<Step>('pick-event');
+  const advanceToGuestDetails = useCallback(async () => {
+    if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
+    setStep('details');
+  }, [accountGate, isPublicGuest]);
+  useEffect(() => {
+    if (!isPublicGuest || step !== 'details') return;
+    void accountGate.ensureSignedIn();
+  }, [accountGate, isPublicGuest, step]);
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const [eventSummaries, setEventSummaries] = useState<EventOfferingSummary[]>([]);
@@ -261,6 +272,13 @@ export function EventBookingFlow({
     async (details: GuestDetails) => {
       setError(null);
       if (!selectedOccurrence) return;
+      if (isPublicGuest) {
+        const emailError = accountGate.validateGuestEmail(details.email);
+        if (emailError) {
+          setError(emailError);
+          return;
+        }
+      }
       setSubmitting(true);
       try {
         const ticket_lines = selectedOccurrence.ticket_types
@@ -322,7 +340,13 @@ export function EventBookingFlow({
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+        if (!res.ok) {
+          if (isPublicGuest && accountGate.handleCreateResponseError(res.status, data.error)) {
+            setError('Sign in is required to book this venue.');
+            return;
+          }
+          throw new Error(data.error ?? 'Booking failed');
+        }
         setCreateResult({
           booking_id: data.booking_id,
           client_secret: data.client_secret,
@@ -343,6 +367,8 @@ export function EventBookingFlow({
       ticketSelections,
       totalTickets,
       isStaff,
+      isPublicGuest,
+      accountGate,
       staffBookingSource,
     ],
   );
@@ -548,7 +574,7 @@ export function EventBookingFlow({
               </div>
               <button
                 type="button"
-                onClick={() => setStep('details')}
+                onClick={() => void advanceToGuestDetails()}
                 className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
               >
                 Continue to guest details
@@ -599,6 +625,8 @@ export function EventBookingFlow({
               refundNoticeHours={eventRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
+              emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
             />
           )}
         </div>

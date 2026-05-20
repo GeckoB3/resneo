@@ -1,6 +1,42 @@
 const DEFAULT_AUTH_NEXT = '/dashboard';
 const DEFAULT_MAGIC_LINK_NEXT = '/auth/callback';
 
+function authNextPathOnly(raw: string): string {
+  return raw.split('?')[0]?.split('#')[0] ?? raw;
+}
+
+export function isPublicBookingAuthReturnPath(raw: string): boolean {
+  const pathOnly = authNextPathOnly(raw);
+  return (
+    pathOnly === '/book' ||
+    pathOnly.startsWith('/book/') ||
+    pathOnly === '/embed' ||
+    pathOnly.startsWith('/embed/')
+  );
+}
+
+function isAllowedMagicLinkDestination(pathWithOptionalQuery: string): boolean {
+  const pathOnly = authNextPathOnly(pathWithOptionalQuery);
+  return (
+    pathOnly === '/auth/callback' ||
+    pathOnly.startsWith('/auth/callback/') ||
+    pathOnly === '/dashboard' ||
+    pathOnly.startsWith('/dashboard/') ||
+    pathOnly === '/onboarding' ||
+    pathOnly.startsWith('/onboarding/') ||
+    pathOnly === '/account' ||
+    pathOnly.startsWith('/account/') ||
+    pathOnly === '/book' ||
+    pathOnly.startsWith('/book/') ||
+    pathOnly === '/embed' ||
+    pathOnly.startsWith('/embed/') ||
+    pathOnly === '/auth/choose-destination' ||
+    pathOnly.startsWith('/auth/choose-destination/') ||
+    pathOnly === '/super' ||
+    pathOnly.startsWith('/super/')
+  );
+}
+
 /**
  * Restricts open redirects from auth query params to same-origin paths only.
  */
@@ -8,6 +44,21 @@ export function sanitizeAuthNextPath(raw: string | null | undefined): string {
   if (!raw || typeof raw !== 'string') return DEFAULT_AUTH_NEXT;
   const next = raw.trim();
   if (!next.startsWith('/') || next.startsWith('//')) return DEFAULT_AUTH_NEXT;
+  return next;
+}
+
+/**
+ * Unwraps `/auth/callback?next=…` values used by branded magic-link emails.
+ */
+export function resolveAuthNextPath(raw: string | null | undefined): string {
+  let next = sanitizeAuthNextPath(raw ?? undefined);
+  if (next.startsWith('/auth/callback?')) {
+    const query = next.slice('/auth/callback?'.length);
+    const inner = new URLSearchParams(query).get('next');
+    if (inner) {
+      next = sanitizeAuthNextPath(decodeURIComponent(inner));
+    }
+  }
   return next;
 }
 
@@ -20,26 +71,12 @@ export function sanitizeMagicLinkNextPath(raw: string | null | undefined): strin
   const trimmed = raw.trim();
   if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return DEFAULT_MAGIC_LINK_NEXT;
 
-  const next = sanitizeAuthNextPath(raw);
-  if (
-    next === '/auth/callback' ||
-    next.startsWith('/auth/callback?') ||
-    next === '/dashboard' ||
-    next.startsWith('/dashboard?') ||
-    next.startsWith('/dashboard/') ||
-    next === '/onboarding' ||
-    next.startsWith('/onboarding?') ||
-    next.startsWith('/onboarding/') ||
-    next === '/account' ||
-    next.startsWith('/account?') ||
-    next.startsWith('/account/') ||
-    next === '/auth/choose-destination' ||
-    next.startsWith('/auth/choose-destination?') ||
-    next === '/super' ||
-    next.startsWith('/super?') ||
-    next.startsWith('/super/')
-  ) {
-    return next;
+  if (trimmed.startsWith('/auth/callback?')) {
+    return sanitizeAuthNextPath(trimmed);
+  }
+
+  if (isAllowedMagicLinkDestination(trimmed)) {
+    return trimmed;
   }
   return DEFAULT_MAGIC_LINK_NEXT;
 }

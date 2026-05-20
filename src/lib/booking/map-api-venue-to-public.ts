@@ -24,5 +24,7 @@ export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePu
     public_booking_area_mode:
       data.public_booking_area_mode === 'manual' ? 'manual' : data.public_booking_area_mode === 'auto' ? 'auto' : undefined,
     feature_flags: mapVenueFeatureFlagsForPublic(data.feature_flags),
+    require_account_login_for_bookings:
+      data.require_account_login_for_bookings === true ? true : undefined,
   };
 }

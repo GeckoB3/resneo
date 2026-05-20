@@ -10,6 +10,7 @@ import { ConfirmationStep } from './ConfirmationStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 
 export interface BookingFlowProps {
   venue: VenuePublic;
@@ -22,6 +23,7 @@ export interface BookingFlowProps {
 const steps: Array<'date' | 'details' | 'payment' | 'confirmation'> = ['date', 'details', 'payment', 'confirmation'];
 
 export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: BookingFlowProps) {
+  const accountGate = usePublicBookingAccountGateContext();
   const areaList = venue.areas ?? [];
   const showAreaTabs = useMemo(() => {
     return areaList.length > 1 && venue.public_booking_area_mode === 'manual';
@@ -199,10 +201,11 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   }, [fetchSlots]);
 
   // Time slot selected — advance to details
-  const handleSlotSelect = useCallback((slot: AvailableSlot) => {
+  const handleSlotSelect = useCallback(async (slot: AvailableSlot) => {
     setSelectedSlot(slot);
+    if (!(await accountGate.ensureSignedIn())) return;
     goNext();
-  }, [goNext]);
+  }, [accountGate, goNext]);
 
   const handleGuestAreaTabChange = useCallback(
     (areaId: string) => {
@@ -218,6 +221,11 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const handleDetailsSubmit = useCallback(async (details: GuestDetails) => {
     setGuestDetails(details);
     setError(null);
+    const emailError = accountGate.validateGuestEmail(details.email);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
     if (!selectedDate || !selectedSlot) return;
     setSubmitting(true);
     try {
@@ -243,6 +251,10 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       });
       const data = await res.json();
       if (!res.ok) {
+        if (accountGate.handleCreateResponseError(res.status, data.error)) {
+          setError('Sign in is required to book this venue.');
+          return;
+        }
         if (res.status === 409) {
           const altMsg = data.alternatives?.length
             ? `This time is no longer available. Try: ${data.alternatives.map((a: { time: string }) => a.time).join(', ')}`
@@ -263,7 +275,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, selectedDate, selectedSlot, partySize, embed, guestAreaId]);
+  }, [venue.id, selectedDate, selectedSlot, partySize, embed, guestAreaId, accountGate]);
 
   const handlePaymentComplete = useCallback(async () => {
     if (!createResult?.booking_id) {
@@ -356,6 +368,8 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
             onSubmit={handleDetailsSubmit}
             onBack={goBack}
             requiresDeposit={requiresDeposit}
+            initialDetails={accountGate.guestDetailsPrefill}
+            emailReadOnly={accountGate.emailReadOnly}
             depositPerPerson={
               selectedSlot.deposit_amount != null && partySize > 0
                 ? selectedSlot.deposit_amount / partySize

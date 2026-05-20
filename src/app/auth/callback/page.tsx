@@ -10,7 +10,7 @@ import {
   mapAuthErrorMessageToDetail,
   parseHashSearchParams,
 } from '@/lib/auth-link';
-import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { resolveAuthNextPath } from '@/lib/safe-auth-redirect';
 
 /**
  * Email invite / magic-link flows must exchange the auth code in the **browser**.
@@ -34,7 +34,7 @@ function AuthCallbackContent() {
         }
 
         const nextParam = searchParams.get('next') ?? '';
-        let destination = sanitizeAuthNextPath(nextParam);
+        let destination = resolveAuthNextPath(nextParam);
         try {
           const res = await fetch(
             `/api/auth/resolve-next?next=${encodeURIComponent(nextParam)}`,

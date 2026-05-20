@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
+import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
+import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
@@ -380,10 +382,20 @@ export function AppointmentBookingFlow({
     }
   }, [isStaff, editBooking]);
   const isPublicGuest = bookingAudience === 'public';
+  const accountGate = usePublicBookingAccountGateContext();
   const isEdit = Boolean(editBooking);
   const isStaffWalkInAppointment = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
+  const publicCreateErrorMessage = useCallback(
+    (res: Response, data: { error?: string }) => {
+      if (isPublicGuest && accountGate.handleCreateResponseError(res.status, data.error)) {
+        return 'Sign in is required to book this venue.';
+      }
+      return data.error ?? 'Booking failed';
+    },
+    [accountGate, isPublicGuest],
+  );
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
   const anyAvailablePractitionerEnabled = Boolean(
     venue.feature_flags?.resolved?.any_available_practitioner,
@@ -498,6 +510,15 @@ export function AppointmentBookingFlow({
   const calendarMonthRef = useRef(calendarMonth);
   calendarMonthRef.current = calendarMonth;
 
+  const advanceToGuestDetails = useCallback(async () => {
+    if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
+    setStep('details');
+  }, [accountGate, isPublicGuest]);
+  const advanceToGroupDetails = useCallback(async () => {
+    if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
+    setStep('group_details');
+  }, [accountGate, isPublicGuest]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!onHeightChange || !containerRef.current) return;
@@ -513,6 +534,12 @@ export function AppointmentBookingFlow({
     if (!onHeightChange) return;
     onHeightChange();
   }, [step, onHeightChange]);
+
+  useEffect(() => {
+    if (!isPublicGuest) return;
+    if (step !== 'details' && step !== 'group_details') return;
+    void accountGate.ensureSignedIn();
+  }, [accountGate, isPublicGuest, step]);
 
   useEffect(() => {
     function onReset() {
@@ -1548,6 +1575,13 @@ export function AppointmentBookingFlow({
     async (details: GuestDetails) => {
       setGuestDetails(details);
       setError(null);
+      if (isPublicGuest) {
+        const emailError = accountGate.validateGuestEmail(details.email);
+        if (emailError) {
+          setError(emailError);
+          return;
+        }
+      }
       const chain = multiServiceSegments;
       if (chain && chain.length > 1) {
         const v = await validateMultiServiceChain(chain);
@@ -1581,7 +1615,10 @@ export function AppointmentBookingFlow({
             }),
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          if (!res.ok) {
+            setError(publicCreateErrorMessage(res, data));
+            return;
+          }
           const ids = data.booking_ids as string[] | undefined;
           const primary = (data.primary_booking_id as string | undefined) ?? ids?.[0];
           if (!primary) throw new Error('Booking failed');
@@ -1687,7 +1724,10 @@ export function AppointmentBookingFlow({
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+        if (!res.ok) {
+          setError(publicCreateErrorMessage(res, data));
+          return;
+        }
         setCreateResult({
           booking_id: data.booking_id,
           client_secret: data.client_secret,
@@ -1723,6 +1763,10 @@ export function AppointmentBookingFlow({
       selectedServiceForPractitioner,
       onBookingCreated,
       collectiveId,
+      isPublicGuest,
+      accountGate,
+      publicCreateErrorMessage,
+      waitlistOfferEntryId,
     ],
   );
 
@@ -1842,6 +1886,13 @@ export function AppointmentBookingFlow({
   const handleGroupDetailsSubmit = useCallback(async (details: GuestDetails) => {
     setGuestDetails(details);
     setError(null);
+    if (isPublicGuest) {
+      const emailError = accountGate.validateGuestEmail(details.email);
+      if (emailError) {
+        setError(emailError);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const res = await fetch(bookingCreateGroupUrl(), {
@@ -1866,7 +1917,14 @@ export function AppointmentBookingFlow({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Group booking failed');
+      if (!res.ok) {
+        setError(
+          isPublicGuest
+            ? publicCreateErrorMessage(res, data)
+            : (data.error ?? 'Group booking failed'),
+        );
+        return;
+      }
       setGroupCreateResult({
         group_booking_id: data.group_booking_id,
         booking_ids: data.booking_ids,
@@ -1883,7 +1941,7 @@ export function AppointmentBookingFlow({
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isPublicGuest, accountGate, publicCreateErrorMessage]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -2827,7 +2885,7 @@ export function AppointmentBookingFlow({
             )}
             <button
               type="button"
-              onClick={() => setStep('details')}
+              onClick={() => void advanceToGuestDetails()}
               className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
             >
               Continue to details
@@ -2988,7 +3046,7 @@ export function AppointmentBookingFlow({
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
-              initialDetails={
+              initialDetails={mergeGuestDetailsPrefill(
                 editBooking
                   ? {
                       first_name: editBooking.guest_first_name,
@@ -2996,8 +3054,10 @@ export function AppointmentBookingFlow({
                       email: editBooking.guest_email,
                       phone: editBooking.guest_phone,
                     }
-                  : staffRebookAppointmentInitialDetails(staffRebookBootstrap)
-              }
+                  : staffRebookAppointmentInitialDetails(staffRebookBootstrap),
+                isPublicGuest ? accountGate.guestDetailsPrefill : undefined,
+              )}
+              emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
               initialAppointmentComments={editBooking ? undefined : staffRebookBootstrap?.appointmentComments}
               hideAppointmentRequestField={isEdit}
               submitLabel={isEdit ? 'Save changes' : undefined}
@@ -3190,7 +3250,7 @@ export function AppointmentBookingFlow({
                 Cancel
               </button>
               <button
-                onClick={() => setStep('group_details')}
+                onClick={() => void advanceToGroupDetails()}
                 className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm"
               >
                 Continue to details
@@ -3424,6 +3484,8 @@ export function AppointmentBookingFlow({
               multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
+              initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
+              emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
               {...publicDetailsFieldProps}
             />
           )}

@@ -113,6 +113,8 @@ interface DetailsStepProps {
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
   audience?: 'public' | 'staff' | 'staff_walk_in';
   initialDetails?: Partial<GuestDetails>;
+  /** Lock email when booking under a signed-in ReserveNI account. */
+  emailReadOnly?: boolean;
   /** Staff bootstrap from guest-history “Rebook” (session). */
   initialAppointmentComments?: string;
   submitLabel?: string;
@@ -140,6 +142,7 @@ export function DetailsStep({
   payAtVenuePaymentRequirement,
   audience = 'public',
   initialDetails,
+  emailReadOnly = false,
   initialAppointmentComments,
   submitLabel,
   hideAppointmentRequestField = false,
@@ -359,9 +362,13 @@ export function DetailsStep({
           <input
             type="email"
             {...register('email')}
-            className={inputCls}
+            readOnly={emailReadOnly}
+            className={`${inputCls}${emailReadOnly ? ' cursor-not-allowed bg-slate-50 text-slate-600' : ''}`}
             placeholder="you@example.com"
           />
+          {emailReadOnly ? (
+            <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ReserveNI email.</p>
+          ) : null}
         </FormField>
 
         <FormField label="Phone" required={audience !== 'staff_walk_in'}>

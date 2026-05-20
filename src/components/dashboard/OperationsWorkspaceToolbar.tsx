@@ -391,13 +391,14 @@ export function OperationsWorkspaceToolbar({
                 ref={dateTriggerRef}
                 type="button"
                 onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
+                title={typeof dateLabel === 'string' ? dateLabel : formatDateHeading(date)}
                 className={compact
-                  ? 'min-h-8 w-[clamp(7.5rem,42vw,9rem)] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
-                  : 'min-h-10 min-w-[8.75rem] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:min-w-[10rem] sm:px-3 sm:text-sm'}
+                  ? 'inline-flex min-h-8 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 whitespace-nowrap sm:text-xs'
+                  : 'inline-flex min-h-10 shrink-0 flex-col items-start justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 whitespace-nowrap sm:px-3 sm:text-sm'}
                 aria-expanded={open === 'date'}
                 aria-controls={datePanelId}
               >
-                <span className="block truncate">{dateLabel ?? formatDateHeading(date)}</span>
+                <span className="whitespace-nowrap tabular-nums">{dateLabel ?? formatDateHeading(date)}</span>
                 {!compact && isToday ? (
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Today</span>
                 ) : null}

@@ -4369,7 +4369,7 @@ export function PractitionerCalendarView({
                   {timeLabels.map((t, i) =>
                     i % 4 === 0 ? (
                       <div
-                        key={t}
+                        key={`time-label-${i}`}
                         className="absolute left-0 flex w-full justify-end pr-1.5"
                         style={{ top: i * SLOT_HEIGHT, transform: 'translateY(-50%)' }}
                       >

@@ -4,7 +4,7 @@
 **Plan scope:** Appointments-family venues only (`light`, `plus`, `appointments` pricing tiers)
 **Settings location:** `/dashboard/settings` → **Linked Accounts** tab (`?tab=linked-accounts`)
 **Last updated:** 2026-05-18
-**Related scope doc:** `Docs/reserveni-linked-calendar-grid-integration-scope.md` (calendar grid integration — largely complete on `/dashboard/calendar`; day-sheet deferred)
+**Related scope doc:** `Docs/archive/reserveni-linked-calendar-grid-integration-scope.md` (archived — calendar grid integration shipped on `/dashboard/calendar`; day-sheet deferred)
 
 ---
 
@@ -1037,7 +1037,7 @@ spec.
 | Day-sheet integration | §8.2 | **Done (synced list)** — `LinkedCalendarView` follows day-sheet date; link to full calendar. Full column grid on day-sheet deferred (restaurant/legacy surface). |
 | ~10 links soft warning | §3 | **Done** — `LINK_COUNT_SOFT_WARNING` (10); banner counts active + pending links in `LinkedAccountsSection`. |
 | PRD / founder-facing docs | Project rules | **Done** — row in §4 “What Is Not in the MVP” + glossary entries in `Docs/PRD.md`. |
-| Manual QA matrix | Scope doc §6.1 | **Done** — checklist in `Docs/reserveni-linked-calendar-grid-integration-scope.md` §6.1 (execute before GA). |
+| Manual QA matrix | Scope doc §6.1 | **Done** — checklist in `Docs/archive/reserveni-linked-calendar-grid-integration-scope.md` §6.1 (execute before GA). |
 
 **P2 — nice to have**
 

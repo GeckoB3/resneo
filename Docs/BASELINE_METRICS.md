@@ -1,6 +1,6 @@
 # Baseline metrics (P0.6)
 
-Phase 1a success metrics in [ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md](./ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md) §10.2 need a **before** picture. P0.6 captures that baseline per venue.
+Phase 1a success metrics in [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md) §9.2 need a **before** picture. P0.6 captures that baseline per venue.
 
 ## What is measured
 

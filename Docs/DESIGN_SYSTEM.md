@@ -130,5 +130,5 @@ Stories live in `src/components/ui/primitives/*.stories.tsx`.
 ## Related documents
 
 - [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./UI_EXCELLENCE_REVIEW_AND_PLAN.md)
-- [ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md](./ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md) — P0.1, P0.2
+- [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md) — P0.1, P0.2
 - `.cursor/rules/frontend.mdc` — mobile, accessibility, loading states

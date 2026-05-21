@@ -1,6 +1,6 @@
 # Appointments feature flags (P0.3)
 
-Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md](./ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md).
+Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md).
 
 ## Flags
 

@@ -1,9 +1,24 @@
-# ReserveNI - Bookable Services Landscape & Unified Architecture Plan
+# ReserveNI - Bookable Services Landscape & Unified Architecture
 
-**From Restaurant Bookings to Every Bookable Service in Northern Ireland**  
-**March 2026** · **Last reviewed:** March 2026
+**From Restaurant Bookings to Every Bookable Service in Northern Ireland**
+**Originally March 2026** · **Last reviewed:** May 2026
 
-This document is the **master reference** for ReserveNI’s five booking models: what each pattern means, what is implemented in the repo today, and how to extend Models C–E using the same patterns as Model B.
+This document is the **conceptual master reference** for ReserveNI's booking
+models: what each scheduling pattern means, which business types map to it, and
+the shared architecture that lets one codebase serve them all.
+
+> **Status (May 2026):** All five booking models are **implemented and shipped**.
+> The original version of this document was written while Models C–E (events,
+> classes, resources) were still being built out and described them as work "to
+> extend". That build-out is **complete** — see §1.3. The lasting value of this
+> document is its **architecture and taxonomy** (the five-model framework, the
+> business-type mapping, the feature matrix, the terminology system), all of
+> which remain current. For up-to-date *functionality* status and the
+> development roadmap, the authoritative sources are:
+>
+> - `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` (Models A/B-appointments)
+> - `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` (Models C/D/E)
+> - `Docs/ReserveNI_Booking_Models_Reference.md` (canonical model definitions)
 
 ---
 
@@ -44,15 +59,20 @@ You might look at this list and see 100+ business types. But every single one ma
 
 This is the key architectural decision: **build five booking engines, not fifty dashboards.**
 
-### 1.3 Implementation status (living)
+### 1.3 Implementation status (May 2026)
+
+**All five models are shipped.** Summary; see the roadmap/review docs linked at
+the top for detailed, current functionality status.
 
 #### Model A (`table_reservation`)
 
-**Status: MVP complete.** Service-based availability engine (with legacy path only where venues are not yet on service config), deposits, communications, day sheet, table management (floor plan / table grid), waitlist, reporting.
+**Status: shipped.** Service-based availability engine, deposits, communications, day sheet, table management (floor plan / table grid, automatic table combination, covers vs table mode), dining waitlist, reporting.
 
-#### Model B (`practitioner_appointment`)
+#### Model B (`practitioner_appointment` / `unified_scheduling`)
 
-**Status: MVP shipped.** Primary implementation surfaces:
+**Status: shipped, including reception-parity Phase 1a.** Beyond the core scheduling surfaces below, the following shipped in May 2026 (behind per-venue feature flags pending pilot rollout): **any-available practitioner**, **guest self-reschedule**, **appointment waitlist v2**, **calendar blocks UI**, and a unified booking detail surface. See `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`.
+
+Core implementation surfaces:
 
 | Area | What exists (code pointers) |
 |------|------------------------------|
@@ -64,19 +84,17 @@ This is the key architectural decision: **build five booking engines, not fifty 
 | Bookings | Appointments-oriented bookings UI; walk-in API for appointment venues; group booking support where enabled; `client_arrived_at` (arrived/waiting before “Seated”) |
 | Payments / comms | Stripe Connect; templated email/SMS; deposit-request and comm log types - see migration [`supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql`](../supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql) |
 
-**Tooling note:** Linting uses **Next.js ESLint** ([`eslint.config.mjs`](../eslint.config.mjs) - `eslint-config-next` core-web-vitals + TypeScript). **`eslint-plugin-react-compiler` is not enabled** in this repo; adopt it deliberately (e.g. warn-only on a directory first) if you want compiler-oriented rules in CI.
-
-**Honest gaps (iterate as needed):** Consumer discovery / marketing site is out of app scope unless specified. Model B onboarding vs §6.2 is documented in **§6.3** (wizard today + dashboard source of truth).
+**Tooling note:** Linting uses **Next.js ESLint** ([`eslint.config.mjs`](../eslint.config.mjs) - `eslint-config-next` core-web-vitals + TypeScript), plus a repo-local rule that warns on hand-rolled modal overlays. The **React Compiler** is enabled via `babel-plugin-react-compiler` (see `package.json`).
 
 #### Models C, D, E (`event_ticket`, `class_session`, `resource_booking`)
 
-**Status: foundation in place; product incomplete vs B.**
+**Status: shipped.** Models C/D/E reached parity with Model B on the things that matter for running a venue end-to-end — catalogue management, public booking, payments, cancellation, comms, roster/attendance, reporting, and unified calendar/list/dashboard surfaces.
 
-- **Database:** Core tables and `bookings` FKs created in [`supabase/migrations/20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql) (see §5).
-- **Availability:** Dedicated engines (e.g. [`src/lib/availability/event-ticket-engine.ts`](../src/lib/availability/event-ticket-engine.ts) and siblings) + `POST /api/booking/create` validation branches in [`src/app/api/booking/create/route.ts`](../src/app/api/booking/create/route.ts).
-- **Dashboard:** Sidebar entries for event manager, class timetable, resource timeline - [`src/app/dashboard/DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx); depth varies by screen.
+- **Database:** Core tables and `bookings` FKs created in [`supabase/migrations/20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql); class commerce, recurring reservations and related tables added later (see `Docs/schema.sql`).
+- **Availability:** Dedicated engines ([`src/lib/availability/event-ticket-engine.ts`](../src/lib/availability/event-ticket-engine.ts) and siblings) + `POST /api/booking/create` validation branches.
+- **Dashboard:** Full managers — event manager, class timetable (+ class commerce products), resource timeline.
 
-**Remaining build-out (phrasing for all three):** Guest-facing booking UX to parity with Model B; staff CRUD and polish; communications and reporting parity; venue `PATCH` reschedule rules per model (mirror Model B: exclude self from capacity, model-specific “invalid slot” edge cases).
+**Known maturity gaps (not "incomplete", but uneven vs appointments):** post-booking **guest self-modify** and **staff slot reschedule** for C/D/E are intentionally limited to view/cancel + cancel-and-rebook; resources lack an instance detail sheet and calendar drag. These are documented and code-enforced — see `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` for the full per-model review and remaining polish items.
 
 ---
 
@@ -193,7 +211,7 @@ Extend mappings when adding business types: prefer **config + DB** over hard-cod
 
 ### 3.4 Dashboard views per model
 
-Each booking model shows a different set of dashboard pages. **Model B** reflects current nav; **C/D/E** include routes that exist but may be **partial** (shell or incomplete product).
+Each booking model shows a different set of dashboard pages. All models have shipped dashboard surfaces; nav is driven by `booking_model` + `enabled_models`.
 
 | Dashboard page | A: Table | B: Appointment | C: Event | D: Class | E: Resource |
 |---|---|---|---|---|---|
@@ -204,13 +222,13 @@ Each booking model shows a different set of dashboard pages. **Model B** reflect
 | Practitioner calendar | - | ✅ | - | - | - |
 | Calendar (registry) | - | ✅ `/dashboard/calendar` | - | - | - |
 | Appointment services + team hours | - | ✅ Services + Availability | - | - | - |
-| Event manager | - | - | ⚠️ Partial | - | - |
-| Class timetable | - | - | - | ⚠️ Partial | - |
-| Resource timeline | - | - | - | - | ⚠️ Partial |
-| Waitlist | ✅ | - | - | - | - |
+| Event manager | - | - | ✅ | - | - |
+| Class timetable (+ commerce products) | - | - | - | ✅ | - |
+| Resource timeline | - | - | - | - | ✅ |
+| Waitlist | ✅ (dining) | ✅ (appointment waitlist v2) | - | - | - |
 | Reports / settings | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) |
 
-Legend: ✅ shipped for MVP · ⚠️ route/feature present; product depth TBD · - not applicable
+Legend: ✅ shipped · - not applicable
 
 ### 3.5 Terminology system
 
@@ -224,35 +242,36 @@ A physiotherapist can see Patient / Appointment / Physio; a barber sees Client /
 
 ---
 
-## 4. Build priority and sequence
+## 4. Build status and what comes next
 
-### 4.1 Delivered
+### 4.1 All five models delivered
 
-- **Model A** - MVP complete (restaurant / table reservation).
-- **Model B** - MVP shipped (practitioner appointments as in §1.3).
+The original build sequence (A → B → C → D → E) is **complete**. Every model has
+a shipped availability engine, public booking flow, staff management surface,
+payment path, and presence on the unified calendar, bookings list, reports and
+dashboard home.
 
-### 4.2 Remaining work (product completion, not greenfield schema)
+| Model | Status | Notes |
+|---|---|---|
+| A: Table | Shipped | Table management, combination engine, covers/table modes, dining waitlist |
+| B: Appointment | Shipped | Incl. Phase 1a reception parity (any-stylist, reschedule, waitlist v2, blocks) |
+| C: Event | Shipped | Event manager, ticket tiers, attendee/roster tooling |
+| D: Class | Shipped | Timetable, instances, roster, **class commerce** (credits/courses/memberships) |
+| E: Resource | Shipped | Resource timeline, duration-based booking, pricing rules |
 
-Phases below assume **migrations already applied** (see §5). Effort is guest UX, staff tooling, comms/reporting parity, and hardening - not inventing new tables from scratch.
+### 4.2 Where the work goes now
 
-**Phase 2 - Model C (`event_ticket`)**  
-Complete guest event listing + ticket purchase flow; staff event CRUD parity with Model B admin patterns; attendee management; reminders; reporting. Reuse `experience_events` + `event_ticket_types` + `event-ticket-engine`.
+Development is no longer about *completing models* — it is about **closing the
+operating loop and winning segments**. The current priorities live in the
+roadmap docs, not here:
 
-**Phase 3 - Model D (`class_session`)**  
-Timetable UX, instance generation/management, spot booking UI, roster/check-in. Shares “dated occurrence + capacity” mental model with C; reuses `class_types`, `class_timetable`, `class_instances` and class availability engine.
-
-**Phase 4 - Model E (`resource_booking`)**  
-Resource timeline UX, duration-based booking UI, pricing rules. Close to Model B’s “grid of bookable intervals” but keyed by `resource_id` and `venue_resources.availability_hours`.
-
-### 4.3 Phased estimate (from current codebase)
-
-| Phase | Model | Status | Remaining focus |
-|---|---|---|---|
-| - | A: Table | Complete | Maintenance + founding venues |
-| - | B: Appointment | MVP shipped | Polish, lint/CI, onboarding parity |
-| 2 | C: Event | Foundation | Guest + staff product completion |
-| 3 | D: Class | Foundation | Timetable + roster product completion |
-| 4 | E: Resource | Foundation | Timeline + booking UX |
+- **Appointments-family roadmap** — checkout/payment surface, compliance
+  (consultation forms, patch tests), retention (packages, reviews, loyalty),
+  growth channels, native staff app. See
+  `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`.
+- **Classes / events / resources** — post-booking guest self-modify and staff
+  reschedule parity, resource calendar ops, account-portal depth. See
+  `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`.
 
 ---
 
@@ -386,6 +405,10 @@ Single Next.js app: shared shell, conditional nav and pages by `booking_model`. 
 
 ## 8. Pricing model summary
 
+> **Out of date — indicative only.** This predates the **Appointments Light /
+> Plus** tiers. For current pricing see `Docs/PRD.md` §6 and
+> `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` §2.2.
+
 | Model | Pricing | Rationale |
 |---|---|---|
 | A: Table Reservation | £79/month flat | Venue-based |
@@ -398,13 +421,22 @@ Solo practitioners get low entry; multi-practitioner businesses scale; venue-bas
 
 ---
 
-## 9. Summary - what to do next
+## 9. Summary
 
-1. **Now:** Operate and harden Model A and Model B for founding venues (reliability, comms, payments, support).
-2. **Next:** Complete **Model C** guest + staff product on top of existing `experience_events` / engines (Phase 2).
-3. **Then:** **Model D** timetable and roster UX (Phase 3), reusing patterns from C where instances and capacity overlap.
-4. **Then:** **Model E** resource timeline and booking length UX (Phase 4).
-5. **Ongoing:** Multi-vertical marketing/onboarding that routes businesses to the correct `booking_model` without forking the app.
-6. **Future:** Consumer discovery across verticals (out of scope unless prioritised).
+All five booking models are built and shipped. This document's enduring purpose
+is the **architecture and taxonomy**: the five-model framework, the business-type
+mapping, the feature matrix, the unified-app pattern, and the terminology system.
 
-New business types should map to one of the five models and extend **terminology + defaults**; new engines are only needed for a new **model**, not for each industry name.
+What that means in practice:
+
+1. **New business types** map to one of the five existing models and extend
+   **terminology + defaults** — no new code or engines required.
+2. **New engines / models** are rare and only justified by a genuinely new
+   scheduling *pattern*, not by a new industry name.
+3. **Current development priorities** are not "finish the models" — they are
+   closing the operating loop and winning target segments. See the roadmap docs
+   linked at the top of this document and in §4.2.
+
+For pricing, see `Docs/PRD.md` and the appointments roadmap — the indicative
+table in §8 predates the Appointments Light/Plus tiers and should not be treated
+as current.

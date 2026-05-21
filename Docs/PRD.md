@@ -2,22 +2,62 @@
 
 **Reserve NI**
 
-*The booking and guest management platform built for Northern Ireland
-restaurants*
+*The booking and guest management platform for Northern Ireland
+appointment, class, event and hospitality businesses*
 
   ------------------ ----------------------------------------------------
-  **Version**        2.0
+  **Version**        2.1
 
-  **Date**           February 2026
+  **Date**           Updated May 2026 (originally February 2026)
 
-  **Status**         MVP Build Specification
+  **Status**         Living product reference
 
-  **Focus**          Pilot --- 10 to 20 founding venues
+  **Focus**          Pilot --- founding venues across appointments,
+                     classes, events, resources and restaurants
 
   **Authors**        Founding Team
   ------------------ ----------------------------------------------------
 
 **CONFIDENTIAL**
+
+# 0. Document status (May 2026)
+
+This PRD was originally written (v2.0, February 2026) as the **MVP build
+specification for a restaurant-only product**. Reserve NI has since grown
+into a **multi-model booking platform**, and the product strategy now
+leads with **appointment-style businesses** (hair salons, barbers,
+beauticians, massage therapists, dog groomers and similar), with classes,
+ticketed events, bookable resources and restaurants supported on the same
+core.
+
+Read this document with that in mind:
+
+- **Sections 1–2 (thesis, restaurant persona)** record the *founding*
+  restaurant thesis. It remains broadly valid for the restaurant SKU but
+  is **no longer the whole product**. A second primary persona — the
+  independent appointment-business owner — now carries equal weight; see
+  the roadmap docs below for that customer.
+- **Section 3 (MVP feature set)** describes restaurant booking flows.
+  These shipped. Appointments, classes, events and resources have since
+  shipped alongside them as additional booking models. §3.10 (Linked
+  Accounts) is current.
+- **Sections 6 (pricing) and 11–12 (timeline / beyond MVP)** predate the
+  Appointments Light/Plus tiers and the current roadmap. Treat the
+  roadmap documents as authoritative where they conflict.
+
+**Authoritative current documents:**
+
+- `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` — current state,
+  competitive position, and the appointments-first development roadmap.
+- `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
+  — classes, events and resources review.
+- `Docs/ReserveNI_Booking_Models_Reference.md` — canonical definitions of
+  the booking models.
+- `Docs/ReserveNI_Unified_Booking_Functionality.md` — multi-model parity
+  and delivery status.
+
+A full rewrite of Sections 1–2 and 6–12 to a multi-model framing is
+tracked as a separate task; this status section is the interim bridge.
 
 # 1. Executive Summary
 
@@ -850,7 +890,7 @@ section 4 as deferred work.
   ---------------------------------------------------------------------------
 
 Specification: `Docs/reserveni-linked-accounts-spec.md`. Calendar grid
-integration scope: `Docs/reserveni-linked-calendar-grid-integration-scope.md`.
+integration scope: `Docs/archive/reserveni-linked-calendar-grid-integration-scope.md`.
 
 # 4. What Is Not in the MVP
 
@@ -900,7 +940,7 @@ this list is what makes the four-month build timeline achievable.
                          Reserve NI handles booking deposits and
                          pre-payments via Stripe Connect; retail at the
                          chair is kept on existing hardware. See
-                         `Docs/ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md`
+                         `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`
                          section 6.2.
 
   **Advanced analytics   Phase 2. MVP reporting covers the metrics needed

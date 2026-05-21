@@ -1,126 +1,218 @@
--- Reserve NI - Database schema reference
--- Apply via Supabase migrations in supabase/migrations/ (in order).
+-- =============================================================================
+-- Reserve NI — Database schema reference (curated map)
+-- =============================================================================
+-- Last regenerated: 21 May 2026, from supabase/migrations/ (171 migrations).
+--
+-- THIS FILE IS NOT THE SOURCE OF TRUTH.
+-- The canonical schema is the ordered migration set in `supabase/migrations/`.
+-- This file is a hand-curated, domain-grouped INVENTORY to help you find your
+-- way around — it deliberately omits column-level detail, because that detail
+-- drifts. For the authoritative definition of any table, open the migration
+-- that creates it.
+--
+-- To get a real, complete schema dump from a live database, run:
+--     supabase db dump --schema public > schema.generated.sql
+-- (or `pg_dump --schema-only --schema=public <connection-string>`).
+--
+-- When you add a migration that creates or drops a table or enum, update the
+-- inventory below and bump the "Last regenerated" date.
+-- =============================================================================
+
 
 -- =============================================================================
 -- ENUMS
 -- =============================================================================
+-- Values below are current as of the regeneration date. Enums gain values via
+-- `ALTER TYPE ... ADD VALUE`; check the latest migration if in doubt.
 
--- CREATE TYPE staff_role AS ENUM ('admin', 'staff');
--- CREATE TYPE booking_status AS ENUM ('Pending','Confirmed','Cancelled','No-Show','Completed','Seated');
--- CREATE TYPE booking_source AS ENUM ('online', 'phone', 'walk-in');
--- CREATE TYPE deposit_status AS ENUM ('Not Required','Pending','Paid','Refunded','Forfeited');
+-- staff_role                    ('admin','staff')
+-- booking_status                ('Pending','Booked','Confirmed','Cancelled','No-Show','Completed','Seated')
+-- booking_source                ('online','phone','walk-in','booking_page','import','widget')
+-- deposit_status                ('Not Required','Pending','Paid','Refunded','Forfeited','Failed','Waived')
+-- booking_model                 ('table_reservation','practitioner_appointment','unified_scheduling',
+--                                'event_ticket','class_session','resource_booking')
+--                               NB: 6 enum values; conceptually 5 booking models —
+--                               Model B has both 'practitioner_appointment' and 'unified_scheduling'.
+--                               See Docs/ReserveNI_Booking_Models_Reference.md (canonical).
+-- waitlist_status               ('waiting','offered','confirmed','expired','cancelled')
+-- class_payment_requirement     ('none','deposit','full_payment')
+-- block_type                    calendar/availability block kinds (incl. 'amended_hours')
 
--- =============================================================================
--- TABLES
--- =============================================================================
+-- Class-commerce enums — see migrations 20260701/20260702* and 20260729*:
+--   class_course_enrollment_status, class_credit_ledger_reason,
+--   class_membership_status, class_recurring_reservation_status
 
--- venues - core venue profile
--- id (uuid PK), name, slug (unique), address, phone, email, cover_photo_url,
--- opening_hours (jsonb), booking_rules (jsonb), deposit_config (jsonb),
--- availability_config (jsonb), daily_booking_log_email_config (jsonb),
--- require_account_login_for_bookings (boolean), timezone (default 'Europe/London'), created_at, updated_at
+-- Linked-accounts enums — see migration 20260919120000_linked_accounts.sql:
+--   link_status, link_action_level, link_calendar_visibility, link_termination_reason
 
--- staff - venue staff; email retained for invites; user_id preferred for auth linkage
--- id (uuid PK), venue_id (FK → venues), user_id (FK → auth.users, nullable), email, name, role (staff_role),
--- permissions (jsonb), invited_at, accepted_at, revoked_at, phone, created_at, updated_at
-
--- user_profiles - application profile 1:1 with auth.users (customer + staff overlap)
--- id (uuid PK, FK → auth.users), display_name, first_name, last_name, phone, profile_image_url,
--- locale, timezone, notification_preferences (jsonb), default_login_destination ('account'|'dashboard'|'ask'),
--- stripe_customer_id, account_claimed_at, last_active_at, deleted_at (soft-delete grace), created_at, updated_at
-
--- user_devices - optional push device rows (future mobile)
--- id (uuid PK), user_id (FK), platform, push_token, device_name, app_version, os_version, last_seen_at, created_at
-
--- guests - one per guest per venue; unique (venue_id, email); index (venue_id, phone)
--- id (uuid PK), venue_id (FK), user_id (FK → auth.users, nullable), name, email, phone (E.164),
--- marketing_consent, marketing_consent_at, marketing_opt_out, source, first_booked_at, last_booked_at,
--- total_bookings_count, total_spent_minor, waiver_signed_at, waiver_version, tags, custom_fields,
--- global_guest_hash, visit_count, identifiability_tier (generated), created_at, updated_at
--- guests_account_safe view: customer-safe projection excluding venue-private CRM fields
-
--- RPC/helpers: handle_new_user (auth trigger), claim_user_account, request_account_deletion,
--- refresh_guest_booking_aggregates, lookup_auth_user_id_by_email (service_role)
-
--- bookings
--- id (uuid PK), venue_id (FK), guest_id (FK), booking_date, booking_time, party_size,
--- status (booking_status), source (booking_source), dietary_notes, occasion, special_requests,
--- deposit_amount_pence, deposit_status, stripe_payment_intent_id, cancellation_deadline,
--- created_by_staff_id, cancelled_by_staff_id, cancellation_actor_type, created_at, updated_at
-
--- events - immutable append-only audit log; no UPDATE/DELETE
--- id (uuid PK), venue_id (FK), booking_id (FK nullable), event_type (text), payload (jsonb), created_at
 
 -- =============================================================================
--- MULTI-MODEL BOOKING (added 2026-03-27)
+-- TABLE INVENTORY (public schema, grouped by domain)
 -- =============================================================================
+-- ~95 tables. For each table's columns, FKs and RLS, open the creating migration.
 
--- CREATE TYPE booking_model AS ENUM ('table_reservation','practitioner_appointment','event_ticket','class_session','resource_booking');
+-- --- Core venue & identity ---------------------------------------------------
+-- venues                         Core venue profile, booking_model, enabled_models,
+--                                terminology, opening_hours / booking_rules /
+--                                deposit_config / availability_config (jsonb), feature_flags
+-- staff                          Venue staff; admin/staff role; invite + auth linkage
+-- staff_calendar_assignments      Staff scoped to specific bookable calendars
+-- user_profiles                  App profile 1:1 with auth.users (customer + staff)
+-- user_devices                   Push device rows (future mobile)
+-- platform_superusers            ReserveNI platform-side admin access
 
--- venues additions:
---   booking_model (booking_model, default 'table_reservation')
---   business_type (text), business_category (text), terminology (jsonb)
+-- --- Guests & CRM ------------------------------------------------------------
+-- guests                          One row per guest per venue (unique venue_id+email)
+-- guest_documents                 Uploaded / signed documents on a contact
+-- guest_households                CRM household grouping
+-- guest_household_members         Household membership
+-- guest_loyalty_ledger            Loyalty point ledger (manual admin adjustments)
+-- guest_marketing_consent_events  GDPR consent change audit
+-- guest_merge_events              Contact-merge audit
+-- contact_audit_events            General contact-change audit
+-- custom_client_fields            Venue-defined custom CRM fields
 
--- bookings additions:
---   guest_attendance_confirmed_at (timestamptz, nullable) - guest tapped "I'll be there" on reminder link
---   practitioner_id (FK → practitioners), appointment_service_id (FK → appointment_services)
---   experience_event_id (FK → experience_events), class_instance_id (FK → class_instances)
---   resource_id (FK → venue_resources), booking_end_time (time)
+-- --- Bookings core & audit ---------------------------------------------------
+-- bookings                         Central booking row for ALL models; model FKs:
+--                                  practitioner_id, appointment_service_id,
+--                                  experience_event_id, class_instance_id,
+--                                  resource_id, event_session_id, calendar_id
+-- booking_ticket_lines             Ticket / line breakdown (Models C/D)
+-- booking_short_links              Short links for manage/confirm pages
+-- events                           IMMUTABLE append-only booking audit log
+-- webhook_events                   Stripe / external webhook idempotency log
+-- reconciliation_alerts            Payment / data reconciliation findings
+-- runs                             Cron / batch job run records
 
--- practitioners - staff who take appointments (Model B)
--- id (uuid PK), venue_id (FK), staff_id (FK nullable), name, email, phone,
--- working_hours (jsonb), break_times (jsonb), days_off (jsonb), is_active, sort_order
+-- --- Appointments & unified scheduling (Model B) -----------------------------
+-- practitioners                    Bookable staff who take appointments
+-- practitioner_services            Which practitioners offer which services
+-- practitioner_leave_periods       Leave / days off
+-- practitioner_calendar_blocks     Manual calendar blocks (block-time UI)
+-- appointment_services             Service catalogue (duration, buffers, price, deposit)
+-- service_variants                 Per-service variants
+-- service_items                    Service catalogue items
+-- service_capacity_rules           Capacity rules per service
+-- service_schedule_exceptions      Per-service availability exceptions
+-- venue_services                   Venue-level service configuration
+-- unified_calendars                Bookable calendar columns
+-- calendar_service_assignments     Which services a calendar offers
+-- calendar_blocks                  Calendar-level blocks
+-- availability_blocks              Availability block entries
+-- party_size_durations             Duration by party size
+-- processing time blocks           (columns on services/bookings — see 20260830* migration)
 
--- appointment_services - service menu (Model B)
--- id (uuid PK), venue_id (FK), name, description, duration_minutes, buffer_minutes,
--- price_pence, deposit_pence, colour, is_active, sort_order
+-- --- Restaurant tables (Model A) ---------------------------------------------
+-- venue_tables                     Physical tables
+-- areas                            Dining areas / sections
+-- floor_plans                      Floor plan definitions
+-- floor_plan_table_positions       Table positions on a floor plan
+-- table_blocks                     Table block-outs
+-- table_statuses                   Live table status
+-- table_combinations               Combined-table groupings
+-- table_combination_members        Members of a combination
+-- combination_auto_overrides       Auto-combination engine overrides
+-- booking_table_assignments        Booking ↔ table assignment
 
--- practitioner_services - which practitioners offer which services (Model B)
--- id (uuid PK), practitioner_id (FK), service_id (FK), custom_duration_minutes, custom_price_pence
+-- --- Events (Model C) --------------------------------------------------------
+-- experience_events                Ticketed events / experiences
+-- event_ticket_types               Ticket tiers per event
+-- event_sessions                   Calendar sessions materialised from events
 
--- experience_events - ticketed events/experiences (Model C)
--- id (uuid PK), venue_id (FK), name, description, event_date, start_time, end_time,
--- capacity, image_url, is_recurring, recurrence_rule, parent_event_id, is_active
+-- --- Classes (Model D) -------------------------------------------------------
+-- class_types                      Recurring class definitions
+-- class_timetable                  Weekly schedule entries
+-- class_instances                  Individual scheduled class sessions
+-- class_booking_groups             Group bookings for classes
+-- class_recurring_reservations     Recurring class reservations
+-- class_recurring_materialization_events  Recurring-materialisation audit
 
--- event_ticket_types - ticket tiers per event (Model C)
--- id (uuid PK), event_id (FK), name, price_pence, capacity, sort_order
+-- --- Class commerce ----------------------------------------------------------
+-- class_credit_products            Purchasable credit packs
+-- class_credit_ledger              Credit earn / spend ledger
+-- class_credit_purchase_fulfillments  Credit purchase fulfilment
+-- user_class_credit_balances       Computed per-user credit balance
+-- class_course_products            Course / series products
+-- class_course_enrollments         Course enrolments
+-- class_course_session_enrollments Per-session enrolment within a course
+-- class_membership_products        Membership products
+-- class_memberships                Active memberships
+-- class_membership_allowance_ledger  Membership allowance usage
+-- class_checkout_transactions      Class-commerce checkout transactions
+-- class_payment_allocations        Payment ↔ entitlement allocation
 
--- class_types - recurring class definitions (Model D)
--- id (uuid PK), venue_id (FK), name, description, duration_minutes, capacity,
--- instructor_id (FK → practitioners), price_pence, colour, is_active
+-- --- Resources (Model E) -----------------------------------------------------
+-- venue_resources                  Bookable facilities / equipment
 
--- class_timetable - weekly schedule entries (Model D)
--- id (uuid PK), class_type_id (FK), day_of_week, start_time, is_active
+-- --- Waitlist ----------------------------------------------------------------
+-- waitlist_entries                 Waitlist joins (restaurant + appointment waitlist v2)
+-- waitlist_slot_opportunities      Appointment-waitlist slot offers
 
--- class_instances - individual scheduled class sessions (Model D)
--- id (uuid PK), class_type_id (FK), timetable_entry_id (FK), instance_date,
--- start_time, capacity_override, is_cancelled, cancel_reason
+-- --- Booking rules & restrictions --------------------------------------------
+-- booking_restrictions             Venue booking restriction rules
+-- booking_restriction_exceptions   Exceptions to restriction rules
 
--- venue_resources - bookable facilities/equipment (Model E)
--- id (uuid PK), venue_id (FK), name, resource_type, min_booking_minutes,
--- max_booking_minutes, slot_interval_minutes, price_per_slot_pence,
--- availability_hours (jsonb), is_active, sort_order
+-- --- Communications ----------------------------------------------------------
+-- communications                   Outbound communication records
+-- communication_logs               Per-booking send log (unique booking_id+message_type)
+-- communication_settings           Venue comms configuration
+-- sms_log                           SMS send log
+-- sms_usage                          SMS usage / allowance metering
+-- booking_log_email_deliveries      Daily booking-log email delivery records
 
--- booking_ticket_lines - ticket breakdown per booking (Models C/D)
--- id (uuid PK), booking_id (FK), ticket_type_id (FK nullable), label, quantity, unit_price_pence
+-- --- Payments ----------------------------------------------------------------
+-- venue_customer_stripe             Venue ↔ Stripe customer linkage (per-venue Connect)
+
+-- --- Linked accounts & collectives -------------------------------------------
+-- account_links                     Pairwise venue links
+-- account_link_audit_log            Link lifecycle audit
+-- venue_collectives                 Multi-venue collective groupings
+-- venue_collective_members          Collective membership
+
+-- --- Import tool -------------------------------------------------------------
+-- import_sessions                   Import wizard sessions
+-- import_files                      Uploaded import files
+-- import_records                    Parsed import records (clients etc.)
+-- import_column_mappings            AI-assisted column mapping
+-- import_validation_issues          Validation findings
+-- import_booking_rows               Parsed booking rows
+-- import_booking_references         Resolved booking FK references
+-- external_record_refs              Mapping to source-platform record ids
+
+-- --- Platform support --------------------------------------------------------
+-- support_sessions                  Superuser sign-in-as venue context
+-- support_audit_events              Append-only support action log
+
+-- --- Metrics -----------------------------------------------------------------
+-- venue_baseline_metrics_snapshots  Weekly per-venue baseline metric snapshots
+
 
 -- =============================================================================
 -- ROW-LEVEL SECURITY
 -- =============================================================================
--- Staff identified by auth.jwt() ->> 'email'. Staff can only read/write rows
+-- Staff are identified by auth.jwt() ->> 'email'. Staff may read/write rows
 -- where venue_id IN (SELECT venue_id FROM staff WHERE email = current_user_email).
--- All new tables follow the same pattern. Public read policies allow anon to
--- read active practitioners, services, events, classes, and resources.
+-- Customer-facing access goes through guests.user_id and account-safe views/RPCs.
+-- Public (anon) read policies expose active practitioners, services, events,
+-- classes and resources for the public booking flows.
+-- New tables follow the same per-venue tenancy pattern; see each migration.
+
 
 -- =============================================================================
--- TRIGGERS
+-- TRIGGERS & APPEND-ONLY GUARANTEES
 -- =============================================================================
--- events_append_only: BEFORE UPDATE/DELETE on events → raise exception.
--- booking_events_trigger: AFTER INSERT OR UPDATE on bookings → insert into events
---   (booking_created on INSERT; booking_status_changed when status changes).
+-- events_append_only        BEFORE UPDATE/DELETE on `events` → raise exception.
+-- booking_events_trigger     AFTER INSERT/UPDATE on `bookings` → write `events`
+--                            rows (booking_created, booking_status_changed, …).
+-- support_audit_events and account_link_audit_log are likewise append-only.
+
 
 -- =============================================================================
--- PLATFORM SUPPORT SESSIONS (see migration 20260426180000_support_sessions_and_audit.sql)
+-- RPC / HELPERS (selected — see migrations for the full set)
 -- =============================================================================
--- support_sessions — superuser sign-in-as venue context (60m default, normal selected-staff access).
--- support_audit_events — append-only log (session lifecycle + api_mutation rows).
+-- handle_new_user                     auth.users insert trigger → user_profiles
+-- claim_user_account                  Link a guest to an authenticated account
+-- request_account_deletion            Start the GDPR deletion grace period
+-- refresh_guest_booking_aggregates    Recompute guest visit/spend aggregates
+-- lookup_auth_user_id_by_email        service_role email → auth user id
+-- reconcileCollectivesAfterLinkChange Collective membership cascade (see linked accounts)

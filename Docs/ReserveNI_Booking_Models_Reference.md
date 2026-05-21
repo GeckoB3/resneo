@@ -127,5 +127,5 @@ Default labels per model live in `DEFAULT_TERMINOLOGY` in `src/types/booking-mod
 ## Related documents
 
 - `Docs/ReserveNI_Unified_Booking_Functionality.md` - multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
-- `Docs/ReserveNI_Unified_Scheduling_Engine_Plan.md` - Unified Scheduling Engine (USE) details.
+- `Docs/archive/ReserveNI_Unified_Scheduling_Engine_Plan.md` - Unified Scheduling Engine (USE) build guide (archived — engine shipped; retained for architecture rationale).
 - `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md` - broader services landscape.

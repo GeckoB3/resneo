@@ -1,6 +1,6 @@
 /**
  * Phase 3 product backlog (reference for prioritisation - not a commitment schedule).
- * Updated May 2026 after Phase 1a completion — see Docs/ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md.
+ * Updated May 2026 after Phase 1a completion — see Docs/ReserveNI-Appointments-Review-And-Roadmap.md.
  */
 export const PHASE_3_BACKLOG_COMPLETED = [
   'Any-available-practitioner appointment pooling (flag: any_available_practitioner)',

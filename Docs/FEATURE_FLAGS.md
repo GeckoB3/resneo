@@ -1,6 +1,6 @@
 # Appointments feature flags (P0.3)
 
-Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md](./ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md).
+Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md).
 
 ## Flags
 
@@ -9,12 +9,6 @@ Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Functionality-Re
 | `waitlist_v2` | Appointment schedule waitlist (guest join, staff offer with guest notify, staff book/confirm, auto-offer on appointment cancel, `waitlist_converted` audit event) | P1a.3 |
 | `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify). Cancellation notice applies to refunds on cancel, not to whether reschedule is allowed. **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
-
-When `waitlist_v2` is on, venues can set `waitlist_config` in the same JSONB:
-
-| Field | Values | Purpose |
-|-------|--------|---------|
-| `mode` | `staff_choose`, `notify_in_order` (default), `notify_all` | How guests are notified when a slot opens |
 
 When `any_available_practitioner` is on, venues can set `any_available_practitioner_config` in the same JSONB:
 

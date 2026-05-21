@@ -304,6 +304,8 @@ interface AppointmentBookingFlowProps {
   };
   /** Built from sessionStorage when staff uses “Rebook” from guest history (same venue). */
   staffRebookBootstrap?: StaffRebookBootstrapPayloadV1 | null;
+  /** When set, staff create/calendar calls target a linked owner venue. */
+  linkedOwnerVenueId?: string;
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -370,6 +372,7 @@ export function AppointmentBookingFlow({
   staffBookingSource = 'phone',
   editBooking,
   staffRebookBootstrap = null,
+  linkedOwnerVenueId,
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
   const acknowledgeStaffBooking = useCallback(() => {
@@ -683,13 +686,14 @@ export function AppointmentBookingFlow({
         opts.variantId ?? null,
         opts.durationMinutes ?? null,
         isAnyAvailablePractitionerId(opts.practitionerId),
+        linkedOwnerVenueId ?? null,
       );
       const res = await fetch(url, { signal: opts.signal });
       const data = (await res.json()) as { available_dates?: string[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
       return new Set(data.available_dates ?? []);
     },
-    [bookingAudience, venue.id],
+    [bookingAudience, venue.id, linkedOwnerVenueId],
   );
 
   const loadAppointmentCalendarMonth = useCallback(
@@ -1684,6 +1688,7 @@ export function AppointmentBookingFlow({
                 ? { staff_booking_duration_ms: staffBookingFlowDurationMs(staffFlowStartedAtRef.current) }
                 : {}),
               ...(staffRebookBootstrap?.guest ? { returning_guest: true } : {}),
+              ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
           });
           const data = await res.json();
@@ -1767,6 +1772,7 @@ export function AppointmentBookingFlow({
       accountGate,
       publicCreateErrorMessage,
       waitlistOfferEntryId,
+      linkedOwnerVenueId,
     ],
   );
 

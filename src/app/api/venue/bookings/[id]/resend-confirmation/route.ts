@@ -8,6 +8,11 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import {
+  linkedGrantAllowsMutation,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
+import type { BookingModel } from '@/types/booking-models';
 
 export async function POST(
   request: NextRequest,
@@ -20,13 +25,18 @@ export async function POST(
   const { id } = await params;
   const admin = getSupabaseAdminClient();
 
-  const { data: booking } = await admin
-    .from('bookings')
-    .select('id, venue_id, guest_id, booking_model, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, deposit_status, dietary_notes, special_requests')
-    .eq('id', id)
-    .eq('venue_id', staff.venue_id)
-    .maybeSingle();
-  if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+  const loaded = await loadStaffAccessibleBooking(staff, id);
+  if (!loaded.ok) {
+    return NextResponse.json({ error: loaded.error }, { status: loaded.status });
+  }
+  if (!linkedGrantAllowsMutation(loaded.ctx.linkedGrant, loaded.ctx.isOwnVenue)) {
+    return NextResponse.json(
+      { error: 'This link does not allow messaging guests on the other venue’s bookings.' },
+      { status: 403 },
+    );
+  }
+
+  const booking = loaded.ctx.booking;
 
   const [{ data: guest }, { data: venue }] = await Promise.all([
     admin.from('guests').select('first_name, last_name, email, phone').eq('id', booking.guest_id).maybeSingle(),
@@ -72,7 +82,7 @@ export async function POST(
     deposit_amount_pence: booking.deposit_amount_pence ?? null,
     deposit_status: booking.deposit_status ?? null,
     manage_booking_link: manageBookingLink,
-    booking_model: booking.booking_model,
+    booking_model: (booking.booking_model as BookingModel | null | undefined) ?? undefined,
   };
   const enriched = await enrichBookingEmailForComms(admin, booking.id, basePayload);
   await sendBookingConfirmationNotifications(

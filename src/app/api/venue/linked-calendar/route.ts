@@ -5,14 +5,25 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
 import { recordReadAudit } from '@/lib/linked-accounts/audit';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
-import type {
-  LinkedBooking,
-  LinkedPractitioner,
-  LinkedService,
-  LinkedVenueCalendar,
+import {
+  resolveLinkedBookingColumnId,
+  type LinkedBooking,
+  type LinkedPractitioner,
+  type LinkedService,
+  type LinkedVenueCalendar,
 } from '@/lib/linked-accounts/calendar';
+import {
+  formatGuestDisplayName,
+  mergeBookingSnapshotWithGuestProfile,
+  normaliseGuestNamePart,
+} from '@/lib/guests/name';
+import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Same column set as staff calendar list (`view=calendar`). */
+const LINKED_CALENDAR_BOOKING_SELECT =
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, resource_id, booking_end_time, experience_event_id, class_instance_id, event_session_id, service_id';
 
 /**
  * GET /api/venue/linked-calendar — bookings and practitioners of every venue
@@ -110,59 +121,72 @@ export async function GET(request: NextRequest) {
       if (fullDetails) {
         const { data: serviceRows } = await admin
           .from('appointment_services')
-          .select('id, name')
+          .select(
+            'id, name, duration_minutes, buffer_minutes, processing_time_blocks, colour, price_pence',
+          )
           .eq('venue_id', access.venueId)
           .eq('is_active', true)
           .order('name', { ascending: true });
         services = (serviceRows ?? []).map((s) => ({
           id: s.id as string,
           name: (s.name as string) ?? 'Service',
+          durationMinutes: (s.duration_minutes as number) ?? 60,
+          bufferMinutes: (s.buffer_minutes as number) ?? 0,
+          processingTimeBlocks: (s.processing_time_blocks as LinkedService['processingTimeBlocks']) ?? [],
+          colour: (s.colour as string) ?? '#6366f1',
+          pricePence: (s.price_pence as number | null) ?? null,
         }));
       }
 
-      // Bookings are read through the RLS-enforced path, not the admin client:
-      // full_details links read the base table; time_only links read
-      // `bookings_linked_anonymised`, which nulls every PII column at the
-      // database (§4.4). The user-scoped client makes RLS the backstop, so a
-      // future change here cannot silently widen what a link exposes.
+      // Bookings are loaded via the admin client once the accepted link grant
+      // is verified above. Practitioners/services already use admin for the
+      // same reason: the user-scoped client can return zero rows when RLS
+      // helper functions disagree with the app-layer grant check (e.g. staff
+      // matched by user_id). Grant enforcement stays in this handler — only
+      // venues from loadAccessibleLinkedVenueIds are queried.
       //
       // Cancelled bookings are excluded: a cancelled slot is free, so it must
       // never render as "busy" on a time_only link or clutter a full_details
       // grid. No-Show rows are kept — that time was still reserved.
-      const bookingSource =
-        access.grant.calendar === 'time_only' ? 'bookings_linked_anonymised' : 'bookings';
-      const { data: bookingRows } = await supabase
-        .from(bookingSource)
-        .select(
-          'id, practitioner_id, calendar_id, appointment_service_id, guest_id, booking_date, booking_time, booking_end_time, status',
-        )
+      const { data: bookingRows, error: bookingErr } = await admin
+        .from('bookings')
+        .select(LINKED_CALENDAR_BOOKING_SELECT)
         .eq('venue_id', access.venueId)
         .neq('status', 'Cancelled')
         .gte('booking_date', rangeFrom)
         .lte('booking_date', rangeTo);
 
+      if (bookingErr) {
+        console.error(
+          `GET /api/venue/linked-calendar bookings query failed for venue ${access.venueId}:`,
+          bookingErr.message,
+        );
+      }
+
       const rawBookings = (bookingRows ?? []) as unknown as Array<Record<string, unknown>>;
 
-      // Resolve guest + service names only for full_details links.
+      // Resolve guest names only for full_details links with PII.
       const guestNames: Record<string, string> = {};
-      const serviceNames: Record<string, string> = {};
+      const guestEmails: Record<string, string | null> = {};
+      const guestPhones: Record<string, string | null> = {};
+      let serviceLabelByBookingId = new Map<string, string>();
       if (fullDetails && rawBookings.length > 0) {
-        const serviceIds = [
-          ...new Set(
-            rawBookings
-              .map((b) => b.appointment_service_id as string | null)
-              .filter((x): x is string => Boolean(x)),
-          ),
-        ];
-        if (serviceIds.length > 0) {
-          const { data: serviceRows } = await admin
-            .from('appointment_services')
-            .select('id, name')
-            .in('id', serviceIds);
-          for (const s of serviceRows ?? []) {
-            serviceNames[s.id as string] = (s.name as string) ?? 'Service';
-          }
-        }
+        serviceLabelByBookingId = await resolveBookingListRowLabels(
+          admin,
+          rawBookings.map((b) => ({
+            id: b.id as string,
+            booking_model: b.booking_model as string | null | undefined,
+            experience_event_id: b.experience_event_id as string | null | undefined,
+            class_instance_id: b.class_instance_id as string | null | undefined,
+            resource_id: b.resource_id as string | null | undefined,
+            event_session_id: b.event_session_id as string | null | undefined,
+            calendar_id: b.calendar_id as string | null | undefined,
+            service_item_id: b.service_item_id as string | null | undefined,
+            practitioner_id: b.practitioner_id as string | null | undefined,
+            appointment_service_id: b.appointment_service_id as string | null | undefined,
+            service_id: b.service_id as string | null | undefined,
+          })),
+        );
         if (canSeePii) {
           const guestIds = [
             ...new Set(
@@ -172,12 +196,9 @@ export async function GET(request: NextRequest) {
             ),
           ];
           if (guestIds.length > 0) {
-            // RLS-enforced: `linked_venue_can_view_guests` only returns rows
-            // when the link grants full_details + PII (§4.4) — the same
-            // condition as `canSeePii`, so RLS is the backstop here too.
-            const { data: guests } = await supabase
+            const { data: guests } = await admin
               .from('guests')
-              .select('id, name, first_name, last_name')
+              .select('id, name, first_name, last_name, email, phone')
               .in('id', guestIds);
             for (const g of guests ?? []) {
               const composed = [g.first_name, g.last_name]
@@ -186,6 +207,8 @@ export async function GET(request: NextRequest) {
                 .trim();
               guestNames[g.id as string] =
                 composed || (g.name as string) || 'Client';
+              guestEmails[g.id as string] = (g.email as string | null) ?? null;
+              guestPhones[g.id as string] = (g.phone as string | null) ?? null;
             }
           }
         }
@@ -194,24 +217,76 @@ export async function GET(request: NextRequest) {
       const editable =
         access.grant.act === 'edit_existing' || access.grant.act === 'create_edit_cancel';
 
-      // Resolve each booking onto its column id. Unified venues key bookings
-      // by `calendar_id`; legacy venues by `practitioner_id`. The fallback
-      // covers mirror rows, where both ids are shared.
-      const bookings: LinkedBooking[] = rawBookings.map((b) => ({
-        id: b.id as string,
-        practitionerId: usesUnified
-          ? (b.calendar_id as string | null) ?? (b.practitioner_id as string | null) ?? null
-          : (b.practitioner_id as string | null) ?? (b.calendar_id as string | null) ?? null,
-        bookingDate: b.booking_date as string,
-        bookingTime: (b.booking_time as string) ?? '',
-        bookingEndTime: (b.booking_end_time as string | null) ?? null,
-        status: (b.status as string) ?? 'Pending',
-        guestName: canSeePii ? guestNames[b.guest_id as string] ?? null : null,
-        serviceName: fullDetails
-          ? serviceNames[(b.appointment_service_id as string) ?? ''] ?? null
-          : null,
-        editable,
-      }));
+      const columnIds = new Set(practitioners.map((p) => p.id));
+
+      const bookings: LinkedBooking[] = rawBookings.map((b) => {
+        const guestId = b.guest_id as string | null;
+        const snapshotMerged = mergeBookingSnapshotWithGuestProfile({
+          booking_guest_first_name: b.guest_first_name as string | null | undefined,
+          booking_guest_last_name: b.guest_last_name as string | null | undefined,
+          profile_first_name: null,
+          profile_last_name: null,
+        });
+        const snapshotPresent =
+          Boolean(normaliseGuestNamePart(b.guest_first_name as string | null | undefined)) ||
+          Boolean(normaliseGuestNamePart(b.guest_last_name as string | null | undefined));
+        const guestLabel =
+          canSeePii && guestId
+            ? guestNames[guestId] ??
+              (snapshotPresent
+                ? formatGuestDisplayName(snapshotMerged.first, snapshotMerged.last)
+                : null)
+            : null;
+
+        const base: LinkedBooking = {
+          id: b.id as string,
+          practitionerId: resolveLinkedBookingColumnId(
+            {
+              practitioner_id: b.practitioner_id as string | null,
+              calendar_id: b.calendar_id as string | null,
+            },
+            columnIds,
+          ),
+          bookingDate: b.booking_date as string,
+          bookingTime: (b.booking_time as string) ?? '',
+          bookingEndTime: (b.booking_end_time as string | null) ?? null,
+          status: (b.status as string) ?? 'Pending',
+          guestName: guestLabel,
+          serviceName: fullDetails
+            ? serviceLabelByBookingId.get(b.id as string) ?? null
+            : null,
+          editable,
+        };
+
+        if (!fullDetails) return base;
+
+        return {
+          ...base,
+          partySize: (b.party_size as number) ?? 1,
+          bookingModel: (b.booking_model as string | null) ?? null,
+          source: (b.source as string | null) ?? null,
+          depositStatus: (b.deposit_status as string) ?? 'none',
+          depositAmountPence: (b.deposit_amount_pence as number | null) ?? null,
+          specialRequests: (b.special_requests as string | null) ?? null,
+          internalNotes: (b.internal_notes as string | null) ?? null,
+          clientArrivedAt: (b.client_arrived_at as string | null) ?? null,
+          guestAttendanceConfirmedAt:
+            (b.guest_attendance_confirmed_at as string | null) ?? null,
+          staffAttendanceConfirmedAt:
+            (b.staff_attendance_confirmed_at as string | null) ?? null,
+          estimatedEndTime: (b.estimated_end_time as string | null) ?? null,
+          guestId,
+          guestEmail: guestId && canSeePii ? guestEmails[guestId] ?? null : null,
+          guestPhone: guestId && canSeePii ? guestPhones[guestId] ?? null : null,
+          appointmentServiceId: (b.appointment_service_id as string | null) ?? null,
+          serviceItemId: (b.service_item_id as string | null) ?? null,
+          serviceVariantId: (b.service_variant_id as string | null) ?? null,
+          processingTimeBlocks: b.processing_time_blocks ?? null,
+          resourceId: (b.resource_id as string | null) ?? null,
+          calendarId: (b.calendar_id as string | null) ?? null,
+          practitionerIdRaw: (b.practitioner_id as string | null) ?? null,
+        };
+      });
 
       calendars.push({
         venueId: access.venueId,

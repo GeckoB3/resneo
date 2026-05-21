@@ -2358,9 +2358,11 @@ function BookingsAccordionList({
                       <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill>
                     )}
                     {!isTableBooking && (
-                      <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
-                        {bookingTypeFilterLabel(inferredModel)}
-                      </Pill>
+                      <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
+                        <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
+                          {bookingTypeFilterLabel(inferredModel)}
+                        </Pill>
+                      </span>
                     )}
                     {booking.dietary_notes && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>

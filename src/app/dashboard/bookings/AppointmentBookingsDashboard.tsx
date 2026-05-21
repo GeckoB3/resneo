@@ -49,7 +49,8 @@ import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModa
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { LinkedBookingsPanel } from '@/components/linked-accounts/LinkedBookingsPanel';
+import { LinkedBookingDetailModal } from '@/components/linked-accounts/LinkedCalendarView';
+import type { LinkedBooking, LinkedVenueCalendar } from '@/lib/linked-accounts/calendar';
 import {
   useDashboardDetailCache,
   type VenueBookingDetailPayload,
@@ -135,6 +136,92 @@ function formatDayHeader(date: string): string {
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
+interface LinkedRowMeta {
+  sourceVenueId: string;
+  sourceVenueName: string;
+  visibility: LinkedVenueCalendar['visibility'];
+  action: LinkedVenueCalendar['action'];
+  editable: boolean;
+  booking: LinkedBooking;
+}
+
+type DashboardRegistryRow = RegistryAppointment & { _linked?: LinkedRowMeta };
+
+function isDashboardLinkedRow(b: RegistryAppointment): boolean {
+  return Boolean((b as DashboardRegistryRow)._linked);
+}
+
+function linkedBookingToDashboardRow(
+  lb: LinkedBooking,
+  venue: Pick<LinkedVenueCalendar, 'venueId' | 'venueName' | 'visibility' | 'action'>,
+): DashboardRegistryRow {
+  const timeOnly = venue.visibility === 'time_only';
+  const timeRaw = lb.bookingTime.trim();
+  const bookingTime = timeRaw.length >= 8 ? timeRaw : `${timeRaw.slice(0, 5)}:00`;
+  const endRaw = lb.bookingEndTime?.trim() ?? '';
+  const bookingEndTime =
+    endRaw.length === 0 ? null : endRaw.length >= 8 ? endRaw : `${endRaw.slice(0, 5)}:00`;
+
+  return {
+    id: lb.id,
+    booking_date: lb.bookingDate,
+    booking_time: bookingTime,
+    booking_end_time: bookingEndTime,
+    party_size: lb.partySize ?? 1,
+    status: lb.status,
+    source: lb.source ?? 'linked',
+    deposit_status: lb.depositStatus ?? 'none',
+    deposit_amount_pence: lb.depositAmountPence ?? null,
+    guest_name: timeOnly ? `${venue.venueName} — busy` : (lb.guestName ?? 'Guest'),
+    guest_email: timeOnly ? null : (lb.guestEmail ?? null),
+    guest_phone: timeOnly ? null : (lb.guestPhone ?? null),
+    guest_visit_count: null,
+    guest_id: lb.guestId ?? undefined,
+    practitioner_id: lb.practitionerId,
+    calendar_id: lb.calendarId ?? lb.practitionerId,
+    appointment_service_id: lb.appointmentServiceId ?? null,
+    service_item_id: lb.serviceItemId ?? null,
+    service_variant_id: lb.serviceVariantId ?? null,
+    processing_time_blocks: lb.processingTimeBlocks ?? null,
+    special_requests: timeOnly ? null : (lb.specialRequests ?? null),
+    internal_notes: timeOnly ? null : (lb.internalNotes ?? null),
+    client_arrived_at: lb.clientArrivedAt ?? null,
+    guest_attendance_confirmed_at: lb.guestAttendanceConfirmedAt ?? null,
+    staff_attendance_confirmed_at: lb.staffAttendanceConfirmedAt ?? null,
+    booking_model: lb.bookingModel ?? null,
+    booking_item_name: timeOnly ? null : (lb.serviceName ?? null),
+    _linked: {
+      sourceVenueId: venue.venueId,
+      sourceVenueName: venue.venueName,
+      visibility: venue.visibility,
+      action: venue.action,
+      editable: lb.editable,
+      booking: lb,
+    },
+  };
+}
+
+function flattenLinkedDashboardRows(venues: LinkedVenueCalendar[]): DashboardRegistryRow[] {
+  const flat: DashboardRegistryRow[] = [];
+  for (const v of venues) {
+    for (const b of v.bookings) {
+      flat.push(linkedBookingToDashboardRow(b, v));
+    }
+  }
+  return flat;
+}
+
+function matchesAppointmentStatusFilter(
+  b: RegistryAppointment,
+  filter: StatusFilterOption | undefined,
+): boolean {
+  if (!filter || filter.label === 'All') return true;
+  if (filter.attendanceConfirmed) return isAttendanceConfirmed(b);
+  if (filter.excludeAttendanceConfirmed && isAttendanceConfirmed(b)) return false;
+  if (filter.apiValue) return b.status === filter.apiValue;
+  return true;
+}
+
 function columnIdForRegistry(b: RegistryAppointment): string | null {
   return b.practitioner_id ?? b.calendar_id ?? null;
 }
@@ -183,6 +270,7 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
 }
 
 function sourcePillVariant(source: string): PillVariant {
+  if (source === 'linked') return 'warning';
   if (source === 'online' || source === 'booking_page') return 'brand';
   if (source === 'walk-in') return 'warning';
   return 'neutral';
@@ -399,6 +487,13 @@ export function AppointmentBookingsDashboard({
   const [sourceScope, setSourceScope] = useState<SourceScope>('all');
   /** True once the venue is known to hold at least one linked calendar. */
   const [linkedAvailable, setLinkedAvailable] = useState(false);
+  const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
+  const [linkedLoading, setLinkedLoading] = useState(false);
+  const [linkedDetailModal, setLinkedDetailModal] = useState<{
+    venueName: string;
+    visibility: LinkedVenueCalendar['visibility'];
+    booking: LinkedBooking;
+  } | null>(null);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -632,6 +727,36 @@ export function AppointmentBookingsDashboard({
     void fetchBookingsForStats();
   }, [fetchBookingsForStats]);
 
+  const fetchLinkedBookings = useCallback(async () => {
+    if (invalidCustomRange) {
+      setLinkedVenues([]);
+      setLinkedAvailable(false);
+      return;
+    }
+    setLinkedLoading(true);
+    try {
+      const res = await fetch(`/api/venue/linked-calendar?from=${from}&to=${to}`);
+      const json = (await res.json()) as { error?: string; venues?: LinkedVenueCalendar[] };
+      if (!res.ok) {
+        setLinkedVenues([]);
+        setLinkedAvailable(false);
+        return;
+      }
+      const loaded = json.venues ?? [];
+      setLinkedVenues(loaded);
+      setLinkedAvailable(loaded.length > 0);
+    } catch {
+      setLinkedVenues([]);
+      setLinkedAvailable(false);
+    } finally {
+      setLinkedLoading(false);
+    }
+  }, [from, to, invalidCustomRange]);
+
+  useEffect(() => {
+    void fetchLinkedBookings();
+  }, [fetchLinkedBookings]);
+
   useEffect(() => {
     let cancelled = false;
     void fetch('/api/venue')
@@ -730,6 +855,46 @@ export function AppointmentBookingsDashboard({
     pickerEndHour,
   ]);
 
+  const linkedPractitionerMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const venue of linkedVenues) {
+      for (const practitioner of venue.practitioners) {
+        map.set(practitioner.id, practitioner.name);
+      }
+    }
+    return map;
+  }, [linkedVenues]);
+
+  const filteredLinkedBookings = useMemo(() => {
+    let list = flattenLinkedDashboardRows(linkedVenues);
+    list = list.filter((b) => matchesAppointmentStatusFilter(b, selectedStatusFilter));
+    if (modelFilter !== 'all') {
+      list = list.filter((b) => inferRegistryModel(b) === modelFilter);
+    }
+    if (viewMode === 'day' && timeRangeFilterActive) {
+      list = list.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
+    }
+    if (filterGuestId) {
+      list = list.filter((b) => b.guest_id === filterGuestId);
+    }
+    return list;
+  }, [
+    linkedVenues,
+    selectedStatusFilter,
+    modelFilter,
+    viewMode,
+    timeRangeFilterActive,
+    pickerStartHour,
+    pickerEndHour,
+    filterGuestId,
+  ]);
+
+  const scopeBookings = useMemo((): DashboardRegistryRow[] => {
+    if (sourceScope === 'own') return filteredBookings;
+    if (sourceScope === 'linked') return filteredLinkedBookings;
+    return [...filteredBookings, ...filteredLinkedBookings];
+  }, [sourceScope, filteredBookings, filteredLinkedBookings]);
+
   const statsBookings = useMemo(() => {
     let reg = filterRegistryAppointments(
       allStatusBookings,
@@ -759,7 +924,7 @@ export function AppointmentBookingsDashboard({
 
   const sortedBookings = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
-    const list = [...filteredBookings];
+    const list = [...scopeBookings];
     list.sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -798,15 +963,15 @@ export function AppointmentBookingsDashboard({
           break;
         }
         case 'practitioner': {
-          const pa = (() => {
-            const id = columnIdForRegistry(a);
-            return id ? practitionerMap.get(id)?.name ?? '' : '';
-          })();
-          const pb = (() => {
-            const id = columnIdForRegistry(b);
-            return id ? practitionerMap.get(id)?.name ?? '' : '';
-          })();
-          cmp = pa.localeCompare(pb, undefined, { sensitivity: 'base' });
+          const resolvePractitionerName = (row: RegistryAppointment) => {
+            const id = columnIdForRegistry(row);
+            if (!id) return '';
+            if (isDashboardLinkedRow(row)) return linkedPractitionerMap.get(id) ?? '';
+            return practitionerMap.get(id)?.name ?? '';
+          };
+          cmp = resolvePractitionerName(a).localeCompare(resolvePractitionerName(b), undefined, {
+            sensitivity: 'base',
+          });
           break;
         }
         case 'status':
@@ -821,7 +986,7 @@ export function AppointmentBookingsDashboard({
       return cmp * dir;
     });
     return list;
-  }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
+  }, [scopeBookings, sortKey, sortDir, serviceMap, practitionerMap, linkedPractitionerMap]);
 
   useEffect(() => {
     if (sortedBookings.length === 0) return;
@@ -846,22 +1011,24 @@ export function AppointmentBookingsDashboard({
     };
   }, [sortedBookings, warmVenueBookingDetail]);
 
-  async function updateRowStatus(bookingId: string, nextStatus: string) {
+  async function updateRowStatus(bookingId: string, nextStatus: string, linked = false) {
     const prev = bookings.find((x) => x.id === bookingId);
-    if (!prev) return;
-    setBookings((rows) =>
-      rows.map((r) => {
-        if (r.id !== bookingId) return r;
-        const updated: RegistryAppointment = { ...r, status: nextStatus };
-        if (prev.status === 'Confirmed' && nextStatus === 'Booked') {
-          updated.staff_attendance_confirmed_at = null;
-          updated.guest_attendance_confirmed_at = null;
-        } else if (nextStatus === 'Confirmed' && prev.status !== 'Confirmed') {
-          updated.staff_attendance_confirmed_at = new Date().toISOString();
-        }
-        return updated;
-      }),
-    );
+    if (!prev && !linked) return;
+    if (prev) {
+      setBookings((rows) =>
+        rows.map((r) => {
+          if (r.id !== bookingId) return r;
+          const updated: RegistryAppointment = { ...r, status: nextStatus };
+          if (prev.status === 'Confirmed' && nextStatus === 'Booked') {
+            updated.staff_attendance_confirmed_at = null;
+            updated.guest_attendance_confirmed_at = null;
+          } else if (nextStatus === 'Confirmed' && prev.status !== 'Confirmed') {
+            updated.staff_attendance_confirmed_at = new Date().toISOString();
+          }
+          return updated;
+        }),
+      );
+    }
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -871,11 +1038,13 @@ export function AppointmentBookingsDashboard({
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         addToast((j as { error?: string }).error ?? 'Could not update status', 'error');
-        setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
+        if (prev) {
+          setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
+        }
         return;
       }
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (payload && typeof payload === 'object' && !('error' in payload)) {
+      if (prev && payload && typeof payload === 'object' && !('error' in payload)) {
         setBookings((rows) =>
           rows.map((r) =>
             r.id === bookingId
@@ -884,13 +1053,18 @@ export function AppointmentBookingsDashboard({
           ),
         );
       }
+      if (linked) {
+        void fetchLinkedBookings();
+      }
       void fetchBookingsForStats();
       if (nextStatus === 'Cancelled') {
         scheduleWaitlistAlertsRefresh();
       }
     } catch {
       addToast('Could not update status', 'error');
-      setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
+      if (prev) {
+        setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
+      }
     }
   }
 
@@ -941,7 +1115,7 @@ export function AppointmentBookingsDashboard({
 
   const toggleAllInList = useCallback((list: RegistryAppointment[], checked: boolean) => {
     setSelectedBookingIds((prev) => {
-      const ids = new Set(list.map((b) => b.id));
+      const ids = new Set(list.filter((b) => !isDashboardLinkedRow(b)).map((b) => b.id));
       if (checked) return [...new Set([...prev, ...ids])];
       return prev.filter((bid) => !ids.has(bid));
     });
@@ -1125,13 +1299,14 @@ export function AppointmentBookingsDashboard({
   }
 
   function renderAppointmentCards(
-    list: RegistryAppointment[],
+    list: DashboardRegistryRow[],
     opts?: { nested?: boolean; showSort?: boolean },
   ) {
     const nested = opts?.nested ?? false;
     const showSort = opts?.showSort ?? !nested;
+    const selectableIds = list.filter((b) => !isDashboardLinkedRow(b)).map((b) => b.id);
     const allSelected =
-      list.length > 0 && list.every((b) => selectedBookingIds.includes(b.id));
+      selectableIds.length > 0 && selectableIds.every((id) => selectedBookingIds.includes(id));
     return (
       <div
         className={
@@ -1147,6 +1322,7 @@ export function AppointmentBookingsDashboard({
               checked={allSelected}
               onChange={(e) => toggleAllInList(list, e.target.checked)}
               aria-label="Select all bookings in this list"
+              disabled={selectableIds.length === 0}
             />
             Select all
           </label>
@@ -1164,14 +1340,21 @@ export function AppointmentBookingsDashboard({
     );
   }
 
-  function renderAppointmentRow(b: RegistryAppointment) {
+  function renderAppointmentRow(b: DashboardRegistryRow) {
+    const linkedMeta = b._linked;
+    const linkedReadOnly =
+      linkedMeta != null && (linkedMeta.visibility === 'time_only' || !linkedMeta.editable);
+    const rowVenueId = linkedMeta?.sourceVenueId ?? venueId;
     const cid = columnIdForRegistry(b);
     const sid = serviceIdForRegistry(b);
-    const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
+    const pracName = linkedMeta
+      ? (cid ? linkedPractitionerMap.get(cid) ?? '-' : '-')
+      : (cid ? practitionerMap.get(cid)?.name ?? '-' : '-');
     const svcName =
       b.booking_item_name?.trim() ||
+      linkedMeta?.booking.serviceName?.trim() ||
       (sid ? serviceMap.get(sid)?.name ?? '' : '') ||
-      '-';
+      (linkedMeta?.visibility === 'time_only' ? '' : '-');
     const svc = sid ? serviceMap.get(sid) ?? null : null;
     const bookingModel = inferRegistryModel(b);
     const typeLabel = bookingModelShortLabel(bookingModel);
@@ -1186,32 +1369,55 @@ export function AppointmentBookingsDashboard({
     const draftMessage = messageDraftById[b.id] ?? '';
     const sendingMessage = sendingMessageIds.includes(b.id);
 
+    const openLinkedReadOnlyDetail = () => {
+      if (!linkedMeta) return;
+      setLinkedDetailModal({
+        venueName: linkedMeta.sourceVenueName,
+        visibility: linkedMeta.visibility,
+        booking: linkedMeta.booking,
+      });
+    };
+
     return (
       <div
         key={b.id}
         role="button"
         tabIndex={0}
-        aria-expanded={expanded}
-        aria-controls={`appt-expand-${b.id}`}
-        onClick={() => toggleExpanded(b.id)}
-        {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
+        aria-expanded={linkedReadOnly ? undefined : expanded}
+        aria-controls={linkedReadOnly ? undefined : `appt-expand-${b.id}`}
+        onClick={() => {
+          if (linkedReadOnly) {
+            openLinkedReadOnlyDetail();
+            return;
+          }
+          toggleExpanded(b.id);
+        }}
+        {...(linkedReadOnly ? {} : bindDetailPrefetchHandlers(b.id, prefetchBookingDetail))}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
+            if (linkedReadOnly) {
+              openLinkedReadOnlyDetail();
+              return;
+            }
             toggleExpanded(b.id);
           }
         }}
-        className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
+        className={`cursor-pointer rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.06] transition-[border-color,box-shadow,background-color] duration-150 sm:px-3 sm:py-3 border-l-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-offset-2 ${statusBorderClass(b)} ${expanded && !linkedReadOnly ? 'border-slate-300 bg-brand-50/50 shadow-md ring-brand-900/15' : 'hover:border-slate-300 hover:bg-slate-50/90 hover:shadow-md hover:shadow-slate-900/[0.07] hover:ring-slate-900/[0.09]'}`}
       >
         <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1.5 sm:min-h-[3rem] sm:gap-2">
           <div onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
-            <input
-              type="checkbox"
-              checked={selectedBookingIds.includes(b.id)}
-              onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
-              aria-label={`Select booking for ${b.guest_name}`}
-              className="h-4 w-4 rounded border-slate-300"
-            />
+            {linkedMeta ? (
+              <span className="inline-block h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <input
+                type="checkbox"
+                checked={selectedBookingIds.includes(b.id)}
+                onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
+                aria-label={`Select booking for ${b.guest_name}`}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs sm:text-sm">
@@ -1240,24 +1446,20 @@ export function AppointmentBookingsDashboard({
               >
                 {formatDayHeader(b.booking_date)}
               </span>
-              <span
-                className={
-                  expanded
-                    ? 'inline shrink-0 text-slate-300'
-                    : 'hidden shrink-0 text-slate-300 sm:inline'
-                }
-              >
-                ·
-              </span>
-              <span
-                className={
-                  expanded
-                    ? 'inline max-w-[10rem] truncate text-[11px] font-medium text-slate-600'
-                    : 'hidden max-w-[10rem] truncate text-[11px] font-medium text-slate-600 sm:inline'
-                }
-              >
-                {svcName}
-              </span>
+              {svcName ? (
+                <>
+                  <span className="inline shrink-0 text-slate-300">·</span>
+                  <span
+                    className={
+                      expanded
+                        ? 'inline max-w-[10rem] truncate text-[11px] font-medium text-slate-600'
+                        : 'inline max-w-[7.5rem] truncate text-[11px] font-medium text-slate-600 sm:max-w-[10rem]'
+                    }
+                  >
+                    {svcName}
+                  </span>
+                </>
+              ) : null}
               <span
                 className={
                   expanded
@@ -1290,9 +1492,11 @@ export function AppointmentBookingsDashboard({
                   Confirmed
                 </BookingStatusPill>
               )}
-              <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
-                {typeLabel}
-              </Pill>
+              <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
+                <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
+                  {typeLabel}
+                </Pill>
+              </span>
               {duration != null && (
                 <span
                   className={
@@ -1315,9 +1519,13 @@ export function AppointmentBookingsDashboard({
                   {b.party_size} people
                 </span>
               )}
-              <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
-                <Pill variant={sourcePillVariant(b.source)} size="sm">
-                  {sourceLabelShort(b.source)}
+              <span
+                className={
+                  expanded || linkedMeta ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'
+                }
+              >
+                <Pill variant={linkedMeta ? 'warning' : sourcePillVariant(b.source)} size="sm">
+                  {linkedMeta ? 'Linked' : sourceLabelShort(b.source)}
                 </Pill>
               </span>
               {priceDisplay && (
@@ -1330,7 +1538,7 @@ export function AppointmentBookingsDashboard({
             </div>
           </div>
           <svg
-            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded && !linkedReadOnly ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             strokeWidth={2}
@@ -1340,7 +1548,7 @@ export function AppointmentBookingsDashboard({
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </div>
-        {expanded && (
+        {expanded && !linkedReadOnly && (
           <div
             id={`appt-expand-${b.id}`}
             onClick={(e) => e.stopPropagation()}
@@ -1352,7 +1560,7 @@ export function AppointmentBookingsDashboard({
               detail={detailById[b.id]}
               detailLoading={detailLoadingIds.includes(b.id)}
               tableManagementEnabled={bookingModel === 'table_reservation'}
-              venueId={venueId}
+              venueId={rowVenueId}
               venueCurrency={currency}
               venueTimezone={venueTimezone}
               guestHistoryListRefresh={guestHistoryRevisionById[b.id] ?? 0}
@@ -1368,7 +1576,7 @@ export function AppointmentBookingsDashboard({
               sendingMessage={sendingMessage}
               onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [b.id]: value }))}
               onSendMessage={(channel) => sendGuestMessage(b.id, draftMessage, channel)}
-              onStatusAction={(status) => { void updateRowStatus(b.id, status); }}
+              onStatusAction={(status) => { void updateRowStatus(b.id, status, Boolean(linkedMeta)); }}
               onDetailUpdated={() => {
                 invalidateVenueBookingDetail(b.id);
                 setDetailById((prev) => {
@@ -1379,6 +1587,7 @@ export function AppointmentBookingsDashboard({
                 void loadBookingDetail(b.id, true);
                 void fetchBookings({ silent: true });
                 void fetchBookingsForStats();
+                if (linkedMeta) void fetchLinkedBookings();
               }}
               venueStaffBookingModel={primaryBookingModel}
               venueStaffEnabledBookingModels={enabledModels}
@@ -1388,6 +1597,11 @@ export function AppointmentBookingsDashboard({
       </div>
     );
   }
+
+  const showOwnBookingsInList = sourceScope === 'all' || sourceScope === 'own';
+  const showLinkedBookingsInList = sourceScope === 'all' || sourceScope === 'linked';
+  const listLoading =
+    (showOwnBookingsInList && loading) || (showLinkedBookingsInList && linkedLoading);
 
   const filterCount =
     (statusKey !== 'All' ? 1 : 0) +
@@ -1760,13 +1974,13 @@ export function AppointmentBookingsDashboard({
                   : 'text-slate-600 hover:bg-slate-50'
               }`}
             >
-              {scope === 'all' ? 'All' : scope === 'own' ? 'My venue' : 'Linked-in'}
+              {scope === 'all' ? 'All' : scope === 'own' ? 'My venue' : 'Linked'}
             </button>
           ))}
         </div>
       ) : null}
 
-      {sourceScope !== 'linked' && (loading ? (
+      {listLoading ? (
         <div className="space-y-3" role="status" aria-label="Loading bookings">
           {[1, 2, 3, 4, 5].map((i) => (
             <Skeleton.Card key={i} className="py-4">
@@ -1780,7 +1994,7 @@ export function AppointmentBookingsDashboard({
             </Skeleton.Card>
           ))}
         </div>
-      ) : filteredBookings.length === 0 ? (
+      ) : sortedBookings.length === 0 ? (
         <EmptyState
           title="No bookings match this view"
           description="Try another date range, clear search, or adjust filters."
@@ -1822,10 +2036,15 @@ export function AppointmentBookingsDashboard({
               </section>
             ))}
         </div>
-      ))}
+      )}
 
-      {sourceScope !== 'own' ? (
-        <LinkedBookingsPanel from={from} to={to} onAvailabilityChange={setLinkedAvailable} />
+      {linkedDetailModal ? (
+        <LinkedBookingDetailModal
+          venueName={linkedDetailModal.venueName}
+          visibility={linkedDetailModal.visibility}
+          booking={linkedDetailModal.booking}
+          onClose={() => setLinkedDetailModal(null)}
+        />
       ) : null}
 
       {bulkGuestMessageOpen && (

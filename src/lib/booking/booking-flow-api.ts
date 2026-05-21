@@ -41,6 +41,7 @@ export function appointmentCalendarUrl(
   variantId?: string | null,
   durationMinutes?: number | null,
   anyAvailable?: boolean,
+  ownerVenueId?: string | null,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -60,6 +61,9 @@ export function appointmentCalendarUrl(
   if (audience === 'public') {
     params.set('venue_id', venueId);
     return `/api/booking/appointment-calendar?${params}`;
+  }
+  if (ownerVenueId) {
+    params.set('owner_venue_id', ownerVenueId);
   }
   return `/api/venue/appointment-calendar?${params}`;
 }

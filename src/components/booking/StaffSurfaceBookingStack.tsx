@@ -89,6 +89,8 @@ export interface StaffSurfaceBookingStackProps {
    * is exposed for this venue (e.g. calendar empty-slot flows prefer Appointment over Table default).
    */
   initialStaffSurfaceTabId?: StaffBookingSurfaceTabId;
+  linkedOwnerVenueId?: string;
+  linkedVenueName?: string;
 }
 
 function staffSurfacePropsKey(bookingModel: BookingModel, enabledModels: BookingModel[]): string {
@@ -134,18 +136,50 @@ function StaffSurfaceBookingStackInner({
   walkInRemainingCapacity,
   staffRebookBootstrap = null,
   initialStaffSurfaceTabId,
+  linkedOwnerVenueId,
+  linkedVenueName: _linkedVenueName,
 }: StaffSurfaceBookingStackProps) {
-  const surfaceTabs = useMemo(
-    () => getStaffBookingSurfaceTabs(bookingModel, enabledModels),
-    [bookingModel, enabledModels],
-  );
-
   const isControlled =
     typeof controlledActiveTab !== 'undefined' && typeof onActiveTabChange === 'function';
 
-  const [internalTab, setInternalTab] = useState<StaffBookingSurfaceTabId>(() =>
-    resolveInitialStaffSurfaceTab(bookingModel, enabledModels, initialStaffSurfaceTabId),
+  /** Venue from parent when provided; otherwise filled by GET /api/venue or linked profile. */
+  const [fetchedVenue, setFetchedVenue] = useState<VenuePublic | null>(null);
+  const [linkedProfile, setLinkedProfile] = useState<{
+    venue: VenuePublic;
+    bookingModel: BookingModel;
+    enabledModels: BookingModel[];
+    currency: string;
+  } | null>(null);
+  const [venueError, setVenueError] = useState<string | null>(null);
+  const resolvedVenue = venueProp ?? fetchedVenue;
+  const effectiveBookingModel = linkedProfile?.bookingModel ?? bookingModel;
+  const effectiveEnabledModels = linkedProfile?.enabledModels ?? enabledModels;
+  const effectiveCurrency = linkedProfile?.currency ?? currency;
+  const effectiveVenueId = linkedOwnerVenueId ?? venueId;
+
+  const surfaceTabs = useMemo(
+    () => getStaffBookingSurfaceTabs(effectiveBookingModel, effectiveEnabledModels),
+    [effectiveBookingModel, effectiveEnabledModels],
   );
+
+  const tabScopeKey = [
+    linkedOwnerVenueId ?? 'own',
+    effectiveBookingModel,
+    effectiveEnabledModels.join('|'),
+    initialStaffSurfaceTabId ?? '',
+  ].join(':');
+
+  const [tabScope, setTabScope] = useState(tabScopeKey);
+  const [internalTab, setInternalTab] = useState<StaffBookingSurfaceTabId>(() =>
+    resolveInitialStaffSurfaceTab(effectiveBookingModel, effectiveEnabledModels, initialStaffSurfaceTabId),
+  );
+
+  if (!isControlled && tabScope !== tabScopeKey) {
+    setTabScope(tabScopeKey);
+    setInternalTab(
+      resolveInitialStaffSurfaceTab(effectiveBookingModel, effectiveEnabledModels, initialStaffSurfaceTabId),
+    );
+  }
 
   const activeTab = isControlled ? controlledActiveTab! : internalTab;
 
@@ -157,12 +191,39 @@ function StaffSurfaceBookingStackInner({
     }
   };
 
-  /** Venue from parent when provided; otherwise filled by GET /api/venue in the effect below. */
-  const [fetchedVenue, setFetchedVenue] = useState<VenuePublic | null>(null);
-  const [venueError, setVenueError] = useState<string | null>(null);
-  const resolvedVenue = venueProp ?? fetchedVenue;
-
   useEffect(() => {
+    if (linkedOwnerVenueId) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await fetch(
+            `/api/venue/linked-calendar/venue-profile?venueId=${encodeURIComponent(linkedOwnerVenueId)}`,
+          );
+          const data = (await res.json()) as Record<string, unknown>;
+          if (!res.ok) {
+            if (!cancelled) {
+              setVenueError(typeof data.error === 'string' ? data.error : 'Could not load linked venue');
+            }
+            return;
+          }
+          if (!cancelled) {
+            setLinkedProfile({
+              venue: data.venue as VenuePublic,
+              bookingModel: data.booking_model as BookingModel,
+              enabledModels: (data.enabled_models as BookingModel[]) ?? [],
+              currency: (data.currency as string) ?? currency,
+            });
+            setFetchedVenue(data.venue as VenuePublic);
+            setVenueError(null);
+          }
+        } catch {
+          if (!cancelled) setVenueError('Could not load linked venue');
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
     if (venueProp) {
       return;
     }
@@ -186,13 +247,13 @@ function StaffSurfaceBookingStackInner({
     return () => {
       cancelled = true;
     };
-  }, [venueProp]);
+  }, [venueProp, linkedOwnerVenueId, currency]);
 
   const showTabs = surfaceTabs.length > 1;
   const tabsForBar = showTabs ? surfaceTabs : [];
   const walkInDefaultSource = bookingIntent === 'walk-in' ? ('walk-in' as const) : undefined;
   const staffBookingSource = walkInDefaultSource ?? 'phone';
-  const isAppointmentPlan = isUnifiedSchedulingVenue(bookingModel);
+  const isAppointmentPlan = isUnifiedSchedulingVenue(effectiveBookingModel);
 
   const body = (): ReactNode => {
     if (venueError) {
@@ -217,7 +278,7 @@ function StaffSurfaceBookingStackInner({
               embedded
               suppressTitle
               advancedMode={advancedMode}
-              venueCurrency={currency}
+              venueCurrency={effectiveCurrency}
               initialDate={initialDate}
               initialTime={initialTime}
               remainingCapacity={walkInRemainingCapacity}
@@ -228,9 +289,9 @@ function StaffSurfaceBookingStackInner({
         }
         return (
           <UnifiedBookingForm
-            venueId={venueId}
+            venueId={effectiveVenueId}
             advancedMode={advancedMode}
-            venueCurrency={currency}
+            venueCurrency={effectiveCurrency}
             initialDate={initialDate}
             initialTime={initialTime}
             onCreated={onCreated}
@@ -250,6 +311,7 @@ function StaffSurfaceBookingStackInner({
             initialTime={initialTime}
             preselectedPractitionerId={preselectedPractitionerId}
             staffRebookBootstrap={activeTab === 'unified_scheduling' ? staffRebookBootstrap : null}
+            linkedOwnerVenueId={linkedOwnerVenueId}
           />
         );
       case 'event_ticket':

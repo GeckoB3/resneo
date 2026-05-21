@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
 import type { LinkedBooking, LinkedVenueCalendar } from '@/lib/linked-accounts/calendar';
+import { linkedBookingBarDetailLabel } from '@/lib/linked-accounts/calendar';
 
 const BOOKING_STATUSES = [
   'Pending',
@@ -253,7 +254,7 @@ function VenueCalendarBlock({
     <div className="rounded-xl border border-slate-200 bg-slate-50/40 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-bold text-slate-900">{venue.venueName}</h3>
-        <Pill variant="neutral" size="sm">
+        <Pill variant="warning" size="sm">
           Linked
         </Pill>
         {timeOnly ? (
@@ -341,7 +342,7 @@ function LinkedBookingChip({
           <span className="ml-1 text-slate-500">— {venueName} busy</span>
         ) : (
           <span className="ml-1 truncate">
-            {booking.guestName ?? booking.serviceName ?? 'Booking'}
+            {linkedBookingBarDetailLabel(booking, timeOnly ? 'time_only' : 'full_details', venueName)}
           </span>
         )}
       </div>

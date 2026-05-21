@@ -66,6 +66,52 @@ export async function recordReadAudit(params: ReadAuditParams): Promise<void> {
   }
 }
 
+interface BookingWriteAuditParams {
+  admin: SupabaseClient;
+  linkId: string;
+  actingVenueId: string;
+  actingUserId: string | null;
+  owningVenueId: string;
+  actionType: 'created_booking' | 'edited_booking' | 'cancelled_booking';
+  bookingId: string;
+  beforeState?: Record<string, unknown> | null;
+  afterState?: Record<string, unknown> | null;
+}
+
+/** Records cross-venue booking writes when the DB trigger GUC path is not used. */
+export async function recordBookingWriteAudit(params: BookingWriteAuditParams): Promise<void> {
+  const {
+    admin,
+    linkId,
+    actingVenueId,
+    actingUserId,
+    owningVenueId,
+    actionType,
+    bookingId,
+    beforeState = null,
+    afterState = null,
+  } = params;
+
+  try {
+    const { error } = await admin.from('account_link_audit_log').insert({
+      link_id: linkId,
+      acting_venue_id: actingVenueId,
+      acting_user_id: actingUserId,
+      owning_venue_id: owningVenueId,
+      action_type: actionType,
+      resource_type: 'booking',
+      resource_id: bookingId,
+      before_state: beforeState,
+      after_state: afterState,
+    });
+    if (error) {
+      console.error('[linked-accounts] recordBookingWriteAudit insert failed:', error.message);
+    }
+  } catch (err) {
+    console.error('[linked-accounts] recordBookingWriteAudit error:', err);
+  }
+}
+
 /** Human-readable label for an audit action_type. */
 export function auditActionLabel(actionType: string): string {
   switch (actionType) {

@@ -30,6 +30,9 @@ export interface StaffSurfaceBookingModalProps {
   heading?: string;
   /** Remount inner stack when changed (e.g. increment on each open). */
   stackKey?: number | string;
+  /** Linked venue the staff member is booking into (cross-venue create). */
+  linkedOwnerVenueId?: string;
+  linkedVenueName?: string;
 }
 
 function defaultHeading(intent: 'new' | 'walk-in'): string {
@@ -56,9 +59,13 @@ export function StaffSurfaceBookingModal({
   staffRebookBootstrap = null,
   heading,
   stackKey,
+  linkedOwnerVenueId,
+  linkedVenueName,
 }: StaffSurfaceBookingModalProps) {
   const titleId = useId();
-  const title = heading ?? defaultHeading(intent);
+  const title =
+    heading ??
+    (linkedVenueName ? `New booking in ${linkedVenueName}` : defaultHeading(intent));
 
   const timedSlotPrefill = typeof preselectedTime === 'string' && preselectedTime.trim() !== '';
 
@@ -114,6 +121,8 @@ export function StaffSurfaceBookingModal({
             initialStaffSurfaceTabId={initialStaffSurfaceTabId}
             preselectedPractitionerId={preselectedPractitionerId}
             staffRebookBootstrap={staffRebookBootstrap}
+            linkedOwnerVenueId={linkedOwnerVenueId}
+            linkedVenueName={linkedVenueName}
           />
         </div>
       </div>

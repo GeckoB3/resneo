@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
-import { EditLinkedBookingModal } from './LinkedCalendarView';
+import { LinkedBookingDetailModal } from './LinkedCalendarView';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import type { LinkedBooking, LinkedVenueCalendar } from '@/lib/linked-accounts/calendar';
 
 /**
@@ -54,6 +56,7 @@ export function LinkedBookingsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<FlatLinkedBooking | null>(null);
+  const [detailBooking, setDetailBooking] = useState<FlatLinkedBooking | null>(null);
   /** Only true after a fetch returns at least one linked venue — avoids flash for unlinked venues. */
   const [showPanel, setShowPanel] = useState(false);
 
@@ -132,7 +135,7 @@ export function LinkedBookingsPanel({
         <ul className="divide-y divide-slate-100">
           {rows.map((b) => {
             const timeOnly = b.visibility === 'time_only';
-            const canEdit = b.editable && !timeOnly && b.status !== 'Cancelled';
+            const usesNativeDetail = b.visibility === 'full_details';
             const timeLabel = b.bookingEndTime
               ? `${fmtTime(b.bookingTime)}–${fmtTime(b.bookingEndTime)}`
               : fmtTime(b.bookingTime);
@@ -160,22 +163,29 @@ export function LinkedBookingsPanel({
                   <Pill variant={statusVariant(b.status)} size="sm">
                     {b.status}
                   </Pill>
-                  {canEdit ? (
+                  {usesNativeDetail ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fetch('/api/venue/linked-calendar/booking/view', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ bookingId: b.id }),
+                        }).catch(() => undefined);
+                        setDetailBooking(b);
+                      }}
+                      className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Open
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       onClick={() => setEditing(b)}
                       className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                      Edit
+                      View
                     </button>
-                  ) : (
-                    <span
-                      title="You cannot edit this booking"
-                      aria-label="Read-only"
-                      className="text-slate-400"
-                    >
-                      🔒
-                    </span>
                   )}
                 </div>
               </li>
@@ -184,16 +194,36 @@ export function LinkedBookingsPanel({
         </ul>
       )}
 
-      {editing ? (
-        <EditLinkedBookingModal
+      {detailBooking ? (
+        <BookingDetailPanel
+          key={detailBooking.id}
+          bookingId={detailBooking.id}
+          venueId={detailBooking.venueId}
+          initialSnapshot={{
+            bookingDate: detailBooking.bookingDate,
+            guestName: detailBooking.guestName ?? 'Guest',
+            partySize: 1,
+            status: detailBooking.status,
+            startTime: detailBooking.bookingTime.slice(0, 5),
+            endTime: detailBooking.bookingEndTime?.slice(0, 5) ?? detailBooking.bookingTime.slice(0, 5),
+            serviceName: detailBooking.serviceName,
+            practitionerId: detailBooking.practitionerId,
+            calendarId: detailBooking.practitionerId,
+            inferredBookingModel: 'unified_scheduling',
+          } satisfies BookingDetailPanelSnapshot}
+          isAppointment
+          presentation="modal"
+          onClose={() => setDetailBooking(null)}
+          onUpdated={() => void load()}
+        />
+      ) : null}
+
+      {editing && editing.visibility === 'time_only' ? (
+        <LinkedBookingDetailModal
           venueName={editing.venueName}
+          visibility={editing.visibility}
           booking={editing}
-          canCancel={editing.action === 'create_edit_cancel'}
           onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-          }}
         />
       ) : null}
     </section>

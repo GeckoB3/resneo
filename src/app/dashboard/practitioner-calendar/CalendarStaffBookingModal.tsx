@@ -7,7 +7,7 @@ import {
 
 export type CalendarStaffBookingModalProps = Omit<
   StaffSurfaceBookingModalProps,
-  'staffRebookBootstrap' | 'heading' | 'stackKey'
+  'staffRebookBootstrap' | 'heading'
 >;
 
 /**

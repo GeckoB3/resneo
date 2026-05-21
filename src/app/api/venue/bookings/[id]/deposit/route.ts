@@ -8,6 +8,11 @@ import { sendDepositRequestNotifications } from '@/lib/communications/send-templ
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import {
+  linkedGrantAllowsMutation,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
+import type { BookingModel } from '@/types/booking-models';
 
 const schema = z.object({
   action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund']),
@@ -27,14 +32,20 @@ export async function POST(
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 
+  const loaded = await loadStaffAccessibleBooking(staff, id);
+  if (!loaded.ok) {
+    return NextResponse.json({ error: loaded.error }, { status: loaded.status });
+  }
+  if (!linkedGrantAllowsMutation(loaded.ctx.linkedGrant, loaded.ctx.isOwnVenue)) {
+    return NextResponse.json(
+      { error: 'This link does not allow changing deposits on the other venue’s bookings.' },
+      { status: 403 },
+    );
+  }
+
   const admin = getSupabaseAdminClient();
-  const { data: booking } = await admin
-    .from('bookings')
-    .select('*')
-    .eq('id', id)
-    .eq('venue_id', staff.venue_id)
-    .single();
-  if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+  const scopeVenueId = loaded.ctx.ownerVenueId;
+  const booking = loaded.ctx.booking;
 
   if (parsed.data.action === 'waive') {
     await admin.from('bookings').update({ deposit_status: 'Waived', updated_at: new Date().toISOString() }).eq('id', id);
@@ -58,7 +69,7 @@ export async function POST(
     const { data: venue } = await admin
       .from('venues')
       .select('stripe_connected_account_id')
-      .eq('id', staff.venue_id)
+      .eq('id', scopeVenueId)
       .single();
     if (!venue?.stripe_connected_account_id) {
       return NextResponse.json({ error: 'Venue payment account not connected' }, { status: 400 });
@@ -79,7 +90,7 @@ export async function POST(
   const { data: venue } = await admin
     .from('venues')
     .select('name, address, email, reply_to_email')
-    .eq('id', staff.venue_id)
+    .eq('id', scopeVenueId)
     .single();
   if (!venue?.name) return NextResponse.json({ error: 'Venue not found' }, { status: 400 });
   if (!guest?.email && !guest?.phone) {
@@ -90,7 +101,7 @@ export async function POST(
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
-  const paymentLink = await createOrGetPaymentShortLink(staff.venue_id, id, baseUrl);
+  const paymentLink = await createOrGetPaymentShortLink(scopeVenueId, id, baseUrl);
 
   await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_sms');
   await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_email');
@@ -103,7 +114,7 @@ export async function POST(
       guest_phone: guest.phone ?? null,
       booking_date: booking.booking_date as string,
       booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '',
-      booking_model: booking.booking_model,
+      booking_model: (booking.booking_model as BookingModel | null | undefined) ?? undefined,
       party_size: booking.party_size as number,
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
     },
@@ -113,7 +124,7 @@ export async function POST(
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
     }),
-    staff.venue_id,
+    scopeVenueId,
     paymentLink,
   );
 

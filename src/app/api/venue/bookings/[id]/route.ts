@@ -53,6 +53,11 @@ import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import {
+  linkedGrantAllowsCancel,
+  linkedGrantAllowsMutation,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
@@ -79,16 +84,11 @@ export async function GET(
 
     const { id } = await params;
 
-    const { data: booking, error: bookErr } = await staff.db
-      .from('bookings')
-      .select('*')
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .single();
-
-    if (bookErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    const loaded = await loadStaffAccessibleBooking(staff, id);
+    if (!loaded.ok) {
+      return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
+    const { booking, ownerVenueId: scopeVenueId } = loaded.ctx;
 
     const bookingAreaId = (booking as { area_id?: string | null }).area_id;
     const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
@@ -110,7 +110,7 @@ export async function GET(
             .from('areas')
             .select('name')
             .eq('id', bookingAreaId)
-            .eq('venue_id', staff.venue_id)
+            .eq('venue_id', scopeVenueId)
             .maybeSingle()
         : Promise.resolve({ data: null as { name?: string } | null }),
       bookingVariantId
@@ -118,7 +118,7 @@ export async function GET(
             .from('service_variants')
             .select('name, price_pence')
             .eq('id', bookingVariantId)
-            .eq('venue_id', staff.venue_id)
+            .eq('venue_id', scopeVenueId)
             .maybeSingle()
         : Promise.resolve({ data: null as { name?: string; price_pence?: number | null } | null }),
       staff.db
@@ -178,7 +178,7 @@ export async function GET(
       const { data: customCombo } = await staff.db
         .from('table_combinations')
         .select('internal_notes')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', scopeVenueId)
         .eq('table_group_key', key)
         .maybeSingle();
       if (customCombo?.internal_notes) {
@@ -187,7 +187,7 @@ export async function GET(
         const { data: autoOv } = await staff.db
           .from('combination_auto_overrides')
           .select('internal_notes')
-          .eq('venue_id', staff.venue_id)
+          .eq('venue_id', scopeVenueId)
           .eq('table_group_key', key)
           .maybeSingle();
         if (autoOv?.internal_notes) {
@@ -241,16 +241,16 @@ export async function PATCH(
       );
     }
 
-    const { data: booking, error: fetchErr } = await staff.db
-      .from('bookings')
-      .select('*')
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .single();
-
-    if (fetchErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    const loaded = await loadStaffAccessibleBooking(staff, id);
+    if (!loaded.ok) {
+      return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
+    const {
+      booking,
+      ownerVenueId: scopeVenueId,
+      isOwnVenue,
+      linkedGrant,
+    } = loaded.ctx;
 
     /** Staff attendance toggle only — any venue staff may update (table, event, class, resource, etc.). */
     const bodyKeys = Object.keys(body as Record<string, unknown>).filter(
@@ -282,7 +282,7 @@ export async function PATCH(
         .from('bookings')
         .update(attPayload)
         .eq('id', id)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', scopeVenueId);
       if (attErr) {
         console.error('PATCH staff_attendance_confirmed failed:', attErr);
         return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
@@ -310,32 +310,38 @@ export async function PATCH(
     }
 
     const admin = getSupabaseAdminClient();
-    const scopedCalendarId =
-      staff.role === 'admin'
-        ? null
-        : await resolveBookingScopedCalendarId(admin, staff.venue_id, booking as Parameters<
-            typeof resolveBookingScopedCalendarId
-          >[2]);
 
     if (staff.role !== 'admin') {
-      if (!scopedCalendarId) {
+      if (isOwnVenue) {
+        const scopedCalendarId = await resolveBookingScopedCalendarId(
+          admin,
+          scopeVenueId,
+          booking as Parameters<typeof resolveBookingScopedCalendarId>[2],
+        );
+        if (!scopedCalendarId) {
+          return NextResponse.json(
+            {
+              error:
+                'This booking is not linked to a team calendar column tied to your permissions. Ask a venue admin to update this booking, or contact support if that seems wrong.',
+            },
+            { status: 403 },
+          );
+        }
+        const access = await requireManagedCalendarAccess(
+          admin,
+          scopeVenueId,
+          staff,
+          scopedCalendarId,
+          'You can only modify bookings on calendars assigned to your account.',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
+        }
+      } else if (!linkedGrantAllowsMutation(linkedGrant, false)) {
         return NextResponse.json(
-          {
-            error:
-              'This booking is not linked to a team calendar column tied to your permissions. Ask a venue admin to update this booking, or contact support if that seems wrong.',
-          },
+          { error: 'This link does not allow editing the other venue’s bookings.' },
           { status: 403 },
         );
-      }
-      const access = await requireManagedCalendarAccess(
-        admin,
-        staff.venue_id,
-        staff,
-        scopedCalendarId,
-        'You can only modify bookings on calendars assigned to your account.',
-      );
-      if (!access.ok) {
-        return NextResponse.json({ error: access.error }, { status: 403 });
       }
     }
 
@@ -397,7 +403,7 @@ export async function PATCH(
 
       const apptInput = await fetchAppointmentInput({
         supabase: admin,
-        venueId: staff.venue_id,
+        venueId: scopeVenueId,
         date: booking.booking_date as string,
         practitionerId: practId,
         serviceId: svcId,
@@ -407,7 +413,7 @@ export async function PATCH(
       const { data: venueClock } = await admin
         .from('venues')
         .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
-        .eq('id', staff.venue_id)
+        .eq('id', scopeVenueId)
         .single();
       attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
 
@@ -435,7 +441,7 @@ export async function PATCH(
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', scopeVenueId);
       if (procUpdErr) {
         console.error('PATCH processing_time_blocks only failed:', procUpdErr);
         return NextResponse.json({ error: 'Could not save processing time' }, { status: 500 });
@@ -455,6 +461,13 @@ export async function PATCH(
       }
       const newStatus = parsed.data;
 
+      if (newStatus === 'Cancelled' && !linkedGrantAllowsCancel(linkedGrant, isOwnVenue)) {
+        return NextResponse.json(
+          { error: 'This link does not allow cancelling the other venue’s bookings.' },
+          { status: 403 },
+        );
+      }
+
       const transitionCheck = validateBookingStatusTransition(booking.status as string, newStatus);
       if (!transitionCheck.ok) {
         return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
@@ -464,7 +477,7 @@ export async function PATCH(
         const { data: venueGrace } = await admin
           .from('venues')
           .select('no_show_grace_minutes, timezone')
-          .eq('id', staff.venue_id)
+          .eq('id', scopeVenueId)
           .single();
         const graceMinutes = venueGrace?.no_show_grace_minutes ?? 15;
         const venueTimezone =
@@ -496,7 +509,7 @@ export async function PATCH(
           const { data: groupRows } = await staff.db
             .from('bookings')
             .select('id, stripe_payment_intent_id, deposit_status, deposit_amount_pence')
-            .eq('venue_id', staff.venue_id)
+            .eq('venue_id', scopeVenueId)
             .eq('group_booking_id', groupBookingId)
             .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']);
 
@@ -525,7 +538,7 @@ export async function PATCH(
 
         let refundSucceeded = false;
         if (canRefund && paymentIntentForRefund) {
-          const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', staff.venue_id).single();
+          const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', scopeVenueId).single();
           if (venue?.stripe_connected_account_id) {
             try {
               await stripe.refunds.create(
@@ -536,7 +549,7 @@ export async function PATCH(
             } catch (refundErr) {
               logBookingOp({
                 operation: 'refund_failed',
-                venue_id: staff.venue_id,
+                venue_id: scopeVenueId,
                 booking_id: id,
                 booking_model: inferBookingRowModel(
                   booking as Parameters<typeof inferBookingRowModel>[0],
@@ -583,7 +596,7 @@ export async function PATCH(
 
         logBookingOp({
           operation: 'cancel',
-          venue_id: staff.venue_id,
+          venue_id: scopeVenueId,
           booking_id: id,
           booking_model: inferBookingRowModel(
             booking as Parameters<typeof inferBookingRowModel>[0],
@@ -592,7 +605,7 @@ export async function PATCH(
 
         const cancelledBookingForWaitlist = {
           id,
-          venue_id: staff.venue_id,
+          venue_id: scopeVenueId,
           booking_date: String(booking.booking_date),
           booking_time: String(booking.booking_time),
           practitioner_id: booking.practitioner_id as string | null | undefined,
@@ -644,7 +657,7 @@ export async function PATCH(
         const { data: venueRow } = await staff.db
           .from('venues')
           .select('name, address, phone, email, reply_to_email')
-          .eq('id', staff.venue_id)
+          .eq('id', scopeVenueId)
           .single();
         if (guestRow && venueRow?.name) {
           const depositAmountStr = depositPenceForMessage
@@ -678,7 +691,7 @@ export async function PATCH(
             email: venueRow.email ?? null,
             reply_to_email: venueRow.reply_to_email ?? null,
           });
-          const vid = staff.venue_id;
+          const vid = scopeVenueId;
           const refundMsg = refund_message;
           after(async () => {
             try {
@@ -702,10 +715,10 @@ export async function PATCH(
           .select('first_name, last_name, email')
           .eq('id', booking.guest_id)
           .maybeSingle();
-        const { data: venueNoShow } = await admin.from('venues').select('name').eq('id', staff.venue_id).maybeSingle();
+        const { data: venueNoShow } = await admin.from('venues').select('name').eq('id', scopeVenueId).maybeSingle();
         if (guestNoShow?.email && venueNoShow?.name) {
           const bookingTimeNs = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-          const venueIdNs = staff.venue_id;
+          const venueIdNs = scopeVenueId;
           const bookingIdNs = id;
           const guestIdNs = booking.guest_id;
           after(async () => {
@@ -790,7 +803,7 @@ export async function PATCH(
           .select('first_name, last_name, email, phone')
           .eq('id', booking.guest_id)
           .single();
-          const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
+          const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', scopeVenueId).single();
           if (guestRow?.email && venueRow?.name) {
             const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
             const emailData = {
@@ -800,11 +813,11 @@ export async function PATCH(
               guest_phone: guestRow.phone ?? null,
               booking_date: booking.booking_date,
               booking_time: bookingTime,
-              booking_model: booking.booking_model,
+              booking_model: (booking.booking_model as BookingModel | null | undefined) ?? undefined,
               party_size: booking.party_size,
             };
             const venueEmailData = { name: venueRow.name, address: venueRow.address ?? undefined };
-            const vid = staff.venue_id;
+            const vid = scopeVenueId;
             after(async () => {
               try {
                 const enriched = await enrichBookingEmailForComms(getSupabaseAdminClient(), id, emailData);
@@ -832,7 +845,7 @@ export async function PATCH(
 
       if (newStatus === 'Seated' && Array.isArray(body.table_ids) && body.table_ids.length > 0) {
         const tableIds = body.table_ids as string[];
-        const valid = await validateTablesBelongToVenue(admin, staff.venue_id, tableIds);
+        const valid = await validateTablesBelongToVenue(admin, scopeVenueId, tableIds);
         if (valid) {
           await replaceBookingAssignments(admin, id, tableIds, staff.id);
           await syncTableStatusesForBooking(admin, id, tableIds, newStatus, staff.id);
@@ -863,7 +876,7 @@ export async function PATCH(
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', scopeVenueId);
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
@@ -896,7 +909,7 @@ export async function PATCH(
         .from('bookings')
         .update(updatePayload)
         .eq('id', id)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', scopeVenueId);
 
       // Run lifecycle hooks if status changed (mirrors the status-PATCH path).
       if (updatePayload.status && updatePayload.status !== currentStatus) {
@@ -948,7 +961,7 @@ export async function PATCH(
           .from('bookings')
           .update(bookingUpdatePayload)
           .eq('id', id)
-          .eq('venue_id', staff.venue_id);
+          .eq('venue_id', scopeVenueId);
       }
 
       if (
@@ -995,7 +1008,7 @@ export async function PATCH(
           if (body.guest_phone !== undefined) {
             contactSnap.guest_phone = guestUpdatePayload.phone ?? null;
           }
-          await staff.db.from('bookings').update(contactSnap).eq('id', id).eq('venue_id', staff.venue_id);
+          await staff.db.from('bookings').update(contactSnap).eq('id', id).eq('venue_id', scopeVenueId);
         }
 
         if (body.guest_first_name !== undefined || body.guest_last_name !== undefined) {
@@ -1010,7 +1023,7 @@ export async function PATCH(
             bookingSnap.guest_last_name =
               typeof body.guest_last_name === 'string' ? normaliseGuestNamePart(body.guest_last_name) : null;
           }
-          await staff.db.from('bookings').update(bookingSnap).eq('id', id).eq('venue_id', staff.venue_id);
+          await staff.db.from('bookings').update(bookingSnap).eq('id', id).eq('venue_id', scopeVenueId);
         }
       }
 
@@ -1148,7 +1161,7 @@ export async function PATCH(
         if (variantIdForDefault) {
           const vRow = await loadActiveVariantForService({
             admin,
-            venueId: staff.venue_id,
+            venueId: scopeVenueId,
             serviceId: svcId,
             variantId: variantIdForDefault,
           });
@@ -1160,7 +1173,7 @@ export async function PATCH(
 
         const intervalResult = await validateAppointmentModificationInterval({
           admin,
-          venueId: staff.venue_id,
+          venueId: scopeVenueId,
           bookingId: id,
           newDate,
           timeStr,
@@ -1185,7 +1198,7 @@ export async function PATCH(
           );
         }
       } else {
-        const venueMode = await resolveVenueMode(admin, staff.venue_id);
+        const venueMode = await resolveVenueMode(admin, scopeVenueId);
         if (venueMode.availabilityEngine !== 'service') {
           return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
         }
@@ -1193,7 +1206,7 @@ export async function PATCH(
         const bookingAreaId = (booking as { area_id?: string | null }).area_id ?? null;
         let targetAreaId = bookingAreaId;
         if (typeof body.area_id === 'string' && body.area_id.trim() !== '') {
-          const areas = await listActiveAreasForVenue(admin, staff.venue_id);
+          const areas = await listActiveAreasForVenue(admin, scopeVenueId);
           if (!areas.some((a) => a.id === body.area_id)) {
             return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
           }
@@ -1213,7 +1226,7 @@ export async function PATCH(
 
         const engineInput = await fetchEngineInput({
           supabase: admin,
-          venueId: staff.venue_id,
+          venueId: scopeVenueId,
           date: newDate,
           partySize: newPartySize,
           areaId: targetAreaId,
@@ -1351,7 +1364,7 @@ export async function PATCH(
         const { data: venueForDeposit } = await admin
           .from('venues')
           .select('deposit_config, stripe_connected_account_id')
-          .eq('id', staff.venue_id)
+          .eq('id', scopeVenueId)
           .single();
 
         const { data: brRow } = tableServiceId
@@ -1380,7 +1393,7 @@ export async function PATCH(
               {
                 amount: additionalPence,
                 currency: 'gbp',
-                metadata: { booking_id: id, venue_id: staff.venue_id, type: 'additional_deposit' },
+                metadata: { booking_id: id, venue_id: scopeVenueId, type: 'additional_deposit' },
                 automatic_payment_methods: { enabled: true },
               },
               { stripeAccount: venueForDeposit.stripe_connected_account_id }
@@ -1420,7 +1433,7 @@ export async function PATCH(
 
       const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
       await logBookingModifiedEvent(admin, {
-        venue_id: staff.venue_id,
+        venue_id: scopeVenueId,
         booking_id: id,
         modification_actor: 'staff',
         before,
@@ -1440,7 +1453,7 @@ export async function PATCH(
         const { data: venueForTables } = await admin
           .from('venues')
           .select('table_management_enabled')
-          .eq('id', staff.venue_id)
+          .eq('id', scopeVenueId)
           .single();
 
         if (venueForTables?.table_management_enabled) {
@@ -1456,7 +1469,7 @@ export async function PATCH(
           } else {
             const resolved = await resolveTableAssignmentDurationBuffer(
               admin,
-              staff.venue_id,
+              scopeVenueId,
               newDate,
               newPartySize,
               serviceIdForDuration,
@@ -1466,7 +1479,7 @@ export async function PATCH(
           }
           const assigned = await autoAssignTable(
             admin,
-            staff.venue_id,
+            scopeVenueId,
             id,
             newDate,
             timeStr,
@@ -1492,7 +1505,7 @@ export async function PATCH(
             const { executeBookingModificationGuestNotification } = await import(
               '@/lib/booking/send-booking-modification-guest-notification'
             );
-            await executeBookingModificationGuestNotification(admin, staff.venue_id, id);
+            await executeBookingModificationGuestNotification(admin, scopeVenueId, id);
           } catch (commsErr) {
             console.error('Booking modification notification failed:', commsErr);
           }
@@ -1544,15 +1557,22 @@ export async function DELETE(
     const { id } = await params;
     const admin = getSupabaseAdminClient();
 
-    const { data: booking, error: fetchErr } = await staff.db
-      .from('bookings')
-      .select('id, venue_id, status')
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .single();
+    const loaded = await loadStaffAccessibleBooking(staff, id);
+    if (!loaded.ok) {
+      return NextResponse.json({ error: loaded.error }, { status: loaded.status });
+    }
+    const {
+      booking,
+      ownerVenueId: scopeVenueId,
+      isOwnVenue,
+      linkedGrant,
+    } = loaded.ctx;
 
-    if (fetchErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    if (!isOwnVenue && !linkedGrantAllowsCancel(linkedGrant, false)) {
+      return NextResponse.json(
+        { error: 'This link does not allow deleting the other venue’s bookings.' },
+        { status: 403 },
+      );
     }
 
     if (booking.status !== 'Cancelled') {
@@ -1588,13 +1608,13 @@ export async function DELETE(
       return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
     }
 
-    const { error: delErr } = await admin.from('bookings').delete().eq('id', id).eq('venue_id', staff.venue_id);
+    const { error: delErr } = await admin.from('bookings').delete().eq('id', id).eq('venue_id', scopeVenueId);
     if (delErr) {
       console.error('DELETE booking: bookings delete failed:', delErr);
       return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
     }
 
-    logBookingOp({ operation: 'delete', venue_id: staff.venue_id, booking_id: id });
+    logBookingOp({ operation: 'delete', venue_id: scopeVenueId, booking_id: id });
 
     return NextResponse.json({ success: true });
   } catch (err) {

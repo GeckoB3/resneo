@@ -18,6 +18,10 @@ import {
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * GET /api/venue/appointment-calendar?practitioner_id=&service_id=&year=&month=
@@ -62,7 +66,20 @@ export async function GET(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const venueMode = await resolveVenueMode(admin, staff.venue_id);
+
+    const ownerVenueParam = searchParams.get('owner_venue_id');
+    const scope = await resolveLinkedStaffCreateScope(
+      admin,
+      staff.venue_id,
+      ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
+      null,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
+    }
+    const calendarVenueId = scope.venueId;
+
+    const venueMode = await resolveVenueMode(admin, calendarVenueId);
     const supportsAppointments =
       isUnifiedSchedulingVenue(venueMode.bookingModel) ||
       venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
@@ -76,7 +93,7 @@ export async function GET(request: NextRequest) {
     const variantOverride = variantId
       ? await loadActiveVariantForService({
           admin,
-          venueId: staff.venue_id,
+          venueId: calendarVenueId,
           serviceId,
           variantId,
         })
@@ -89,7 +106,7 @@ export async function GET(request: NextRequest) {
       const { data: venueFlagsRow } = await admin
         .from('venues')
         .select('feature_flags')
-        .eq('id', staff.venue_id)
+        .eq('id', calendarVenueId)
         .maybeSingle();
       const venueFlags = parseVenueFeatureFlags(
         (venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags,
@@ -104,7 +121,7 @@ export async function GET(request: NextRequest) {
     const available_dates = anyAvailable
       ? await computeAnyAvailableAppointmentDatesInMonth(
           admin,
-          staff.venue_id,
+          calendarVenueId,
           serviceId,
           year,
           month,
@@ -112,7 +129,7 @@ export async function GET(request: NextRequest) {
         )
       : await computeAppointmentAvailableDatesInMonth(
           admin,
-          staff.venue_id,
+          calendarVenueId,
           practitionerId!,
           serviceId,
           year,

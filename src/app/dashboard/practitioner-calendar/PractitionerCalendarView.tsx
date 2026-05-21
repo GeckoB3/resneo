@@ -38,11 +38,16 @@ import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import { CalendarColumnsChecklist } from '@/app/dashboard/practitioner-calendar/CalendarColumnsFilter';
 import {
-  EditLinkedBookingModal,
-  CreateLinkedBookingModal,
   LinkedBookingDetailModal,
 } from '@/components/linked-accounts/LinkedCalendarView';
 import type { LinkedVenueCalendar, LinkedBooking } from '@/lib/linked-accounts/calendar';
+import {
+  linkedBookingToGridBooking,
+  linkedBookingBarDetailLabel,
+  linkedColumnKey,
+  linkedColumnUsesNativeGrid,
+  resolveLinkedGridPractitionerIdForPatch,
+} from '@/lib/linked-accounts/calendar';
 import { linkedBookingCountByDate } from '@/lib/linked-accounts/month-linked-counts';
 import {
   BookingDetailPanel,
@@ -171,8 +176,12 @@ interface LinkedColumn {
   action: LinkedVenueCalendar['action'];
 }
 
-function linkedColumnKey(venueId: string, practitionerId: string): string {
-  return `linked:${venueId}:${practitionerId}`;
+type DayGridColumn =
+  | { kind: 'native'; practitioner: Practitioner }
+  | { kind: 'linked'; column: LinkedColumn };
+
+function dayGridColumnId(col: DayGridColumn): string {
+  return col.kind === 'native' ? col.practitioner.id : col.column.key;
 }
 
 interface AppointmentService {
@@ -222,6 +231,9 @@ interface Booking {
   event_session_id?: string | null;
   /** Needed to hide attendance actions for walk-ins (same as bookings dashboard). */
   source?: string | null;
+  /** Set for editable linked-venue bookings rendered on the native day grid. */
+  _linkedOwnerVenueId?: string;
+  _linkedColumnKey?: string;
 }
 
 interface CalendarBlock {
@@ -276,6 +288,7 @@ function apiResourceRowToVenueResource(r: VenueResourceRow, venueIdForRow: strin
 
 /** Staff column: appointment anchor, or resource booking mapped onto its host calendar column. */
 function resolveBookingColumnId(b: Booking, resourceParentById: Map<string, string>): string | null {
+  if (b._linkedColumnKey) return b._linkedColumnKey;
   const rid = b.resource_id ?? null;
   if (rid && resourceParentById.has(rid)) return resourceParentById.get(rid)!;
   if (b.calendar_id && resourceParentById.has(b.calendar_id)) return resourceParentById.get(b.calendar_id)!;
@@ -351,8 +364,8 @@ interface PractitionerCalendarPreferences {
   weekStart?: string;
   monthAnchor?: string;
   visibleCalendarIdsState?: string[] | null;
-  /** Linked-venue columns the user has opted into (§8.2). Default: none. */
-  visibleLinkedColumnIds?: string[];
+  /** Linked-venue columns to show (§8.2). `null` = all linked columns; otherwise a subset. */
+  visibleLinkedColumnIds?: string[] | null;
   filterStatus?: string;
   startHourOverride?: number | null;
   endHourOverride?: number | null;
@@ -379,7 +392,7 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
   if (value.visibleCalendarIdsState !== undefined && value.visibleCalendarIdsState !== null) {
     if (!Array.isArray(value.visibleCalendarIdsState) || !value.visibleCalendarIdsState.every((id) => typeof id === 'string' && UUID_RE.test(id))) return false;
   }
-  if (value.visibleLinkedColumnIds !== undefined) {
+  if (value.visibleLinkedColumnIds !== undefined && value.visibleLinkedColumnIds !== null) {
     if (
       !Array.isArray(value.visibleLinkedColumnIds) ||
       !value.visibleLinkedColumnIds.every((id) => typeof id === 'string' && id.startsWith('linked:'))
@@ -488,6 +501,10 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
     return BOOKING_PALETTE_BOOKED;
   }
   return BOOKING_PALETTE_BOOKED;
+}
+
+function linkedBookingCalendarBlockStyle(status: string): BookingBlockPalette {
+  return bookingCalendarBlockStyle({ status, client_arrived_at: null } as Booking);
 }
 
 function calendarStatusLabel(b: Booking): string {
@@ -1342,7 +1359,7 @@ function slotOccupied(
   blocks: CalendarBlock[],
   pracId: string,
   dateStr: string,
-  serviceMap: Map<string, AppointmentService>,
+  getServiceMap: (b: Booking) => Map<string, AppointmentService>,
   classScheduleBlocks: ScheduleBlockDTO[] = [],
   eventColumnBlocks: ScheduleBlockDTO[] = [],
   resourceParentById: Map<string, string>,
@@ -1356,7 +1373,7 @@ function slotOccupied(
       if (excludeBookingId && b.id === excludeBookingId) continue;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
       if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
-      const busyIv = practitionerWallBusyIntervalsForBooking(b, serviceMap);
+      const busyIv = practitionerWallBusyIntervalsForBooking(b, getServiceMap(b));
       if (busyIv.some((iv) => overlapsRange(slotStart, slotEnd, iv.start, iv.end))) return true;
     }
   }
@@ -1391,7 +1408,7 @@ function appointmentWindowCollides(
   excludeBookingId: string | undefined,
   bookings: Booking[],
   blocks: CalendarBlock[],
-  serviceMap: Map<string, AppointmentService>,
+  getServiceMap: (b: Booking) => Map<string, AppointmentService>,
   classScheduleBlocks: ScheduleBlockDTO[],
   eventColumnBlocks: ScheduleBlockDTO[],
   resourceParentById: Map<string, string>,
@@ -1411,7 +1428,7 @@ function appointmentWindowCollides(
       if (excludeBookingId && b.id === excludeBookingId) continue;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
       if (['Cancelled', 'No-Show'].includes(b.status)) continue;
-      const otherBusy = practitionerWallBusyIntervalsForBooking(b, serviceMap);
+      const otherBusy = practitionerWallBusyIntervalsForBooking(b, getServiceMap(b));
       for (const c of candIntervals) {
         for (const o of otherBusy) {
           if (overlapsRange(c.start, c.end, o.start, o.end)) return true;
@@ -1675,19 +1692,19 @@ function linkedBlockHeight(start: string, end: string | null): number {
   return Math.max((d / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.6);
 }
 
+function linkedBookingUsesNativeDetail(column: LinkedColumn): boolean {
+  return column.visibility === 'full_details';
+}
+
 function linkedBookingIsClickable(column: LinkedColumn, b: LinkedBooking): boolean {
-  return (
-    column.visibility === 'full_details' &&
-    b.editable &&
-    b.status !== 'Cancelled'
-  );
+  return linkedBookingUsesNativeDetail(column) && b.editable && b.status !== 'Cancelled';
 }
 
 /**
  * One read-only day-grid column for a linked venue's practitioner (§8.2).
  * Deliberately self-contained: no droppables, no drag, no resource maths — the
- * native calendar pipeline never sees this. Bookings render desaturated; only
- * `full_details` + editable links are clickable.
+ * native calendar pipeline never sees this. Visual treatment matches native columns
+ * except for the linked note in the column header.
  */
 const LinkedDayColumn = memo(function LinkedDayColumn({
   column,
@@ -1701,22 +1718,25 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   bookings: LinkedBooking[];
   startHour: number;
   totalSlots: number;
-  onBookingClick: (b: LinkedBooking) => void;
+  onBookingClick: (b: LinkedBooking, anchor?: { x: number; y: number }) => void;
   /** When set, empty slots are clickable to create a booking (§4.3). */
   onCreateAt?: (time: string) => void;
 }) {
   const timeOnly = column.visibility === 'time_only';
   return (
     <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
-      <div className="relative bg-slate-50/50" style={{ height: totalSlots * SLOT_HEIGHT }}>
-        {Array.from({ length: totalSlots }, (_, i) => (
-          <div
-            key={i}
-            className="absolute left-0 w-full border-t border-slate-100"
-            style={{ top: i * SLOT_HEIGHT }}
-            aria-hidden
-          />
-        ))}
+      <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
+        {Array.from({ length: totalSlots }, (_, i) => {
+          const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
+          return (
+            <div
+              key={i}
+              className={`absolute left-0 w-full border-t ${calendarGridLineClass(slotStartMins)}`}
+              style={{ top: i * SLOT_HEIGHT }}
+              aria-hidden
+            />
+          );
+        })}
         {onCreateAt
           ? Array.from({ length: totalSlots }, (_, i) => {
               const slotTime = minutesToTime(startHour * 60 + i * SLOT_MINUTES);
@@ -1736,22 +1756,20 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
         {bookings.map((b) => {
           const top = linkedSlotTop(b.bookingTime, startHour);
           const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime);
-          const clickable = linkedBookingIsClickable(column, b);
           const timeLabel = `${b.bookingTime.slice(0, 5)}${
             b.bookingEndTime ? `–${b.bookingEndTime.slice(0, 5)}` : ''
           }`;
-          const detail = timeOnly
-            ? `${column.venueName} — busy`
-            : b.guestName ?? b.serviceName ?? 'Booking';
+          const detail = linkedBookingBarDetailLabel(b, column.visibility, column.venueName);
+          const palette = linkedBookingCalendarBlockStyle(b.status);
           const inner = (
             <div
-              className="flex h-full min-h-0 w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-slate-300 bg-white/70 px-1.5 py-1 text-left text-[10px] text-slate-500 saturate-50"
-              style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+              className="flex h-full min-h-0 w-full flex-col gap-0.5 overflow-hidden rounded-xl border border-solid px-2 py-1.5 text-left text-[10px] shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10"
+              style={bookingBlockCardStyle(palette)}
             >
-              <span className="font-semibold tabular-nums text-slate-600">{timeLabel}</span>
-              <span className="truncate">{detail}</span>
+              <span className="font-semibold tabular-nums">{timeLabel}</span>
+              <span className="truncate font-medium">{detail}</span>
               {!timeOnly ? (
-                <span className="mt-auto text-[9px] uppercase tracking-wide text-slate-400">
+                <span className="mt-auto text-[9px] font-semibold uppercase tracking-wide opacity-80">
                   {b.status}
                 </span>
               ) : null}
@@ -1765,11 +1783,15 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
             >
               <button
                 type="button"
-                onClick={() => onBookingClick(b)}
-                className="block h-full w-full text-left transition hover:saturate-100 hover:opacity-90"
+                onClick={(e) =>
+                  onBookingClick(b, { x: e.clientX, y: e.clientY })
+                }
+                className="block h-full w-full text-left"
                 title={
-                  clickable
-                    ? `Edit in ${column.venueName}`
+                  linkedBookingUsesNativeDetail(column)
+                    ? linkedBookingIsClickable(column, b)
+                      ? `Edit in ${column.venueName}`
+                      : `Open booking · ${column.venueName}`
                     : `View detail · ${column.venueName}`
                 }
               >
@@ -1840,6 +1862,7 @@ export function PractitionerCalendarView({
   const [venueResources, setVenueResources] = useState<VenueResourceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [detailBookingOwnerVenueId, setDetailBookingOwnerVenueId] = useState<string | null>(null);
   const [detailBookingAnchor, setDetailBookingAnchor] = useState<{ x: number; y: number } | null>(null);
   const [classInstanceSheet, setClassInstanceSheet] = useState<{
     instanceId: string;
@@ -1855,11 +1878,8 @@ export function PractitionerCalendarView({
   );
   /** Linked-venue calendars (§8.2). Adjacent to the native pipeline, never merged. */
   const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
-  /** Linked columns the user has opted into. Default: none (opt-in). */
-  const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[]>([]);
-  const [linkedEditing, setLinkedEditing] = useState<
-    { column: LinkedColumn; booking: LinkedBooking } | null
-  >(null);
+  /** Linked columns to show. `null` = all linked columns (default). */
+  const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[] | null>(null);
   const [linkedViewing, setLinkedViewing] = useState<
     { column: LinkedColumn; booking: LinkedBooking } | null
   >(null);
@@ -2650,10 +2670,64 @@ export function PractitionerCalendarView({
     return out;
   }, [linkedVenues]);
 
-  /** Linked columns the user has switched on — these render on the grid. */
-  const visibleLinkedColumns = useMemo(
-    () => linkedColumns.filter((c) => visibleLinkedColumnIds.includes(c.key)),
-    [linkedColumns, visibleLinkedColumnIds],
+  /** Linked columns visible on the grid. */
+  const visibleLinkedColumns = useMemo(() => {
+    if (visibleLinkedColumnIds === null) return linkedColumns;
+    const allowed = new Set(visibleLinkedColumnIds);
+    return linkedColumns.filter((c) => allowed.has(c.key));
+  }, [linkedColumns, visibleLinkedColumnIds]);
+
+  /** Read-only linked columns (time_only or view-only full_details). */
+  const readOnlyLinkedColumns = useMemo(
+    () => visibleLinkedColumns.filter((c) => !linkedColumnUsesNativeGrid(c)),
+    [visibleLinkedColumns],
+  );
+
+  /** Linked columns that share the native interactive day grid (drag, resize, actions). */
+  const nativeGridLinkedColumns = useMemo(
+    () => visibleLinkedColumns.filter((c) => linkedColumnUsesNativeGrid(c)),
+    [visibleLinkedColumns],
+  );
+
+  const linkedNativeGridColumnByKey = useMemo(() => {
+    const m = new Map<string, LinkedColumn>();
+    for (const c of nativeGridLinkedColumns) m.set(c.key, c);
+    return m;
+  }, [nativeGridLinkedColumns]);
+
+  const dayGridColumns = useMemo((): DayGridColumn[] => {
+    const native: DayGridColumn[] = filteredPractitioners.map((practitioner) => ({
+      kind: 'native',
+      practitioner,
+    }));
+    const linked: DayGridColumn[] = nativeGridLinkedColumns.map((column) => ({
+      kind: 'linked',
+      column,
+    }));
+    return [...native, ...linked];
+  }, [filteredPractitioners, nativeGridLinkedColumns]);
+
+  const linkedNativeBookings = useMemo((): Booking[] => {
+    const out: Booking[] = [];
+    for (const v of linkedVenues) {
+      if (!linkedColumnUsesNativeGrid(v)) continue;
+      for (const lb of v.bookings) {
+        if (!lb.practitionerId) continue;
+        out.push(
+          linkedBookingToGridBooking(
+            lb,
+            v.venueId,
+            linkedColumnKey(v.venueId, lb.practitionerId),
+          ) as Booking,
+        );
+      }
+    }
+    return out;
+  }, [linkedVenues]);
+
+  const allGridBookings = useMemo(
+    () => [...bookings, ...linkedNativeBookings],
+    [bookings, linkedNativeBookings],
   );
 
   const linkedVenueById = useMemo(() => {
@@ -2674,17 +2748,27 @@ export function PractitionerCalendarView({
   );
 
   /**
-   * A click on any linked booking opens the edit modal when the grant allows
-   * it, or a read-only detail modal otherwise (§4.3) — so the grid never
-   * swallows a click silently.
+   * Full-details linked bookings open the native booking detail panel (same as
+   * own-venue bookings). Time-only links keep the lightweight read-only modal.
    */
-  const openLinkedBooking = useCallback((column: LinkedColumn, booking: LinkedBooking) => {
-    if (linkedBookingIsClickable(column, booking)) {
-      setLinkedEditing({ column, booking });
-    } else {
+  const openLinkedBooking = useCallback(
+    (column: LinkedColumn, booking: LinkedBooking, anchor?: { x: number; y: number }) => {
+      if (linkedBookingUsesNativeDetail(column)) {
+        void fetch('/api/venue/linked-calendar/booking/view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: booking.id }),
+        }).catch(() => undefined);
+        setLinkedViewing(null);
+        setDetailBookingOwnerVenueId(column.venueId);
+        setDetailBookingId(booking.id);
+        setDetailBookingAnchor(anchor ?? null);
+        return;
+      }
       setLinkedViewing({ column, booking });
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     const root = timelineRootRef.current;
@@ -2774,8 +2858,39 @@ export function PractitionerCalendarView({
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
 
+  const linkedServiceMapsByVenue = useMemo(() => {
+    const out = new Map<string, Map<string, AppointmentService>>();
+    for (const v of linkedVenues) {
+      if (!linkedColumnUsesNativeGrid(v)) continue;
+      const m = new Map<string, AppointmentService>();
+      for (const s of v.services) {
+        m.set(s.id, {
+          id: s.id,
+          name: s.name,
+          duration_minutes: s.durationMinutes ?? 60,
+          buffer_minutes: s.bufferMinutes ?? 0,
+          processing_time_blocks: s.processingTimeBlocks ?? [],
+          colour: s.colour ?? '#6366f1',
+          price_pence: s.pricePence ?? null,
+        });
+      }
+      out.set(v.venueId, m);
+    }
+    return out;
+  }, [linkedVenues]);
+
+  const serviceMapForBooking = useCallback(
+    (b: Booking): Map<string, AppointmentService> => {
+      if (b._linkedOwnerVenueId) {
+        return linkedServiceMapsByVenue.get(b._linkedOwnerVenueId) ?? new Map();
+      }
+      return serviceMap;
+    },
+    [linkedServiceMapsByVenue, serviceMap],
+  );
+
   function bookingsForPractitioner(pracId: string, dayDate: string): Booking[] {
-    return bookings.filter((b) => {
+    return allGridBookings.filter((b) => {
       if (b.booking_date !== dayDate) return false;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId) return false;
       if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
@@ -2784,7 +2899,7 @@ export function PractitionerCalendarView({
   }
 
   function getBookingDuration(b: Booking): number {
-    return bookingCalendarDisplaySpanMinutes(b, serviceMap);
+    return bookingCalendarDisplaySpanMinutes(b, serviceMapForBooking(b));
   }
 
   function slotTop(time: string): number {
@@ -3020,6 +3135,8 @@ export function PractitionerCalendarView({
 
   async function patchBookingMove(booking: Booking, newDate: string, newTime: string, newPracId: string) {
     const prev = { ...booking };
+    const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
+    const linkedOwnerVenueId = booking._linkedOwnerVenueId;
     const timeHm = newTime.length === 5 ? newTime : newTime.slice(0, 5);
     const timeForStore = newTime.length === 5 ? `${newTime}:00` : newTime;
     const dur = getBookingDuration(booking);
@@ -3027,20 +3144,43 @@ export function PractitionerCalendarView({
     const bookingEndForStore = `${endHm}:00`;
     const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
     setLastScheduleEditUndo({ kind: 'move', prev });
-    setBookings((rows) =>
-      rows.map((b) =>
-        b.id === booking.id
-          ? {
-              ...b,
-              booking_date: newDate,
-              booking_time: timeForStore,
-              booking_end_time: bookingEndForStore,
-              estimated_end_time: estimatedEndForStore,
-              ...(b.calendar_id != null ? { calendar_id: newPracId } : { practitioner_id: newPracId }),
-            }
-          : b,
-      ),
-    );
+    if (linkedOwnerVenueId) {
+      setLinkedVenues((venues) =>
+        venues.map((v) => {
+          if (v.venueId !== linkedOwnerVenueId) return v;
+          return {
+            ...v,
+            bookings: v.bookings.map((lb) => {
+              if (lb.id !== booking.id) return lb;
+              return {
+                ...lb,
+                bookingDate: newDate,
+                bookingTime: timeHm,
+                bookingEndTime: endHm,
+                practitionerId: realPracId,
+              };
+            }),
+          };
+        }),
+      );
+    } else {
+      setBookings((rows) =>
+        rows.map((b) =>
+          b.id === booking.id
+            ? {
+                ...b,
+                booking_date: newDate,
+                booking_time: timeForStore,
+                booking_end_time: bookingEndForStore,
+                estimated_end_time: estimatedEndForStore,
+                ...(b.calendar_id != null
+                  ? { calendar_id: newPracId }
+                  : { practitioner_id: newPracId }),
+              }
+            : b,
+        ),
+      );
+    }
     beginScheduleEditFollowUp(booking.id);
 
     const savePromise = (async (): Promise<'ok' | 'failed'> => {
@@ -3051,7 +3191,7 @@ export function PractitionerCalendarView({
           body: JSON.stringify({
             booking_date: newDate,
             booking_time: timeForStore,
-            practitioner_id: newPracId,
+            practitioner_id: realPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
             defer_modification_guest_notification: true,
@@ -3060,16 +3200,44 @@ export function PractitionerCalendarView({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           addToast((j as { error?: string }).error ?? 'Could not move appointment', 'error');
-          setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+          if (linkedOwnerVenueId) {
+            setLinkedVenues((venues) =>
+              venues.map((v) => {
+                if (v.venueId !== linkedOwnerVenueId) return v;
+                return {
+                  ...v,
+                  bookings: v.bookings.map((lb) => {
+                    if (lb.id !== prev.id) return lb;
+                    return {
+                      ...lb,
+                      bookingDate: prev.booking_date,
+                      bookingTime: prev.booking_time.slice(0, 5),
+                      bookingEndTime: prev.booking_end_time?.slice(0, 5) ?? null,
+                      practitionerId: resolveLinkedGridPractitionerIdForPatch(
+                        prev._linkedColumnKey ?? prev.practitioner_id ?? '',
+                      ),
+                    };
+                  }),
+                };
+              }),
+            );
+          } else {
+            setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+          }
           setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
           clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
         }
         void fetchData({ silent: true });
+        if (linkedOwnerVenueId) void loadLinkedData();
         return 'ok';
       } catch {
         addToast('Could not move appointment', 'error');
-        setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+        if (linkedOwnerVenueId) {
+          void loadLinkedData();
+        } else {
+          setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+        }
         setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
         clearScheduleEditFollowUpForBooking(booking.id);
         return 'failed';
@@ -3087,6 +3255,7 @@ export function PractitionerCalendarView({
   const patchBookingResize = useCallback(
     async (booking: Booking, newEndHm: string) => {
       const prev = { ...booking };
+      const linkedOwnerVenueId = booking._linkedOwnerVenueId;
       const startHm = booking.booking_time.slice(0, 5);
       const endLen5 = minutesToTime(timeToMinutes(newEndHm));
       if (timeToMinutes(newEndHm) <= timeToMinutes(startHm)) return;
@@ -3097,17 +3266,36 @@ export function PractitionerCalendarView({
         endLen5,
       );
       setLastScheduleEditUndo({ kind: 'resize', prev });
-      setBookings((rows) =>
-        rows.map((b) =>
-          b.id === booking.id
-            ? {
-                ...b,
-                booking_end_time: bookingEndForStore,
-                estimated_end_time: estimatedEndForStore,
-              }
-            : b,
-        ),
-      );
+      if (linkedOwnerVenueId) {
+        setLinkedVenues((venues) =>
+          venues.map((v) => {
+            if (v.venueId !== linkedOwnerVenueId) return v;
+            return {
+              ...v,
+              bookings: v.bookings.map((lb) => {
+                if (lb.id !== booking.id) return lb;
+                return {
+                  ...lb,
+                  bookingEndTime: endLen5,
+                  estimatedEndTime: estimatedEndForStore,
+                };
+              }),
+            };
+          }),
+        );
+      } else {
+        setBookings((rows) =>
+          rows.map((b) =>
+            b.id === booking.id
+              ? {
+                  ...b,
+                  booking_end_time: bookingEndForStore,
+                  estimated_end_time: estimatedEndForStore,
+                }
+              : b,
+          ),
+        );
+      }
       beginScheduleEditFollowUp(booking.id);
 
       const savePromise = (async (): Promise<'ok' | 'failed'> => {
@@ -3124,16 +3312,19 @@ export function PractitionerCalendarView({
           if (!res.ok) {
             const j = await res.json().catch(() => ({}));
             addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
-            setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+            if (linkedOwnerVenueId) void loadLinkedData();
+            else setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
             setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
             clearScheduleEditFollowUpForBooking(booking.id);
             return 'failed';
           }
           void fetchData({ silent: true });
+          if (linkedOwnerVenueId) void loadLinkedData();
           return 'ok';
         } catch {
           addToast('Could not update duration', 'error');
-          setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
+          if (linkedOwnerVenueId) void loadLinkedData();
+          else setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
           setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
           clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
@@ -3152,6 +3343,7 @@ export function PractitionerCalendarView({
       beginScheduleEditFollowUp,
       clearScheduleEditFollowUpForBooking,
       fetchData,
+      loadLinkedData,
     ],
   );
 
@@ -3176,10 +3368,34 @@ export function PractitionerCalendarView({
     const bookingEndForStore =
       prev.booking_end_time && prev.booking_end_time.trim() !== ''
         ? bookingTimeToStore(prev.booking_end_time)
-        : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMap))}:00`;
+        : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMapForBooking(prev)))}:00`;
+    const linkedOwnerVenueId = prev._linkedOwnerVenueId;
+    const undoPracId = resolveLinkedGridPractitionerIdForPatch(colId);
 
     setScheduleUndoPending(true);
-    setBookings((rows) => rows.map((b) => (b.id === bookingId ? { ...prev } : b)));
+    if (linkedOwnerVenueId) {
+      setLinkedVenues((venues) =>
+        venues.map((v) => {
+          if (v.venueId !== linkedOwnerVenueId) return v;
+          return {
+            ...v,
+            bookings: v.bookings.map((lb) => {
+              if (lb.id !== bookingId) return lb;
+              return {
+                ...lb,
+                bookingDate: prev.booking_date,
+                bookingTime: prev.booking_time.slice(0, 5),
+                bookingEndTime: prev.booking_end_time?.slice(0, 5) ?? null,
+                practitionerId: undoPracId,
+                estimatedEndTime: prev.estimated_end_time,
+              };
+            }),
+          };
+        }),
+      );
+    } else {
+      setBookings((rows) => rows.map((b) => (b.id === bookingId ? { ...prev } : b)));
+    }
 
     const skipBookingModificationGuestNotification =
       pendingDeferredModificationNotifyBookingIdRef.current === bookingId;
@@ -3211,7 +3427,7 @@ export function PractitionerCalendarView({
           body: JSON.stringify({
             booking_date: prev.booking_date,
             booking_time: timeForStore,
-            practitioner_id: colId,
+            practitioner_id: undoPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
             ...(skipBookingModificationGuestNotification
@@ -3231,6 +3447,7 @@ export function PractitionerCalendarView({
       setDragMoveConfirmBookingId(null);
       addToast('Change undone', 'success');
       void fetchData({ silent: true });
+      if (linkedOwnerVenueId) void loadLinkedData();
     } catch {
       addToast('Could not undo', 'error');
       void fetchData({ silent: true });
@@ -3243,8 +3460,9 @@ export function PractitionerCalendarView({
     lastScheduleEditUndo,
     resourceParentById,
     scheduleUndoPending,
-    serviceMap,
+    serviceMapForBooking,
     cancelPendingDeferredModificationGuestNotify,
+    loadLinkedData,
   ]);
 
   async function quickPatchBooking(bookingId: string, body: Record<string, unknown>) {
@@ -3264,6 +3482,7 @@ export function PractitionerCalendarView({
         scheduleWaitlistAlertsRefresh();
       }
       void fetchData({ silent: true });
+      void loadLinkedData();
     } catch {
       addToast('Update failed', 'error');
     } finally {
@@ -3357,15 +3576,18 @@ export function PractitionerCalendarView({
           pracId,
           dateStr,
           undefined,
-          bookings,
+          allGridBookings,
           displayBlocks,
-          serviceMap,
+          serviceMapForBooking,
           pracClassBlocks,
           pracEventBlocks,
           resourceParentById,
           { ignoreBookings: true, excludeBlockId: bl.id },
         );
-      const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
+      const pracName =
+        linkedNativeGridColumnByKey.get(pracId)?.practitionerName ??
+        filteredPractitioners.find((p) => p.id === pracId)?.name ??
+        'Staff';
       const timeLabel = minutesToTime(targetStartMins);
       const sameColumn = columnIdForBlock(bl) === pracId && bl.block_date === dateStr;
       const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
@@ -3392,7 +3614,11 @@ export function PractitionerCalendarView({
     const dayEndMin = endHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
-    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(b, targetStartMins, serviceMap);
+    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(
+      b,
+      targetStartMins,
+      serviceMapForBooking(b),
+    );
     const invalid =
       targetStartMins < dayStartMin ||
       endMin > dayEndMin ||
@@ -3402,15 +3628,18 @@ export function PractitionerCalendarView({
         pracId,
         dateStr,
         b.id,
-        bookings,
+        allGridBookings,
         displayBlocks,
-        serviceMap,
+        serviceMapForBooking,
         pracClassBlocks,
         pracEventBlocks,
         resourceParentById,
         { ignoreBookings: true, candidatePractitionerBusy: candBusy },
       );
-    const pracName = filteredPractitioners.find((p) => p.id === pracId)?.name ?? 'Staff';
+    const pracName =
+      linkedNativeGridColumnByKey.get(pracId)?.practitionerName ??
+      filteredPractitioners.find((p) => p.id === pracId)?.name ??
+      'Staff';
     const timeLabel = minutesToTime(targetStartMins);
     const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
     const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
@@ -3474,7 +3703,7 @@ export function PractitionerCalendarView({
       const pointerId = downEvent.pointerId;
       const startY = downEvent.clientY;
       const startM = timeToMinutes(booking.booking_time.slice(0, 5));
-      const dur0 = bookingDurationMinutes(booking, serviceMap);
+      const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
       const endM0 = startM + dur0;
       const minEnd = startM + SLOT_MINUTES;
       const gridEndMax = endHour * 60;
@@ -3547,7 +3776,7 @@ export function PractitionerCalendarView({
       window.addEventListener('pointerup', finish);
       window.addEventListener('pointercancel', finish);
     },
-    [endHour, patchBookingResize, serviceMap],
+    [endHour, patchBookingResize, serviceMapForBooking],
   );
 
   const beginBlockResize = useCallback(
@@ -3692,7 +3921,7 @@ export function PractitionerCalendarView({
   const calendarFilterCount =
     (calendarFilterIds === null ? 0 : 1) +
     (filterStatus !== 'all' ? 1 : 0) +
-    (visibleLinkedColumnIds.length > 0 ? 1 : 0);
+    (visibleLinkedColumnIds !== null && linkedColumns.length > 0 ? 1 : 0);
   const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
   const calendarSummaryContent = (
     <div
@@ -3737,6 +3966,19 @@ export function PractitionerCalendarView({
             Linked venues
           </p>
           <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                checked={visibleLinkedColumnIds === null}
+                onChange={(e) => {
+                  if (e.target.checked) setVisibleLinkedColumnIds(null);
+                  else setVisibleLinkedColumnIds(linkedColumns.map((c) => c.key));
+                }}
+              />
+              <span className="font-medium">All linked calendars</span>
+            </label>
+            <div className="border-t border-slate-100" />
             {[
               ...new Map(linkedColumns.map((c) => [c.venueId, c.venueName])).entries(),
             ].map(([venueId, venueName]) => (
@@ -3748,28 +3990,41 @@ export function PractitionerCalendarView({
                   {linkedColumns
                     .filter((c) => c.venueId === venueId)
                     .map((c) => {
-                      const checked = visibleLinkedColumnIds.includes(c.key);
+                      const allLinked = visibleLinkedColumnIds === null;
+                      const checked =
+                        allLinked ||
+                        (visibleLinkedColumnIds !== null && visibleLinkedColumnIds.includes(c.key));
                       return (
                         <label
                           key={c.key}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800"
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm ${
+                            allLinked ? 'text-slate-400' : 'text-slate-800'
+                          }`}
                         >
                           <input
                             type="checkbox"
-                            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
                             checked={checked}
+                            disabled={allLinked}
                             onChange={(e) => {
+                              if (allLinked) return;
                               setVisibleLinkedColumnIds((cur) => {
-                                const next = new Set(cur);
+                                const next = new Set(cur ?? []);
                                 if (e.target.checked) next.add(c.key);
                                 else next.delete(c.key);
-                                return [...next];
+                                const ordered = linkedColumns
+                                  .filter((col) => next.has(col.key))
+                                  .map((col) => col.key);
+                                if (ordered.length === 0) return [];
+                                if (ordered.length === linkedColumns.length) return null;
+                                return ordered;
                               });
                             }}
                           />
                           <span className="truncate">
                             {c.practitionerName}
                             {c.practitionerActive ? '' : ' (inactive)'}
+                            <span className="text-slate-500"> · linked</span>
                           </span>
                         </label>
                       );
@@ -3806,7 +4061,7 @@ export function PractitionerCalendarView({
           type="button"
           onClick={() => {
             setVisibleCalendarIdsState(null);
-            setVisibleLinkedColumnIds([]);
+            setVisibleLinkedColumnIds(null);
             setFilterStatus('all');
           }}
           className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
@@ -3885,7 +4140,29 @@ export function PractitionerCalendarView({
     setClassInstanceSheet(null);
     setClassInstanceAnchor(null);
     setEventInstanceSheet(null);
+    setLinkedViewing(null);
+    setDetailBookingOwnerVenueId(null);
     setDetailBookingId(id);
+    setDetailBookingAnchor(anchor ?? null);
+  }, []);
+
+  const openGridBookingDetail = useCallback((b: Booking, anchor?: { x: number; y: number }) => {
+    if (justResizedBookingIdRef.current === b.id) return;
+    setClassInstanceSheet(null);
+    setClassInstanceAnchor(null);
+    setEventInstanceSheet(null);
+    setLinkedViewing(null);
+    if (b._linkedOwnerVenueId) {
+      void fetch('/api/venue/linked-calendar/booking/view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: b.id }),
+      }).catch(() => undefined);
+      setDetailBookingOwnerVenueId(b._linkedOwnerVenueId);
+    } else {
+      setDetailBookingOwnerVenueId(null);
+    }
+    setDetailBookingId(b.id);
     setDetailBookingAnchor(anchor ?? null);
   }, []);
 
@@ -3909,18 +4186,40 @@ export function PractitionerCalendarView({
 
   const calendarBookingDetailSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
     if (!detailBookingId) return null;
-    const b = bookings.find((x) => x.id === detailBookingId);
-    if (!b) return null;
-    return bookingDetailPanelSnapshotFromListRow({
-      ...b,
-      guest_name: b.guest_name,
-      inferred_booking_model: inferBookingRowModel(b),
-      service_name: (() => {
-        const serviceId = serviceIdForBooking(b);
-        return serviceId ? serviceMap.get(serviceId)?.name ?? null : null;
-      })(),
-    });
-  }, [detailBookingId, bookings, serviceMap]);
+    const b =
+      bookings.find((x) => x.id === detailBookingId) ??
+      linkedNativeBookings.find((x) => x.id === detailBookingId);
+    if (b) {
+      return bookingDetailPanelSnapshotFromListRow({
+        ...b,
+        guest_name: b.guest_name,
+        inferred_booking_model: inferBookingRowModel(b),
+        service_name: (() => {
+          const serviceId = serviceIdForBooking(b);
+          return serviceId ? serviceMapForBooking(b).get(serviceId)?.name ?? null : null;
+        })(),
+      });
+    }
+    if (detailBookingOwnerVenueId) {
+      const venue = linkedVenues.find((v) => v.venueId === detailBookingOwnerVenueId);
+      const lb = venue?.bookings.find((x) => x.id === detailBookingId);
+      if (lb) {
+        return {
+          bookingDate: lb.bookingDate,
+          guestName: lb.guestName ?? 'Guest',
+          partySize: 1,
+          status: lb.status,
+          startTime: lb.bookingTime.slice(0, 5),
+          endTime: lb.bookingEndTime?.slice(0, 5) ?? lb.bookingTime.slice(0, 5),
+          serviceName: lb.serviceName,
+          practitionerId: lb.practitionerId,
+          calendarId: lb.practitionerId,
+          inferredBookingModel: 'unified_scheduling',
+        };
+      }
+    }
+    return null;
+  }, [detailBookingId, detailBookingOwnerVenueId, bookings, linkedNativeBookings, linkedVenues, serviceMapForBooking]);
 
   useEffect(() => {
     if (bookings.length === 0) return;
@@ -4234,10 +4533,10 @@ export function PractitionerCalendarView({
                   </tr>
                 ))}
                 {visibleLinkedColumns.map((col) => (
-                  <tr key={col.key} className="border-b border-slate-100 bg-slate-50/40">
-                    <td className="sticky left-0 bg-slate-50/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
-                      <span className="font-semibold text-slate-600">{col.practitionerName}</span>
-                      <span className="mt-0.5 block text-[10px] font-medium text-slate-400">
+                  <tr key={col.key} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
+                    <td className="sticky left-0 bg-white/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
+                      <span className="font-semibold text-slate-900">{col.practitionerName}</span>
+                      <span className="mt-0.5 block text-[11px] leading-tight text-slate-600">
                         Linked · {col.venueName}
                       </span>
                       {col.action === 'create_edit_cancel' ? (
@@ -4264,10 +4563,7 @@ export function PractitionerCalendarView({
                           <div className="flex min-h-[80px] flex-col gap-1">
                             {dayBookings.map((b) => {
                               const clickable = linkedBookingIsClickable(col, b);
-                              const detail =
-                                col.visibility === 'time_only'
-                                  ? `${col.venueName} — busy`
-                                  : b.guestName ?? b.serviceName ?? 'Booking';
+                              const detail = linkedBookingBarDetailLabel(b, col.visibility, col.venueName);
                               const timeLabel = `${b.bookingTime.slice(0, 5)}${
                                 b.bookingEndTime
                                   ? `–${b.bookingEndTime.slice(0, 5)}`
@@ -4275,15 +4571,17 @@ export function PractitionerCalendarView({
                               }`;
                               const inner = (
                                 <div
-                                  className="rounded-lg border border-slate-300 bg-white/70 px-2 py-1 text-left text-[11px] text-slate-500 saturate-50"
-                                  style={{ borderLeftWidth: 3, borderLeftColor: '#94a3b8' }}
+                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10"
+                                  style={bookingBlockCardStyle(
+                                    linkedBookingCalendarBlockStyle(b.status),
+                                  )}
                                 >
-                                  <div className="font-semibold tabular-nums text-slate-600">
+                                  <div className="font-semibold tabular-nums">
                                     {timeLabel}
                                   </div>
-                                  <div className="truncate">{detail}</div>
+                                  <div className="truncate font-medium">{detail}</div>
                                   {col.visibility !== 'time_only' ? (
-                                    <div className="mt-0.5 text-[9px] uppercase tracking-wide text-slate-400">
+                                    <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide opacity-80">
                                       {b.status}
                                     </div>
                                   ) : null}
@@ -4293,7 +4591,9 @@ export function PractitionerCalendarView({
                                 <button
                                   key={b.id}
                                   type="button"
-                                  onClick={() => openLinkedBooking(col, b)}
+                                  onClick={(e) =>
+                                    openLinkedBooking(col, b, { x: e.clientX, y: e.clientY })
+                                  }
                                   className="block w-full text-left transition hover:opacity-90"
                                   title={
                                     clickable
@@ -4387,22 +4687,67 @@ export function PractitionerCalendarView({
                   role="row"
                   aria-label="Calendar columns"
                 >
-                  {filteredPractitioners.map((prac) => {
-                    const hoursLine = formatWorkingHoursLineForDate(prac.working_hours, date, venueTimezone);
+                  {dayGridColumns.map((col) => {
+                    if (col.kind === 'native') {
+                      const hoursLine = formatWorkingHoursLineForDate(
+                        col.practitioner.working_hours,
+                        date,
+                        venueTimezone,
+                      );
+                      return (
+                        <div
+                          key={`hdr-${col.practitioner.id}`}
+                          className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5 sm:min-w-[240px]"
+                        >
+                          <span
+                            className="truncate text-center text-sm font-semibold text-slate-900"
+                            title={col.practitioner.name}
+                          >
+                            {col.practitioner.name}
+                          </span>
+                          <span
+                            className="line-clamp-2 w-full text-center text-[11px] leading-tight text-slate-600"
+                            title={hoursLine}
+                          >
+                            {hoursLine}
+                          </span>
+                        </div>
+                      );
+                    }
+                    const linkedCol = col.column;
                     return (
                       <div
-                        key={`hdr-${prac.id}`}
+                        key={`hdr-${linkedCol.key}`}
                         className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5 sm:min-w-[240px]"
                       >
-                        <span className="truncate text-center text-sm font-semibold text-slate-900" title={prac.name}>
-                          {prac.name}
+                        <span
+                          className="truncate text-center text-sm font-semibold text-slate-900"
+                          title={`${linkedCol.practitionerName} · ${linkedCol.venueName}`}
+                        >
+                          {linkedCol.practitionerName}
                         </span>
                         <span
                           className="line-clamp-2 w-full text-center text-[11px] leading-tight text-slate-600"
-                          title={hoursLine}
+                          title={`Linked · ${linkedCol.venueName}`}
                         >
-                          {hoursLine}
+                          Linked · {linkedCol.venueName}
                         </span>
+                        {linkedCol.action === 'create_edit_cancel' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const v = linkedVenueById.get(linkedCol.venueId);
+                              if (v)
+                                setLinkedCreating({
+                                  venue: v,
+                                  practitionerId: linkedCol.practitionerId,
+                                });
+                            }}
+                            className="mt-0.5 text-[10px] font-semibold text-brand-600 hover:underline"
+                          >
+                            + New booking
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -4418,20 +4763,22 @@ export function PractitionerCalendarView({
                       <span className="text-center text-[11px] leading-tight text-slate-500">—</span>
                     </div>
                   ) : null}
-                  {visibleLinkedColumns.map((col) => (
+                  {readOnlyLinkedColumns.map((col) => (
                     <div
                       key={`hdr-${col.key}`}
-                      className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 bg-slate-50/70 px-3 py-1.5 sm:min-w-[240px]"
+                      className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5 sm:min-w-[240px]"
                     >
                       <span
-                        className="truncate text-center text-sm font-semibold text-slate-600"
+                        className="truncate text-center text-sm font-semibold text-slate-900"
                         title={`${col.practitionerName} · ${col.venueName}`}
                       >
                         {col.practitionerName}
                       </span>
-                      <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
-                        <span className="truncate">Linked · {col.venueName}</span>
+                      <span
+                        className="line-clamp-2 w-full text-center text-[11px] leading-tight text-slate-600"
+                        title={`Linked · ${col.venueName}`}
+                      >
+                        Linked · {col.venueName}
                       </span>
                       {col.action === 'create_edit_cancel' ? (
                         <button
@@ -4453,22 +4800,30 @@ export function PractitionerCalendarView({
                   ))}
                 </div>
                 <div className="flex w-full min-w-0 border-l border-slate-300">
-              {filteredPractitioners.map((prac) => {
-                const pracBookings = bookingsForPractitioner(prac.id, date);
-                const pracClassBlocks = classBlocksForGrid.filter(
-                  (b) => b.calendar_id === prac.id && b.date === date,
-                );
-                const pracEventBlocks = eventBlocksForGrid.filter(
-                  (b) => b.calendar_id === prac.id && b.date === date,
-                );
-                const pracBlocks = displayBlocks.filter(
-                  (bl) =>
-                    columnIdForBlock(bl) === prac.id &&
-                    bl.block_date === date &&
-                    bl.block_type !== 'class_session',
-                );
+              {dayGridColumns.map((col) => {
+                const pracId = dayGridColumnId(col);
+                const isLinkedCol = col.kind === 'linked';
+                const pracBookings = bookingsForPractitioner(pracId, date);
+                const pracClassBlocks = isLinkedCol
+                  ? []
+                  : classBlocksForGrid.filter(
+                      (b) => b.calendar_id === pracId && b.date === date,
+                    );
+                const pracEventBlocks = isLinkedCol
+                  ? []
+                  : eventBlocksForGrid.filter(
+                      (b) => b.calendar_id === pracId && b.date === date,
+                    );
+                const pracBlocks = isLinkedCol
+                  ? []
+                  : displayBlocks.filter(
+                      (bl) =>
+                        columnIdForBlock(bl) === pracId &&
+                        bl.block_date === date &&
+                        bl.block_type !== 'class_session',
+                    );
                 return (
-                  <div key={prac.id} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
+                  <div key={pracId} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
                       {timeLabels.map((_, i) => {
                         const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
@@ -4485,11 +4840,11 @@ export function PractitionerCalendarView({
                         const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
                         const occ = slotOccupied(
                           slotStartMins,
-                          bookings,
+                          allGridBookings,
                           displayBlocks,
-                          prac.id,
+                          pracId,
                           date,
-                          serviceMap,
+                          serviceMapForBooking,
                           pracClassBlocks,
                           pracEventBlocks,
                           resourceParentById,
@@ -4497,17 +4852,29 @@ export function PractitionerCalendarView({
                           dragExcludeBlockId,
                           { ignoreBookings: dragBooking != null },
                         );
-                        const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
+                        const dropId = `drop-${pracId}-${date}-${slotStartMins}`;
                         return (
                           <DroppableSlotButton
                             key={dropId}
                             id={dropId}
-                            pracId={prac.id}
+                            pracId={pracId}
                             dateStr={date}
                             slotStartMins={slotStartMins}
                             top={i * SLOT_HEIGHT}
                             disabled={occ}
                             onEmptyClick={(ev, pid, dstr, t) => {
+                              const linkedCol = linkedNativeGridColumnByKey.get(pid);
+                              if (linkedCol?.action === 'create_edit_cancel') {
+                                const v = linkedVenueById.get(linkedCol.venueId);
+                                if (v) {
+                                  setLinkedCreating({
+                                    venue: v,
+                                    practitionerId: linkedCol.practitionerId,
+                                    time: t,
+                                  });
+                                  return;
+                                }
+                              }
                               setSlotMenu({
                                 pracId: pid,
                                 dateStr: dstr,
@@ -4520,7 +4887,7 @@ export function PractitionerCalendarView({
                         );
                       })}
 
-                      {calendarDragTarget && calendarDragTarget.pracId === prac.id ? (
+                      {calendarDragTarget && calendarDragTarget.pracId === pracId ? (
                         <div
                           className={`pointer-events-none absolute left-0 right-0 z-[8] rounded-lg border-x-2 border-b-2 border-t-2 ${
                             calendarDragTarget.invalid
@@ -4537,15 +4904,17 @@ export function PractitionerCalendarView({
                         />
                       ) : null}
 
-                      {resourceAvailabilityByPractitioner.get(prac.id)?.map((m, i) => (
-                        <div
-                          key={`mint-${prac.id}-${i}-${m.resourceName}`}
+                      {!isLinkedCol
+                        ? resourceAvailabilityByPractitioner.get(pracId)?.map((m, i) => (
+                          <div
+                            key={`mint-${pracId}-${i}-${m.resourceName}`}
                           className="pointer-events-none absolute left-1 right-1 z-[5] rounded-md border border-emerald-200/90 bg-emerald-50/90"
                           style={{ top: m.top, height: m.height }}
                           title={`${m.resourceName} — available to book`}
                           aria-hidden
                         />
-                      ))}
+                      ))
+                        : null}
 
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
@@ -4771,7 +5140,7 @@ export function PractitionerCalendarView({
                           const duration = getBookingDuration(b);
                           const palette = bookingCalendarBlockStyle(b);
                           const sid = serviceIdForBooking(b);
-                          const svc = sid ? serviceMap.get(sid) : null;
+                          const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                           const top = slotTop(b.booking_time);
                           const height = slotHeightFromDuration(duration);
                           const canDrag =
@@ -4816,7 +5185,7 @@ export function PractitionerCalendarView({
                                   }`}
                                   style={bookingBlockCardStyle(palette)}
                                 >
-                                  <BookingProcessingStrip b={b} serviceMap={serviceMap} />
+                                  <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       ref={handle.setActivatorNodeRef}
@@ -4852,7 +5221,7 @@ export function PractitionerCalendarView({
                                             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                             <button
                                               type="button"
-                                              onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                              onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                               {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
                                               className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                                                 blockH < 56 ? 'py-1.5' : 'py-2'
@@ -5010,7 +5379,7 @@ export function PractitionerCalendarView({
                         const serviceTitle = items
                           .map((x) => {
                             const sid = serviceIdForBooking(x);
-                            return sid ? serviceMap.get(sid)?.name : null;
+                            return sid ? serviceMapForBooking(x).get(sid)?.name : null;
                           })
                           .filter(Boolean)
                           .join(' → ');
@@ -5048,7 +5417,7 @@ export function PractitionerCalendarView({
                                         {items.map((b, segIdx) => {
                                           const dur = getBookingDuration(b);
                                           const sid = serviceIdForBooking(b);
-                                          const svc = sid ? serviceMap.get(sid) : null;
+                                          const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
                                           const showSegPills = !isOverlapLane && segmentApproxPx >= 88;
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
@@ -5059,10 +5428,10 @@ export function PractitionerCalendarView({
                                               className="relative flex min-h-0 flex-col overflow-hidden"
                                               style={{ flex: dur, backgroundColor: palette.bg }}
                                             >
-                                              <BookingProcessingStrip b={b} serviceMap={serviceMap} wallPaintMinutes={dur} />
+                                              <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} wallPaintMinutes={dur} />
                                               <button
                                                 type="button"
-                                                onClick={(e) => openBookingDetail(b.id, { x: e.clientX, y: e.clientY })}
+                                                onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                                 className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
@@ -5144,14 +5513,14 @@ export function PractitionerCalendarView({
                 </>
               ) : null}
               {viewMode === 'day'
-                ? visibleLinkedColumns.map((col) => (
+                ? readOnlyLinkedColumns.map((col) => (
                     <LinkedDayColumn
                       key={col.key}
                       column={col}
                       bookings={linkedBookingsFor(col, date)}
                       startHour={startHour}
                       totalSlots={TOTAL_SLOTS}
-                      onBookingClick={(b) => openLinkedBooking(col, b)}
+                      onBookingClick={(b, anchor) => openLinkedBooking(col, b, anchor)}
                       onCreateAt={
                         col.action === 'create_edit_cancel'
                           ? (time) => {
@@ -5373,7 +5742,7 @@ export function PractitionerCalendarView({
         <BookingDetailPanel
           key={detailBookingId}
           bookingId={detailBookingId}
-          venueId={venueId}
+          venueId={detailBookingOwnerVenueId ?? venueId}
           venueCurrency={currency}
           initialSnapshot={calendarBookingDetailSnapshot}
           isAppointment
@@ -5385,9 +5754,13 @@ export function PractitionerCalendarView({
               dismissPendingModificationGuestNotify();
             }
             setDetailBookingId(null);
+            setDetailBookingOwnerVenueId(null);
             setDetailBookingAnchor(null);
           }}
-          onUpdated={() => void fetchData({ silent: true })}
+          onUpdated={() => {
+            void fetchData({ silent: true });
+            void loadLinkedData();
+          }}
         />
       ) : null}
 
@@ -5455,19 +5828,6 @@ export function PractitionerCalendarView({
         </Dialog>
       ) : null}
 
-      {linkedEditing ? (
-        <EditLinkedBookingModal
-          venueName={linkedEditing.column.venueName}
-          booking={linkedEditing.booking}
-          canCancel={linkedEditing.column.action === 'create_edit_cancel'}
-          onClose={() => setLinkedEditing(null)}
-          onSaved={() => {
-            setLinkedEditing(null);
-            void loadLinkedData();
-          }}
-        />
-      ) : null}
-
       {linkedViewing ? (
         <LinkedBookingDetailModal
           venueName={linkedViewing.column.venueName}
@@ -5478,16 +5838,24 @@ export function PractitionerCalendarView({
       ) : null}
 
       {linkedCreating ? (
-        <CreateLinkedBookingModal
-          venue={linkedCreating.venue}
-          practitionerId={linkedCreating.practitionerId}
-          time={linkedCreating.time}
-          date={viewMode === 'day' ? date : weekStart}
+        <CalendarStaffBookingModal
+          open
+          intent="new"
+          linkedOwnerVenueId={linkedCreating.venue.venueId}
+          linkedVenueName={linkedCreating.venue.venueName}
+          stackKey={`linked-${linkedCreating.venue.venueId}-${linkedCreating.practitionerId ?? 'any'}`}
           onClose={() => setLinkedCreating(null)}
-          onSaved={() => {
+          onCreated={() => {
             setLinkedCreating(null);
             void loadLinkedData();
           }}
+          venueId={linkedCreating.venue.venueId}
+          currency={currency}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          preselectedDate={viewMode === 'day' ? date : weekStart}
+          preselectedPractitionerId={linkedCreating.practitionerId}
+          preselectedTime={linkedCreating.time}
         />
       ) : null}
     </div>

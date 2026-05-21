@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { sendCustomBookingMessage, summariseChannelResult } from '@/lib/communications/send-custom-booking-message';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import {
+  linkedGrantAllowsMutation,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
 
 const schema = z.object({
   message: z.string().min(1).max(2000),
@@ -23,10 +27,21 @@ export async function POST(
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Message is required' }, { status: 400 });
 
+  const loaded = await loadStaffAccessibleBooking(staff, id);
+  if (!loaded.ok) {
+    return NextResponse.json({ error: loaded.error }, { status: loaded.status });
+  }
+  if (!linkedGrantAllowsMutation(loaded.ctx.linkedGrant, loaded.ctx.isOwnVenue)) {
+    return NextResponse.json(
+      { error: 'This link does not allow messaging guests on the other venue’s bookings.' },
+      { status: 403 },
+    );
+  }
+
   const channel = parsed.data.channel as GuestMessageChannel;
 
   const result = await sendCustomBookingMessage({
-    venueId: staff.venue_id,
+    venueId: loaded.ctx.ownerVenueId,
     bookingId: id,
     message: parsed.data.message,
     channel,

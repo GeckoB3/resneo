@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
+import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import type { BookingModel } from '@/types/booking-models';
 
 /**
@@ -22,16 +23,11 @@ export async function GET(
 
     const { id } = await params;
 
-    const { data: booking, error: bookErr } = await staff.db
-      .from('bookings')
-      .select('*')
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .single();
-
-    if (bookErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    const loaded = await loadStaffAccessibleBooking(staff, id);
+    if (!loaded.ok) {
+      return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
+    const { booking, ownerVenueId: scopeVenueId } = loaded.ctx;
 
     const bookingAreaId = (booking as { area_id?: string | null }).area_id;
     const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
@@ -45,7 +41,7 @@ export async function GET(
               .from('areas')
               .select('name')
               .eq('id', bookingAreaId)
-              .eq('venue_id', staff.venue_id)
+              .eq('venue_id', scopeVenueId)
               .maybeSingle()
           : Promise.resolve({ data: null as { name?: string } | null }),
         bookingVariantId
@@ -53,7 +49,7 @@ export async function GET(
               .from('service_variants')
               .select('name, price_pence')
               .eq('id', bookingVariantId)
-              .eq('venue_id', staff.venue_id)
+              .eq('venue_id', scopeVenueId)
               .maybeSingle()
           : Promise.resolve({ data: null as { name?: string; price_pence?: number | null } | null }),
         staff.db

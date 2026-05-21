@@ -48,6 +48,8 @@ import {
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-event';
+import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
+import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 
 function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
   const [startH, startM] = startHHmm.split(':').map(Number);
@@ -92,6 +94,8 @@ const phoneBookingSchema = z.object({
   staff_booking_duration_ms: z.number().int().min(500).max(30 * 60 * 1000).optional(),
   /** Client already existed at this venue before this booking (P0.6 returning-client time-to-book). */
   returning_guest: z.boolean().optional(),
+  /** Create in a linked venue the caller may book on behalf of (requires create_edit_cancel). */
+  owner_venue_id: z.string().uuid().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -109,6 +113,9 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -168,8 +175,19 @@ export async function POST(request: NextRequest) {
     } = parsed.data;
     const bookingSource = (parsed.data.source ?? 'phone') as 'phone' | 'walk-in';
     const staffWalkIn = bookingSource === 'walk-in';
-    const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
+
+    const scope = await resolveLinkedStaffCreateScope(
+      admin,
+      staff.venue_id,
+      parsed.data.owner_venue_id,
+      user?.id ?? null,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
+    }
+    const venueId = scope.venueId;
+    const linkedCreate = scope.linked;
 
     const { data: venue } = await admin
       .from('venues')
@@ -987,15 +1005,32 @@ export async function POST(request: NextRequest) {
         ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: null })
         : [];
 
+      if (linkedCreate) {
+        apptInsert.created_by_linked_venue_id = linkedCreate.actingVenueId;
+      }
+
       const { data: apptBooking, error: apptErr } = await admin
         .from('bookings')
         .insert(apptInsert)
         .select('id')
         .single();
 
-      if (apptErr) {
-        console.error('Appointment booking insert failed:', apptErr);
+      if (apptErr || !apptBooking) {
+        console.error('Appointment booking insert failed:', apptErr?.message, apptErr?.details);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+
+      if (linkedCreate) {
+        void recordBookingWriteAudit({
+          admin,
+          linkId: linkedCreate.linkId,
+          actingVenueId: linkedCreate.actingVenueId,
+          actingUserId: linkedCreate.actorUserId,
+          owningVenueId: linkedCreate.ownerVenueId,
+          actionType: 'created_booking',
+          bookingId: apptBooking.id,
+          afterState: { id: apptBooking.id, venue_id: venueId },
+        });
       }
 
       let payment_url: string | undefined;

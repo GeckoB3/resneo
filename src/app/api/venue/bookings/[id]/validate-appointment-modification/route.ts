@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
+import {
+  linkedGrantAllowsMutation,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
 
 const bodySchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -39,18 +43,16 @@ export async function POST(
     }
 
     const admin = getSupabaseAdminClient();
-    const { data: booking, error: bookingErr } = await admin
-      .from('bookings')
-      .select(
-        'id, venue_id, practitioner_id, calendar_id, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks',
-      )
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .maybeSingle();
-
-    if (bookingErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    const loaded = await loadStaffAccessibleBooking(staff, id);
+    if (!loaded.ok) {
+      return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
+    const {
+      booking,
+      ownerVenueId: scopeVenueId,
+      isOwnVenue,
+      linkedGrant,
+    } = loaded.ctx;
 
     const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
     if (!isAppointment) {
@@ -58,15 +60,22 @@ export async function POST(
     }
 
     if (staff.role !== 'admin') {
-      const access = await requireManagedCalendarAccess(
-        admin,
-        staff.venue_id,
-        staff,
-        parsed.data.practitioner_id,
-        'You can only validate changes on calendars assigned to your account.',
-      );
-      if (!access.ok) {
-        return NextResponse.json({ ok: false, error: access.error }, { status: 403 });
+      if (isOwnVenue) {
+        const access = await requireManagedCalendarAccess(
+          admin,
+          scopeVenueId,
+          staff,
+          parsed.data.practitioner_id,
+          'You can only validate changes on calendars assigned to your account.',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ ok: false, error: access.error }, { status: 403 });
+        }
+      } else if (!linkedGrantAllowsMutation(linkedGrant, false)) {
+        return NextResponse.json(
+          { error: 'This link does not allow editing the other venue’s bookings.' },
+          { status: 403 },
+        );
       }
     }
 
@@ -88,7 +97,7 @@ export async function POST(
 
     const result = await validateAppointmentModificationInterval({
       admin,
-      venueId: staff.venue_id,
+      venueId: scopeVenueId,
       bookingId: id,
       newDate: parsed.data.booking_date,
       timeStr,

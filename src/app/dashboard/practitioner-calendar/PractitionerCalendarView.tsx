@@ -6418,6 +6418,12 @@ export function PractitionerCalendarView({
               bookingAudience="staff"
               staffBookingSource="phone"
               onBookingCreated={() => void fetchData({ silent: true })}
+              onClose={() => {
+                setShowResourceBooking(false);
+                setResourceBookingResourceId(undefined);
+                setPrefillDate(undefined);
+                setPrefillTime(undefined);
+              }}
               initialResourceId={resourceBookingResourceId}
               initialDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
               initialTime={prefillTime}

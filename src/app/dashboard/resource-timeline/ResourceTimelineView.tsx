@@ -2052,10 +2052,8 @@ export function ResourceTimelineView({
               venue={resourceBookingVenue}
               bookingAudience="staff"
               staffBookingSource="phone"
-              onBookingCreated={() => {
-                setShowResourceBooking(false);
-                void fetchResourceBookings();
-              }}
+              onBookingCreated={() => void fetchResourceBookings()}
+              onClose={() => setShowResourceBooking(false)}
               initialResourceId={selectedId}
             />
           ) : (

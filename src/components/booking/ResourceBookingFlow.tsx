@@ -164,6 +164,8 @@ export interface ResourceBookingFlowProps {
   /** Staff dashboard: walk-in vs phone booking source for venue API. */
   staffBookingSource?: 'phone' | 'walk-in';
   onBookingCreated?: () => void;
+  /** Dismiss the hosting modal/sheet after staff confirms the success screen. */
+  onClose?: () => void;
   /** Staff calendar deep-link: open the standard flow with a resource already selected. */
   initialResourceId?: string;
   initialDate?: string;
@@ -185,6 +187,7 @@ export function ResourceBookingFlow({
   bookingAudience = 'public',
   staffBookingSource = 'phone',
   onBookingCreated,
+  onClose,
   initialResourceId,
   initialDate,
   initialTime,
@@ -199,7 +202,8 @@ export function ResourceBookingFlow({
   const accountGate = usePublicBookingAccountGateContext();
   const acknowledgeStaffBooking = useCallback(() => {
     onBookingCreated?.();
-  }, [onBookingCreated]);
+    onClose?.();
+  }, [onBookingCreated, onClose]);
   const isStaffWalkIn = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);

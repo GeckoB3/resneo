@@ -395,6 +395,7 @@ function StaffSurfaceBookingStackInner({
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
+            onClose={onClose}
             staffRebookBootstrap={displayActiveTab === 'resource_booking' ? staffRebookBootstrap : null}
           />
         );

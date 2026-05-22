@@ -221,13 +221,6 @@ function StaffSurfaceBookingStackInner({
   };
 
   useEffect(() => {
-    if (isControlled || !preselectedExperienceEventId) return;
-    if (surfaceTabs.some((t) => t.id === 'event_ticket') && activeTab !== 'event_ticket') {
-      setInternalTab('event_ticket');
-    }
-  }, [isControlled, preselectedExperienceEventId, surfaceTabs, activeTab]);
-
-  useEffect(() => {
     if (linkedOwnerVenueId) {
       let cancelled = false;
       (async () => {

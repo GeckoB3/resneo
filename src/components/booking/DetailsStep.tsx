@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useForm, Controller, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -166,7 +166,7 @@ export function DetailsStep({
     [phoneDefaultCountry],
   );
   const activeSchema = isStaffWalkIn ? detailsSchemaStaffWalkIn : isStaff ? detailsSchemaStaff : detailsSchemaWithTerms;
-  const selectedKnownContactRef = useRef(false);
+  const [selectedKnownContact, setSelectedKnownContact] = useState(false);
   const { register, control, setValue, handleSubmit, formState: { errors, isSubmitting } } = useForm<
     FormDataWithTerms | FormDataStaff | FormDataStaffWalkIn
   >({
@@ -228,6 +228,37 @@ export function DetailsStep({
   const textareaCls =
     fieldClassName?.replace('min-h-[44px]', '') ??
     'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+
+  const onValidSubmit = useCallback(
+    (d: FormDataWithTerms | FormDataStaff | FormDataStaffWalkIn) => {
+      const phoneRaw = 'phone' in d ? d.phone : '';
+      const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
+      const fnRaw = 'first_name' in d ? String(d.first_name ?? '').trim() : '';
+      const lnRaw = 'last_name' in d ? String(d.last_name ?? '').trim() : '';
+      onSubmit({
+        first_name: fnRaw,
+        last_name: lnRaw,
+        email: d.email || '',
+        phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
+        dietary_notes: useAppointmentFields
+          ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
+          : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
+        occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
+        ...(audience === 'public' && 'marketingConsent' in d
+          ? { marketing_consent: Boolean(d.marketingConsent) }
+          : {}),
+        ...(useStaffContactAutocomplete && selectedKnownContact ? { returning_guest: true } : {}),
+      });
+    },
+    [
+      audience,
+      onSubmit,
+      phoneDefaultCountry,
+      selectedKnownContact,
+      useAppointmentFields,
+      useStaffContactAutocomplete,
+    ],
+  );
 
   return (
     <div className="space-y-5">
@@ -323,31 +354,7 @@ export function DetailsStep({
         </div>
       )}
 
-      <form
-        onSubmit={handleSubmit((d) => {
-          const phoneRaw = 'phone' in d ? d.phone : '';
-          const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
-          const fnRaw = 'first_name' in d ? String(d.first_name ?? '').trim() : '';
-          const lnRaw = 'last_name' in d ? String(d.last_name ?? '').trim() : '';
-          onSubmit({
-            first_name: fnRaw,
-            last_name: lnRaw,
-            email: d.email || '',
-            phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
-            dietary_notes: useAppointmentFields
-              ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
-              : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
-            occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
-            ...(audience === 'public' && 'marketingConsent' in d
-              ? { marketing_consent: Boolean(d.marketingConsent) }
-              : {}),
-            ...(useStaffContactAutocomplete && selectedKnownContactRef.current
-              ? { returning_guest: true }
-              : {}),
-          });
-        })}
-        className="space-y-4"
-      >
+      <form onSubmit={handleSubmit(onValidSubmit)} className="space-y-4">
         {useStaffContactAutocomplete ? (
           <>
             <StaffGuestContactFields
@@ -358,7 +365,7 @@ export function DetailsStep({
                 phone: wPhone ?? '',
               }}
               onFieldChange={(field, value) => {
-                selectedKnownContactRef.current = false;
+                setSelectedKnownContact(false);
                 const formField =
                   field === 'firstName'
                     ? 'first_name'
@@ -369,7 +376,7 @@ export function DetailsStep({
               }}
               phoneDefaultCountry={phoneDefaultCountry}
               onContactSelected={(_row: GuestListRow) => {
-                selectedKnownContactRef.current = true;
+                setSelectedKnownContact(true);
               }}
               emailReadOnly={emailReadOnly}
               phoneRequired={!isStaffWalkIn}

@@ -638,9 +638,8 @@ export function ResourceInstanceDetailSheet({
           <aside
             ref={panelRef}
             className="max-h-[inherit] min-w-0 max-w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-            role="dialog"
+            role="region"
             aria-labelledby="resource-detail-title"
-            aria-modal="false"
             onClick={(event) => event.stopPropagation()}
           >
             {headerBlock}

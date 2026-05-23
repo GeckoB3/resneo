@@ -36,7 +36,7 @@ const features = [
   },
   {
     title: "Built for Northern Ireland",
-    description: `Local support, GBP pricing, and tailored to the NI business community. No commissions, no hidden fees. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
+    description: `Local support and tailored to the NI business community. No commissions, no hidden fees. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
     icon: MapPinIcon,
   },
 ];

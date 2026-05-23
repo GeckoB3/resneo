@@ -235,7 +235,19 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ redirect_url: session.url });
   } catch (err) {
+    const stripeMessage =
+      err &&
+      typeof err === 'object' &&
+      'type' in err &&
+      (err as { type?: string }).type === 'StripeInvalidRequestError' &&
+      'message' in err &&
+      typeof (err as { message?: unknown }).message === 'string'
+        ? (err as { message: string }).message
+        : null;
     console.error('[create-checkout] Error:', err);
+    if (stripeMessage) {
+      return NextResponse.json({ error: stripeMessage }, { status: 400 });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

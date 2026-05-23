@@ -3,14 +3,9 @@ import { SIGNUP_TRIAL_DAYS } from '@/lib/signup-trial-copy';
 import { buildSignupCheckoutSubscriptionData } from '@/lib/stripe/subscription-line-items';
 
 describe('buildSignupCheckoutSubscriptionData', () => {
-  it('sets a 14-day trial with pause when payment method is missing at trial end', () => {
+  it('sets a 14-day trial for new signup checkout', () => {
     expect(buildSignupCheckoutSubscriptionData()).toEqual({
       trial_period_days: SIGNUP_TRIAL_DAYS,
-      trial_settings: {
-        end_behavior: {
-          missing_payment_method: 'pause',
-        },
-      },
     });
   });
 });

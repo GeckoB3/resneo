@@ -93,15 +93,14 @@ export function getPersistedSubscriptionItemIds(sub: Stripe.Subscription): Persi
  */
 /**
  * Subscription settings for new signup Checkout only. Do not use for resubscribe or plan upgrades.
+ *
+ * Stripe rejects `trial_settings.end_behavior.missing_payment_method: pause` when the subscription
+ * includes metered prices (SMS overage). Failed trial-end charges are handled in the subscription
+ * webhook via `pauseSubscriptionOnTrialEndPaymentFailure`.
  */
 export function buildSignupCheckoutSubscriptionData(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
   return {
     trial_period_days: SIGNUP_TRIAL_DAYS,
-    trial_settings: {
-      end_behavior: {
-        missing_payment_method: 'pause',
-      },
-    },
   };
 }
 

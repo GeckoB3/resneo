@@ -262,13 +262,10 @@ export default function PaymentPage() {
                 Appointments Light: {SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
               </p>
               <p className="mt-1.5 leading-relaxed">
-                One bookable calendar and one venue login. Appointments, classes, events, and bookable resources.
-                You choose which models to start with in onboarding; edit anytime in Settings. Email reminders are
-                included.
-              </p>
-              <p className="mt-1.5 leading-relaxed">
-                {SMS_INCLUDED_LIGHT} SMS per month included during your trial and after, then {overagePence}p each
-                (billed through Stripe with your subscription).
+                One bookable calendar and one venue login. Appointments, classes, events, and bookable resources
+                included. Edit anytime in Settings. Unlimited email and {SMS_INCLUDED_LIGHT} SMS messages included.
+                Additional SMS messages are billed at {overagePence}p/SMS (billed through Stripe with your
+                subscription).
               </p>
             </div>
           ) : (

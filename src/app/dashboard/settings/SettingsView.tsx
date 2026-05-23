@@ -1326,8 +1326,14 @@ function SettingsViewInner({
         />
       </header>
       <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200/90 bg-slate-100/95 py-2 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-100/85 sm:-mx-6 sm:px-0 lg:-mx-8">
-        <div className="overflow-x-auto px-4 pb-0.5 sm:px-6 lg:px-8">
-          <TabBar tabs={tabBarTabs} value={selectedTab} onChange={(id) => replaceWithTab(id)} />
+        <div className="px-4 sm:px-6 lg:px-8">
+          <TabBar
+            tabs={tabBarTabs}
+            value={selectedTab}
+            onChange={(id) => replaceWithTab(id)}
+            mobileLayout="two-row-scroll"
+            mobileNote="Scroll sideways to see all settings tabs"
+          />
         </div>
       </div>
       <div className="mt-3">

@@ -101,7 +101,7 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="flex min-h-[100dvh] min-h-screen flex-col bg-slate-50">
       {/* Cover photo — thin banner, no dark overlay */}
       {venue.cover_photo_url && (
         <div className="h-36 w-full overflow-hidden sm:h-44">
@@ -178,28 +178,30 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
 
       {venue.opening_hours && <OpeningHoursDisplay hours={venue.opening_hours} />}
 
-      <div
-        id="booking-form-start"
-        className={`mx-auto max-w-lg scroll-mt-4 px-4 pb-24 ${isAppointment ? 'py-6 sm:py-8' : 'py-8'}`}
-      >
-        <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
-      </div>
+      <div className="flex flex-1 flex-col">
+        <div
+          id="booking-form-start"
+          className={`mx-auto w-full max-w-lg flex-1 scroll-mt-4 px-4 pb-6 ${isAppointment ? 'py-6 sm:py-8' : 'py-8'}`}
+        >
+          <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
+        </div>
 
-      <footer className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/90 backdrop-blur py-3 text-center text-xs text-slate-400">
-        <span>
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Privacy Policy
-          </a>
-          {' · '}
-          <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Website Terms of Use
-          </a>
-          {' · '}
-          <a href="https://www.reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-            Powered by ReserveNI
-          </a>
-        </span>
-      </footer>
+        <footer className="mt-auto shrink-0 border-t border-slate-200 bg-white/95 px-4 py-3 pb-safe text-center text-xs leading-relaxed text-slate-400 backdrop-blur">
+          <p className="mx-auto max-w-lg">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+              Privacy Policy
+            </a>
+            {' · '}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+              Website Terms of Use
+            </a>
+            {' · '}
+            <a href="https://www.reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+              Powered by ReserveNI
+            </a>
+          </p>
+        </footer>
+      </div>
     </main>
   );
 }

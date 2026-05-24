@@ -19,13 +19,12 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "seed:e2e-smoke": "node scripts/seed-e2e-smoke-venue.mjs",
-    "test:db": "supabase test db",
+    "test:db": "npx --yes supabase@2.98.2 test db",
     "smoke:cron": "node scripts/smoke-cron.mjs",
     "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
     "seed:dev-restaurant1": "node scripts/seed-dev-restaurant1-account.mjs",
     "delete:user-venue": "node scripts/delete-user-and-venue.mjs",
-    "delete:venue": "tsx scripts/hard-delete-venue.ts",
-    "supabase": "supabase"
+    "delete:venue": "tsx scripts/hard-delete-venue.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -84,7 +83,6 @@
     "happy-dom": "^20.9.0",
     "knip": "^6.6.2",
     "madge": "^8.0.0",
-    "supabase": "^2.98.2",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",

@@ -2547,9 +2547,7 @@ export function PractitionerCalendarView({
       isPractitionerCalendarPreferences,
     );
     if (remembered.viewMode) setViewMode(remembered.viewMode);
-    if (remembered.date) setDate(remembered.date);
-    if (remembered.weekStart) setWeekStart(remembered.weekStart);
-    if (remembered.monthAnchor) setMonthAnchor(remembered.monthAnchor);
+    // Date navigation resets to venue-local today on each visit (see initialIsoDate).
     if (remembered.visibleCalendarIdsState !== undefined) {
       setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
     }
@@ -2573,32 +2571,29 @@ export function PractitionerCalendarView({
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
   })();
 
-  useEffect(() => {
-    if (!calendarPrefsHydrated) return;
-    writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, {
+  const calendarPrefsSnapshot = useMemo(
+    (): PractitionerCalendarPreferences => ({
       viewMode,
-      date,
-      weekStart,
-      monthAnchor,
       visibleCalendarIdsState,
       visibleLinkedColumnIds,
       filterStatus,
       startHourOverride,
       endHourOverride,
-    });
-  }, [
-    calendarPrefsHydrated,
-    preferencesKey,
-    viewMode,
-    date,
-    weekStart,
-    monthAnchor,
-    visibleCalendarIdsState,
-    visibleLinkedColumnIds,
-    filterStatus,
-    startHourOverride,
-    endHourOverride,
-  ]);
+    }),
+    [
+      viewMode,
+      visibleCalendarIdsState,
+      visibleLinkedColumnIds,
+      filterStatus,
+      startHourOverride,
+      endHourOverride,
+    ],
+  );
+
+  useEffect(() => {
+    if (!calendarPrefsHydrated) return;
+    writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
+  }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
 
   const fetchData = useCallback(
     async (options?: { silent?: boolean }) => {

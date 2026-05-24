@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
@@ -73,11 +73,11 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
 
 /** GET /api/venue/bookings/[id] - full booking detail with guest and events timeline. */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -265,7 +265,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
@@ -1751,11 +1751,11 @@ export async function PATCH(
  * Clears related rows that would otherwise remain with null booking_id.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

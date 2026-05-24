@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
@@ -43,9 +44,9 @@ const venueProfileSchema = z.object({
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue - return the authenticated user's venue profile. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

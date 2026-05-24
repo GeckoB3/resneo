@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, getLinkedPractitionerId, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -16,9 +17,9 @@ const patchSchema = z
   });
 
 /** GET /api/venue/staff/me - current user's staff profile (name, email, phone, role). */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

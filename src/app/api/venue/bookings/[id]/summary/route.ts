@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
@@ -11,11 +11,11 @@ import type { BookingModel } from '@/types/booking-models';
  * Omits events, communications, and combination notes (filled by full GET).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

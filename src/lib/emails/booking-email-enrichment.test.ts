@@ -24,13 +24,19 @@ describe('enrichBookingEmailForComms', () => {
     callIndex = 0;
   });
 
-  function makeMockClient(rows: Array<{ table: string; data: unknown }>): SupabaseClient {
+  function makeMockClient(
+    rows: Array<{ table: string; data: unknown }>,
+    ticketLines: Array<{ label: string; quantity: number; unit_price_pence: number }> = [],
+  ): SupabaseClient {
     return {
       from: (table: string) => ({
         select: () => ({
-          eq: () => {
+          eq: (_col: string, val: unknown) => {
             if (table === 'booking_ticket_lines') {
-              return Promise.resolve({ data: [], error: null });
+              if (val !== bookingId) {
+                return Promise.resolve({ data: [], error: null });
+              }
+              return Promise.resolve({ data: ticketLines, error: null });
             }
             return {
               maybeSingle: async () => {
@@ -49,41 +55,53 @@ describe('enrichBookingEmailForComms', () => {
   }
 
   it('adds experience event name and booking_model for event_ticket rows', async () => {
-    const client = makeMockClient([
-      {
-        table: 'bookings',
-        data: {
-          practitioner_id: null,
-          appointment_service_id: null,
-          calendar_id: null,
-          service_item_id: null,
-          group_booking_id: null,
-          guest_id: 'g1',
-          person_label: null,
-        },
-      },
-      {
-        table: 'bookings',
-        data: {
-          experience_event_id: 'evt-uuid',
-          class_instance_id: null,
-          resource_id: null,
-          booking_end_time: null,
-          booking_time: '14:00:00',
-          party_size: 2,
-        },
-      },
-      {
-        table: 'experience_events',
-        data: { name: 'Spring Supper Club' },
-      },
-    ]);
-
-    const out = await enrichBookingEmailForComms(client, bookingId, base);
+    const out = await enrichBookingEmailForComms(
+      makeMockClient(
+        [
+          {
+            table: 'bookings',
+            data: {
+              practitioner_id: null,
+              appointment_service_id: null,
+              calendar_id: null,
+              service_item_id: null,
+              group_booking_id: null,
+              guest_id: 'g1',
+              person_label: null,
+            },
+          },
+          {
+            table: 'bookings',
+            data: {
+              experience_event_id: 'evt-uuid',
+              class_instance_id: null,
+              resource_id: null,
+              booking_end_time: null,
+              booking_time: '14:00:00',
+              party_size: 2,
+            },
+          },
+          {
+            table: 'experience_events',
+            data: { name: 'Spring Supper Club' },
+          },
+        ],
+        [
+          { label: 'Adult ticket', quantity: 2, unit_price_pence: 3000 },
+        ],
+      ),
+      bookingId,
+      base,
+    );
 
     expect(out.booking_model).toBe('event_ticket');
     expect(out.email_variant).toBe('appointment');
     expect(out.appointment_service_name).toBe('Spring Supper Club');
+    expect(out.booking_ticket_price_lines).toEqual([
+      { label: 'Adult ticket', quantity: 2, unit_price_pence: 3000 },
+    ]);
+    expect(out.booking_total_price_pence).toBe(6000);
+    expect(out.appointment_price_display).toBe('£60.00');
   });
 
   it('adds class type name for class_session rows', async () => {

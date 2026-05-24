@@ -936,12 +936,22 @@ async function handleNonTableBooking(
     }
     const ticketTotalDisplay =
       ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
+    const eventTicketPriceLines =
+      ticket_lines && ticket_lines.length > 0
+        ? ticket_lines.map((tl) => ({
+            label: tl.label,
+            quantity: tl.quantity,
+            unit_price_pence: tl.unit_price_pence,
+          }))
+        : undefined;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'event_ticket',
       appointment_service_name: event.event_name,
       practitioner_name: null,
       appointment_price_display: ticketTotalDisplay,
+      booking_total_price_pence: ticketTotal > 0 ? ticketTotal : null,
+      ...(eventTicketPriceLines ? { booking_ticket_price_lines: eventTicketPriceLines } : {}),
     };
   } else if (effectiveModel === 'class_session') {
     if (!class_instance_id) {

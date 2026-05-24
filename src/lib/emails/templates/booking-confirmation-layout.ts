@@ -10,7 +10,11 @@
  *  5. Pre-appointment instructions card — before-visit notes  (when provided, appt only)
  */
 
-import type { BookingEmailData, GroupAppointmentLine, VenueEmailData } from '@/lib/emails/types';
+import type { BookingEmailData, BookingTicketPriceLine, GroupAppointmentLine, VenueEmailData } from '@/lib/emails/types';
+import {
+  confirmationPaymentPolicyText,
+  formatMoneyOrNull,
+} from '@/lib/communications/booking-confirmation-pricing';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { escapeHtml, escapeHtmlMultiline, formatDate, formatTime } from './base-template';
@@ -50,7 +54,7 @@ function heroPhrase(booking: BookingEmailData, isAppt: boolean): { before: strin
   if (m === 'event_ticket') return { before: 'Your event is', highlight: 'confirmed' };
   if (m === 'class_session') return { before: 'Your class is', highlight: 'confirmed' };
   if (m === 'resource_booking') return { before: 'Your booking is', highlight: 'confirmed' };
-  if (isAppt || booking.email_variant === 'appointment') return { before: 'Your appointment is', highlight: 'confirmed' };
+  if (isAppt || booking.email_variant === 'appointment') return { before: 'Your booking is', highlight: 'confirmed' };
   return { before: 'Your booking is', highlight: 'confirmed' };
 }
 
@@ -105,7 +109,98 @@ function buildActionButtons(opts: {
 
 // ─── Appointment line-item detail rows ────────────────────────────────────────
 
+function buildEventTicketDetailRows(
+  booking: BookingEmailData,
+  tickets: BookingTicketPriceLine[],
+  paymentDisplay: string | null,
+): string {
+  const eventName = booking.appointment_service_name?.trim() || 'Event';
+  let computedTotal = 0;
+  let ticketCount = 0;
+
+  const itemRows = tickets.map((t) => {
+    const subtotal = t.quantity * t.unit_price_pence;
+    computedTotal += subtotal;
+    ticketCount += t.quantity;
+    const unitFmt = formatMoneyOrNull(t.unit_price_pence);
+    const subFmt = formatMoneyOrNull(subtotal);
+    const label = (t.label?.trim() || 'Ticket').replace(/:\s*$/, '');
+    const qtyLine =
+      t.quantity === 1
+        ? `1 ticket at ${unitFmt ?? '—'}`
+        : `${t.quantity} tickets at ${unitFmt ?? '—'} each`;
+
+    const priceCell = subFmt
+      ? `<td style="padding:14px 0;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
+        `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(subFmt)}</p>` +
+        `</td>`
+      : `<td></td>`;
+
+    return (
+      `<tr>` +
+      `<td style="padding:14px 0;border-bottom:1px solid ${RULE};vertical-align:top">` +
+      `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(label)}</p>` +
+      `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED}">${escapeHtml(qtyLine)}</p>` +
+      `</td>` +
+      priceCell +
+      `</tr>`
+    );
+  });
+
+  const totalFmt = formatMoneyOrNull(
+    booking.booking_total_price_pence != null && booking.booking_total_price_pence > 0
+      ? booking.booking_total_price_pence
+      : computedTotal,
+  );
+
+  const totalRow = totalFmt
+    ? `<tr>` +
+      `<td style="padding:14px 0 2px;vertical-align:top">` +
+      `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">Total cost</p>` +
+      `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED}">` +
+      `${escapeHtml(`${ticketCount} ${ticketCount === 1 ? 'ticket' : 'tickets'} purchased`)}` +
+      `</p>` +
+      `</td>` +
+      `<td style="padding:14px 0 2px;text-align:right;vertical-align:top;white-space:nowrap">` +
+      `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">${escapeHtml(totalFmt)}</p>` +
+      `</td>` +
+      `</tr>`
+    : '';
+
+  const paymentRow = paymentDisplay?.trim()
+    ? `<tr>` +
+      `<td colspan="2" style="padding:16px 0 0;vertical-align:top;border-top:1px solid ${RULE}">` +
+      `<p style="margin:0 0 4px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em">Payment</p>` +
+      `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.5;font-family:${FONT}">${escapeHtmlMultiline(paymentDisplay.trim())}</p>` +
+      `</td>` +
+      `</tr>`
+    : '';
+
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0 0">` +
+    `<tbody>` +
+    `<tr>` +
+    `<td colspan="2" style="padding:0 0 12px;vertical-align:top">` +
+    `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(eventName)}</p>` +
+    `</td>` +
+    `</tr>` +
+    itemRows.join('') +
+    totalRow +
+    paymentRow +
+    `</tbody>` +
+    `</table>`
+  );
+}
+
 function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: string | null): string {
+  if (booking.booking_model === 'event_ticket' && booking.booking_ticket_price_lines?.length) {
+    return buildEventTicketDetailRows(
+      booking,
+      booking.booking_ticket_price_lines,
+      confirmationPaymentPolicyText(booking),
+    );
+  }
+
   // Group: multiple services / people
   if (booking.group_appointments && booking.group_appointments.length > 0) {
     const itemRows = booking.group_appointments.map((g) => {
@@ -333,7 +428,10 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<span style="display:inline-block;padding:5px 14px 5px 10px;border-radius:9999px;` +
     `background:${ACCENT};color:#fff;font-size:12px;font-weight:700;font-family:${FONT};letter-spacing:0.01em">&#10003; Confirmed</span>`;
 
-  const detailsHeading = appointmentStyle ? 'Appointment details' : 'Booking details';
+  const detailsHeading =
+    booking.booking_model === 'event_ticket'
+      ? 'Event details'
+      : 'Booking details';
 
   const preambleSection = blocks.preambleHtml?.trim()
     ? `<div style="margin:14px 0 0;font-size:14px;color:${TEXT_BODY};line-height:1.55;font-family:${FONT}">${blocks.preambleHtml}</div>`

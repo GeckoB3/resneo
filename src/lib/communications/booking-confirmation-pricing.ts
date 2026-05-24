@@ -72,30 +72,57 @@ function sumGroupAppointmentPricesPence(booking: BookingEmailData): number | nul
   return any ? sum : null;
 }
 
+/** Ticket quantity + per-type pricing for event confirmations (email card, plain text). */
+export function confirmationEventTicketBreakdownLines(booking: BookingEmailData): string[] {
+  const tickets = booking.booking_ticket_price_lines;
+  if (!tickets?.length) return [];
+
+  const lines: string[] = [];
+  let computedTotal = 0;
+  let ticketCount = 0;
+
+  for (const t of tickets) {
+    const unit = formatMoneyOrNull(t.unit_price_pence);
+    const subtotal = t.quantity * t.unit_price_pence;
+    computedTotal += subtotal;
+    ticketCount += t.quantity;
+    const subFmt = formatMoneyOrNull(subtotal);
+    const rawLabel = (t.label?.trim() || 'Ticket').replace(/:\s*$/, '');
+    if (!unit || !subFmt) continue;
+    if (t.quantity === 1) {
+      lines.push(`${rawLabel}: 1 ticket at ${unit} (${subFmt})`);
+    } else {
+      lines.push(`${rawLabel}: ${t.quantity} tickets at ${unit} each (${subFmt})`);
+    }
+  }
+
+  if (ticketCount > 0) {
+    const ticketWord = ticketCount === 1 ? 'ticket' : 'tickets';
+    lines.unshift(`Tickets purchased: ${ticketCount} ${ticketWord}`);
+  }
+
+  const tf = formatMoneyOrNull(computedTotal);
+  if (tf) {
+    lines.push(`Total cost: ${tf}`);
+  }
+
+  return lines;
+}
+
+function confirmationPaymentPolicyLines(booking: BookingEmailData): string[] {
+  const lines: string[] = [];
+  const pay = paymentStatusLine(booking);
+  if (pay) lines.push(pay);
+  const ref = refundPolicyLine(booking);
+  if (ref) lines.push(ref);
+  return lines;
+}
+
 function singleBookingPriceLines(booking: BookingEmailData): string[] {
   const lines: string[] = [];
   const tickets = booking.booking_ticket_price_lines;
   if (tickets?.length) {
-    let computedTotal = 0;
-    for (const t of tickets) {
-      const unit = formatMoneyOrNull(t.unit_price_pence);
-      const subtotal = t.quantity * t.unit_price_pence;
-      computedTotal += subtotal;
-      const subFmt = formatMoneyOrNull(subtotal);
-      const rawLabel = (t.label?.trim() || 'Tickets').replace(/:\s*$/, '');
-      if (unit && subFmt) {
-        if (t.quantity === 1) {
-          lines.push(`${rawLabel}: ${unit}`);
-        } else {
-          lines.push(`${rawLabel}: ${unit} × ${t.quantity} = ${subFmt}`);
-        }
-      }
-    }
-    if (tickets.length > 1) {
-      const tf = formatMoneyOrNull(computedTotal);
-      if (tf) lines.push(`Total: ${tf}`);
-    }
-    return lines;
+    return confirmationEventTicketBreakdownLines(booking);
   }
 
   const qty =
@@ -239,12 +266,15 @@ export function confirmationStructuredPriceText(booking: BookingEmailData): stri
     lines.push(...singleBookingPriceLines(booking));
   }
 
-  const pay = paymentStatusLine(booking);
-  if (pay) lines.push(pay);
+  lines.push(...confirmationPaymentPolicyLines(booking));
 
-  const ref = refundPolicyLine(booking);
-  if (ref) lines.push(ref);
+  if (lines.length === 0) return null;
+  return lines.join('\n');
+}
 
+/** Payment and cancellation copy only (for event emails that show tickets in the detail table). */
+export function confirmationPaymentPolicyText(booking: BookingEmailData): string | null {
+  const lines = confirmationPaymentPolicyLines(booking);
   if (lines.length === 0) return null;
   return lines.join('\n');
 }
@@ -262,6 +292,68 @@ export function bookingConfirmationPaymentTextLines(booking: BookingEmailData): 
 /**
  * Short suffix for SMS (leading space when non-empty). Appointments / unified lanes only.
  */
+/**
+ * Short ticket + price summary for event booking confirmation SMS.
+ */
+export function eventBookingConfirmationSmsPriceSuffix(booking: BookingEmailData): string {
+  const tickets = booking.booking_ticket_price_lines;
+  if (!tickets?.length) {
+    return bookingConfirmationSmsPriceSuffix(booking);
+  }
+
+  const parts: string[] = [];
+  const ticketCount = tickets.reduce((sum, t) => sum + t.quantity, 0);
+  const totalPence =
+    booking.booking_total_price_pence != null && booking.booking_total_price_pence > 0
+      ? booking.booking_total_price_pence
+      : tickets.reduce((sum, t) => sum + t.quantity * t.unit_price_pence, 0);
+  const totalFmt = formatMoneyOrNull(totalPence > 0 ? totalPence : null);
+  const ticketWord = ticketCount === 1 ? 'ticket' : 'tickets';
+
+  if (ticketCount > 0) {
+    parts.push(`${ticketCount} ${ticketWord}`);
+  }
+
+  for (const t of tickets) {
+    const unitFmt = formatMoneyOrNull(t.unit_price_pence);
+    if (!unitFmt) continue;
+    const label = (t.label?.trim() || 'Ticket').replace(/:\s*$/, '');
+    parts.push(t.quantity === 1 ? `${label} ${unitFmt}` : `${label} ${t.quantity}×${unitFmt}`);
+  }
+
+  if (totalFmt) {
+    parts.push(`total ${totalFmt}`);
+  }
+
+  const ds = (booking.deposit_status ?? '').toLowerCase();
+  const paidPence = booking.deposit_amount_pence;
+  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
+
+  if (paidOnline) {
+    const amt = formatMoneyOrNull(paidPence);
+    if (amt) {
+      if (totalPence > 0 && paidPence >= totalPence) {
+        parts.push(`paid in full (${amt})`);
+      } else if (totalPence > 0 && paidPence < totalPence) {
+        const bal = formatMoneyOrNull(totalPence - paidPence);
+        parts.push(bal ? `${amt} paid, ${bal} due at venue` : `${amt} paid, balance due at venue`);
+      } else {
+        parts.push(`${amt} paid online`);
+      }
+    }
+  } else if (ds === 'pending' && (paidPence ?? 0) > 0) {
+    const dep = formatMoneyOrNull(paidPence);
+    parts.push(dep ? `${dep} deposit due` : 'deposit due');
+  } else if (isFreeBookingDisplay(booking)) {
+    parts.push('free');
+  } else if (totalFmt) {
+    parts.push('pay at venue');
+  }
+
+  if (parts.length === 0) return '';
+  return ` ${parts.join(', ')}.`;
+}
+
 export function bookingConfirmationSmsPriceSuffix(booking: BookingEmailData): string {
   const ds = (booking.deposit_status ?? '').toLowerCase();
   const paidPence = booking.deposit_amount_pence;

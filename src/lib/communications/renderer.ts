@@ -10,6 +10,7 @@ import {
   formatSmsDate,
   formatTime,
 } from '@/lib/emails/templates/base-template';
+import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
 import { renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
@@ -17,6 +18,7 @@ import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/ema
 import {
   bookingConfirmationSmsPriceSuffix,
   confirmationStructuredPriceText,
+  eventBookingConfirmationSmsPriceSuffix,
   formatMoneyOrNull,
 } from './booking-confirmation-pricing';
 import type {
@@ -183,7 +185,9 @@ export function renderCommunicationSms(
     switch (opts.messageKey) {
       case 'booking_confirmation': {
         const payHint = isAppointmentLane(opts.lane)
-          ? bookingConfirmationSmsPriceSuffix(opts.booking)
+          ? opts.booking.booking_model === 'event_ticket'
+            ? eventBookingConfirmationSmsPriceSuffix(opts.booking)
+            : bookingConfirmationSmsPriceSuffix(opts.booking)
           : '';
         if (isAppointmentLane(opts.lane)) {
           const core = `${leadPart}${vn}: Confirmed: ${withStaffSms(opts.booking, label)} on ${smsDate} at ${time}.${payHint}`;
@@ -291,14 +295,14 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         : [];
       return {
         subject: appointment
-          ? `Your appointment at ${opts.venue.name} is confirmed`
+          ? confirmationSubject(opts.booking, opts.venue.name)
           : `Your booking at ${opts.venue.name} is confirmed`,
-        heading: appointment ? 'Your appointment is confirmed' : 'Your booking is confirmed',
+        heading: 'Your booking is confirmed',
         mainContent: [
           htmlParagraph(`Hi ${guestName},`),
           htmlParagraph(
             appointment
-              ? 'Your appointment is confirmed. Here are the details:'
+              ? 'Your booking is confirmed. Here are the details:'
               : 'Your table is booked. Here are the details:',
           ),
           opts.cancellationPolicy ? htmlRaw(`<strong>Cancellation policy:</strong> ${escapeHtml(opts.cancellationPolicy)}`) : '',
@@ -310,7 +314,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Hi ${guestName},`,
           '',
           appointment
-            ? 'Your appointment is confirmed. Here are the details:'
+            ? 'Your booking is confirmed. Here are the details:'
             : 'Your table is booked. Here are the details:',
           appointment ? `Service: ${withStaffLabel}` : null,
           `Date: ${date}`,

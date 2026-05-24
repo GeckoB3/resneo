@@ -1,5 +1,20 @@
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendPolicyMessage } from './outbound';
+
+async function enrichBookingForConfirmation(booking: BookingEmailData): Promise<BookingEmailData> {
+  if (!booking.id?.trim()) return booking;
+  try {
+    return await enrichBookingEmailForComms(getSupabaseAdminClient(), booking.id, booking);
+  } catch (err) {
+    console.error('[send-templated] enrichBookingForConfirmation failed', {
+      bookingId: booking.id,
+      err,
+    });
+    return booking;
+  }
+}
 
 interface SendResult {
   sent: boolean;
@@ -49,8 +64,9 @@ export async function sendBookingConfirmationNotifications(
   venue: VenueEmailData,
   venueId: string,
 ): Promise<{ email: SendResult; sms: SendResult }> {
-  const email = await sendBookingConfirmationEmail(booking, venue, venueId);
-  const sms = await sendBookingConfirmationSms(booking, venue, venueId);
+  const enriched = await enrichBookingForConfirmation(booking);
+  const email = await sendBookingConfirmationEmail(enriched, venue, venueId);
+  const sms = await sendBookingConfirmationSms(enriched, venue, venueId);
   return { email, sms };
 }
 

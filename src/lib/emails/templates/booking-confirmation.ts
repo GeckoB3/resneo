@@ -30,7 +30,7 @@ function isAppointmentStyle(booking: BookingEmailData): boolean {
   );
 }
 
-function confirmationSubject(booking: BookingEmailData, venueName: string): string {
+export function confirmationSubject(booking: BookingEmailData, venueName: string): string {
   const m = booking.booking_model;
   if (m === "event_ticket") {
     return `Your event at ${venueName} is confirmed`;

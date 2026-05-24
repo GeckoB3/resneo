@@ -46,8 +46,15 @@ const EVENT_BOOKING: BookingEmailData = {
   ...BASE_TABLE_BOOKING,
   guest_name: 'Jamie Patel',
   party_size: 2,
-  appointment_service_name: 'The Great Escape — Adult ticket × 2',
+  booking_model: 'event_ticket',
+  email_variant: 'appointment',
+  appointment_service_name: 'The Great Escape',
   practitioner_name: null,
+  booking_total_price_pence: 5000,
+  appointment_price_display: '£50.00',
+  booking_ticket_price_lines: [
+    { label: 'Adult ticket', quantity: 2, unit_price_pence: 2500 },
+  ],
 };
 
 const RESOURCE_BOOKING: BookingEmailData = {

@@ -319,6 +319,12 @@ export async function POST(request: NextRequest) {
         appointment_service_name: evSlot.event_name,
         practitioner_name: null,
         appointment_price_display: ticketTotalDisplay,
+        booking_total_price_pence: ticketTotal > 0 ? ticketTotal : null,
+        booking_ticket_price_lines: ticketLines.map((tl) => ({
+          label: tl.label,
+          quantity: tl.quantity,
+          unit_price_pence: tl.unit_price_pence,
+        })),
       };
 
       const refundWindowHours = await resolveCancellationNoticeHoursForCreate({

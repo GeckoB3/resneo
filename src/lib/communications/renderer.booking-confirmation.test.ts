@@ -22,6 +22,24 @@ function baseBooking(over: Partial<BookingEmailData>): BookingEmailData {
 }
 
 describe('renderCommunicationEmail booking_confirmation', () => {
+  it('uses booking wording in subject and hero for non-table confirmations', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        booking_model: 'unified_scheduling',
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+    });
+    expect(out?.subject).toBe('Your booking at Test Venue is confirmed');
+    expect(out?.html).toContain('Your booking is');
+    expect(out?.html).not.toContain('Your appointment is');
+    expect(out?.text).toContain('Your booking is confirmed. Here are the details:');
+  });
+
   it('puts price and pay-at-venue copy in the detail card only, not the intro', () => {
     const out = renderCommunicationEmail({
       lane: 'appointments_other',
@@ -78,6 +96,36 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     });
     expect(out?.html).toMatch(/Cancellation:.*Full refund if you cancel before/i);
     expect(out?.text).toMatch(/Full refund if you cancel before/i);
+  });
+
+  it('shows event ticket quantity, unit price, and total cost', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        booking_model: 'event_ticket',
+        appointment_service_name: 'Spring Supper Club',
+        party_size: 3,
+        booking_ticket_price_lines: [
+          { label: 'Adult ticket', quantity: 2, unit_price_pence: 2500 },
+          { label: 'Child ticket', quantity: 1, unit_price_pence: 1500 },
+        ],
+        booking_total_price_pence: 6500,
+        appointment_price_display: '£65.00',
+        deposit_status: 'Not Required',
+      }),
+      venue,
+    });
+    expect(out?.html).toContain('Event details');
+    expect(out?.html).toContain('Spring Supper Club');
+    expect(out?.html).toContain('2 tickets at £25.00 each');
+    expect(out?.html).toContain('1 ticket at £15.00');
+    expect(out?.html).toContain('Total cost');
+    expect(out?.html).toContain('£65.00');
+    expect(out?.html).toContain('3 tickets purchased');
+    expect(out?.text).toContain('Tickets purchased: 3 tickets');
+    expect(out?.text).toContain('Total cost: £65.00');
   });
 
   it('shows per-seat and total for multi-seat class bookings', () => {

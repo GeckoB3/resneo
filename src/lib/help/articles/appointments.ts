@@ -406,6 +406,180 @@ Each class type must reference a **bookable calendar** your plan still allows. I
 `.trim(),
     },
     {
+      slug: 'selling-class-packs',
+      helpSection: 'operations',
+      title: 'Selling class packs (credits)',
+      description:
+        'Configure credit packs guests can buy in advance, set expiry, restrict to specific class types, and track usage.',
+      tags: ['classes', 'class-packs', 'credits', 'commerce', 'memberships'],
+      content: `
+# Selling class packs
+
+**Class credits** let guests pre-pay for a fixed number of classes — for example, a 5-class intro offer or a 10-class pass. When they redeem a credit at booking, no card charge is needed.
+
+**Where:** Classes → **Class products** → **Credits** tab. The "Class products" button only appears when **Class packs, courses & memberships** is on under **Settings → Booking settings → Optional Booking features**.
+
+## What a pack contains
+
+- **Name and description** — what guests see on your public booking page and in their account.
+- **Credits count** — how many classes the pack buys (1 credit = 1 spot in a class).
+- **Price** — total price for the pack, in £.
+- **Validity (days)** — credits expire this many days after purchase. Leave blank for no expiry.
+- **Eligible classes** — restrict the pack to specific class types, or leave empty to allow all classes.
+- **Active** — toggle off to stop selling it without losing history.
+
+Use the **Intro 5 pack** and **10 class pass** quick templates to prefill sensible defaults.
+
+## How a guest buys a pack
+
+1. They open your public booking page and choose the **Classes** tab.
+2. Under "Passes, courses & memberships" they click **Buy pack**.
+3. If signed out, they sign in (password or magic link); if signed in, they jump straight to **Account → Class credits** with the pack preselected.
+4. Stripe Elements opens automatically. They pay with card or saved card.
+5. The credits appear under **Balances** with their expiry date. A receipt email goes out (**Class credits purchased**).
+
+## How credits are spent
+
+When a guest books a class on your public page and the class requires payment, they can tick **Pay with class credits** instead. The system spends from the **oldest expiring** batch first (FIFO) and only from packs eligible for that class type. If they don't have enough, the line falls back to card payment.
+
+If a credit-paid booking is cancelled within your cancellation window, **the credit is restored** to the same batch and a **Class credits restored** email goes out — automatic and idempotent.
+
+## Expiry and reminders
+
+A nightly cron expires balances on their expiry date. **7 days before expiry**, guests with unused credits get a reminder email (**Class credits expiring soon**) so they have time to book a class.
+
+## Archive vs delete
+
+- **Archive** when you stop offering a pack but want to keep its purchase history. Guests who already own credits from it can still spend them; new buyers can't see it.
+- **Delete** only when no guest has ever bought from it. The dashboard blocks deletion otherwise — archive instead.
+
+## Tips
+
+- Set **validity_days** to nudge guests into a habit (30–90 days work well).
+- Restrict an introductory pack to your beginner class type only — guests then upgrade to a "10 class pass" once they've found their level.
+`.trim(),
+    },
+    {
+      slug: 'building-a-class-course',
+      helpSection: 'operations',
+      title: 'Building a class course',
+      description:
+        'Bundle a fixed set of class sessions into one course product, set enrolment caps and dates, and manage cancellations.',
+      tags: ['classes', 'courses', 'commerce'],
+      content: `
+# Building a class course
+
+A **course** is a fixed-session programme — six weeks of beginners Pilates, a four-session yoga immersion — sold as one price. Guests enrol once and the system holds a spot for them in every linked session.
+
+**Where:** Classes → **Class products** → **Courses** tab.
+
+## Setup
+
+1. First, generate the class instances that will make up the course (the **Classes** page does this from your weekly timetable).
+2. Create the course product with:
+   - **Name and description** — your marketing copy.
+   - **Price** — total price in £. Free courses (£0) skip Stripe entirely.
+   - **Max enrolments** — optional cap; the form blocks new enrolments once it's hit.
+   - **Enrolment opens / closes** — optional window where guests can sign up.
+   - **Included sessions** — pick the instances that make up the course. Use the **class type** dropdown and **date range** filters to narrow the list, then tick each session you want included.
+   - **Cancellation window (days)** — how many days before the first session a guest can self-cancel for a full refund. Leave blank for non-refundable.
+
+Active courses must have at least one session selected.
+
+## How a guest enrols
+
+1. From the public **Classes** tab they click **Enrol** on the course they want.
+2. Free courses confirm immediately; paid courses open Stripe Elements with the venue's connected account.
+3. After payment, the system links the guest's enrolment to every session and sends an **Enrolment confirmed** email listing the sessions and start date.
+
+## Cancellations and refunds
+
+Inside the configured window:
+
+- **Guests** can cancel themselves from **Account → Courses** — Stripe issues a full refund automatically, all linked session enrolments are cancelled, and the guest gets a **Course refund** email.
+- **Staff** can cancel any enrolment from **Class products → Courses → View enrollments** (same refund behaviour) or **Force-cancel** past the window if needed (no automatic refund — handle manually with the guest).
+
+## Per-session attendance
+
+After a session runs, mark each enrolled guest as **Attended** or **No show** from the **Class instance roster** (open it from the Classes dashboard). The course enrolment shows running totals like "5 / 6 sessions attended" so you can spot drop-offs.
+
+## Tips
+
+- **Limit max enrolments** to your room's capacity so a sold-out course doesn't accidentally over-fill a session.
+- Set **opens_at** ahead of your first session so the marketing window matches your social posts.
+- A 7-day **cancellation_window_days** is a good default — guests have time to commit, but you have enough notice to refill the spot.
+`.trim(),
+    },
+    {
+      slug: 'selling-memberships',
+      helpSection: 'operations',
+      title: 'Selling memberships',
+      description:
+        'Subscription class plans — unlimited or allowance-based — with rollover, member discounts, and Stripe Connect billing.',
+      tags: ['classes', 'memberships', 'commerce', 'subscriptions'],
+      content: `
+# Selling memberships
+
+A **membership** is a Stripe-billed subscription that gives the member ongoing class access — either unlimited classes or a fixed allowance per billing period. Memberships bill on **each venue's own Stripe Connect account**.
+
+**Where:** Classes → **Class products** → **Memberships** tab.
+
+## Plan rules
+
+- **Unlimited** — the simplest model. Any class covered by the plan is free for the member.
+- **Allowance per period** — N classes per billing period (weekly / monthly / yearly).
+   - **Rollover** — unused allowance carries into the next period.
+   - **Rollover limit** — cap the carry-over (otherwise it accumulates indefinitely).
+- **Member discount %** — applies to paid classes that aren't already covered by allowance or unlimited (e.g. workshops outside the plan).
+- **Eligible class types** — restrict the plan to specific class types, or leave empty for all classes.
+- **Allow recurring booking** — must be enabled for guests on this plan to set up recurring auto-bookings.
+
+## Stripe Connect setup
+
+Two ways to attach a Stripe price:
+
+1. **Recurring price + interval** (recommended) — ReserveNI creates a Stripe Product and a recurring Price on your connected account when you save the plan. Change the price or interval later and a new Price is generated; the old one is archived automatically.
+2. **Paste an existing Stripe Price ID** — useful if you already manage subscriptions externally.
+
+Active plans must have a Stripe price attached so guests can subscribe.
+
+## How a guest subscribes
+
+1. From the public **Classes** tab they click **Start membership** on the plan.
+2. They're sent to Stripe-hosted Checkout (on your connected account) to enter card details.
+3. The webhook syncs the subscription to ReserveNI and sends a **Membership started** welcome email.
+
+## Period boundaries and allowance reset
+
+A nightly cron writes a **period_reset** ledger row each billing cycle. The remaining allowance carries over per the rollover rules. The member sees "**X / Y classes used this period · Resets {date}**" in **Account → Memberships**.
+
+## Cancelling
+
+Members cancel from their account; the cancellation is **scheduled for period end** (they keep access until then). They get a **Membership scheduled to end** email immediately and a **Membership ended** email once the final period rolls over.
+
+## Discount + allowance precedence
+
+When a guest books a class with a paid line and they hold a membership covering it, the engine evaluates in this order:
+
+1. **Pay with class credits** if the guest has a credit balance and ticked the box.
+2. **Course coverage** if the class is part of a course they're enrolled in.
+3. **Membership unlimited** — line is free.
+4. **Membership allowance** — line is free, allowance ledger debits.
+5. **Member discount** — the line is paid but reduced by the best discount on any membership covering the class type.
+6. Otherwise, full price.
+
+## Archiving
+
+When you archive a membership product, ReserveNI automatically archives the Stripe Product and Price on the connected account. Existing members keep their subscription until they cancel — the plan just stops being offered to new buyers.
+
+## Tips
+
+- Make your most popular plan the **default** by listing it first under your venue's marketing.
+- Set **rollover_limit = allowance_per_period** to allow members one missed week without them stockpiling free classes indefinitely.
+- Use **member_discount_percent** on workshop-style class types you don't want fully covered.
+`.trim(),
+    },
+    {
       slug: 'events',
       helpSection: 'operations',
       title: 'Ticketed events',

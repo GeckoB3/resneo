@@ -43,6 +43,7 @@ interface CourseProduct {
   opens_at: string | null;
   closes_at: string | null;
   session_instance_ids: string[];
+  cancellation_window_days: number | null;
   active: boolean;
 }
 
@@ -568,6 +569,12 @@ export function ClassCommerceProductsClient({ venueId }: { venueId: string }) {
   }
 
   function coursePayload(fd: FormData) {
+    const cancellationRaw = String(fd.get('cancellation_window_days') ?? '').trim();
+    let cancellation_window_days: number | null = null;
+    if (cancellationRaw !== '') {
+      const n = Number(cancellationRaw);
+      cancellation_window_days = Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+    }
     return {
       name: String(fd.get('name') ?? '').trim(),
       description: optionalText(fd.get('description')),
@@ -576,6 +583,7 @@ export function ClassCommerceProductsClient({ venueId }: { venueId: string }) {
       opens_at: isoFromDatetimeLocal(fd.get('opens_at')),
       closes_at: isoFromDatetimeLocal(fd.get('closes_at')),
       session_instance_ids: selectedValues(fd, 'session_instance_ids') ?? [],
+      cancellation_window_days,
       currency: 'gbp',
       active: fd.get('active') === 'on',
     };
@@ -1159,6 +1167,17 @@ function CoursePanel({
                 onEdit={() => setEditing(editing === `course:${p.id}` ? null : `course:${p.id}`)}
                 onArchive={() => onPatch(p.id, { active: !p.active })}
                 onDelete={() => onDelete(p.id, p.name)}
+                extraButton={
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditing(editing === `course-enrol:${p.id}` ? null : `course-enrol:${p.id}`)
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                  >
+                    {editing === `course-enrol:${p.id}` ? 'Hide enrollments' : 'View enrollments'}
+                  </button>
+                }
               />
               {editing === `course:${p.id}` ? (
                 <form
@@ -1173,6 +1192,9 @@ function CoursePanel({
                     Save changes
                   </button>
                 </form>
+              ) : null}
+              {editing === `course-enrol:${p.id}` ? (
+                <CourseEnrollmentsPanel courseId={p.id} courseName={p.name} instances={instances} classTypes={classTypes} />
               ) : null}
             </ProductCard>
           ))
@@ -1225,10 +1247,293 @@ function CourseFields({
         </label>
       </div>
       <SessionMultiSelect instances={instances} classTypes={classTypes} defaultValue={product?.session_instance_ids ?? []} />
+      <label className={LABEL}>
+        Cancellation window (days)
+        <input
+          name="cancellation_window_days"
+          type="number"
+          min={0}
+          max={365}
+          defaultValue={product?.cancellation_window_days ?? ''}
+          placeholder="7"
+          className={FIELD}
+        />
+        <span className="block text-[11px] font-normal text-slate-500">
+          How many days before the first session a guest can self-cancel for a full refund. Leave blank for non-refundable.
+        </span>
+      </label>
       <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
         <input name="active" type="checkbox" defaultChecked={product?.active ?? true} className="h-4 w-4 rounded border-slate-300" />
         Open for enrollment
       </label>
+    </div>
+  );
+}
+
+interface CourseEnrollmentRow {
+  id: string;
+  user_id: string;
+  status: string;
+  stripe_payment_intent_id: string | null;
+  created_at: string;
+  updated_at: string;
+  guest: {
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+  } | null;
+}
+
+interface CourseSessionEnrollmentRow {
+  id: string;
+  enrollment_id: string;
+  class_instance_id: string;
+  status: string;
+}
+
+interface CourseEnrollmentsResponse {
+  product: {
+    id: string;
+    name: string;
+    cancellation_window_days: number | null;
+    session_instance_ids: string[] | null;
+  };
+  enrollments: CourseEnrollmentRow[];
+  session_enrollments: CourseSessionEnrollmentRow[];
+}
+
+const ENROLLMENT_STATUS_BADGES: Record<string, string> = {
+  pending_payment: 'bg-amber-100 text-amber-800',
+  active: 'bg-emerald-100 text-emerald-800',
+  cancelled: 'bg-slate-200 text-slate-700',
+  completed: 'bg-slate-100 text-slate-700',
+};
+
+const SESSION_STATUS_BADGES: Record<string, string> = {
+  scheduled: 'bg-slate-100 text-slate-700',
+  attended: 'bg-emerald-100 text-emerald-800',
+  cancelled: 'bg-slate-200 text-slate-700',
+  no_show: 'bg-amber-100 text-amber-800',
+};
+
+function guestDisplayName(g: CourseEnrollmentRow['guest']): string {
+  if (!g) return 'Guest';
+  return [g.first_name, g.last_name].filter(Boolean).join(' ').trim() || g.email || 'Guest';
+}
+
+function CourseEnrollmentsPanel({
+  courseId,
+  courseName,
+  instances,
+  classTypes,
+}: {
+  courseId: string;
+  courseName: string;
+  instances: ClassInstanceOption[];
+  classTypes: ClassTypeOption[];
+}) {
+  const [data, setData] = useState<CourseEnrollmentsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyEnrId, setBusyEnrId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/class-course-products/${encodeURIComponent(courseId)}/enrollments`);
+      const json = (await res.json()) as CourseEnrollmentsResponse & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load enrollments');
+      setData(json);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function cancelEnrollment(enrId: string, opts: { bypassWindow: boolean; reason?: string }) {
+    setBusyEnrId(enrId);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(
+        `/api/venue/class-course-products/${encodeURIComponent(courseId)}/enrollments/${encodeURIComponent(enrId)}/cancel`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bypass_window: opts.bypassWindow, cancel_reason: opts.reason ?? null }),
+        },
+      );
+      const json = (await res.json()) as { ok?: boolean; refund_amount_pence?: number; error?: string };
+      if (!res.ok) {
+        setError(json.error ?? 'Cancel failed');
+        return;
+      }
+      const refunded = json.refund_amount_pence ?? 0;
+      setNotice(
+        refunded > 0
+          ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} processed.`
+          : 'Cancelled (no refund issued).',
+      );
+      await load();
+    } finally {
+      setBusyEnrId(null);
+    }
+  }
+
+  const sessionsByEnrolment = useMemo(() => {
+    const map = new Map<string, CourseSessionEnrollmentRow[]>();
+    for (const s of data?.session_enrollments ?? []) {
+      const arr = map.get(s.enrollment_id) ?? [];
+      arr.push(s);
+      map.set(s.enrollment_id, arr);
+    }
+    return map;
+  }, [data?.session_enrollments]);
+
+  function instanceLine(id: string): string {
+    return instanceLabel(instances, classTypes, id);
+  }
+
+  const enrollments = data?.enrollments ?? [];
+  const active = enrollments.filter((e) => e.status !== 'cancelled');
+  const cancelled = enrollments.filter((e) => e.status === 'cancelled');
+
+  return (
+    <div className="mt-4 rounded-xl bg-slate-50 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-900">Enrollments — {courseName}</h4>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="text-xs font-semibold text-brand-700 hover:underline"
+        >
+          Refresh
+        </button>
+      </div>
+      {loading && !data ? <p className="mt-2 text-sm text-slate-500">Loading…</p> : null}
+      {error ? (
+        <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-800">{error}</p>
+      ) : null}
+      {notice ? (
+        <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-900">{notice}</p>
+      ) : null}
+      {data ? (
+        <>
+          {enrollments.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">No enrollments yet.</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {active.map((e) => {
+                const sessions = sessionsByEnrolment.get(e.id) ?? [];
+                const attended = sessions.filter((s) => s.status === 'attended').length;
+                const total = sessions.length;
+                const isOpen = expanded === e.id;
+                return (
+                  <div key={e.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{guestDisplayName(e.guest)}</p>
+                        <p className="text-xs text-slate-500">
+                          {e.guest?.email ?? '—'} · enrolled {e.created_at.slice(0, 10)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-700">
+                          <span
+                            className={`mr-1 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                              ENROLLMENT_STATUS_BADGES[e.status] ?? 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {e.status}
+                          </span>
+                          {total > 0 ? `${attended} / ${total} sessions attended` : 'No sessions linked yet'}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {sessions.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpanded(isOpen ? null : e.id)}
+                            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {isOpen ? 'Hide sessions' : 'Show sessions'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={busyEnrId === e.id}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Cancel ${guestDisplayName(e.guest)}'s enrollment? If within the refund window, their payment will be refunded automatically.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            void cancelEnrollment(e.id, { bypassWindow: false });
+                          }}
+                          className="rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          {busyEnrId === e.id ? 'Working…' : 'Cancel enrollment'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyEnrId === e.id}
+                          onClick={() => {
+                            const reason = window.prompt('Force-cancel reason (skips refund — handle manually):');
+                            if (reason === null) return;
+                            void cancelEnrollment(e.id, { bypassWindow: true, reason });
+                          }}
+                          className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Force-cancel
+                        </button>
+                      </div>
+                    </div>
+                    {isOpen && sessions.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-xs text-slate-700">
+                        {sessions.map((s) => (
+                          <li key={s.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2 py-1">
+                            <span>{instanceLine(s.class_instance_id)}</span>
+                            <span
+                              className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                SESSION_STATUS_BADGES[s.status] ?? 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {s.status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {cancelled.length > 0 ? (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+                    {cancelled.length} cancelled enrollment{cancelled.length === 1 ? '' : 's'}
+                  </summary>
+                  <ul className="mt-2 space-y-1 text-xs text-slate-500">
+                    {cancelled.map((e) => (
+                      <li key={e.id}>
+                        {guestDisplayName(e.guest)} — cancelled {e.updated_at.slice(0, 10)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
+          )}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1483,18 +1788,21 @@ function ProductActions({
   onEdit,
   onArchive,
   onDelete,
+  extraButton,
 }: {
   active: boolean;
   editing: boolean;
   onEdit: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  extraButton?: React.ReactNode;
 }) {
   return (
     <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold">
       <button type="button" onClick={onEdit} className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
         {editing ? 'Close editor' : 'Edit'}
       </button>
+      {extraButton}
       <button type="button" onClick={onArchive} className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
         {active ? 'Archive' : 'Reactivate'}
       </button>

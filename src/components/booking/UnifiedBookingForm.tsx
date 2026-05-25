@@ -11,6 +11,10 @@ import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenu
 import { staffBookingFlowDurationMs } from '@/lib/metrics/staff-booking-flow-duration';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
+import {
+  addWeeksLocalYmd,
+  STAFF_BOOKING_WEEK_OFFSETS,
+} from '@/components/booking/ResourceCalendarMonth';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 /** YYYY-MM-DD in the browser's local calendar (matches guest BookingFlow / DateStep). */
@@ -1340,6 +1344,34 @@ export function UnifiedBookingForm({
                         </button>
                       );
                     })}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
+                      {STAFF_BOOKING_WEEK_OFFSETS.map((weeks) => {
+                        const ymd = addWeeksLocalYmd(weeks);
+                        const isPast = ymd < todayStr;
+                        const isSelected = date === ymd;
+                        return (
+                          <button
+                            key={weeks}
+                            type="button"
+                            disabled={isPast}
+                            onClick={() => {
+                              setDate(ymd);
+                              const [y, m] = ymd.split('-').map(Number);
+                              if (y && m) setCalendarMonth(new Date(y, m - 1, 1));
+                              setOpenPanel(null);
+                            }}
+                            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                              isSelected
+                                ? 'bg-brand-600 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-brand-50 hover:text-brand-700'
+                            }`}
+                          >
+                            +{weeks} wk
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
               );

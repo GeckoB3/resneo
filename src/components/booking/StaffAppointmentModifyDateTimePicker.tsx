@@ -422,6 +422,7 @@ export function StaffAppointmentModifyDateTimePicker({
         onNextMonth={goNextMonth}
         minSelectableDate={minSelectableDate}
         loading={loadingCalendar}
+        weekOffsetShortcuts
       />
       {loadingSlots ? (
         <div className="h-32 animate-pulse rounded-xl bg-slate-100" aria-label="Loading times" />

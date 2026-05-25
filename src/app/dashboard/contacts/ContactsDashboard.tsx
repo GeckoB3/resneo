@@ -34,6 +34,7 @@ import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { guestListRowFromDetailResponse } from '@/lib/guests/guest-list-row-from-detail';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
 import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 
@@ -818,6 +819,33 @@ export function ContactsDashboard({
     openContact(guestIdFromQuery);
     router.replace('/dashboard/contacts', { scroll: false });
   }, [openContact, router, searchParams]);
+
+  const expandedGuestInDirectory = Boolean(
+    expandedGuestId && guests.some((g) => g.id === expandedGuestId),
+  );
+
+  const directoryRows = useMemo(() => {
+    if (!expandedGuestId) return guests;
+    if (expandedGuestInDirectory) return guests;
+    if (detail?.guest.id === expandedGuestId) {
+      const pinned = guestListRowFromDetailResponse(detail);
+      return [pinned, ...guests.filter((g) => g.id !== pinned.id)];
+    }
+    return guests;
+  }, [detail, expandedGuestId, expandedGuestInDirectory, guests]);
+
+  const showDeepLinkContactLoading = Boolean(
+    expandedGuestId && !expandedGuestInDirectory && (detailLoading || detail?.guest.id !== expandedGuestId),
+  );
+
+  useEffect(() => {
+    if (!expandedGuestId || showDeepLinkContactLoading) return;
+    const elId = `contact-expand-${expandedGuestId}`;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(elId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expandedGuestId, showDeepLinkContactLoading, detail?.guest.id]);
 
   const toggleTagFilter = useCallback((tag: string) => {
     setTagFilter((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -1673,7 +1701,7 @@ export function ContactsDashboard({
 
           {loading ? (
             <DashboardListSkeleton rowCount={7} />
-          ) : guests.length === 0 ? (
+          ) : guests.length === 0 && directoryRows.length === 0 ? (
             <EmptyState title={emptyTitle} description={emptyDescription} />
           ) : (
             <div className="space-y-3">
@@ -1699,7 +1727,15 @@ export function ContactsDashboard({
                 role="list"
                 aria-label={`${clientWord} directory`}
               >
-                {guests.map((g) => {
+                {showDeepLinkContactLoading ? (
+                  <div
+                    className="rounded-xl border border-brand-200/90 bg-brand-50/40 px-3 py-3 text-sm text-brand-900"
+                    role="status"
+                  >
+                    Opening {clientLower}…
+                  </div>
+                ) : null}
+                {directoryRows.map((g) => {
                   const isAnonRow = filter === 'anonymous' || g.identifiability_tier === 'anonymous';
                   const expanded = expandedGuestId === g.id;
                   return (

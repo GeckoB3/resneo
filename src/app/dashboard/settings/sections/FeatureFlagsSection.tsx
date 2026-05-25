@@ -36,6 +36,12 @@ const FLAG_META: {
     description:
       'When you are fully booked, guests can join a waitlist for their preferred date, time, calendar, and service. Choose how your team is notified when a slot opens.',
   },
+  {
+    key: 'class_commerce_enabled',
+    title: 'Class packs, courses & memberships',
+    description:
+      'Turn on prepaid class commerce: credit packs, fixed-session courses, and recurring membership plans. Adds a "Class products" area to your Classes dashboard and exposes them in guest accounts.',
+  },
 ];
 
 export function FeatureFlagsSection({

@@ -16,6 +16,7 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import type { BookingModel } from '@/types/booking-models';
 import {
   bookingModelShortLabel,
+  showBookingModelTypePill,
   inferBookingRowModel,
 } from '@/lib/booking/infer-booking-row-model';
 import {
@@ -134,19 +135,6 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
     default:
       return 'neutral';
   }
-}
-
-function sourcePillVariant(source: string): PillVariant {
-  if (source === 'online' || source === 'booking_page') return 'brand';
-  if (source === 'walk-in') return 'warning';
-  return 'neutral';
-}
-
-function sourceLabelShort(source: string): string {
-  if (source === 'booking_page' || source === 'online') return 'Online';
-  if (source === 'walk-in') return 'Walk-in';
-  if (source === 'phone') return 'Phone';
-  return source.replace(/_/g, ' ');
 }
 
 function depositPillVariant(status: string): PillVariant {
@@ -503,11 +491,13 @@ export function RegistryBookingAccordionList({
                       Confirmed
                     </BookingStatusPill>
                   )}
-                  <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
-                    <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
-                      {typeLabel}
-                    </Pill>
-                  </span>
+                  {showBookingModelTypePill(bookingModel) ? (
+                    <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
+                      <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
+                        {typeLabel}
+                      </Pill>
+                    </span>
+                  ) : null}
                   {duration != null && (
                     <span className="hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block">
                       {duration} min
@@ -518,11 +508,6 @@ export function RegistryBookingAccordionList({
                       {b.party_size} people
                     </span>
                   )}
-                  <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}>
-                    <Pill variant={sourcePillVariant(b.source)} size="sm">
-                      {sourceLabelShort(b.source)}
-                    </Pill>
-                  </span>
                   {priceDisplay && (
                     <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                       <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>

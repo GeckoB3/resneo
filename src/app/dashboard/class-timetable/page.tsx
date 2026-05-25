@@ -6,6 +6,7 @@ import { ToastProvider } from '@/components/ui/Toast';
 import { ClassTimetableView } from './ClassTimetableView';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { venueHasClassCommerceEnabled } from '@/lib/class-commerce/auth';
 
 export default async function ClassTimetablePage() {
   const supabase = await createClient();
@@ -38,6 +39,8 @@ export default async function ClassTimetablePage() {
       ? []
       : await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
 
+  const classCommerceEnabled = await venueHasClassCommerceEnabled(admin, staff.venue_id);
+
   return (
     <ToastProvider>
       <PageFrame maxWidthClass="max-w-6xl">
@@ -47,6 +50,7 @@ export default async function ClassTimetablePage() {
           linkedPractitionerIds={linkedPractitionerIds}
           currency={currency}
           stripeConnected={stripeConnected}
+          classCommerceEnabled={classCommerceEnabled}
         />
       </PageFrame>
     </ToastProvider>

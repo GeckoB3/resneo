@@ -33,7 +33,16 @@ export type CommunicationLogMessageType =
   | 'no_show_notification_email'
   | 'post_visit_thankyou_email'
   | 'appointment_waitlist_offer_email'
-  | 'appointment_waitlist_offer_sms';
+  | 'appointment_waitlist_offer_sms'
+  | 'class_credits_purchased_email'
+  | 'class_credits_expiring_email'
+  | 'class_credits_restored_email'
+  | 'class_course_enrolled_email'
+  | 'class_course_refunded_email'
+  | 'class_membership_started_email'
+  | 'class_membership_renewed_email'
+  | 'class_membership_cancelling_email'
+  | 'class_membership_ended_email';
 
 const LOG_MESSAGE_TYPE_MAP: Record<
   CommunicationMessageKey,
@@ -88,6 +97,15 @@ const LOG_MESSAGE_TYPE_MAP: Record<
     email: 'appointment_waitlist_offer_email',
     sms: 'appointment_waitlist_offer_sms',
   },
+  class_credits_purchased: { email: 'class_credits_purchased_email' },
+  class_credits_expiring: { email: 'class_credits_expiring_email' },
+  class_credits_restored: { email: 'class_credits_restored_email' },
+  class_course_enrolled: { email: 'class_course_enrolled_email' },
+  class_course_refunded: { email: 'class_course_refunded_email' },
+  class_membership_started: { email: 'class_membership_started_email' },
+  class_membership_renewed: { email: 'class_membership_renewed_email' },
+  class_membership_cancelling: { email: 'class_membership_cancelling_email' },
+  class_membership_ended: { email: 'class_membership_ended_email' },
 };
 
 export interface ResolveCommPolicyInput {

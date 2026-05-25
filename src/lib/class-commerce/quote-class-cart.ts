@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import type { ClassCartLineInput, ClassCartQuoteLine, ClassCartQuoteResult } from '@/types/class-commerce';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
+import { getMembershipDiscountForClassType } from '@/lib/class-commerce/membership-discount';
 
 function onlineChargePenceForLine(
   cls: { payment_requirement: string; price_pence: number | null; deposit_amount_pence: number | null },
@@ -16,12 +17,31 @@ function onlineChargePenceForLine(
   return 0;
 }
 
+function applyDiscount(pence: number, percent: number): { final: number; discount: number } {
+  if (percent <= 0 || pence <= 0) return { final: pence, discount: 0 };
+  const final = Math.max(0, Math.round(pence * (1 - percent / 100)));
+  return { final, discount: pence - final };
+}
+
 export async function quoteClassCart(
   admin: SupabaseClient,
-  params: { venueId: string; lines: ClassCartLineInput[] },
+  params: { venueId: string; lines: ClassCartLineInput[]; userId?: string },
 ): Promise<ClassCartQuoteResult> {
-  const { venueId, lines } = params;
+  const { venueId, lines, userId } = params;
   const out: ClassCartQuoteLine[] = [];
+  const discountCacheByType = new Map<string, number>();
+
+  async function discountFor(classTypeId: string): Promise<number> {
+    if (!userId) return 0;
+    if (discountCacheByType.has(classTypeId)) return discountCacheByType.get(classTypeId)!;
+    const pct = await getMembershipDiscountForClassType(admin, {
+      userId,
+      venueId,
+      classTypeId,
+    });
+    discountCacheByType.set(classTypeId, pct);
+    return pct;
+  }
 
   for (const line of lines) {
     const { data: inst, error: instErr } = await admin
@@ -40,6 +60,9 @@ export async function quoteClassCart(
         class_type_id: '',
         remaining_before: 0,
         online_charge_pence: 0,
+        original_pence: 0,
+        member_discount_pence: 0,
+        member_discount_percent: 0,
         payment_requirement: 'none',
         requires_stripe_checkout: false,
         ok: false,
@@ -71,6 +94,9 @@ export async function quoteClassCart(
         class_type_id: row.class_type_id,
         remaining_before: 0,
         online_charge_pence: 0,
+        original_pence: 0,
+        member_discount_pence: 0,
+        member_discount_percent: 0,
         payment_requirement: 'none',
         requires_stripe_checkout: false,
         ok: false,
@@ -91,6 +117,9 @@ export async function quoteClassCart(
         class_type_id: row.class_type_id,
         remaining_before: 0,
         online_charge_pence: 0,
+        original_pence: 0,
+        member_discount_pence: 0,
+        member_discount_percent: 0,
         payment_requirement: 'none',
         requires_stripe_checkout: false,
         ok: false,
@@ -112,10 +141,13 @@ export async function quoteClassCart(
     const cls = avail.find((c) => c.instance_id === line.class_instance_id);
     const remaining = cls?.remaining ?? 0;
     const ok = cls != null && remaining >= line.party_size;
-    const onlineCharge =
-      cls != null ? onlineChargePenceForLine(cls, line.party_size) : 0;
+    const originalCharge = cls != null ? onlineChargePenceForLine(cls, line.party_size) : 0;
     const requiresStripe = Boolean(cls?.requires_stripe_checkout);
     const payReq = (cls?.payment_requirement as ClassPaymentRequirement | undefined) ?? 'none';
+
+    const classTypeId = cls?.class_type_id ?? row.class_type_id;
+    const pct = ok && originalCharge > 0 ? await discountFor(classTypeId) : 0;
+    const discounted = applyDiscount(originalCharge, pct);
 
     out.push({
       class_instance_id: line.class_instance_id,
@@ -123,9 +155,12 @@ export async function quoteClassCart(
       booking_date: bookingDate,
       booking_time: bookingTime,
       class_name: cls?.class_name ?? typeName,
-      class_type_id: cls?.class_type_id ?? row.class_type_id,
+      class_type_id: classTypeId,
       remaining_before: remaining,
-      online_charge_pence: ok ? onlineCharge : 0,
+      online_charge_pence: ok ? discounted.final : 0,
+      original_pence: ok ? originalCharge : 0,
+      member_discount_pence: ok ? discounted.discount : 0,
+      member_discount_percent: ok ? pct : 0,
       payment_requirement: ok ? payReq : 'none',
       requires_stripe_checkout: ok ? requiresStripe : false,
       ok,

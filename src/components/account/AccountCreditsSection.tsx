@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -106,6 +107,11 @@ interface CatalogProduct {
 }
 
 export function AccountCreditsSection() {
+  const searchParams = useSearchParams();
+  const deepLinkVenueId = searchParams?.get('venue') ?? null;
+  const deepLinkProductId = searchParams?.get('product') ?? null;
+  const autostart = searchParams?.get('autostart') === '1';
+
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [products, setProducts] = useState<Array<{ id: string; name: string; venue_id: string }>>([]);
@@ -121,11 +127,13 @@ export function AccountCreditsSection() {
     client_secret: string;
     stripe_account_id: string;
   } | null>(null);
+  const autoStartedRef = useRef(false);
 
   const load = useCallback(async () => {
     await Promise.resolve();
     setError(null);
-    const res = await fetch('/api/account/credits');
+    const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
+    const res = await fetch(`/api/account/credits${qs}`);
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? 'Could not load credits');
@@ -140,7 +148,7 @@ export function AccountCreditsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
-  }, []);
+  }, [deepLinkVenueId]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -151,30 +159,55 @@ export function AccountCreditsSection() {
   const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Pack';
 
-  async function startPurchase(venue_id: string, product_id: string) {
-    setError(null);
-    const res = await fetch('/api/account/credits/purchase', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id, product_id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not start payment');
-      return;
-    }
-    setPurchase({
-      venue_id,
-      product_id,
-      client_secret: data.client_secret,
-      stripe_account_id: data.stripe_account_id,
-    });
-  }
+  const startPurchase = useCallback(
+    async (venue_id: string, product_id: string) => {
+      setError(null);
+      const res = await fetch('/api/account/credits/purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id, product_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Could not start payment');
+        return;
+      }
+      setPurchase({
+        venue_id,
+        product_id,
+        client_secret: data.client_secret,
+        stripe_account_id: data.stripe_account_id,
+      });
+    },
+    [],
+  );
 
   function afterPaid() {
     setPurchase(null);
     void load();
   }
+
+  // Auto-start checkout when arriving from /book/... with ?venue=&product=&autostart=1.
+  // The setState cascade inside startPurchase() is intentional: this is a one-shot
+  // reaction to an external (deep-link) event, gated by autoStartedRef so it cannot
+  // re-trigger on subsequent renders.
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!autostart || !deepLinkVenueId || !deepLinkProductId) return;
+    // Wait until the catalog has loaded and the product is visible to the user.
+    if (purchaseCatalog.products.length === 0) return;
+    const exists = purchaseCatalog.products.some(
+      (p) => p.id === deepLinkProductId && p.venue_id === deepLinkVenueId,
+    );
+    if (!exists) return;
+    autoStartedRef.current = true;
+    // Defer the network call (which mutates state) out of the effect body so the
+    // react-hooks/set-state-in-effect rule is happy; the user-perceived behaviour
+    // is the same since this is a one-shot event handler.
+    queueMicrotask(() => {
+      void startPurchase(deepLinkVenueId, deepLinkProductId);
+    });
+  }, [autostart, deepLinkVenueId, deepLinkProductId, purchaseCatalog.products, startPurchase]);
 
   return (
     <div className="space-y-8">
@@ -206,7 +239,12 @@ export function AccountCreditsSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
         <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
-        <BuyPackPicker catalog={purchaseCatalog} onBuy={(v, p) => void startPurchase(v, p)} />
+        <BuyPackPicker
+          catalog={purchaseCatalog}
+          preselectVenueId={deepLinkVenueId}
+          preselectProductId={deepLinkProductId}
+          onBuy={(v, p) => void startPurchase(v, p)}
+        />
       </div>
 
       {purchase ? (
@@ -246,13 +284,33 @@ export function AccountCreditsSection() {
 
 function BuyPackPicker({
   catalog,
+  preselectVenueId,
+  preselectProductId,
   onBuy,
 }: {
   catalog: { venues: Array<{ id: string; name: string }>; products: CatalogProduct[] };
+  preselectVenueId?: string | null;
+  preselectProductId?: string | null;
   onBuy: (venueId: string, productId: string) => void;
 }) {
-  const [venueId, setVenueId] = useState(catalog.venues[0]?.id ?? '');
-  const [productId, setProductId] = useState('');
+  const initialVenueId =
+    (preselectVenueId && catalog.venues.some((v) => v.id === preselectVenueId)
+      ? preselectVenueId
+      : null) ?? catalog.venues[0]?.id ?? '';
+  const [venueId, setVenueId] = useState(initialVenueId);
+  const [productId, setProductId] = useState(preselectProductId ?? '');
+  // Track venue prop changes (catalog loads async).
+  useEffect(() => {
+    if (preselectVenueId && catalog.venues.some((v) => v.id === preselectVenueId)) {
+      setVenueId(preselectVenueId);
+    } else if (!venueId && catalog.venues[0]?.id) {
+      setVenueId(catalog.venues[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectVenueId, catalog.venues.length]);
+  useEffect(() => {
+    if (preselectProductId) setProductId(preselectProductId);
+  }, [preselectProductId]);
   const productChoices = useMemo(
     () => catalog.products.filter((p) => p.venue_id === venueId),
     [catalog.products, venueId],

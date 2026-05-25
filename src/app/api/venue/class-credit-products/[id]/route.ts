@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { classCreditProductPatchSchema } from '@/lib/class-commerce/product-schemas';
 import { assertEligibleClassTypesForVenue } from '@/lib/class-commerce/validate-venue-product-refs';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -12,6 +13,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const body = await request.json().catch(() => ({}));
     const parsed = classCreditProductPatchSchema.safeParse(body);
@@ -68,6 +71,8 @@ export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id:
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { count, error: cErr } = await staff.db
       .from('user_class_credit_balances')

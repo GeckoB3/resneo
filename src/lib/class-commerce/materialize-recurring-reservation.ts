@@ -2,6 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { findOrCreateGuest } from '@/lib/guests';
 import { insertFreeClassSessionBooking } from '@/lib/booking/insert-free-class-session-booking';
 import { splitLegacyGuestName } from '@/lib/guests/name';
+import {
+  type ClassRecurringRule,
+  parseClassRecurringRule,
+  normaliseRuleStartTimeToPgTime,
+} from '@/lib/class-commerce/recurring-rule-schema';
 
 function addDaysYmd(ymd: string, n: number): string {
   const d = new Date(`${ymd}T12:00:00Z`);
@@ -9,17 +14,38 @@ function addDaysYmd(ymd: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function ymdToWeekday(ymd: string): number {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  return d.getUTCDay();
+}
+
+/** Next on-or-after `fromYmd` whose UTC weekday matches `weekday`. */
+function nextOccurrenceOfWeekday(fromYmd: string, weekday: number): string {
+  const cur = ymdToWeekday(fromYmd);
+  const offset = (weekday - cur + 7) % 7;
+  return addDaysYmd(fromYmd, offset);
+}
+
 export interface MaterializeRecurringReservationResult {
   status: 'success' | 'partial' | 'failed' | 'skipped';
   booking_ids: string[];
-  /** Next calendar date the cron should consider this rule (always advances). */
-  next_materialize_on: string;
+  /** Next calendar date the cron should consider this rule (always advances; null = exhausted). */
+  next_materialize_on: string | null;
   message?: string;
 }
 
+const FORWARD_HORIZON_DAYS = 28;
+
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /**
- * Creates concrete free class_session bookings for upcoming instances of the reservation's class type.
- * Does not send per-booking guest emails (`skipGuestNotifications`); venue ops should follow up or add digest comms later.
+ * Materialise concrete bookings for a recurring reservation, honoring the rule
+ * shape (weekday + start_time + end_date + max_occurrences + interval_weeks).
+ *
+ * Idempotent: skips dates the guest already has a booking for. Only books classes
+ * with no online card requirement.
  */
 export async function materializeRecurringReservation(
   admin: SupabaseClient,
@@ -27,28 +53,48 @@ export async function materializeRecurringReservation(
 ): Promise<MaterializeRecurringReservationResult> {
   const { data: res, error: rErr } = await admin
     .from('class_recurring_reservations')
-    .select('id, venue_id, user_id, class_type_id, status, next_materialize_on')
+    .select(
+      'id, venue_id, user_id, class_type_id, status, next_materialize_on, last_materialized_at, rule',
+    )
     .eq('id', reservationId)
     .maybeSingle();
 
   if (rErr || !res) {
-    return { status: 'failed', booking_ids: [], next_materialize_on: addDaysYmd(new Date().toISOString().slice(0, 10), 7), message: 'Reservation not found' };
+    return {
+      status: 'failed',
+      booking_ids: [],
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
+      message: 'Reservation not found',
+    };
   }
 
   const row = res as {
+    id: string;
     venue_id: string;
     user_id: string;
     class_type_id: string;
     status: string;
     next_materialize_on: string | null;
+    last_materialized_at: string | null;
+    rule: unknown;
   };
 
   if (row.status !== 'active') {
     return {
       status: 'skipped',
       booking_ids: [],
-      next_materialize_on: addDaysYmd(new Date().toISOString().slice(0, 10), 7),
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
       message: 'Reservation not active',
+    };
+  }
+
+  const rule: ClassRecurringRule | null = parseClassRecurringRule(row.rule);
+  if (!rule) {
+    return {
+      status: 'failed',
+      booking_ids: [],
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
+      message: 'Invalid or missing rule',
     };
   }
 
@@ -58,7 +104,7 @@ export async function materializeRecurringReservation(
     return {
       status: 'failed',
       booking_ids: [],
-      next_materialize_on: addDaysYmd(new Date().toISOString().slice(0, 10), 7),
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
       message: 'Could not resolve user email',
     };
   }
@@ -69,7 +115,9 @@ export async function materializeRecurringReservation(
     .eq('id', row.user_id)
     .maybeSingle();
 
-  const prof = profile as { display_name?: string | null; first_name?: string | null; last_name?: string | null } | null;
+  const prof = profile as
+    | { display_name?: string | null; first_name?: string | null; last_name?: string | null }
+    | null;
   const displayName =
     prof?.display_name?.trim() ||
     [prof?.first_name, prof?.last_name].filter(Boolean).join(' ').trim() ||
@@ -86,7 +134,7 @@ export async function materializeRecurringReservation(
     return {
       status: 'failed',
       booking_ids: [],
-      next_materialize_on: addDaysYmd(new Date().toISOString().slice(0, 10), 7),
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
       message: 'Venue not found',
     };
   }
@@ -101,7 +149,7 @@ export async function materializeRecurringReservation(
     return {
       status: 'failed',
       booking_ids: [],
-      next_materialize_on: addDaysYmd(new Date().toISOString().slice(0, 10), 7),
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
       message: 'Class type not found',
     };
   }
@@ -117,8 +165,9 @@ export async function materializeRecurringReservation(
   const requiresPaid =
     (payReq === 'full_payment' && priceP > 0) || (payReq === 'deposit' && depPer > 0 && priceP > 0);
   if (requiresPaid) {
-    const today = new Date().toISOString().slice(0, 10);
-    const fromDateEarly = row.next_materialize_on && row.next_materialize_on >= today ? row.next_materialize_on : today;
+    const today = todayYmd();
+    const fromDateEarly =
+      row.next_materialize_on && row.next_materialize_on >= today ? row.next_materialize_on : today;
     return {
       status: 'skipped',
       booking_ids: [],
@@ -127,18 +176,76 @@ export async function materializeRecurringReservation(
     };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const fromDate = row.next_materialize_on && row.next_materialize_on >= today ? row.next_materialize_on : today;
+  // Window bounds.
+  const today = todayYmd();
+  const lastMatYmd = row.last_materialized_at
+    ? row.last_materialized_at.slice(0, 10)
+    : null;
 
+  const earliestCandidate =
+    lastMatYmd != null
+      ? addDaysYmd(lastMatYmd, rule.interval_weeks * 7)
+      : today;
+  const fromDate = earliestCandidate < today ? today : earliestCandidate;
+
+  let windowEnd = addDaysYmd(today, FORWARD_HORIZON_DAYS);
+  if (rule.end_date && rule.end_date < windowEnd) windowEnd = rule.end_date;
+
+  if (fromDate > windowEnd) {
+    return {
+      status: 'skipped',
+      booking_ids: [],
+      next_materialize_on: rule.end_date && rule.end_date <= today ? null : addDaysYmd(today, 7),
+      message: 'Outside materialisation window',
+    };
+  }
+
+  const ruleTimePg = normaliseRuleStartTimeToPgTime(rule.start_time);
+  const intervalDays = rule.interval_weeks * 7;
+
+  // Walk weekday occurrences in [fromDate, windowEnd].
+  const targetDates: string[] = [];
+  let cursor = nextOccurrenceOfWeekday(fromDate, rule.weekday);
+
+  // If interval > 1 we need a stable phase anchor. Anchor to last_materialized_at
+  // when present so fortnightly schedules don't drift.
+  if (rule.interval_weeks > 1 && lastMatYmd) {
+    const anchor = lastMatYmd;
+    // Skip cursors that fall on the wrong week relative to anchor.
+    while (cursor <= windowEnd) {
+      const daysFromAnchor = Math.round(
+        (new Date(`${cursor}T12:00:00Z`).getTime() - new Date(`${anchor}T12:00:00Z`).getTime()) /
+          (24 * 60 * 60 * 1000),
+      );
+      if (daysFromAnchor % intervalDays === 0) break;
+      cursor = addDaysYmd(cursor, 7);
+    }
+  }
+
+  while (cursor <= windowEnd) {
+    targetDates.push(cursor);
+    cursor = addDaysYmd(cursor, intervalDays);
+  }
+
+  if (targetDates.length === 0) {
+    return {
+      status: 'skipped',
+      booking_ids: [],
+      next_materialize_on:
+        rule.end_date && rule.end_date <= windowEnd ? null : addDaysYmd(windowEnd, 1),
+      message: 'No matching dates in window',
+    };
+  }
+
+  // Resolve class instances for those dates / start_time.
   const { data: instances, error: iErr } = await admin
     .from('class_instances')
     .select('id, instance_date, start_time, is_cancelled')
     .eq('class_type_id', row.class_type_id)
     .eq('is_cancelled', false)
-    .gte('instance_date', fromDate)
-    .order('instance_date', { ascending: true })
-    .order('start_time', { ascending: true })
-    .limit(6);
+    .eq('start_time', ruleTimePg)
+    .in('instance_date', targetDates)
+    .order('instance_date', { ascending: true });
 
   if (iErr) {
     console.error('[materializeRecurringReservation] instances', iErr);
@@ -150,16 +257,42 @@ export async function materializeRecurringReservation(
     };
   }
 
-  const instList = (instances ?? []) as Array<{ id: string; instance_date: string; start_time: string }>;
+  const instList = (instances ?? []) as Array<{
+    id: string;
+    instance_date: string;
+    start_time: string;
+  }>;
+
   if (instList.length === 0) {
     return {
       status: 'skipped',
       booking_ids: [],
-      next_materialize_on: addDaysYmd(fromDate, 7),
-      message: 'No upcoming sessions',
+      next_materialize_on:
+        rule.end_date && rule.end_date <= windowEnd ? null : addDaysYmd(windowEnd, 1),
+      message: 'No upcoming sessions match this rule',
     };
   }
 
+  // max_occurrences cap — count bookings already attributed to this rule.
+  let occurrencesAvailable = Infinity;
+  if (rule.max_occurrences) {
+    const { count } = await admin
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('class_recurring_reservation_id', row.id);
+    const used = count ?? 0;
+    occurrencesAvailable = Math.max(0, rule.max_occurrences - used);
+    if (occurrencesAvailable === 0) {
+      return {
+        status: 'skipped',
+        booking_ids: [],
+        next_materialize_on: null,
+        message: 'max_occurrences reached',
+      };
+    }
+  }
+
+  // Build guest record (uses email as the auth link).
   const nameParts = splitLegacyGuestName(displayName);
   const { guest } = await findOrCreateGuest(
     admin,
@@ -177,6 +310,8 @@ export async function materializeRecurringReservation(
   let failures = 0;
 
   for (const inst of instList) {
+    if (occurrencesAvailable <= 0) break;
+
     const { data: existing } = await admin
       .from('bookings')
       .select('id')
@@ -199,18 +334,24 @@ export async function materializeRecurringReservation(
       source: 'booking_page',
       groupBookingId: null,
       skipGuestNotifications: true,
+      classRecurringReservationId: row.id,
     });
 
     if (ins.ok) {
       bookingIds.push(ins.bookingId);
+      occurrencesAvailable -= 1;
     } else {
       failures += 1;
       console.warn('[materializeRecurringReservation] insert failed', inst.id, ins.error);
     }
   }
 
-  const lastDate = instList[instList.length - 1]?.instance_date ?? fromDate;
-  const nextMaterializeOn = addDaysYmd(lastDate, 7);
+  const lastTargetDate = targetDates[targetDates.length - 1] ?? fromDate;
+  const exhausted =
+    occurrencesAvailable === 0 ||
+    Boolean(rule.end_date && rule.end_date <= lastTargetDate);
+
+  const nextMaterializeOn = exhausted ? null : addDaysYmd(lastTargetDate, intervalDays);
 
   let status: MaterializeRecurringReservationResult['status'];
   if (bookingIds.length > 0 && failures === 0) status = 'success';

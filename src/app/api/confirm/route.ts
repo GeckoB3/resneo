@@ -544,6 +544,56 @@ export async function POST(request: NextRequest) {
         actorId: null,
       });
 
+      // Plan §4.1 — restore class credits / membership allowance when the
+      // cancelled booking is a class_session paid via credits or membership.
+      // For guest self-cancel we only restore when the cancellation policy was
+      // met (i.e. a refund would have been due if the booking had been card-paid).
+      const eligibleForCreditRestore = Boolean(deadline && new Date() <= deadline);
+      if (eligibleForCreditRestore && cancelInferred === 'class_session') {
+        try {
+          const { bookingWasCreditPaid, bookingWasMembershipPaid } = await import(
+            '@/lib/class-commerce/booking-was-credit-paid'
+          );
+          if (await bookingWasCreditPaid(supabase, bookingId)) {
+            const { restoreClassCreditsForBooking } = await import(
+              '@/lib/class-commerce/restore-class-credits'
+            );
+            const res = await restoreClassCreditsForBooking(supabase, {
+              bookingId,
+              idempotencyPrefix: `guest_self_cancel:${bookingId}`,
+            });
+            if (res.ok && res.restoredCredits > 0) {
+              await supabase.from('events').insert({
+                venue_id: booking.venue_id,
+                booking_id: bookingId,
+                event_type: 'class_credit_restored',
+                payload: { restored_credits: res.restoredCredits, source: 'guest_self_cancel' },
+              });
+            }
+          }
+          if (await bookingWasMembershipPaid(supabase, bookingId)) {
+            const { restoreMembershipAllowanceForBooking } = await import(
+              '@/lib/class-commerce/restore-membership-allowance'
+            );
+            const res = await restoreMembershipAllowanceForBooking({
+              admin: supabase,
+              bookingId,
+              idempotencyPrefix: `guest_self_cancel:${bookingId}`,
+            });
+            if (res.restoredSessions > 0) {
+              await supabase.from('events').insert({
+                venue_id: booking.venue_id,
+                booking_id: bookingId,
+                event_type: 'class_membership_allowance_restored',
+                payload: { restored_sessions: res.restoredSessions, source: 'guest_self_cancel' },
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[confirm/cancel] credit/allowance restore failed', err);
+        }
+      }
+
       const { data: venue } = await supabase
         .from("venues")
         .select("name, address, phone, booking_rules, email, reply_to_email")

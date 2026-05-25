@@ -49,6 +49,11 @@ export function bookingModelShortLabel(model: BookingModel): string {
   return SHORT[model] ?? model;
 }
 
+/** Type pill on booking list/day-sheet rows — class, event, and resource only (not appointment). */
+export function showBookingModelTypePill(model: BookingModel): boolean {
+  return model !== 'practitioner_appointment' && model !== 'unified_scheduling';
+}
+
 /** True for plain table reservations; false for appointments, classes, events, and resource bookings (use Start / Undo Start instead of Seat / Unseat). */
 export function isTableReservationBooking(row: {
   booking_model?: string | null;

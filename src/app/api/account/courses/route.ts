@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  cancelByDateFromWindow,
+  earliestSessionDateForCourse,
+  withinCancellationWindow,
+} from '@/lib/class-commerce/course-cancellation';
+import {
+  extraVenueIdsFromUrl,
+  getClassCommerceVenuesForUser,
+} from '@/lib/class-commerce/user-venue-scope';
 
 /**
  * GET /api/account/courses — course enrollments for the signed-in user.
@@ -31,17 +40,54 @@ export async function GET(request: Request) {
 
     const [{ data: products }, { data: venues }] = await Promise.all([
       productIds.length
-        ? admin.from('class_course_products').select('id, name, venue_id, price_pence').in('id', productIds)
+        ? admin
+            .from('class_course_products')
+            .select('id, name, venue_id, price_pence, cancellation_window_days')
+            .in('id', productIds)
         : Promise.resolve({ data: [] as unknown[] }),
       venueIds.length ? admin.from('venues').select('id, name').in('id', venueIds) : Promise.resolve({ data: [] as unknown[] }),
     ]);
 
-    const { data: catalogCourses, error: catErr } = await admin
-      .from('class_course_products')
-      .select('id, name, venue_id, price_pence, currency')
-      .eq('active', true)
-      .order('name', { ascending: true })
-      .limit(200);
+    // Compute per-enrollment refund eligibility.
+    const productById = new Map(
+      ((products ?? []) as Array<{
+        id: string;
+        cancellation_window_days: number | null;
+      }>).map((p) => [p.id, p] as const),
+    );
+    const enrichedEnrollments = await Promise.all(
+      rows.map(async (r) => {
+        const courseId = (r as { course_product_id: string }).course_product_id;
+        const prod = productById.get(courseId) ?? null;
+        const firstSessionDate = await earliestSessionDateForCourse(admin, courseId);
+        const cancelByDate = cancelByDateFromWindow(firstSessionDate, prod?.cancellation_window_days ?? null);
+        return {
+          ...(r as Record<string, unknown>),
+          first_session_date: firstSessionDate,
+          cancel_by_date: cancelByDate,
+          can_cancel_now: withinCancellationWindow(cancelByDate),
+        };
+      }),
+    );
+
+    // Phase 3 §6.4 — scope the purchase catalog to venues the user has touched,
+    // plus any venue passed via `?venue=` deep-link.
+    const scopedVenueIds = await getClassCommerceVenuesForUser(
+      admin,
+      user.id,
+      extraVenueIdsFromUrl(request.url),
+    );
+
+    const { data: catalogCourses, error: catErr } =
+      scopedVenueIds.length > 0
+        ? await admin
+            .from('class_course_products')
+            .select('id, name, venue_id, price_pence, currency')
+            .eq('active', true)
+            .in('venue_id', scopedVenueIds)
+            .order('name', { ascending: true })
+            .limit(200)
+        : { data: [] as unknown[], error: null };
 
     if (catErr) {
       console.error('[account/courses] catalog', catErr);
@@ -55,7 +101,7 @@ export async function GET(request: Request) {
         : { data: [] as unknown[] };
 
     return NextResponse.json({
-      enrollments: rows,
+      enrollments: enrichedEnrollments,
       products: products ?? [],
       venues: venues ?? [],
       purchase_catalog: {

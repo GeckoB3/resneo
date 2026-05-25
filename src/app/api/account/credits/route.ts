@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  extraVenueIdsFromUrl,
+  getClassCommerceVenuesForUser,
+} from '@/lib/class-commerce/user-venue-scope';
 
 /**
  * GET /api/account/credits — balances + ledger for the signed-in user.
@@ -49,12 +53,27 @@ export async function GET(request: Request) {
       venueIds.length ? admin.from('venues').select('id, name').in('id', venueIds) : Promise.resolve({ data: [] as unknown[] }),
     ]);
 
-    const { data: catalogProducts, error: catErr } = await admin
-      .from('class_credit_products')
-      .select('id, name, venue_id, credits_count, price_pence, currency')
-      .eq('active', true)
-      .order('price_pence', { ascending: true })
-      .limit(200);
+    // Phase 3 §6.4 — scope the purchase catalog to venues the user has touched.
+    // Unauthenticated discovery is via /api/account/discover-class-venues.
+    // `?venue=<id>` is honoured as an additive scope so a first-time buyer
+    // arriving via deep-link from the public booking page can see the product
+    // they came to buy.
+    const scopedVenueIds = await getClassCommerceVenuesForUser(
+      admin,
+      user.id,
+      extraVenueIdsFromUrl(request.url),
+    );
+
+    const { data: catalogProducts, error: catErr } =
+      scopedVenueIds.length > 0
+        ? await admin
+            .from('class_credit_products')
+            .select('id, name, venue_id, credits_count, price_pence, currency')
+            .eq('active', true)
+            .in('venue_id', scopedVenueIds)
+            .order('price_pence', { ascending: true })
+            .limit(200)
+        : { data: [] as unknown[], error: null };
 
     if (catErr) {
       console.error('[account/credits] catalog products', catErr);

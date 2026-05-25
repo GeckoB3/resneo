@@ -42,6 +42,8 @@ const courseFields = {
   closes_at: z.string().max(80).optional().nullable(),
   session_instance_ids: z.array(z.string().uuid()).max(500).default([]),
   active: z.boolean().optional(),
+  /** Phase 2 §5.3 — refund window in days before the first session. NULL = non-refundable. */
+  cancellation_window_days: z.number().int().min(0).max(365).optional().nullable(),
 };
 
 function refineCourseWindows(
@@ -88,6 +90,7 @@ export const classCourseProductPatchSchema = z
     closes_at: z.string().max(80).optional().nullable(),
     session_instance_ids: z.array(z.string().uuid()).max(500).optional(),
     active: z.boolean().optional(),
+    cancellation_window_days: z.number().int().min(0).max(365).optional().nullable(),
   })
   .superRefine((data, ctx) => {
     refineCourseWindows(data.opens_at, data.closes_at, ctx);

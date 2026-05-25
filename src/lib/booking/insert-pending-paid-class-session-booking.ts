@@ -26,6 +26,11 @@ export interface InsertPendingPaidClassSessionBookingParams {
   partySize: number;
   source: 'online' | 'widget' | 'booking_page';
   groupBookingId: string;
+  /**
+   * Override the natural deposit/full charge with a discounted amount (e.g. member
+   * discount applied at quote time). Must not exceed the natural charge.
+   */
+  overrideOnlineChargePence?: number;
 }
 
 /**
@@ -35,7 +40,18 @@ export interface InsertPendingPaidClassSessionBookingParams {
 export async function insertPendingPaidClassSessionBooking(
   params: InsertPendingPaidClassSessionBookingParams,
 ): Promise<{ ok: true; bookingId: string; deposit_amount_pence: number } | { ok: false; status: number; error: string }> {
-  const { admin, venueId, venue: _venue, guest, guestEmail, classInstanceId, partySize, source, groupBookingId } = params;
+  const {
+    admin,
+    venueId,
+    venue: _venue,
+    guest,
+    guestEmail,
+    classInstanceId,
+    partySize,
+    source,
+    groupBookingId,
+    overrideOnlineChargePence,
+  } = params;
 
   const { data: inst, error: instErr } = await admin
     .from('class_instances')
@@ -78,7 +94,18 @@ export async function insertPendingPaidClassSessionBooking(
   const payReq = ct.payment_requirement ?? 'none';
   const priceP = ct.price_pence ?? 0;
   const depPer = ct.deposit_amount_pence ?? 0;
-  const depositPence = onlineChargePence(payReq, priceP, depPer, partySize);
+  const naturalDeposit = onlineChargePence(payReq, priceP, depPer, partySize);
+  if (naturalDeposit <= 0) {
+    return { ok: false, status: 400, error: 'This session does not require an online card payment' };
+  }
+  let depositPence = naturalDeposit;
+  if (
+    typeof overrideOnlineChargePence === 'number' &&
+    overrideOnlineChargePence >= 0 &&
+    overrideOnlineChargePence <= naturalDeposit
+  ) {
+    depositPence = overrideOnlineChargePence;
+  }
   if (depositPence <= 0) {
     return { ok: false, status: 400, error: 'This session does not require an online card payment' };
   }

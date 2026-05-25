@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 /**
  * GET /api/venue/class-commerce-reports — lightweight class-commerce KPIs for the dashboard.
@@ -11,6 +12,8 @@ export async function GET() {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const admin = getSupabaseAdminClient();
     const venueId = staff.venue_id;

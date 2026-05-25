@@ -92,8 +92,14 @@ export interface ClassCartQuoteLine {
   class_name: string;
   class_type_id: string;
   remaining_before: number;
-  /** Total online card charge for this line in pence (deposit or full). */
+  /** Total online card charge for this line in pence (deposit or full), after any member discount. */
   online_charge_pence: number;
+  /** Pre-discount charge, useful for UI strike-through pricing. Equals `online_charge_pence` when no discount applies. */
+  original_pence: number;
+  /** Per-line membership savings (pence), already subtracted from `online_charge_pence`. */
+  member_discount_pence: number;
+  /** Best membership discount percent that applied to this line (0–100). */
+  member_discount_percent: number;
   /** How this line is charged online when `online_charge_pence` &gt; 0. */
   payment_requirement: ClassPaymentRequirement;
   requires_stripe_checkout: boolean;

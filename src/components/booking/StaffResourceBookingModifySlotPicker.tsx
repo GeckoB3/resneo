@@ -428,6 +428,7 @@ export function StaffResourceBookingModifySlotPicker({
           minSelectableDate={minSelectableDate}
           loading={loadingCalendar}
           accentPublic={false}
+          weekOffsetShortcuts
         />
       </div>
 

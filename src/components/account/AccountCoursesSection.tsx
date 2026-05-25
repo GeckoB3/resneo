@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -10,6 +11,9 @@ interface EnrollmentRow {
   venue_id: string;
   course_product_id: string;
   status: string;
+  first_session_date: string | null;
+  cancel_by_date: string | null;
+  can_cancel_now: boolean;
 }
 
 interface CatalogCourse {
@@ -96,6 +100,12 @@ function stripeForAccount(accountId: string) {
 }
 
 export function AccountCoursesSection() {
+  const searchParams = useSearchParams();
+  const deepLinkVenueId = searchParams?.get('venue') ?? null;
+  const deepLinkCourseId = searchParams?.get('course') ?? null;
+  const autostart = searchParams?.get('autostart') === '1';
+  const autoStartedRef = useRef(false);
+
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [products, setProducts] = useState<Array<{ id: string; name: string; venue_id: string; price_pence: number }>>([]);
   const [venues, setVenues] = useState<Array<{ id: string; name: string }>>([]);
@@ -119,7 +129,8 @@ export function AccountCoursesSection() {
   const load = useCallback(async () => {
     await Promise.resolve();
     setError(null);
-    const res = await fetch('/api/account/courses');
+    const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
+    const res = await fetch(`/api/account/courses${qs}`);
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? 'Could not load');
@@ -133,7 +144,7 @@ export function AccountCoursesSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       courses: (pc?.courses ?? []) as CatalogCourse[],
     });
-  }, []);
+  }, [deepLinkVenueId]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -143,6 +154,20 @@ export function AccountCoursesSection() {
 
   const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Course';
+
+  // Preselect venue/course from deep-link query.
+  useEffect(() => {
+    if (deepLinkVenueId && purchaseCatalog.venues.some((v) => v.id === deepLinkVenueId)) {
+      setVenueId(deepLinkVenueId);
+    }
+  }, [deepLinkVenueId, purchaseCatalog.venues]);
+  useEffect(() => {
+    if (!deepLinkCourseId) return;
+    const course = purchaseCatalog.courses.find((c) => c.id === deepLinkCourseId);
+    if (!course) return;
+    if (course.price_pence === 0) setProductIdFree(course.id);
+    else setProductIdPaid(course.id);
+  }, [deepLinkCourseId, purchaseCatalog.courses]);
 
   const resolvedVenueId = venueId || purchaseCatalog.venues[0]?.id || '';
 
@@ -183,6 +208,48 @@ export function AccountCoursesSection() {
     setMsg('Enrolled.');
     void load();
   }
+
+  async function cancelEnrollment(id: string) {
+    setError(null);
+    setMsg(null);
+    if (!window.confirm('Cancel this enrollment? If within the refund window your payment will be refunded.')) {
+      return;
+    }
+    const res = await fetch('/api/account/courses/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enrollment_id: id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error ?? 'Cancel failed');
+      return;
+    }
+    const refunded = (data as { refund_amount_pence?: number }).refund_amount_pence ?? 0;
+    setMsg(refunded > 0 ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} is being processed.` : 'Cancelled.');
+    void load();
+  }
+
+  // Auto-start when arriving with ?venue=&course=&autostart=1 — deferred out of
+  // the effect body so the setState cascade inside enrollFree/startPaidCheckout
+  // runs after this render commits.
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!autostart || !deepLinkVenueId || !deepLinkCourseId) return;
+    const course = purchaseCatalog.courses.find(
+      (c) => c.id === deepLinkCourseId && c.venue_id === deepLinkVenueId,
+    );
+    if (!course) return;
+    autoStartedRef.current = true;
+    queueMicrotask(() => {
+      if (course.price_pence === 0) {
+        void enrollFree();
+      } else {
+        void startPaidCheckout();
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autostart, deepLinkVenueId, deepLinkCourseId, purchaseCatalog.courses]);
 
   async function startPaidCheckout() {
     setError(null);
@@ -230,12 +297,39 @@ export function AccountCoursesSection() {
         {enrollments.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">None yet.</p>
         ) : (
-          <ul className="mt-2 space-y-1 text-sm">
-            {enrollments.map((e) => (
-              <li key={e.id}>
-                {productName(e.course_product_id)} · {venueName(e.venue_id)} · {e.status}
-              </li>
-            ))}
+          <ul className="mt-2 space-y-2 text-sm">
+            {enrollments.map((e) => {
+              const active = e.status === 'active';
+              return (
+                <li key={e.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-900">{productName(e.course_product_id)}</div>
+                    <div className="text-xs text-slate-600">
+                      {venueName(e.venue_id)} · {e.status}
+                      {e.first_session_date ? ` · starts ${e.first_session_date}` : ''}
+                    </div>
+                    {active ? (
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {e.cancel_by_date == null
+                          ? 'This course is non-refundable.'
+                          : e.can_cancel_now
+                            ? `You can cancel for a full refund until ${e.cancel_by_date}.`
+                            : 'Past the cancellation window. Contact the venue.'}
+                      </div>
+                    ) : null}
+                  </div>
+                  {active && e.can_cancel_now ? (
+                    <button
+                      type="button"
+                      onClick={() => void cancelEnrollment(e.id)}
+                      className="rounded border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                    >
+                      Cancel enrollment
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

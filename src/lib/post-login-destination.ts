@@ -35,10 +35,20 @@ export async function resolvePostLoginDestination(
     return next.startsWith('/super') ? next : '/super';
   }
 
-  const explicitAccount = next === '/account' || next.startsWith('/account/');
-  const explicitDashboard = next === '/dashboard' || next.startsWith('/dashboard/');
-  const explicitOnboarding = next === '/onboarding' || next.startsWith('/onboarding/');
-  const explicitPublicBooking = isPublicBookingAuthReturnPath(next);
+  // Only treat the resolved `next` as an explicit caller intent when the caller
+  // actually passed something. `resolveAuthNextPath('')` defaults to `/dashboard`,
+  // and treating that default as "the caller explicitly asked for /dashboard"
+  // would skip the dual-role chooser for any user who logged in without a
+  // ?next= param (e.g. plain password sign-in from /login).
+  const callerProvidedNext = Boolean(rawNext && rawNext.trim());
+
+  const explicitAccount =
+    callerProvidedNext && (next === '/account' || next.startsWith('/account/'));
+  const explicitDashboard =
+    callerProvidedNext && (next === '/dashboard' || next.startsWith('/dashboard/'));
+  const explicitOnboarding =
+    callerProvidedNext && (next === '/onboarding' || next.startsWith('/onboarding/'));
+  const explicitPublicBooking = callerProvidedNext && isPublicBookingAuthReturnPath(next);
 
   if (explicitPublicBooking) return next;
   if (explicitOnboarding) return next;
@@ -68,12 +78,25 @@ export async function resolvePostLoginDestination(
   }
   const hasStaff = staffIdSet.size > 0;
 
-  const { count: guestLinkCount } = await admin
-    .from('guests')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
+  // Detect guests by user_id OR by email — the claim_user_account RPC backfills
+  // unlinked guest rows on every login, but we belt-and-brace here so a brand-
+  // new login (where the claim hasn't fully propagated yet, or where the user
+  // changed email) still routes through the dual-role chooser.
+  const [guestByUser, guestByEmail] = await Promise.all([
+    admin
+      .from('guests')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+    emailNorm
+      ? admin
+          .from('guests')
+          .select('id', { count: 'exact', head: true })
+          .ilike('email', emailNorm)
+      : Promise.resolve({ count: 0 }),
+  ]);
 
-  const hasGuest = (guestLinkCount ?? 0) > 0;
+  const hasGuest =
+    ((guestByUser.count ?? 0) > 0) || ((guestByEmail.count ?? 0) > 0);
 
   const pref = (profile as { default_login_destination?: string | null } | null)
     ?.default_login_destination;

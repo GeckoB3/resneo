@@ -116,12 +116,12 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
       <SectionCard elevated>
         <SectionCard.Header
           title="Appointment performance"
-          description="How reliably guests attend, rebook, and use self-service — for appointment bookings only."
+          description="Attendance, reschedules, cancellations, and how quickly your team adds bookings — for the date range selected above."
         />
         <SectionCard.Body>
           <p className="text-sm text-slate-600">
-            There is not enough appointment activity in the selected date range yet. Widen the range above or check
-            back once you have more bookings.
+            Not enough appointment activity in this date range yet. Widen the range at the top of Reports or check
+            back after more bookings are created.
           </p>
         </SectionCard.Body>
       </SectionCard>
@@ -138,10 +138,10 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
 
   const noShowDetail =
     metrics.no_show.eligible_count === 0
-      ? 'No completed or seated appointments in this period yet, so a no-show rate cannot be calculated.'
+      ? 'No appointments reached Started or Completed in this period yet, so a no-show rate cannot be calculated.'
       : metrics.no_show.no_show_count === 0
-        ? `None of your ${metrics.no_show.eligible_count} attended appointments were marked as no-shows.`
-        : `${metrics.no_show.no_show_count} guest${metrics.no_show.no_show_count === 1 ? '' : 's'} did not arrive out of ${metrics.no_show.eligible_count} appointments that were expected to take place.`;
+        ? `No no-shows among ${metrics.no_show.eligible_count} appointment${metrics.no_show.eligible_count === 1 ? '' : 's'} that were due to take place (walk-ins are excluded).`
+        : `${metrics.no_show.no_show_count} guest${metrics.no_show.no_show_count === 1 ? '' : 's'} did not arrive out of ${metrics.no_show.eligible_count} appointments that were due to take place (walk-ins excluded).`;
 
   const modifications = metrics.reschedule.modifications_count;
   const guestMoves = metrics.reschedule.guest_self_reschedule_count;
@@ -151,28 +151,31 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
   const selfServeValue =
     modifications === 0 ? '—' : formatPct(metrics.reschedule.guest_self_reschedule_rate_pct);
 
+  const knownMoves = guestMoves + staffMoves;
   const selfServeDetail =
     modifications === 0
-      ? 'No appointment time changes were recorded in this period.'
-      : [
-          `${guestMoves} change${guestMoves === 1 ? '' : 's'} made by the guest online`,
-          `${staffMoves} change${staffMoves === 1 ? '' : 's'} made by your team`,
-          otherMoves > 0
-            ? `${otherMoves} earlier change${otherMoves === 1 ? '' : 's'} (before guest vs staff was recorded)`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+      ? 'No appointment date or time changes were recorded in this period.'
+      : knownMoves === 0
+        ? `${modifications} time change${modifications === 1 ? '' : 's'} in this period; none were recorded as guest or staff (older system data).`
+        : [
+            `${modifications} time change${modifications === 1 ? '' : 's'} in this period.`,
+            `Among ${knownMoves} where we know who moved it: ${guestMoves} by the guest online, ${staffMoves} by your team.`,
+            otherMoves > 0
+              ? `${otherMoves} older change${otherMoves === 1 ? '' : 's'} not attributed to guest or staff.`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' ');
 
   const messagingValue =
     modifications === 0 ? '—' : formatPct(metrics.reschedule.reschedule_via_email_rate_pct);
 
   const messagingDetail =
     modifications === 0
-      ? 'No schedule changes to measure.'
+      ? 'No appointment moves to measure.'
       : metrics.reschedule.modification_notifications_count === 0
-        ? 'When appointments were moved, guests were not sent an automatic update message for those changes.'
-        : `${metrics.reschedule.modification_notifications_count} of ${modifications} schedule change${modifications === 1 ? '' : 's'} had an email or text update sent to the guest — often when staff moved the booking.`;
+        ? `None of the ${modifications} move${modifications === 1 ? '' : 's'} triggered an automatic email or text to the guest. Staff moves often send an update when configured in Settings.`
+        : `${metrics.reschedule.modification_notifications_count} of ${modifications} move${modifications === 1 ? '' : 's'} had an email or text sent to the guest (usually after your team changed the time).`;
 
   const rebookValue =
     metrics.cancellation_rebook.cancellations_with_guest === 0
@@ -181,10 +184,10 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
 
   const rebookDetail =
     metrics.cancellation_rebook.cancellations_with_guest === 0
-      ? 'No cancelled appointments with a guest on file in this period.'
+      ? 'No cancelled appointments with a guest profile in this period.'
       : metrics.cancellation_rebook.rebooked_within_7d === 0
-        ? `None of ${metrics.cancellation_rebook.cancellations_with_guest} cancelled appointment${metrics.cancellation_rebook.cancellations_with_guest === 1 ? '' : 's'} were followed by another booking within a week.`
-        : `${metrics.cancellation_rebook.rebooked_within_7d} of ${metrics.cancellation_rebook.cancellations_with_guest} cancelled appointment${metrics.cancellation_rebook.cancellations_with_guest === 1 ? '' : 's'} were followed by another booking within 7 days.`;
+        ? `None of ${metrics.cancellation_rebook.cancellations_with_guest} cancellation${metrics.cancellation_rebook.cancellations_with_guest === 1 ? '' : 's'} led to another appointment within 7 days.`
+        : `${metrics.cancellation_rebook.rebooked_within_7d} of ${metrics.cancellation_rebook.cancellations_with_guest} cancellation${metrics.cancellation_rebook.cancellations_with_guest === 1 ? '' : 's'} were followed by a new appointment within 7 days.`;
 
   const gapValue =
     metrics.cancellation_rebook.median_rebook_gap_hours == null
@@ -193,8 +196,8 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
 
   const gapDetail =
     metrics.cancellation_rebook.rebooked_within_7d === 0
-      ? 'When guests rebook after cancelling, the typical wait will appear here.'
-      : `Typical wait before the same guest books again. Most rebook within ${formatHours(metrics.cancellation_rebook.p75_rebook_gap_hours)} (75% of cases).`;
+      ? 'When a guest books again after cancelling, the typical wait will appear here.'
+      : `Median time from cancellation to the guest’s next appointment. Three quarters rebook within ${formatHours(metrics.cancellation_rebook.p75_rebook_gap_hours)}.`;
 
   const staffSamples = metrics.staff_time_to_book.sample_count;
   const staffValue =
@@ -205,16 +208,16 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
 
   const staffDetail =
     staffSamples === 0
-      ? 'Timing is recorded when staff create bookings in the dashboard. More samples will appear as your team uses the booking flow.'
+      ? 'Recorded when your team creates an appointment in the dashboard (from opening the form to saving). More samples appear as staff use that flow.'
       : returningCount > 0
-        ? `Based on ${staffSamples} booking${staffSamples === 1 ? '' : 's'} created by staff. For guests who have visited before, the typical time was ${formatDurationFriendly(returningMedian)} (${returningCount} booking${returningCount === 1 ? '' : 's'}).`
-        : `Based on ${staffSamples} booking${staffSamples === 1 ? '' : 's'} created by staff in this period.`;
+        ? `Median across ${staffSamples} staff-created appointment${staffSamples === 1 ? '' : 's'}. Returning guests: typical ${formatDurationFriendly(returningMedian)} (${returningCount} booking${returningCount === 1 ? '' : 's'}).`
+        : `Median across ${staffSamples} appointment${staffSamples === 1 ? '' : 's'} created by staff in this period.`;
 
   return (
     <SectionCard elevated>
       <SectionCard.Header
         title="Appointment performance"
-        description={`How guests attend, change, and rebook — ${periodLabel}. Appointments only (not table dining, classes, or events).`}
+        description={`${periodLabel} · appointment bookings only · same dates as the range above`}
       />
       <SectionCard.Body className="space-y-8">
         {snapshot ? (
@@ -234,9 +237,12 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
           </div>
         ) : null}
 
-        <MetricGroup heading="Attendance" intro="Guests who were expected but did not arrive.">
+        <MetricGroup
+          heading="Attendance"
+          intro="Online and staff-booked appointments (not walk-ins) that reached Started, Completed, or were marked no-show."
+        >
           <InsightMetricCard
-            title="No-shows"
+            title="No-show rate"
             value={noShowValue}
             detail={noShowDetail}
             tone="amber"
@@ -249,11 +255,11 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
         </MetricGroup>
 
         <MetricGroup
-          heading="Changing appointment times"
-          intro="When a booking was moved to a different time — by the guest online or by your team."
+          heading="Reschedules"
+          intro="Appointments moved to another date or time. Percentages below use only moves where the system recorded guest vs staff (older moves may be listed separately)."
         >
           <InsightMetricCard
-            title="Moved by the guest online"
+            title="Guest moved online (share of known moves)"
             value={selfServeValue}
             detail={selfServeDetail}
             tone="emerald"
@@ -266,7 +272,7 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
             )}
           />
           <InsightMetricCard
-            title="Guest notified after a change"
+            title="Guest notified after a move"
             value={messagingValue}
             detail={messagingDetail}
             tone="brand"
@@ -280,9 +286,12 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
           />
         </MetricGroup>
 
-        <MetricGroup heading="After a cancellation" intro="Whether guests come back and how quickly.">
+        <MetricGroup
+          heading="After a cancellation"
+          intro="Cancelled appointments with a guest on file — whether the same guest booked again within seven days."
+        >
           <InsightMetricCard
-            title="Rebooked within a week"
+            title="Rebooked within 7 days"
             value={rebookValue}
             detail={rebookDetail}
             tone="violet"
@@ -295,7 +304,7 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
             )}
           />
           <InsightMetricCard
-            title="Time until they rebook"
+            title="Typical wait to rebook"
             value={gapValue}
             detail={gapDetail}
             tone="slate"
@@ -309,9 +318,12 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
           />
         </MetricGroup>
 
-        <MetricGroup heading="Team efficiency" intro="How long staff take to add a booking at reception.">
+        <MetricGroup
+          heading="Team efficiency"
+          intro="How long it takes staff to create an appointment in the dashboard (form open to save)."
+        >
           <InsightMetricCard
-            title="Typical time to create a booking"
+            title="Median time to create an appointment"
             value={staffValue}
             detail={staffDetail}
             tone="blue"
@@ -326,9 +338,9 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
         </MetricGroup>
 
         <p className="text-xs leading-relaxed text-slate-500">
-          These figures update when you change the report dates. A saved reference snapshot (updated weekly) helps you
-          spot trends over time — enable guest self-reschedule and online deposits in Settings to improve attendance
-          and reduce phone calls.
+          Figures follow the report dates at the top of this page. A saved reference snapshot (updated weekly) lets you
+          compare against an earlier period. Guest self-reschedule and deposit rules in Settings can improve attendance
+          and cut manual rescheduling.
         </p>
       </SectionCard.Body>
     </SectionCard>

@@ -8,6 +8,7 @@ import { ClientsSection, type ClientSummary } from './ClientsSection';
 import { BaselineMetricsSection } from './BaselineMetricsSection';
 import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { DashboardStatColor } from '@/components/dashboard/dashboard-stat-types';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -324,14 +325,17 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
       ],
       [
         appt
-          ? `${terminology.client}s arrived, seated, or completed (headcount)`
+          ? `${terminology.client}s arrived, started, or completed (headcount)`
           : 'Covers seated',
         String(r.covers_seated),
       ],
       ['By source (created)', ''],
       ...aggregateBookingSourcesByLabel(r.by_source).map(({ name, value }) => [name, String(value)]),
       ['By status', ''],
-      ...Object.entries(r.by_status).map(([k, v]) => [k, String(v)]),
+      ...Object.entries(r.by_status).map(([k, v]) => [
+        appt ? bookingStatusDisplayLabel(k, false) : k,
+        String(v),
+      ]),
     ]);
   }, [data, bookingModel, terminology, pricingTier]);
 
@@ -466,7 +470,14 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
   const staffWord = terminology.staff;
 
   const sourcePieData = r1?.by_source ? aggregateBookingSourcesByLabel(r1.by_source) : [];
-  const statusBarData = r1?.by_status ? Object.entries(r1.by_status).map(([source, count]) => ({ source, count })) : [];
+  const statusBarData = r1?.by_status
+    ? Object.entries(r1.by_status).map(([status, count]) => ({
+        source: appointmentDashboardExperience
+          ? bookingStatusDisplayLabel(status, false)
+          : status,
+        count,
+      }))
+    : [];
   const noShowRateOverall = r2.length > 0
     ? (r2.reduce((a, d) => a + d.no_show_count, 0) / Math.max(1, r2.reduce((a, d) => a + d.confirmed_at_time_count, 0))) * 100
     : 0;
@@ -597,7 +608,7 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
               <p className="mb-4 text-sm text-slate-500">
                 Headcount comes from party size on each {bookingWord.toLowerCase()}: the middle figure is total{' '}
                 <strong>{clientLower} places</strong> booked in range (each person in a group counts once). The
-                right-hand figure is how many of those places reached arrived, seated, or completed status.
+                right-hand figure is how many of those places reached arrived, started, or completed status.
               </p>
             )}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -701,10 +712,9 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
           onExportBlocked={(msg) => notifyExport('notice', msg)}
         >
           <p className="mb-4 text-sm text-slate-500">
-            Non-cancelled {bookingWord.toLowerCase()}s in this date range, counting only appointment scheduling (table
-            dining and other non-appointment types are excluded). Volume is split by calendar or legacy practitioner (staff),
-            by linked service (appointment service or unified service item), and booking source. The &quot;Arrived or
-            completed&quot; bar includes marked arrival, started, or completed visits.
+            Non-cancelled {bookingWord.toLowerCase()}s in this date range. Volume is split by {staffWord.toLowerCase()}{' '}
+            (calendar), by service, and by how the {clientLower} booked. The &quot;Arrived or completed&quot; bar counts
+            marked arrival, started, or completed visits.
           </p>
           {!r7 || (pracPerformanceData.length === 0 && svcVolumeData.length === 0 && channelPieData.length === 0) ? (
             <p className="text-sm text-slate-400">

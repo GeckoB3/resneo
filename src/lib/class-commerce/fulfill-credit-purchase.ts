@@ -2,6 +2,7 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { stripe } from '@/lib/stripe';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
+import { sendClassCommerceComm } from '@/lib/communications/send-class-commerce';
 
 export interface FulfillCreditPurchaseParams {
   admin: SupabaseClient;
@@ -47,7 +48,7 @@ export async function fulfillClassCreditPurchaseFromPaymentIntent(
 
   const { data: product, error: prodErr } = await admin
     .from('class_credit_products')
-    .select('id, venue_id, credits_count, validity_days')
+    .select('id, venue_id, credits_count, validity_days, name')
     .eq('id', productId)
     .eq('venue_id', venueId)
     .maybeSingle();
@@ -126,6 +127,25 @@ export async function fulfillClassCreditPurchaseFromPaymentIntent(
     .from('class_credit_purchase_fulfillments')
     .update({ balance_id: balanceId })
     .eq('stripe_payment_intent_id', paymentIntentId);
+
+  // Phase 2 §5.5 — receipt email. Best-effort; failures don't unwind fulfilment.
+  try {
+    await sendClassCommerceComm({
+      venueId,
+      userId,
+      payload: {
+        key: 'class_credits_purchased',
+        vars: {
+          venueName: '',
+          packName: (product as { name?: string | null }).name?.trim() || 'class credits',
+          creditsCount,
+          expiresAtIso: expiresAt,
+        },
+      },
+    });
+  } catch (commsErr) {
+    console.error('[fulfillClassCreditPurchase] receipt comms failed', commsErr);
+  }
 
   return { fulfilled: true };
 }

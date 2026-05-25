@@ -1,5 +1,10 @@
+import { Suspense } from 'react';
 import { AccountCreditsSection } from '@/components/account/AccountCreditsSection';
 
 export default function AccountCreditsPage() {
-  return <AccountCreditsSection />;
+  return (
+    <Suspense fallback={null}>
+      <AccountCreditsSection />
+    </Suspense>
+  );
 }

@@ -30,6 +30,8 @@ export interface InsertFreeClassSessionBookingParams {
    * (caller has already verified credits, course entitlement, or membership).
    */
   settleWithoutOnlineCard?: boolean;
+  /** When set, the booking is attributed to this recurring reservation rule for lineage tracking. */
+  classRecurringReservationId?: string | null;
 }
 
 /**
@@ -53,6 +55,7 @@ export async function insertFreeClassSessionBooking(
     groupBookingId,
     skipGuestNotifications = false,
     settleWithoutOnlineCard = false,
+    classRecurringReservationId = null,
   } = params;
 
   const { data: inst, error: instErr } = await admin
@@ -170,6 +173,7 @@ export async function insertFreeClassSessionBooking(
     class_instance_id: classInstanceId,
     capacity_used: partySize,
     group_booking_id: groupBookingId,
+    class_recurring_reservation_id: classRecurringReservationId,
   };
 
   const { data: booking, error: bookErr } = await admin

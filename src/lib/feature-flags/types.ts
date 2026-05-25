@@ -10,6 +10,7 @@ export const APPOINTMENTS_FEATURE_FLAG_KEYS = [
   'waitlist_v2',
   'guest_self_reschedule',
   'any_available_practitioner',
+  'class_commerce_enabled',
 ] as const;
 
 export type AppointmentsFeatureFlagKey = (typeof APPOINTMENTS_FEATURE_FLAG_KEYS)[number];
@@ -22,6 +23,7 @@ export const venueFeatureFlagsSchema = z
     guest_self_reschedule: z.boolean().optional(),
     any_available_practitioner: z.boolean().optional(),
     any_available_practitioner_config: anyAvailablePractitionerConfigSchema.optional(),
+    class_commerce_enabled: z.boolean().optional(),
   })
   .strip();
 

@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { stripe } from '@/lib/stripe';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 import { linkCourseSessionEnrollmentsForEnrollment } from '@/lib/class-commerce/link-course-session-enrollments';
+import { sendClassCommerceComm } from '@/lib/communications/send-class-commerce';
+import { earliestSessionDateForCourse } from '@/lib/class-commerce/course-cancellation';
 
 export interface FulfillCourseEnrollmentParams {
   admin: SupabaseClient;
@@ -75,7 +77,7 @@ export async function fulfillCourseEnrollmentFromPaymentIntent(
 
   const { data: product, error: pErr } = await admin
     .from('class_course_products')
-    .select('session_instance_ids')
+    .select('session_instance_ids, name')
     .eq('id', productId)
     .eq('venue_id', venueId)
     .maybeSingle();
@@ -109,6 +111,26 @@ export async function fulfillCourseEnrollmentFromPaymentIntent(
   if (!linked.ok) {
     console.error('[fulfillCourseEnrollment] link sessions', linked.error);
     return { fulfilled: false, reason: 'link_sessions_failed' };
+  }
+
+  // Phase 2 §5.5 — receipt email. Best-effort.
+  try {
+    const firstSessionDate = await earliestSessionDateForCourse(admin, productId);
+    await sendClassCommerceComm({
+      venueId,
+      userId,
+      payload: {
+        key: 'class_course_enrolled',
+        vars: {
+          venueName: '',
+          courseName: (product as { name?: string | null }).name?.trim() || 'course',
+          sessionCount: sessionIds.length,
+          firstSessionDate,
+        },
+      },
+    });
+  } catch (commsErr) {
+    console.error('[fulfillCourseEnrollment] receipt comms failed', commsErr);
   }
 
   return { fulfilled: true };

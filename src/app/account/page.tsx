@@ -204,24 +204,6 @@ export default async function AccountHomePage() {
           ))}
         </div>
       </section>
-
-      <div className="rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 to-white px-5 py-5 sm:px-6 sm:py-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-brand-900">Magic link sign-in</p>
-            <p className="mt-1 max-w-xl text-sm text-brand-950/80">
-              Prefer email links? You can always request a fresh sign-in link from the login page — no password
-              required.
-            </p>
-          </div>
-          <Link
-            href="/login?redirectTo=/account"
-            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand-600/20 transition-colors hover:bg-brand-700"
-          >
-            Open login
-          </Link>
-        </div>
-      </div>
     </div>
   );
 }

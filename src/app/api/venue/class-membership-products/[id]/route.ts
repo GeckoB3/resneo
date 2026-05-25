@@ -5,8 +5,10 @@ import { classMembershipProductPatchSchema, parseMembershipRules } from '@/lib/c
 import { assertEligibleClassTypesForVenue } from '@/lib/class-commerce/validate-venue-product-refs';
 import {
   archiveStripePriceOnConnectedAccount,
+  archiveStripeProductOnConnectedAccount,
   createMembershipRecurringProductAndPrice,
 } from '@/lib/stripe/connected-membership-product';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -16,6 +18,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { data: existing, error: exErr } = await staff.db
       .from('class_membership_products')
@@ -150,6 +154,17 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       return NextResponse.json({ error: 'Update failed' }, { status: 500 });
     }
     if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    // Phase 2 §5.6 — archive Stripe Product + Price on the active → inactive transition.
+    if (existingRow.active === true && nextActive === false && stripeAccount) {
+      if (stripe_price_id) {
+        await archiveStripePriceOnConnectedAccount(stripeAccount, stripe_price_id);
+      }
+      if (stripe_product_id) {
+        await archiveStripeProductOnConnectedAccount(stripeAccount, stripe_product_id);
+      }
+    }
+
     return NextResponse.json({ product: data });
   } catch (e) {
     console.error('[class-membership-products] PATCH', e);
@@ -165,6 +180,8 @@ export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id:
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { count, error: cErr } = await staff.db
       .from('class_memberships')
@@ -184,6 +201,33 @@ export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id:
         },
         { status: 409 },
       );
+    }
+
+    // Phase 2 §5.6 — archive Stripe artefacts before deleting so the Connect
+    // account doesn't carry orphan Products/Prices.
+    const { data: existingForDelete } = await staff.db
+      .from('class_membership_products')
+      .select('stripe_price_id, stripe_product_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    const { data: venueForDelete } = await staff.db
+      .from('venues')
+      .select('stripe_connected_account_id')
+      .eq('id', staff.venue_id)
+      .maybeSingle();
+    const stripeAccountForDelete = (
+      venueForDelete as { stripe_connected_account_id?: string | null } | null
+    )?.stripe_connected_account_id?.trim();
+
+    if (stripeAccountForDelete && existingForDelete) {
+      const priceId = (existingForDelete as { stripe_price_id?: string | null }).stripe_price_id ?? null;
+      const productIdOnStripe =
+        (existingForDelete as { stripe_product_id?: string | null }).stripe_product_id ?? null;
+      if (priceId) await archiveStripePriceOnConnectedAccount(stripeAccountForDelete, priceId);
+      if (productIdOnStripe) {
+        await archiveStripeProductOnConnectedAccount(stripeAccountForDelete, productIdOnStripe);
+      }
     }
 
     const { error } = await staff.db

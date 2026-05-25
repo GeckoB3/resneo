@@ -229,6 +229,27 @@ export function ClassBookingFlow({
   const [payWithClassCredits, setPayWithClassCredits] = useState(false);
   const [cartPayWithClassCredits, setCartPayWithClassCredits] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  /** Where to land after the "Sign in to buy" modal completes — defaults to the same page. */
+  const [authRedirectTo, setAuthRedirectTo] = useState<string | null>(null);
+  /** Live auth state so the commerce panel can swap between "Sign in to buy" and direct Buy links. */
+  const [signedIn, setSignedIn] = useState<boolean>(false);
+
+  // Detect auth state in the browser so the commerce CTA matches reality.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!cancelled) setSignedIn(Boolean(data.user?.id));
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session?.user?.id));
+    });
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     setPayWithClassCredits(false);
@@ -634,19 +655,14 @@ export function ClassBookingFlow({
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Passes, courses & memberships</p>
                   <h3 className="mt-1 text-base font-semibold text-slate-900">Come often? Save with a pack or plan.</h3>
                   <p className="mt-1 text-sm text-slate-600">
-                    Sign in to buy packs, enroll in courses, or start a membership — then book classes from your account.
+                    {signedIn
+                      ? 'Buy a pack, enroll in a course, or start a membership — then come back to book.'
+                      : 'Sign in to buy packs, enroll in courses, or start a membership — then book classes from your account.'}
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:items-end">
-                  <button
-                    type="button"
-                    onClick={() => setAuthModalOpen(true)}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                  >
-                    Sign in to buy
-                  </button>
                   <Link
-                    href="/account/classes"
+                    href={`/account/classes?venue=${encodeURIComponent(venue.id)}`}
                     className="text-center text-xs font-semibold text-brand-700 hover:underline sm:text-right"
                   >
                     Open class account hub
@@ -655,25 +671,55 @@ export function ClassBookingFlow({
               </div>
               <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                 {commerceSummary.packs.map((p) => (
-                  <div key={p.id} className="rounded-xl bg-slate-50 px-3 py-2">
-                    <span className="font-medium">{p.name}</span>
-                    <span className="text-slate-500"> · {p.credits_count} credits · {sym}{(p.price_pence / 100).toFixed(2)}</span>
-                  </div>
+                  <CommerceLine
+                    key={p.id}
+                    label={p.name}
+                    detail={`${p.credits_count} credits · ${sym}${(p.price_pence / 100).toFixed(2)}`}
+                    actionLabel={signedIn ? 'Buy pack' : 'Sign in to buy'}
+                    onClick={() => {
+                      const target = `/account/credits?venue=${encodeURIComponent(venue.id)}&product=${encodeURIComponent(p.id)}&autostart=1`;
+                      if (signedIn) {
+                        window.location.href = target;
+                      } else {
+                        setAuthRedirectTo(target);
+                        setAuthModalOpen(true);
+                      }
+                    }}
+                  />
                 ))}
                 {commerceSummary.courses.map((c) => (
-                  <div key={c.id} className="rounded-xl bg-slate-50 px-3 py-2">
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-slate-500">
-                      {' '}
-                      · course · {c.price_pence <= 0 ? 'free' : `${sym}${(c.price_pence / 100).toFixed(2)}`}
-                    </span>
-                  </div>
+                  <CommerceLine
+                    key={c.id}
+                    label={c.name}
+                    detail={`course · ${c.price_pence <= 0 ? 'free' : `${sym}${(c.price_pence / 100).toFixed(2)}`}`}
+                    actionLabel={signedIn ? (c.price_pence <= 0 ? 'Enroll free' : 'Enroll') : 'Sign in to enroll'}
+                    onClick={() => {
+                      const target = `/account/courses?venue=${encodeURIComponent(venue.id)}&course=${encodeURIComponent(c.id)}&autostart=1`;
+                      if (signedIn) {
+                        window.location.href = target;
+                      } else {
+                        setAuthRedirectTo(target);
+                        setAuthModalOpen(true);
+                      }
+                    }}
+                  />
                 ))}
                 {commerceSummary.memberships.map((m) => (
-                  <div key={m.id} className="rounded-xl bg-slate-50 px-3 py-2">
-                    <span className="font-medium">{m.name}</span>
-                    <span className="text-slate-500"> · membership</span>
-                  </div>
+                  <CommerceLine
+                    key={m.id}
+                    label={m.name}
+                    detail="membership"
+                    actionLabel={signedIn ? 'Start membership' : 'Sign in to subscribe'}
+                    onClick={() => {
+                      const target = `/account/memberships?venue=${encodeURIComponent(venue.id)}&plan=${encodeURIComponent(m.id)}&autostart=1`;
+                      if (signedIn) {
+                        window.location.href = target;
+                      } else {
+                        setAuthRedirectTo(target);
+                        setAuthModalOpen(true);
+                      }
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -1007,7 +1053,42 @@ export function ClassBookingFlow({
         </div>
       )}
 
-      <RequireAuthModal open={authModalOpen} redirectTo={pathname} onClose={() => setAuthModalOpen(false)} />
+      <RequireAuthModal
+        open={authModalOpen}
+        redirectTo={authRedirectTo ?? pathname}
+        onClose={() => {
+          setAuthModalOpen(false);
+          setAuthRedirectTo(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function CommerceLine({
+  label,
+  detail,
+  actionLabel,
+  onClick,
+}: {
+  label: string;
+  detail: string;
+  actionLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-slate-900">{label}</div>
+        <div className="truncate text-xs text-slate-500">{detail}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+      >
+        {actionLabel}
+      </button>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
+import { bookingTimelineEventsForDisplay } from '@/lib/booking/format-booking-timeline-event';
 import {
   BOOKING_DETAIL_MAX_STACK_DEPTH,
   GuestBookingsForGuestAccordion,
@@ -787,25 +788,34 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
           <SectionCard>
             <SectionCard.Body className={sectionPadding}>
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Timeline</p>
-              {d.events.length === 0 ? (
-                <p className="text-xs text-slate-400">{isHydrated ? 'No events yet.' : '…'}</p>
-              ) : (
+              {(() => {
+                const timelineRows = bookingTimelineEventsForDisplay(d.events);
+                if (timelineRows.length === 0) {
+                  return (
+                    <p className="text-xs text-slate-400">{isHydrated ? 'No events yet.' : '…'}</p>
+                  );
+                }
+                return (
                 <div className={`${isPopover ? 'max-h-28 space-y-1.5' : 'max-h-36 space-y-2'} overflow-y-auto pr-1`}>
-                  {d.events.map((ev) => (
+                  {timelineRows.map((ev) => (
                     <div key={ev.id} className="flex items-start gap-2 text-xs">
                       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-100">
                         <span className="h-1 w-1 rounded-full bg-slate-400" />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <span className="font-medium text-slate-700">{ev.event_type.replace(/_/g, ' ')}</span>
+                        <span className="font-medium text-slate-700">{ev.title}</span>
                         <span className="ml-1.5 text-[10px] text-slate-400">
                           {new Date(ev.created_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
                         </span>
+                        {ev.detail ? (
+                          <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{ev.detail}</p>
+                        ) : null}
                       </div>
                     </div>
                   ))}
                 </div>
-              )}
+                );
+              })()}
             </SectionCard.Body>
           </SectionCard>
 

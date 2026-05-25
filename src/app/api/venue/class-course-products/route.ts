@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { classCourseProductBodySchema } from '@/lib/class-commerce/product-schemas';
 import { assertClassInstancesForVenue } from '@/lib/class-commerce/validate-venue-product-refs';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 export async function GET() {
   try {
@@ -11,6 +12,8 @@ export async function GET() {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { data, error } = await staff.db
       .from('class_course_products')
@@ -36,6 +39,8 @@ export async function POST(request: NextRequest) {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const body = await request.json().catch(() => ({}));
     const parsed = classCourseProductBodySchema.safeParse(body);

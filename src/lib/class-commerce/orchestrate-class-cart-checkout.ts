@@ -11,6 +11,8 @@ import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-clas
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
 import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/membership-class-access';
+import { membershipCoversClassType } from '@/lib/class-commerce/membership-allowance-coverage';
+import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
 import type { ClassCartCheckoutResponse, ClassCartLineInput, ClassCartQuoteLine, ClassCartQuoteResult } from '@/types/class-commerce';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 
@@ -42,7 +44,7 @@ export async function orchestrateClassCartCheckout(
   const { venueId, lines, userId, userEmail, displayName, payWithClassCredits = false } = params;
   const emailLower = userEmail.toLowerCase();
 
-  const quote = await quoteClassCart(admin, { venueId, lines });
+  const quote = await quoteClassCart(admin, { venueId, lines, userId });
   if (!quote.all_ok) {
     return { ok: false, status: 409, error: 'Cart is not valid', quote };
   }
@@ -126,12 +128,24 @@ export async function orchestrateClassCartCheckout(
       }
 
       let useMembership = false;
+      let membershipCoverage: Awaited<ReturnType<typeof membershipCoversClassType>> | null = null;
       if (!useCredits && !useCourse && online > 0) {
-        useMembership = await membershipUnlimitedCoversClassType(admin, {
+        membershipCoverage = await membershipCoversClassType(admin, {
           userId,
           venueId,
           classTypeId: qLine.class_type_id,
+          partySize: line.party_size,
         });
+        useMembership = membershipCoverage.ok;
+        // Keep legacy helper alignment for clarity (unlimited overrides allowance pricing).
+        if (!useMembership) {
+          // Fallback to the legacy unlimited check in case ledger rows are stale.
+          useMembership = await membershipUnlimitedCoversClassType(admin, {
+            userId,
+            venueId,
+            classTypeId: qLine.class_type_id,
+          });
+        }
       }
 
       if (useCredits && online > 0) {
@@ -191,6 +205,27 @@ export async function orchestrateClassCartCheckout(
         if (!res.ok) {
           throw new Error(res.error);
         }
+        // When the matched membership is an allowance plan, ledger the consumption.
+        if (
+          useMembership &&
+          membershipCoverage &&
+          membershipCoverage.ok &&
+          membershipCoverage.mode === 'allowance'
+        ) {
+          const consumed = await consumeMembershipAllowanceForBooking({
+            admin,
+            membershipId: membershipCoverage.membershipId,
+            userId,
+            venueId,
+            sessions: line.party_size,
+            bookingId: res.bookingId,
+            idempotencyKey: `redeem_allowance_cart:${groupId}:${line.class_instance_id}`,
+          });
+          if (!consumed.ok) {
+            await admin.from('bookings').delete().eq('id', res.bookingId);
+            throw new Error('Could not apply membership allowance.');
+          }
+        }
         bookingIds.push(res.bookingId);
         continue;
       }
@@ -206,6 +241,7 @@ export async function orchestrateClassCartCheckout(
           partySize: line.party_size,
           source: 'online',
           groupBookingId: groupId,
+          overrideOnlineChargePence: qLine.online_charge_pence,
         });
         if (!res.ok) {
           throw new Error(res.error);

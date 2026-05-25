@@ -152,12 +152,14 @@ export function ClassTimetableView({
   linkedPractitionerIds = [],
   currency = 'GBP',
   stripeConnected = false,
+  classCommerceEnabled = false,
 }: {
   venueId: string;
   isAdmin: boolean;
   linkedPractitionerIds?: string[];
   currency?: string;
   stripeConnected?: boolean;
+  classCommerceEnabled?: boolean;
 }) {
   const sym = currencySymbolFromCode(currency);
   function formatPrice(pence: number): string {
@@ -760,12 +762,14 @@ export function ClassTimetableView({
         subtitle="Set up class types, add sessions to the calendar, then manage bookings from your roster."
         actions={
           <>
-            <Link
-              href="/dashboard/class-timetable/products"
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
-            >
-              Class products
-            </Link>
+            {classCommerceEnabled ? (
+              <Link
+                href="/dashboard/class-timetable/products"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+              >
+                Class products
+              </Link>
+            ) : null}
             {isAdmin || linkedPractitionerIds.length > 0 ? (
               <button
                 type="button"

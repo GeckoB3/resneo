@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -26,7 +26,6 @@ import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
-import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -62,7 +61,6 @@ import {
   canShowCancelStaffAttendanceConfirmationAction,
   canShowConfirmBookingAttendanceAction,
   isAttendanceConfirmed,
-  showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import {
@@ -79,7 +77,6 @@ import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact
 import { guestStubFromBookingRow } from '@/lib/booking/booking-row-guest-stub';
 import {
   bookingDetailLiteFromListRow,
-  bookingDisplayEndHm,
   resolveExpandedBookingServiceLine,
 } from '@/lib/booking/booking-detail-from-row';
 import {
@@ -92,6 +89,7 @@ import {
   type BookingRowOverlay,
 } from '@/lib/booking/booking-row-overlay';
 import { formatCommunicationLogLabel } from '@/lib/communications/display-labels';
+import { bookingTimelineEventsForDisplay } from '@/lib/booking/format-booking-timeline-event';
 
 export interface BookingRow {
   id: string;
@@ -170,7 +168,12 @@ export interface BookingDetailLite {
     recipient?: string | null;
     error_message?: string | null;
   }>;
-  events: Array<{ id: string; event_type: string; created_at: string }>;
+  events: Array<{
+    id: string;
+    event_type: string;
+    created_at: string;
+    payload?: Record<string, unknown> | null;
+  }>;
   combination_staff_notes?: string | null;
   cde_context?: {
     inferred_model: BookingModel;
@@ -533,7 +536,6 @@ export function ExpandedBookingContent({
   const depositAmtStr = effectiveBooking.deposit_amount_pence
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
-  const endTime = bookingDisplayEndHm(booking);
   const serviceLine = resolveExpandedBookingServiceLine(booking, activeDetail);
   const cdeContextForCard =
     activeDetail?.cde_context &&
@@ -549,6 +551,11 @@ export function ExpandedBookingContent({
     activeDetail?.special_requests,
     activeDetail?.internal_notes,
   ].filter(Boolean).length;
+
+  const timelineEvents = useMemo(
+    () => bookingTimelineEventsForDisplay(activeDetail?.events ?? []),
+    [activeDetail?.events],
+  );
 
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
@@ -756,6 +763,122 @@ export function ExpandedBookingContent({
         ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`
         : EXP_BOOKING_REVERT;
 
+  const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [
+    {
+      key: 'previous-visit',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Previous visit</span>
+        <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">
+          {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
+        </span>
+      </span>
+      ),
+    },
+    {
+      key: 'visits',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Visits</span>
+        <span className="font-semibold text-slate-800">
+          {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
+        </span>
+      </span>
+      ),
+    },
+  ];
+
+  if (tableStyle) {
+    bookingMetaSegments.push({
+      key: 'table',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Table</span>
+        <span
+          className={`break-words font-semibold [overflow-wrap:anywhere] ${tableNames.length > 0 ? 'text-emerald-800' : 'text-amber-800'}`}
+        >
+          {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
+          {activeDetail?.combination_staff_notes ? (
+            <span className="font-medium text-emerald-800"> — {activeDetail.combination_staff_notes}</span>
+          ) : null}
+        </span>
+      </span>
+      ),
+    });
+  } else if (booking.party_size > 1) {
+    bookingMetaSegments.push({
+      key: 'party',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Party</span>
+        <span className="font-semibold text-slate-800">{booking.party_size} people</span>
+      </span>
+      ),
+    });
+  }
+
+  bookingMetaSegments.push({
+    key: 'deposit',
+    node: (
+    <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+      <span className="font-medium text-slate-500">Deposit</span>
+      <span
+        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-800'}`}
+      >
+        {effectiveBooking.deposit_status === 'Not Required'
+          ? 'None'
+          : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
+            ? `${depositAmtStr} paid`
+            : effectiveBooking.deposit_status}
+      </span>
+    </span>
+    ),
+  });
+
+  if (activeDetail?.checked_in_at) {
+    bookingMetaSegments.push({
+      key: 'checked-in',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Checked in</span>
+        <span className="font-semibold text-slate-800">{formatRelative(activeDetail.checked_in_at)}</span>
+      </span>
+      ),
+    });
+  }
+
+  bookingMetaSegments.push(
+    {
+      key: 'source',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Source</span>
+        <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">{booking.source}</span>
+      </span>
+      ),
+    },
+    {
+      key: 'ref',
+      node: (
+      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+        <span className="font-medium text-slate-500">Ref</span>
+        <button
+          type="button"
+          onClick={() => {
+            void copyBookingRef();
+          }}
+          className="font-semibold text-slate-800 hover:text-brand-700"
+          title={refCopied ? 'Copied!' : 'Copy booking reference'}
+          aria-label={refCopied ? 'Booking reference copied' : 'Copy booking reference'}
+        >
+          #{booking.id.slice(0, 8)}
+          {refCopied ? ' ✓' : ''}
+        </button>
+      </span>
+      ),
+    },
+  );
+
   return (
     <div
       id={`booking-expand-${booking.id}`}
@@ -798,20 +921,52 @@ export function ExpandedBookingContent({
                       </svg>
                     </Link>
                   ) : null}
-                  <Pill variant="neutral" size="sm">{visitCount > 0 ? `${visitCount} visit${visitCount !== 1 ? 's' : ''}` : 'First visit'}</Pill>
                   {(activeDetail?.guest?.customer_profile_notes ?? profileGuest?.customer_profile_notes) ? (
                     <Pill variant="info" size="sm">Guest note</Pill>
                   ) : null}
                 </div>
-                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="font-medium text-slate-700">{formatDateNice(booking.booking_date)}</span>
-                  <span className="text-slate-300">·</span>
-                  <span className="font-semibold tabular-nums text-slate-700">
-                    {booking.booking_time.slice(0, 5)}{endTime ? ` - ${endTime}` : ''}
-                  </span>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500">
+                  {guestEmail ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!linkedViewOnly) openGuestMessageComposer('email');
+                      }}
+                      disabled={linkedViewOnly}
+                      className="max-w-full break-words font-medium text-slate-700 [overflow-wrap:anywhere] hover:text-brand-700 disabled:cursor-default disabled:opacity-50"
+                    >
+                      {guestEmail}
+                    </button>
+                  ) : (
+                    <span className="text-slate-400">No email</span>
+                  )}
+                  {guestPhone ? (
+                    <>
+                      <span className="text-slate-300" aria-hidden>
+                        ·
+                      </span>
+                      <a
+                        href={guestTelHref ?? `tel:${guestPhone}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium tabular-nums text-slate-700 hover:text-brand-700"
+                      >
+                        {guestPhone}
+                      </a>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-slate-300" aria-hidden>
+                        ·
+                      </span>
+                      <span className="text-slate-400">No phone</span>
+                    </>
+                  )}
                   {serviceLine ? (
                     <>
-                      <span className="text-slate-300">·</span>
+                      <span className="text-slate-300" aria-hidden>
+                        ·
+                      </span>
                       <span className="font-medium text-slate-700">{serviceLine}</span>
                     </>
                   ) : null}
@@ -819,34 +974,6 @@ export function ExpandedBookingContent({
                     <Pill variant="warning" size="sm" dot>
                       Deposit pending
                     </Pill>
-                  ) : null}
-                  {showAttendanceConfirmedSupplementPill(effectiveBooking) ? (
-                    <BookingStatusPill statusKey="Confirmed" dot className="shrink-0">
-                      Confirmed
-                    </BookingStatusPill>
-                  ) : null}
-                  {tableStyle ? (
-                    <>
-                      <span className="text-slate-300">·</span>
-                      <span>{booking.party_size} cover{booking.party_size === 1 ? '' : 's'}</span>
-                    </>
-                  ) : booking.party_size > 1 ? (
-                    <>
-                      <span className="text-slate-300">·</span>
-                      <span>{booking.party_size} people</span>
-                    </>
-                  ) : null}
-                  {tableStyle && booking.area_name ? (
-                    <>
-                      <span className="hidden text-slate-300 sm:inline">·</span>
-                      <span className="hidden sm:inline">{booking.area_name}</span>
-                    </>
-                  ) : null}
-                  {booking.created_at ? (
-                    <>
-                      <span className="hidden text-slate-300 sm:inline">·</span>
-                      <span className="hidden sm:inline">Created {formatRelative(booking.created_at)}</span>
-                    </>
                   ) : null}
                 </div>
               </div>
@@ -876,99 +1003,20 @@ export function ExpandedBookingContent({
               ) : null}
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Email</p>
-              {guestEmail ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openGuestMessageComposer('email');
-                  }}
-                  className="block w-full break-words text-left text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere] hover:text-brand-700"
-                >
-                  {guestEmail}
-                </button>
-              ) : (
-                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
-              )}
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Telephone</p>
-              {guestPhone ? (
-                <a
-                  href={`tel:${guestPhone}`}
-                  className="block w-full break-words text-xs font-bold leading-snug text-slate-800 tabular-nums [overflow-wrap:anywhere] hover:text-brand-700"
-                >
-                  {guestPhone}
-                </a>
-              ) : (
-                <p className="text-xs font-bold leading-snug text-slate-400">Not provided</p>
-              )}
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Previous visit</p>
-              <p className="break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
-                {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Visits</p>
-              <p className="break-words text-xs font-bold leading-snug text-slate-800 [overflow-wrap:anywhere]">
-                {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
-              </p>
-            </div>
-            {tableStyle ? (
-              <div className={`rounded-lg border px-2 py-1.5 ${tableNames.length > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
-                <p className={`break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${tableNames.length > 0 ? 'text-emerald-900' : 'text-amber-800'}`}>
-                  {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
-                </p>
-                {activeDetail?.combination_staff_notes ? (
-                  <p className="mt-1 break-words text-[10px] font-medium leading-snug text-emerald-800 [overflow-wrap:anywhere]">
-                    {activeDetail.combination_staff_notes}
-                  </p>
+          <div
+            className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-700"
+            role="list"
+          >
+            {bookingMetaSegments.map((segment, index) => (
+              <Fragment key={segment.key}>
+                {index > 0 ? (
+                  <span className="shrink-0 text-slate-300" aria-hidden>
+                    ·
+                  </span>
                 ) : null}
-              </div>
-            ) : booking.party_size > 1 ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Party</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{booking.party_size} people</p>
-              </div>
-            ) : null}
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
-              <p className={`break-words text-xs font-bold leading-snug [overflow-wrap:anywhere] ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-700'}`}>
-                {effectiveBooking.deposit_status === 'Not Required'
-                  ? 'None'
-                  : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
-                    ? `${depositAmtStr} paid`
-                    : effectiveBooking.deposit_status}
-              </p>
-            </div>
-            {activeDetail?.checked_in_at ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Checked in</p>
-                <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{formatRelative(activeDetail.checked_in_at)}</p>
-              </div>
-            ) : null}
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Source</p>
-              <p className="break-words text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere]">{booking.source}</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Ref</p>
-              <button
-                type="button"
-                onClick={() => { void copyBookingRef(); }}
-                className="break-words text-left text-xs font-bold leading-snug text-slate-700 [overflow-wrap:anywhere] hover:text-brand-700"
-                title={refCopied ? 'Copied!' : 'Copy booking reference'}
-                aria-label={refCopied ? 'Booking reference copied' : 'Copy booking reference'}
-              >
-                #{booking.id.slice(0, 8)}{refCopied ? ' ✓' : ''}
-              </button>
-            </div>
+                <span role="listitem">{segment.node}</span>
+              </Fragment>
+            ))}
           </div>
         </SectionCard.Body>
       </SectionCard>
@@ -1258,11 +1306,11 @@ export function ExpandedBookingContent({
         </div>
       ) : null}
 
-      {!linkedViewOnly ? (
       <details
         className={bookingExpandAccordionDetailsClass}
-        open={showMessageBox}
+        open={!linkedViewOnly ? showMessageBox : undefined}
         onToggle={(event) => {
+          if (linkedViewOnly) return;
           const nextOpen = event.currentTarget.open;
           setShowMessageBox(nextOpen);
           if (nextOpen) setModifyBookingOpen(false);
@@ -1273,89 +1321,153 @@ export function ExpandedBookingContent({
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
             {(activeDetail?.communications ?? []).length > 0
               ? `${activeDetail!.communications.length} sent`
-              : guestPhone && guestEmail
-                ? 'SMS + email'
-                : guestPhone
-                  ? 'SMS'
-                  : guestEmail
-                    ? 'Email'
-                    : 'No contact'}
+              : linkedViewOnly
+                ? detailLoading
+                  ? 'Loading…'
+                  : 'None sent'
+                : guestPhone && guestEmail
+                  ? 'SMS + email'
+                  : guestPhone
+                    ? 'SMS'
+                    : guestEmail
+                      ? 'Email'
+                      : 'No contact'}
           </span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
         <div className={bookingExpandAccordionMessagingBodyClass}>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-slate-700">Message {guestName.split(' ')[0]}</p>
-            {(activeDetail?.communications ?? []).length > 0 && (
-              <span className="text-[10px] text-slate-400">
-                {activeDetail!.communications.length} sent · last via {activeDetail!.communications[0]?.channel}
-              </span>
+          {!linkedViewOnly ? (
+            <>
+              <div className="mb-2">
+                <p className="text-xs font-semibold text-slate-700">Message {guestName.split(' ')[0]}</p>
+              </div>
+              <textarea
+                ref={messageTextareaRef}
+                value={draftMessage}
+                onChange={(e) => onMessageDraftChange(e.target.value)}
+                rows={3}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
+                placeholder="Write a message"
+              />
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                  Send via
+                  <GuestMessageChannelSelect
+                    value={guestMessageChannel}
+                    onChange={setGuestMessageChannel}
+                    disabled={sendingMessage}
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center sm:gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowMessageBox(false)}
+                    className="rounded-lg border border-slate-200 bg-white px-[11px] py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sendingMessage || draftMessage.trim().length === 0}
+                    onClick={() => {
+                      void handleSendGuestMessage();
+                    }}
+                    className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:py-1.5"
+                    aria-busy={sendingMessage}
+                  >
+                    {sendingMessage ? (
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/25 border-t-white"
+                        aria-hidden
+                      />
+                    ) : null}
+                    <span>Send</span>
+                  </button>
+                </div>
+              </div>
+              {guestMessageFeedback ? (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className={`mt-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${
+                    guestMessageFeedback.tone === 'success'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                      : guestMessageFeedback.tone === 'warning'
+                        ? 'border-amber-200 bg-amber-50 text-amber-950'
+                        : 'border-red-200 bg-red-50 text-red-800'
+                  }`}
+                >
+                  {guestMessageFeedback.text}
+                </p>
+              ) : null}
+            </>
+          ) : null}
+          <div
+            className={
+              linkedViewOnly
+                ? undefined
+                : 'mt-4 border-t border-slate-200/80 pt-3'
+            }
+          >
+            <p className="mb-2 text-xs font-semibold text-slate-700">Sent for this booking</p>
+            {(activeDetail?.communications ?? []).length > 0 ? (
+              <ul className="space-y-2">
+                {(activeDetail?.communications ?? []).map((comm) => (
+                  <li
+                    key={comm.id}
+                    className="rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`rounded px-1 py-0.5 text-[10px] font-semibold uppercase ${
+                              comm.channel === 'email'
+                                ? 'bg-blue-50 text-blue-800'
+                                : 'bg-emerald-50 text-emerald-800'
+                            }`}
+                          >
+                            {comm.channel}
+                          </span>
+                          <span className="font-medium text-slate-800">
+                            {formatCommunicationLogLabel(comm.message_type)}
+                          </span>
+                          <span
+                            className={`rounded px-1 py-0.5 text-[10px] font-semibold capitalize ${
+                              comm.status === 'sent' || comm.status === 'delivered'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : comm.status === 'failed' || comm.status === 'bounced'
+                                  ? 'bg-red-50 text-red-700'
+                                  : 'bg-amber-50 text-amber-800'
+                            }`}
+                          >
+                            {comm.status}
+                          </span>
+                        </div>
+                        {comm.recipient ? (
+                          <p className="mt-0.5 truncate text-[10px] text-slate-400">To {comm.recipient}</p>
+                        ) : null}
+                        {comm.error_message && comm.status === 'failed' ? (
+                          <p className="mt-0.5 text-[10px] text-red-600">{comm.error_message}</p>
+                        ) : null}
+                      </div>
+                      <span className="shrink-0 text-slate-400">{formatRelative(comm.created_at)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-500">
+                {detailLoading
+                  ? 'Loading communications…'
+                  : 'No emails or SMS have been sent to the guest for this booking yet.'}
+              </p>
             )}
           </div>
-          <textarea
-            ref={messageTextareaRef}
-            value={draftMessage}
-            onChange={(e) => onMessageDraftChange(e.target.value)}
-            rows={3}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
-            placeholder="Write a message"
-          />
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-              Send via
-              <GuestMessageChannelSelect
-                value={guestMessageChannel}
-                onChange={setGuestMessageChannel}
-                disabled={sendingMessage}
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center sm:gap-1.5">
-              <button
-                type="button"
-                onClick={() => setShowMessageBox(false)}
-                className="rounded-lg border border-slate-200 bg-white px-[11px] py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={sendingMessage || draftMessage.trim().length === 0}
-                onClick={() => {
-                  void handleSendGuestMessage();
-                }}
-                className="inline-flex min-w-[5.25rem] items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-slate-900 disabled:opacity-50 sm:py-1.5"
-                aria-busy={sendingMessage}
-              >
-                {sendingMessage ? (
-                  <span
-                    className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/25 border-t-white"
-                    aria-hidden
-                  />
-                ) : null}
-                <span>Send</span>
-              </button>
-            </div>
-          </div>
-          {guestMessageFeedback ? (
-            <p
-              role="status"
-              aria-live="polite"
-              className={`mt-2 rounded-lg border px-2.5 py-2 text-xs font-medium ${
-                guestMessageFeedback.tone === 'success'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                  : guestMessageFeedback.tone === 'warning'
-                    ? 'border-amber-200 bg-amber-50 text-amber-950'
-                    : 'border-red-200 bg-red-50 text-red-800'
-              }`}
-            >
-              {guestMessageFeedback.text}
-            </p>
-          ) : null}
         </div>
       </details>
-      ) : null}
 
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
@@ -1469,13 +1581,13 @@ export function ExpandedBookingContent({
         </SectionCard>
       )}
 
-      {/* Timeline — booking status / staff activity events */}
+      {/* Timeline — created, confirmed (guest/staff), modifications, cancellations */}
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
           <span>Timeline</span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-            {(activeDetail?.events ?? []).length > 0
-              ? `${activeDetail!.events.length} event${activeDetail!.events.length === 1 ? '' : 's'}`
+            {timelineEvents.length > 0
+              ? `${timelineEvents.length} event${timelineEvents.length === 1 ? '' : 's'}`
               : detailLoading
                 ? 'Loading…'
                 : 'No events'}
@@ -1485,95 +1597,28 @@ export function ExpandedBookingContent({
           </svg>
         </summary>
         <div className={bookingExpandAccordionBodyClass}>
-          {(activeDetail?.events ?? []).length > 0 ? (
+          {timelineEvents.length > 0 ? (
             <ul className="space-y-2">
-              {(activeDetail?.events ?? []).map((event) => (
+              {timelineEvents.map((event) => (
                 <li
                   key={event.id}
-                  className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
+                  className="rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
                 >
-                  <span className="min-w-0 truncate font-medium capitalize">
-                    {event.event_type.replace(/_/g, ' ')}
-                  </span>
-                  <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <span className="min-w-0 font-medium text-slate-800">{event.title}</span>
+                    <span className="shrink-0 text-slate-400">{formatRelative(event.created_at)}</span>
+                  </div>
+                  {event.detail ? (
+                    <p className="mt-0.5 break-words text-[10px] leading-snug text-slate-500 [overflow-wrap:anywhere]">
+                      {event.detail}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>
           ) : (
             <p className="text-xs text-slate-500">
               {detailLoading ? 'Loading timeline…' : 'No booking activity recorded yet.'}
-            </p>
-          )}
-        </div>
-      </details>
-
-      {/* Communications — emails and SMS sent to the guest for this booking */}
-      <details className={bookingExpandAccordionDetailsClass}>
-        <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Communications</span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
-            {(activeDetail?.communications ?? []).length > 0
-              ? `${activeDetail!.communications.length} message${activeDetail!.communications.length === 1 ? '' : 's'}`
-              : detailLoading
-                ? 'Loading…'
-                : 'None sent'}
-          </span>
-          <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-          </svg>
-        </summary>
-        <div className={bookingExpandAccordionBodyClass}>
-          {(activeDetail?.communications ?? []).length > 0 ? (
-            <ul className="space-y-2">
-              {(activeDetail?.communications ?? []).map((comm) => (
-                <li
-                  key={comm.id}
-                  className="rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] text-slate-600 shadow-sm ring-1 ring-slate-900/[0.03]"
-                >
-                  <div className="flex min-w-0 items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span
-                          className={`rounded px-1 py-0.5 text-[10px] font-semibold uppercase ${
-                            comm.channel === 'email'
-                              ? 'bg-blue-50 text-blue-800'
-                              : 'bg-emerald-50 text-emerald-800'
-                          }`}
-                        >
-                          {comm.channel}
-                        </span>
-                        <span className="font-medium text-slate-800">
-                          {formatCommunicationLogLabel(comm.message_type)}
-                        </span>
-                        <span
-                          className={`rounded px-1 py-0.5 text-[10px] font-semibold capitalize ${
-                            comm.status === 'sent' || comm.status === 'delivered'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : comm.status === 'failed' || comm.status === 'bounced'
-                                ? 'bg-red-50 text-red-700'
-                                : 'bg-amber-50 text-amber-800'
-                          }`}
-                        >
-                          {comm.status}
-                        </span>
-                      </div>
-                      {comm.recipient ? (
-                        <p className="mt-0.5 truncate text-[10px] text-slate-400">To {comm.recipient}</p>
-                      ) : null}
-                      {comm.error_message && comm.status === 'failed' ? (
-                        <p className="mt-0.5 text-[10px] text-red-600">{comm.error_message}</p>
-                      ) : null}
-                    </div>
-                    <span className="shrink-0 text-slate-400">{formatRelative(comm.created_at)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-slate-500">
-              {detailLoading
-                ? 'Loading communications…'
-                : 'No emails or SMS have been sent to the guest for this booking yet.'}
             </p>
           )}
         </div>

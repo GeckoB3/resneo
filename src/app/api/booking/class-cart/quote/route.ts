@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { quoteClassCart } from '@/lib/class-commerce/quote-class-cart';
 
 const bodySchema = z.object({
@@ -22,10 +23,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    // Logged-in members get their plan's discount reflected in the quote.
+    let userId: string | undefined;
+    try {
+      const supabase = await createRouteHandlerClient(request);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) userId = user.id;
+    } catch {
+      // unauthenticated visitor — no discount
+    }
+
     const admin = getSupabaseAdminClient();
     const quote = await quoteClassCart(admin, {
       venueId: parsed.data.venue_id,
       lines: parsed.data.lines,
+      userId,
     });
 
     return NextResponse.json(quote);

@@ -85,6 +85,7 @@ export function buildDetailForExpanded(
       id: event.id,
       event_type: event.event_type,
       created_at: event.created_at,
+      payload: event.payload ?? null,
     })),
     combination_staff_notes: d.combination_staff_notes,
     inferred_booking_model: d.inferred_booking_model,

@@ -658,6 +658,20 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       throw new Error(
         'appointment_waitlist_offer is rendered via renderAppointmentWaitlistOfferEmail, not buildMainContentEmail',
       );
+    case 'class_credits_purchased':
+    case 'class_credits_expiring':
+    case 'class_credits_restored':
+    case 'class_course_enrolled':
+    case 'class_course_refunded':
+    case 'class_membership_started':
+    case 'class_membership_renewed':
+    case 'class_membership_cancelling':
+    case 'class_membership_ended':
+      // Class-commerce keys render via sendClassCommerceComm, not buildMainContentEmail
+      // (they are not booking-keyed and use canonical bodies for v1).
+      throw new Error(
+        `${opts.messageKey} is rendered via sendClassCommerceComm, not buildMainContentEmail`,
+      );
   }
 }
 

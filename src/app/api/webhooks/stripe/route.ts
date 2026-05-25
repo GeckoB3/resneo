@@ -162,65 +162,68 @@ export async function POST(request: NextRequest) {
       });
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
-      const bookingId = pi.metadata?.booking_id;
-      if (bookingId) {
-        const { data: booking, error: bookingLoadErr } = await supabase
-          .from('bookings')
-          .select('id, venue_id')
-          .eq('id', bookingId)
-          .maybeSingle();
 
-        if (bookingLoadErr) {
-          console.error('[Stripe webhook] payment_failed booking load failed:', bookingLoadErr, { bookingId });
-          throw bookingLoadErr;
+      // Plan §4.4 — look up by PaymentIntent, not by metadata.booking_id. Cart
+      // checkouts attach the PI id to every paid booking in the group; we must
+      // mark them all Failed, not just the primary.
+      const { data: failedRows, error: failedSelErr } = await supabase
+        .from('bookings')
+        .select('id, venue_id')
+        .eq('stripe_payment_intent_id', pi.id)
+        .eq('deposit_status', 'Pending');
+
+      if (failedSelErr) {
+        console.error('[Stripe webhook] payment_failed load by PI failed:', failedSelErr, { pi: pi.id });
+        throw failedSelErr;
+      }
+
+      const rowsToFail = (failedRows ?? []) as Array<{ id: string; venue_id: string }>;
+      if (rowsToFail.length > 0) {
+        const { error: failUpdateErr } = await supabase
+          .from('bookings')
+          .update({
+            deposit_status: 'Failed',
+            updated_at: new Date().toISOString(),
+          })
+          .in(
+            'id',
+            rowsToFail.map((r) => r.id),
+          );
+        if (failUpdateErr) {
+          console.error('[Stripe webhook] payment_failed deposit update failed:', failUpdateErr, {
+            paymentIntentId: pi.id,
+          });
+          throw failUpdateErr;
         }
 
-        if (booking?.venue_id) {
-          const { error: failUpdateErr } = await supabase
-            .from('bookings')
-            .update({
-              deposit_status: 'Failed',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('stripe_payment_intent_id', pi.id)
-            .eq('venue_id', booking.venue_id)
-            .eq('deposit_status', 'Pending');
-
-          if (failUpdateErr) {
-            console.error('[Stripe webhook] payment_failed deposit update failed:', failUpdateErr, {
-              bookingId,
-              paymentIntentId: pi.id,
-            });
-            throw failUpdateErr;
-          }
-
-          const { data: venue, error: venueErr } = await supabase
-            .from('venues')
-            .select('name, kitchen_email')
-            .eq('id', booking.venue_id)
-            .maybeSingle();
-          if (venueErr) {
-            console.error('[Stripe webhook] payment_failed venue load failed:', venueErr, {
-              venueId: booking.venue_id,
-            });
-            throw venueErr;
-          }
-
-          if (venue?.kitchen_email) {
-            try {
+        // One kitchen alert per venue.
+        const venuesSeen = new Set<string>();
+        for (const r of rowsToFail) {
+          if (venuesSeen.has(r.venue_id)) continue;
+          venuesSeen.add(r.venue_id);
+          try {
+            const { data: venue } = await supabase
+              .from('venues')
+              .select('name, kitchen_email')
+              .eq('id', r.venue_id)
+              .maybeSingle();
+            if (venue?.kitchen_email) {
+              const bookingsForVenue = rowsToFail
+                .filter((b) => b.venue_id === r.venue_id)
+                .map((b) => b.id);
               await sendCommunication({
                 type: 'custom_message',
                 recipient: { email: venue.kitchen_email },
                 payload: {
                   venue_name: venue.name ?? 'Venue',
-                  message: `Deposit payment failed for booking ${bookingId}. Please follow up with the guest.`,
+                  message: `Deposit payment failed for booking${bookingsForVenue.length > 1 ? 's' : ''} ${bookingsForVenue.join(', ')}. Please follow up with the guest.`,
                 },
-                venue_id: booking.venue_id,
-                booking_id: bookingId,
+                venue_id: r.venue_id,
+                booking_id: bookingsForVenue[0],
               });
-            } catch (commsErr) {
-              console.error('Webhook payment failure alert send failed:', commsErr);
             }
+          } catch (commsErr) {
+            console.error('Webhook payment failure alert send failed:', commsErr);
           }
         }
       }

@@ -12,6 +12,13 @@ import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
+import { restoreClassCreditsForBooking } from '@/lib/class-commerce/restore-class-credits';
+import { restoreMembershipAllowanceForBooking } from '@/lib/class-commerce/restore-membership-allowance';
+import {
+  bookingWasCreditPaid,
+  bookingWasMembershipPaid,
+} from '@/lib/class-commerce/booking-was-credit-paid';
+import { sendClassCommerceComm } from '@/lib/communications/send-class-commerce';
 
 const CANCELLABLE = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
@@ -19,6 +26,11 @@ export interface StaffCancelBookingNotifyOptions {
   /** Prepended to refund lines (e.g. event cancelled by venue). */
   refundMessagePrefix?: string | null;
   actorId: string | null;
+  /**
+   * When false, skip restoring class credits / membership allowance on the
+   * cancelled bookings (e.g. an admin "void & forfeit" path). Defaults to true.
+   */
+  restoreCredits?: boolean;
 }
 
 export interface StaffCancelBookingResult {
@@ -176,6 +188,72 @@ export async function cancelStaffBookingWithNotify(
       nextStatus: 'Cancelled',
       actorId: options.actorId,
     });
+  }
+
+  // Plan §4.1 — restore class credits and membership allowance for each
+  // cancelled booking. Idempotent.
+  const restoreCreditsFlag = options.restoreCredits ?? true;
+  if (restoreCreditsFlag) {
+    for (const id of idsToCancel) {
+      try {
+        if (await bookingWasCreditPaid(admin, id)) {
+          const res = await restoreClassCreditsForBooking(admin, {
+            bookingId: id,
+            idempotencyPrefix: `staff_cancel:${id}`,
+          });
+          if (res.ok && res.restoredCredits > 0) {
+            await admin.from('events').insert({
+              venue_id: venueId,
+              booking_id: id,
+              event_type: 'class_credit_restored',
+              payload: { restored_credits: res.restoredCredits, source: 'staff_cancel' },
+            });
+            // Resolve guest auth user id to notify them.
+            const { data: bRow } = await admin
+              .from('bookings')
+              .select('guest_id')
+              .eq('id', id)
+              .maybeSingle();
+            const guestId = (bRow as { guest_id?: string } | null)?.guest_id;
+            if (guestId) {
+              const { data: g } = await admin
+                .from('guests')
+                .select('user_id')
+                .eq('id', guestId)
+                .maybeSingle();
+              const userId = (g as { user_id?: string | null } | null)?.user_id ?? null;
+              if (userId) {
+                await sendClassCommerceComm({
+                  venueId,
+                  userId,
+                  payload: {
+                    key: 'class_credits_restored',
+                    vars: { venueName: '', creditsRestored: res.restoredCredits },
+                  },
+                });
+              }
+            }
+          }
+        }
+        if (await bookingWasMembershipPaid(admin, id)) {
+          const res = await restoreMembershipAllowanceForBooking({
+            admin,
+            bookingId: id,
+            idempotencyPrefix: `staff_cancel:${id}`,
+          });
+          if (res.restoredSessions > 0) {
+            await admin.from('events').insert({
+              venue_id: venueId,
+              booking_id: id,
+              event_type: 'class_membership_allowance_restored',
+              payload: { restored_sessions: res.restoredSessions, source: 'staff_cancel' },
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[staff-cancel-booking] credit/allowance restore failed', err, { id });
+      }
+    }
   }
 
   const { data: venueRow } = await staffDb

@@ -23,6 +23,15 @@ export function formatCommunicationLogLabel(messageType: string): string {
     reminder_2: 'Reminder',
     post_visit_email: 'Post-visit thank you',
     marketing_bulk: 'Marketing message',
+    class_credits_purchased: 'Class credits purchased',
+    class_credits_expiring: 'Class credits expiring soon',
+    class_credits_restored: 'Class credits restored',
+    class_course_enrolled: 'Course enrollment confirmed',
+    class_course_refunded: 'Course refund',
+    class_membership_started: 'Membership started',
+    class_membership_renewed: 'Membership renewed',
+    class_membership_cancelling: 'Membership cancellation scheduled',
+    class_membership_ended: 'Membership ended',
   };
   if (titles[normalized]) return titles[normalized];
   if (titles[messageType]) return titles[messageType];

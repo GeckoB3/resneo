@@ -1,7 +1,5 @@
 'use client';
 
-import { Skeleton } from '@/components/ui/Skeleton';
-
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = [
   'January',
@@ -28,6 +26,24 @@ export function todayYmdLocal(): string {
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
 }
 
+/** Weeks ahead of today for staff booking date shortcuts (+2 … +6). */
+export const STAFF_BOOKING_WEEK_OFFSETS = [2, 3, 4, 5, 6] as const;
+
+/** Local calendar date N weeks from today (or from `base`). */
+export function addWeeksLocalYmd(weeksFromToday: number, base: Date = new Date()): string {
+  const d = new Date(base);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + weeksFromToday * 7);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function formatWeekShortcutLabel(weeks: number, ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return `+${weeks} wk`;
+  const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `+${weeks} wk · ${day}`;
+}
+
 const NAV_BTN_BASE =
   'min-h-10 min-w-10 shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
 const NAV_BTN_PUBLIC = 'ap-calendar-nav shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors';
@@ -41,8 +57,10 @@ export function ResourceCalendarMonth({
   onPrevMonth,
   onNextMonth,
   minSelectableDate,
+  maxSelectableDate,
   loading = false,
   accentPublic = false,
+  weekOffsetShortcuts = false,
 }: {
   year: number;
   month: number;
@@ -53,9 +71,13 @@ export function ResourceCalendarMonth({
   onNextMonth: () => void;
   /** First date users may book (inclusive), YYYY-MM-DD. */
   minSelectableDate: string;
+  /** Last date users may book (inclusive), YYYY-MM-DD. Omit for no upper limit. */
+  maxSelectableDate?: string;
   loading?: boolean;
   /** When true, nav/selection use appointment-public accent classes. */
   accentPublic?: boolean;
+  /** Staff booking: quick-pick +2 … +6 weeks from today below the grid. */
+  weekOffsetShortcuts?: boolean;
 }) {
   const first = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0).getDate();
@@ -90,30 +112,29 @@ export function ResourceCalendarMonth({
         ))}
       </div>
 
-      <div className="relative mt-1">
-        <div
-          className={`grid min-w-0 grid-cols-7 gap-1 auto-rows-[minmax(2.5rem,auto)] transition-opacity ${loading ? 'pointer-events-none opacity-40' : ''}`}
-        >
+      <div className="mt-1">
+        <div className="grid min-w-0 grid-cols-7 gap-1 auto-rows-[minmax(2.5rem,auto)]">
           {cells.map((d, idx) => {
             if (d === null) {
               return <div key={`e-${idx}`} className="min-h-[2.5rem]" aria-hidden />;
             }
             const ymd = `${year}-${pad2(month)}-${pad2(d)}`;
             const isPast = ymd < minSelectableDate;
+            const overMax = maxSelectableDate != null && ymd > maxSelectableDate;
             const hasAvail = availableDates.has(ymd);
             const isSelected = selectedDate === ymd;
-            const disabled = isPast || !hasAvail;
+            const disabled = isPast || overMax || (!hasAvail && !isSelected);
 
             let cellClass =
               'flex min-h-[2.5rem] min-w-0 items-center justify-center rounded-lg text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 sm:min-h-[2.75rem] ';
-            if (disabled) {
-              cellClass += isPast
-                ? 'cursor-not-allowed text-slate-300 '
-                : 'cursor-not-allowed bg-slate-50 text-slate-400 ';
-            } else if (isSelected) {
+            if (isSelected) {
               cellClass += accentPublic
                 ? 'ap-cal-day-selected cursor-pointer '
                 : 'cursor-pointer bg-slate-800 text-white shadow-sm ring-2 ring-slate-800 ring-offset-1 ';
+            } else if (disabled) {
+              cellClass += isPast || overMax
+                ? 'cursor-not-allowed text-slate-300 '
+                : 'cursor-not-allowed bg-slate-50 text-slate-400 ';
             } else if (hasAvail) {
               cellClass +=
                 'cursor-pointer bg-emerald-50 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-100 ';
@@ -138,20 +159,38 @@ export function ResourceCalendarMonth({
             );
           })}
         </div>
-
-        {loading ? (
-          <div
-            className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/60"
-            role="status"
-            aria-label="Loading availability"
-          >
-            <div className="w-full space-y-2 px-2">
-              <Skeleton.Line className="mx-auto w-1/2" />
-              <Skeleton.Block className="h-24" />
-            </div>
-          </div>
-        ) : null}
       </div>
+
+      {weekOffsetShortcuts ? (
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
+            {STAFF_BOOKING_WEEK_OFFSETS.map((weeks) => {
+              const ymd = addWeeksLocalYmd(weeks);
+              const outOfRange =
+                ymd < minSelectableDate || (maxSelectableDate != null && ymd > maxSelectableDate);
+              const isSelected = selectedDate === ymd;
+              return (
+                <button
+                  key={weeks}
+                  type="button"
+                  disabled={outOfRange}
+                  title={formatWeekShortcutLabel(weeks, ymd)}
+                  onClick={() => {
+                    if (!outOfRange) onSelectDate(ymd);
+                  }}
+                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    isSelected
+                      ? accentPublic
+                        ? 'ap-cal-day-selected'
+                        : 'bg-slate-800 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-800'
+                  }`}
+                >
+                  <span className="block tabular-nums">+{weeks} wk</span>
+                </button>
+              );
+            })}
+        </div>
+      ) : null}
 
       <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
         <span className="inline-flex items-center gap-1.5">

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { classCreditProductBodySchema } from '@/lib/class-commerce/product-schemas';
 import { assertEligibleClassTypesForVenue } from '@/lib/class-commerce/validate-venue-product-refs';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 /**
  * GET /api/venue/class-credit-products — list credit packs for the current venue (staff).
@@ -15,6 +16,8 @@ export async function GET() {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { data, error } = await staff.db
       .from('class_credit_products')
@@ -41,6 +44,8 @@ export async function POST(request: NextRequest) {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const body = await request.json().catch(() => ({}));
     const parsed = classCreditProductBodySchema.safeParse(body);

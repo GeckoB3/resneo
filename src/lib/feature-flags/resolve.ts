@@ -10,6 +10,7 @@ const ENV_BY_FLAG: Record<AppointmentsFeatureFlagKey, string> = {
   waitlist_v2: 'FEATURE_FLAG_WAITLIST_V2',
   guest_self_reschedule: 'FEATURE_FLAG_GUEST_SELF_RESCHEDULE',
   any_available_practitioner: 'FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER',
+  class_commerce_enabled: 'FEATURE_FLAG_CLASS_COMMERCE_ENABLED',
 };
 
 /** Per-flag defaults when venue storage omits the key (env override still wins). */

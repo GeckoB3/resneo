@@ -59,9 +59,13 @@ function formatCheckedInAt(value: string | null): string {
 function ClassBookingConcertina({
   attendee,
   currency,
+  instanceId,
+  onMutated,
 }: {
   attendee: AttendeeRow;
   currency: string;
+  instanceId: string;
+  onMutated: () => void;
 }) {
   const guestName = attendee.guest_name ?? 'Guest';
   const contactSummary = attendee.guest_phone ?? attendee.guest_email ?? 'No contact';
@@ -128,8 +132,118 @@ function ClassBookingConcertina({
         >
           Open full booking
         </Link>
+        <AttendanceActions
+          instanceId={instanceId}
+          bookingId={attendee.booking_id}
+          status={attendee.status}
+          checkedInAt={attendee.checked_in_at}
+          onMutated={onMutated}
+        />
       </div>
     </details>
+  );
+}
+
+function CheckInAllButton({
+  instanceId,
+  onMutated,
+}: {
+  instanceId: string;
+  onMutated: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function click() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/venue/class-instances/${instanceId}/attendees/check-in-all`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr((data as { error?: string }).error ?? 'Bulk check-in failed');
+        return;
+      }
+      onMutated();
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void click()}
+        disabled={busy}
+        className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+      >
+        {busy ? 'Checking in…' : 'Check in all'}
+      </button>
+      {err ? <span className="basis-full text-xs text-red-600">{err}</span> : null}
+    </>
+  );
+}
+
+function AttendanceActions({
+  instanceId,
+  bookingId,
+  status,
+  checkedInAt,
+  onMutated,
+}: {
+  instanceId: string;
+  bookingId: string;
+  status: string;
+  checkedInAt: string | null;
+  onMutated: () => void;
+}) {
+  const [busy, setBusy] = useState<'check_in' | 'no_show' | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (status === 'Cancelled') return null;
+
+  async function call(kind: 'check_in' | 'no_show') {
+    setBusy(kind);
+    setErr(null);
+    try {
+      const path = kind === 'check_in' ? 'check-in' : 'no-show';
+      const res = await fetch(
+        `/api/venue/class-instances/${instanceId}/attendees/${bookingId}/${path}`,
+        { method: 'POST' },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr((data as { error?: string }).error ?? 'Update failed');
+        return;
+      }
+      onMutated();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const alreadyCheckedIn = Boolean(checkedInAt);
+  const alreadyNoShow = status === 'No Show';
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        disabled={busy === 'check_in' || alreadyCheckedIn}
+        onClick={() => void call('check_in')}
+        className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {alreadyCheckedIn ? 'Checked in' : busy === 'check_in' ? 'Checking…' : 'Check in'}
+      </button>
+      <button
+        type="button"
+        disabled={busy === 'no_show' || alreadyNoShow}
+        onClick={() => void call('no_show')}
+        className="rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {alreadyNoShow ? 'No show' : busy === 'no_show' ? 'Marking…' : 'No show'}
+      </button>
+      {err ? <p className="basis-full text-[11px] text-red-600">{err}</p> : null}
+    </div>
   );
 }
 
@@ -438,6 +552,8 @@ export function ClassInstanceDetailSheet({
                       key={attendee.booking_id}
                       attendee={attendee}
                       currency={currency}
+                      instanceId={instanceId ?? ''}
+                      onMutated={() => void load()}
                     />
                   ))
                 )}
@@ -539,6 +655,9 @@ export function ClassInstanceDetailSheet({
                 >
                   Download CSV
                 </button>
+              ) : null}
+              {attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No Show' && !a.checked_in_at) ? (
+                <CheckInAllButton instanceId={instanceId ?? ''} onMutated={() => void load()} />
               ) : null}
               {isAdmin && instance && !instance.is_cancelled ? (
                 <button

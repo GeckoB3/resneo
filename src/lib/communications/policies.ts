@@ -20,7 +20,30 @@ export type CommunicationMessageKey =
   | 'custom_message'
   | 'no_show_notification'
   | 'post_visit_thankyou'
-  | 'appointment_waitlist_offer';
+  | 'appointment_waitlist_offer'
+  // Phase 2 §5.5 — class commerce.
+  | 'class_credits_purchased'
+  | 'class_credits_expiring'
+  | 'class_credits_restored'
+  | 'class_course_enrolled'
+  | 'class_course_refunded'
+  | 'class_membership_started'
+  | 'class_membership_renewed'
+  | 'class_membership_cancelling'
+  | 'class_membership_ended';
+
+/** Read-only set of the class-commerce keys for use in dispatch helpers. */
+export const CLASS_COMMERCE_MESSAGE_KEYS: readonly CommunicationMessageKey[] = [
+  'class_credits_purchased',
+  'class_credits_expiring',
+  'class_credits_restored',
+  'class_course_enrolled',
+  'class_course_refunded',
+  'class_membership_started',
+  'class_membership_renewed',
+  'class_membership_cancelling',
+  'class_membership_ended',
+] as const;
 
 export interface LaneMessagePolicy {
   enabled: boolean;
@@ -153,6 +176,80 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
       hoursBefore: null,
       hoursAfter: null,
     },
+    // Phase 2 §5.5 — class commerce keys. Email-on, SMS-off by default; venues
+    // can toggle SMS for the keys that have it listed under ALLOWED_CHANNELS.
+    class_credits_purchased: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_credits_expiring: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_credits_restored: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_course_enrolled: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_course_refunded: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_membership_started: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_membership_renewed: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_membership_cancelling: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    class_membership_ended: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
   };
 }
 
@@ -243,6 +340,16 @@ const ALLOWED_CHANNELS_BY_MESSAGE: Record<
   no_show_notification: EMAIL_ONLY,
   post_visit_thankyou: EMAIL_ONLY,
   appointment_waitlist_offer: EMAIL_AND_SMS,
+  // Class commerce — email-only for v1; SMS can land per-key later.
+  class_credits_purchased: EMAIL_ONLY,
+  class_credits_expiring: EMAIL_ONLY,
+  class_credits_restored: EMAIL_ONLY,
+  class_course_enrolled: EMAIL_ONLY,
+  class_course_refunded: EMAIL_ONLY,
+  class_membership_started: EMAIL_ONLY,
+  class_membership_renewed: EMAIL_ONLY,
+  class_membership_cancelling: EMAIL_ONLY,
+  class_membership_ended: EMAIL_ONLY,
 };
 
 function sanitizeChannels(
@@ -380,6 +487,51 @@ function sanitizeLanePolicies(
       'appointment_waitlist_offer',
       row.appointment_waitlist_offer,
       fallback.appointment_waitlist_offer,
+    ),
+    class_credits_purchased: sanitizeMessagePolicy(
+      'class_credits_purchased',
+      row.class_credits_purchased,
+      fallback.class_credits_purchased,
+    ),
+    class_credits_expiring: sanitizeMessagePolicy(
+      'class_credits_expiring',
+      row.class_credits_expiring,
+      fallback.class_credits_expiring,
+    ),
+    class_credits_restored: sanitizeMessagePolicy(
+      'class_credits_restored',
+      row.class_credits_restored,
+      fallback.class_credits_restored,
+    ),
+    class_course_enrolled: sanitizeMessagePolicy(
+      'class_course_enrolled',
+      row.class_course_enrolled,
+      fallback.class_course_enrolled,
+    ),
+    class_course_refunded: sanitizeMessagePolicy(
+      'class_course_refunded',
+      row.class_course_refunded,
+      fallback.class_course_refunded,
+    ),
+    class_membership_started: sanitizeMessagePolicy(
+      'class_membership_started',
+      row.class_membership_started,
+      fallback.class_membership_started,
+    ),
+    class_membership_renewed: sanitizeMessagePolicy(
+      'class_membership_renewed',
+      row.class_membership_renewed,
+      fallback.class_membership_renewed,
+    ),
+    class_membership_cancelling: sanitizeMessagePolicy(
+      'class_membership_cancelling',
+      row.class_membership_cancelling,
+      fallback.class_membership_cancelling,
+    ),
+    class_membership_ended: sanitizeMessagePolicy(
+      'class_membership_ended',
+      row.class_membership_ended,
+      fallback.class_membership_ended,
     ),
   };
 }

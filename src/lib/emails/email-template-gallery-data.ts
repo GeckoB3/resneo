@@ -86,6 +86,15 @@ function messageKeyTitle(key: CommunicationMessageKey): string {
     no_show_notification: 'No-show notification',
     post_visit_thankyou: 'Post-visit thank you',
     appointment_waitlist_offer: 'Waitlist invite',
+    class_credits_purchased: 'Class credits purchased',
+    class_credits_expiring: 'Class credits expiring soon',
+    class_credits_restored: 'Class credits restored',
+    class_course_enrolled: 'Course enrollment confirmed',
+    class_course_refunded: 'Course refund',
+    class_membership_started: 'Membership started',
+    class_membership_renewed: 'Membership renewed',
+    class_membership_cancelling: 'Membership cancellation scheduled',
+    class_membership_ended: 'Membership ended',
   };
   return titles[key];
 }

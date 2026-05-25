@@ -51,6 +51,14 @@
     {
       "path": "/api/cron/baseline-metrics-snapshot",
       "schedule": "0 3 * * 0"
+    },
+    {
+      "path": "/api/cron/class-credit-expiry",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/class-membership-period-reset",
+      "schedule": "0 3 * * *"
     }
   ]
 }

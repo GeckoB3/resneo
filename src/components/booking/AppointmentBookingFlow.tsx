@@ -1042,6 +1042,14 @@ export function AppointmentBookingFlow({
     loadAppointmentCalendarMonth,
   ]);
 
+  /** Keep the calendar grid on the month of the selected date (e.g. +N week shortcuts). */
+  useEffect(() => {
+    if (!date) return;
+    const [y, m] = date.split('-').map(Number);
+    if (!y || !m) return;
+    setCalendarMonth((prev) => (prev.year === y && prev.month === m ? prev : { year: y, month: m }));
+  }, [date]);
+
   /** Reset the displayed month whenever the user changes service or practitioner. */
   useEffect(() => {
     const base = date || todayStr();
@@ -2739,6 +2747,7 @@ export function AppointmentBookingFlow({
               onNextMonth={goNextMonth}
               minSelectableDate={todayYmdLocal()}
               loading={loadingCalendar}
+              weekOffsetShortcuts={isStaff}
             />
           </div>
           {isStaffWalkInAppointment && (
@@ -3425,6 +3434,7 @@ export function AppointmentBookingFlow({
               onNextMonth={goNextMonth}
               minSelectableDate={todayYmdLocal()}
               loading={loadingCalendar}
+              weekOffsetShortcuts={isStaff}
             />
           </div>
           {loading ? (

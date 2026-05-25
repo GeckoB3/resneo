@@ -36,6 +36,7 @@ import {
   bookingStatusDisplayLabel,
   inferBookingRowModel,
   isTableReservationBooking,
+  showBookingModelTypePill,
 } from '@/lib/booking/infer-booking-row-model';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
@@ -226,19 +227,6 @@ function formatDateFull(date: string): string {
 }
 function statusBorderClass(status: string): string {
   return bookingStatusVisualForKey(status).listBorderLeft;
-}
-
-function sourceBadge(source: string) {
-  const key = source.toLowerCase();
-  const variantMap: Record<string, PillVariant> = {
-    online: 'brand',
-    phone: 'neutral',
-    'walk-in': 'warning',
-    staff: 'neutral',
-    booking_page: 'brand',
-  };
-  const label = key === 'booking_page' ? 'online' : source;
-  return <Pill variant={variantMap[key] ?? 'neutral'} size="sm">{label}</Pill>;
 }
 
 function bookingTypeFilterLabel(model: BookingModel): string {
@@ -1421,8 +1409,6 @@ export function DaySheetView({
                                   </span>
                                 </>
                               ) : null}
-                              <span className="hidden shrink-0 text-slate-300 sm:inline">·</span>
-                              <span className="hidden shrink-0 sm:inline-flex">{sourceBadge(b.source)}</span>
                               <BookingStatusPill statusKey={b.status}>{displayStatus}</BookingStatusPill>
                               {isTableBooking && b.area_name ? (
                                 <span className="hidden sm:inline-flex">
@@ -1437,7 +1423,7 @@ export function DaySheetView({
                                 </Pill>
                               ) : null}
                               {showAttendanceConfirmedSupplementPill(b) ? <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill> : null}
-                              {!isTableBooking ? (
+                              {showBookingModelTypePill(inferredModel) ? (
                                 <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
                                   {bookingTypeFilterLabel(inferredModel)}
                                 </Pill>

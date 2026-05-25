@@ -42,10 +42,31 @@ export function LoginForm({
     const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
     if (err) { setError(err.message); return; }
-    const { data: { user } } = await supabase.auth.getUser();
-    let destination = redirectTo ?? '/dashboard';
-    if (!redirectTo && hasPlatformSuperuserJwtRole(user)) {
-      destination = '/super';
+
+    // Route through the same server-side resolver the magic-link flow uses so
+    // that:
+    //   1. claim_user_account() runs and backfills any unlinked guest rows,
+    //   2. dual-role users (staff + guest at the same venue) land on
+    //      /auth/choose-destination instead of being hard-coded to /dashboard,
+    //   3. set-password and platform-superuser gates are honoured.
+    //
+    // We only fall back to the local heuristic when the resolver is unreachable.
+    let destination: string;
+    try {
+      const res = await fetch(
+        `/api/auth/resolve-next?next=${encodeURIComponent(redirectTo ?? '')}`,
+        { credentials: 'include' },
+      );
+      if (!res.ok) throw new Error(`resolve-next ${res.status}`);
+      const body = (await res.json()) as { destination?: string };
+      destination = body.destination?.trim() || (redirectTo ?? '/dashboard');
+    } catch (resolveErr) {
+      console.warn('[login] resolve-next fallback:', resolveErr instanceof Error ? resolveErr.message : resolveErr);
+      const { data: { user } } = await supabase.auth.getUser();
+      destination = redirectTo ?? '/dashboard';
+      if (!redirectTo && hasPlatformSuperuserJwtRole(user)) {
+        destination = '/super';
+      }
     }
     window.location.href = destination;
   }

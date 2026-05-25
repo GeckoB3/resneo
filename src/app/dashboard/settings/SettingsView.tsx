@@ -79,6 +79,11 @@ const TABS = [
     description: 'Your account and business contact details used across the dashboard.',
   },
   {
+    key: 'business-hours',
+    label: 'Business hours',
+    description: 'Weekly opening hours and one-off closures or exceptions.',
+  },
+  {
     key: 'booking-settings',
     label: 'Booking Settings',
     description: 'Active booking models, guest sign-in requirements, and optional appointment features.',
@@ -87,11 +92,6 @@ const TABS = [
     key: 'booking-page',
     label: 'Booking Page',
     description: 'Public URL, branding, website embed, and QR code for your guest-facing booking page.',
-  },
-  {
-    key: 'business-hours',
-    label: 'Business hours',
-    description: 'Weekly opening hours and one-off closures or exceptions.',
   },
   {
     key: 'plan',

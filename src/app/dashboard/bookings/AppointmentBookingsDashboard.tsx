@@ -28,7 +28,12 @@ import { readResponseJson } from '@/lib/http/read-response-json';
 import { formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
-import { inferBookingRowModel, bookingModelShortLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import {
+  inferBookingRowModel,
+  bookingModelShortLabel,
+  isTableReservationBooking,
+  showBookingModelTypePill,
+} from '@/lib/booking/infer-booking-row-model';
 import {
   isAttendanceConfirmed,
   showAttendanceConfirmedSupplementPill,
@@ -271,20 +276,6 @@ function bookingTypePillVariant(model: BookingModel): PillVariant {
     default:
       return 'neutral';
   }
-}
-
-function sourcePillVariant(source: string): PillVariant {
-  if (source === 'linked') return 'warning';
-  if (source === 'online' || source === 'booking_page') return 'brand';
-  if (source === 'walk-in') return 'warning';
-  return 'neutral';
-}
-
-function sourceLabelShort(source: string): string {
-  if (source === 'booking_page' || source === 'online') return 'Online';
-  if (source === 'walk-in') return 'Walk-in';
-  if (source === 'phone') return 'Phone';
-  return source.replace(/_/g, ' ');
 }
 
 function depositPillVariant(status: string): PillVariant {
@@ -1511,11 +1502,13 @@ export function AppointmentBookingsDashboard({
                   Confirmed
                 </BookingStatusPill>
               )}
-              <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
-                <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
-                  {typeLabel}
-                </Pill>
-              </span>
+              {showBookingModelTypePill(bookingModel) ? (
+                <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
+                  <Pill variant={bookingTypePillVariant(bookingModel)} size="sm">
+                    {typeLabel}
+                  </Pill>
+                </span>
+              ) : null}
               {duration != null && (
                 <span
                   className={
@@ -1538,15 +1531,17 @@ export function AppointmentBookingsDashboard({
                   {b.party_size} people
                 </span>
               )}
-              <span
-                className={
-                  expanded || linkedMeta ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'
-                }
-              >
-                <Pill variant={linkedMeta ? 'warning' : sourcePillVariant(b.source)} size="sm">
-                  {linkedMeta ? 'Linked' : sourceLabelShort(b.source)}
-                </Pill>
-              </span>
+              {linkedMeta ? (
+                <span
+                  className={
+                    expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'
+                  }
+                >
+                  <Pill variant="warning" size="sm">
+                    Linked
+                  </Pill>
+                </span>
+              ) : null}
               {priceDisplay && (
                 <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                   <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>

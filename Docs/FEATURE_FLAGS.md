@@ -9,6 +9,7 @@ Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Review-And-Roadm
 | `waitlist_v2` | Appointment schedule waitlist (guest join, staff offer with guest notify, staff book/confirm, auto-offer on appointment cancel, `waitlist_converted` audit event) | P1a.3 |
 | `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify). Cancellation notice applies to refunds on cancel, not to whether reschedule is allowed. **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
+| `class_commerce_enabled` | Gates the entire class-commerce surface area: credit packs, courses, memberships, recurring reservations, and the dashboard products UI. See [reserveni-class-products-plan.md](./reserveni-class-products-plan.md) §10. Off-state hides the dashboard `/dashboard/class-timetable/products` page and returns 403 from all `/api/venue/class-{credit,course,membership}-products/*` routes. Existing class instances and guest bookings continue to work — the flag strictly gates **prepaid commerce** surfaces. | Class products §10 |
 
 When `any_available_practitioner` is on, venues can set `any_available_practitioner_config` in the same JSONB:
 
@@ -32,6 +33,7 @@ All flags default to **off** until enabled per venue or via environment override
 | `waitlist_v2` | `FEATURE_FLAG_WAITLIST_V2` |
 | `guest_self_reschedule` | `FEATURE_FLAG_GUEST_SELF_RESCHEDULE` |
 | `any_available_practitioner` | `FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER` |
+| `class_commerce_enabled` | `FEATURE_FLAG_CLASS_COMMERCE_ENABLED` |
 
 Example (enable all in staging):
 

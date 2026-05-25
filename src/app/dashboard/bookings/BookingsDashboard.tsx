@@ -40,6 +40,7 @@ import {
   bookingModelShortLabel,
   isTableReservationBooking,
   bookingStatusDisplayLabel,
+  showBookingModelTypePill,
 } from '@/lib/booking/infer-booking-row-model';
 import {
   isAttendanceConfirmed,
@@ -2154,17 +2155,6 @@ function statusBorderClass(booking: BookingRow): string {
   return bookingStatusVisualForRow(booking).listBorderLeft;
 }
 
-function sourceBadge(s: string) {
-  const variantMap: Record<string, PillVariant> = {
-    online: 'brand',
-    phone: 'neutral',
-    'walk-in': 'warning',
-    booking_page: 'brand',
-  };
-  const label = s === 'booking_page' ? 'online' : s;
-  return <Pill variant={variantMap[s] ?? 'neutral'} size="sm">{label}</Pill>;
-}
-
 function depositBadge(status: string, amountPence: number | null) {
   if (status === 'Not Required') return null;
   const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
@@ -2328,20 +2318,6 @@ function BookingsAccordionList({
                         </span>
                       </>
                     ) : null}
-                    <span
-                      className={
-                        expanded
-                          ? 'inline shrink-0 text-slate-300'
-                          : 'hidden shrink-0 text-slate-300 sm:inline'
-                      }
-                    >
-                      ·
-                    </span>
-                    <span
-                      className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}
-                    >
-                      {sourceBadge(booking.source)}
-                    </span>
                     <BookingStatusPill statusKey={booking.status}>{displayStatus}</BookingStatusPill>
                     {isTableBooking && showAreaBadge && booking.area_name && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
@@ -2357,13 +2333,13 @@ function BookingsAccordionList({
                     {showAttendanceConfirmedSupplementPill(booking) && (
                       <BookingStatusPill statusKey="Confirmed" dot>Confirmed</BookingStatusPill>
                     )}
-                    {!isTableBooking && (
+                    {showBookingModelTypePill(inferredModel) ? (
                       <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 md:inline-flex'}>
                         <Pill variant={bookingTypePillVariant(inferredModel)} size="sm">
                           {bookingTypeFilterLabel(inferredModel)}
                         </Pill>
                       </span>
-                    )}
+                    ) : null}
                     {booking.dietary_notes && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="warning" size="sm" dot>Dietary</Pill>

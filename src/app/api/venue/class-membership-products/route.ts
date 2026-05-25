@@ -7,6 +7,7 @@ import {
 } from '@/lib/class-commerce/product-schemas';
 import { assertEligibleClassTypesForVenue } from '@/lib/class-commerce/validate-venue-product-refs';
 import { createMembershipRecurringProductAndPrice } from '@/lib/stripe/connected-membership-product';
+import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 
 /**
  * GET /api/venue/class-membership-products — list membership products (staff).
@@ -19,6 +20,8 @@ export async function GET() {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const { data, error } = await staff.db
       .from('class_membership_products')
@@ -44,6 +47,8 @@ export async function POST(request: NextRequest) {
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
     }
+    const gate = await requireClassCommercePlan(staff.db, staff.venue_id);
+    if (!gate.ok) return gate.response;
 
     const body = await request.json().catch(() => ({}));
     const parsed = classMembershipProductBodySchema.safeParse(body);

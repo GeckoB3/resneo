@@ -80,3 +80,19 @@ export async function archiveStripePriceOnConnectedAccount(
     console.warn('[archiveStripePriceOnConnectedAccount] non-fatal', priceId, e);
   }
 }
+
+/**
+ * Best-effort: archive the Stripe Product so it is no longer offered for new checkouts.
+ * Stripe will not allow archiving a Product whose only Price is still active — callers
+ * should archive all live Prices first (the membership product helper above does this).
+ */
+export async function archiveStripeProductOnConnectedAccount(
+  stripeAccountId: string,
+  productId: string,
+): Promise<void> {
+  try {
+    await stripe.products.update(productId, { active: false }, { stripeAccount: stripeAccountId });
+  } catch (e) {
+    console.warn('[archiveStripeProductOnConnectedAccount] non-fatal', productId, e);
+  }
+}

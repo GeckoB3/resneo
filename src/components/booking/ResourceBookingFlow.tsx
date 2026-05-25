@@ -835,6 +835,7 @@ export function ResourceBookingFlow({
             minSelectableDate={minYmd}
             loading={loadingCalendar}
             accentPublic={isPublicGuest}
+            weekOffsetShortcuts={isStaff}
           />
         </div>
       )}

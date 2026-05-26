@@ -12,7 +12,11 @@ import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_I
 import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
-import { SIGNUP_TRIAL_SHORT_LABEL, signupTrialSmsDuringTrialNotice } from '@/lib/signup-trial-copy';
+import {
+  SIGNUP_TRIAL_CARD_NOTICE,
+  SIGNUP_TRIAL_SHORT_LABEL,
+  signupTrialSmsDuringTrialNotice,
+} from '@/lib/signup-trial-copy';
 
 type FaqItem = { question: string; answer: string };
 
@@ -109,8 +113,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         },
         {
           question: 'Can I try ReserveNI before committing?',
-          answer:
-            'You can contact us for a free demo tailored to your business type—we will walk you through how ReserveNI fits your setup and answer questions before you sign up.',
+          answer: `Yes. New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan when they sign up online. ${SIGNUP_TRIAL_CARD_NOTICE} You can also contact us for a free demo tailored to your business—we will walk you through how ReserveNI fits your setup and answer questions before you sign up.`,
         },
       ],
     },

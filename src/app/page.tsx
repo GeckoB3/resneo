@@ -52,7 +52,7 @@ const steps = [
     number: "1",
     title: "Pick your plan",
     description:
-      "Choose Appointments Light, Plus, or Pro, or the Restaurant plan, then create your account. Founding Partner spots are available for qualifying businesses.",
+      "Choose Appointments Light, Plus, or Pro, or the Restaurant plan, then create your account. Every paid plan includes a 14-day free trial.",
   },
   { number: "2", title: "Choose your booking models", description: "Appointments includes appointments, classes, events, and resources. Enable the ones you want to start with." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },

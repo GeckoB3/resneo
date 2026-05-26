@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ImportRowPreviewDialog } from '@/components/import/ImportRowPreviewDialog';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
 import { readResponseJson } from '@/lib/api/read-response-json';
+import { SEND_IMPORT_REMINDERS_SESSION_KEY } from '@/lib/import/booking-import-comms';
 
 type Issue = {
   id: string;
@@ -29,7 +30,11 @@ type ValidationSummary = {
 
 type SessionPayload = {
   status?: string;
-  session_settings?: { validation_summary?: ValidationSummary } | null;
+  has_booking_file?: boolean;
+  session_settings?: {
+    validation_summary?: ValidationSummary;
+    send_import_reminders?: boolean;
+  } | null;
   validation_job_id?: string | null;
   validation_job_status?: string | null;
   validation_job_error?: string | null;
@@ -105,6 +110,9 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
 
   const [preview, setPreview] = useState<{ fileId: string; row: number; filename: string } | null>(null);
   const [patchingId, setPatchingId] = useState<string | null>(null);
+  const [hasBookingFile, setHasBookingFile] = useState(false);
+  const [sendImportReminders, setSendImportReminders] = useState(true);
+  const [savingImportCommsPref, setSavingImportCommsPref] = useState(false);
 
   const clearPoll = useCallback(() => {
     if (pollTimer.current) {
@@ -118,12 +126,35 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     setCounts(data.issues?.length ? countsFromIssues(data.issues) : null);
     const s = data.session?.session_settings?.validation_summary ?? null;
     setSummary(s ?? null);
+    setHasBookingFile(Boolean(data.session?.has_booking_file));
+    const rawReminders = data.session?.session_settings?.[SEND_IMPORT_REMINDERS_SESSION_KEY];
+    setSendImportReminders(rawReminders !== false);
     const map: Record<string, string> = {};
     for (const f of data.files ?? []) {
       map[f.id] = f.filename;
     }
     setFilesById(map);
   }, []);
+
+  const persistSendImportReminders = useCallback(
+    async (enabled: boolean) => {
+      setSavingImportCommsPref(true);
+      try {
+        const res = await fetch(`/api/import/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_settings: { [SEND_IMPORT_REMINDERS_SESSION_KEY]: enabled },
+          }),
+        });
+        const data = await readResponseJson<{ error?: string }>(res);
+        if (!res.ok) throw new Error(data.error ?? 'Failed to save reminder preference');
+      } finally {
+        setSavingImportCommsPref(false);
+      }
+    },
+    [sessionId],
+  );
 
   const waitForValidation = useCallback(
     async (initialJob?: string | null) => {
@@ -637,6 +668,36 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             Rows with unresolved blocking errors will be skipped unless you chose &quot;import anyway&quot; for email
             issues.
           </p>
+        </div>
+      )}
+
+      {!loading && !polling && hasBookingFile && (
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              checked={sendImportReminders}
+              disabled={savingImportCommsPref}
+              onChange={(e) => {
+                const enabled = e.target.checked;
+                setSendImportReminders(enabled);
+                void persistSendImportReminders(enabled);
+              }}
+            />
+            <span>
+              <span className="font-medium text-slate-900">Send upcoming reminders for imported bookings</span>
+              <span className="mt-1 block text-xs text-slate-600">
+                On by default. Reserve NI will not resend booking confirmations from import, but scheduled reminders
+                (for example 24 hours and 2 hours before the appointment, per your Communications settings) will run for
+                future bookings when their send time is still ahead. Reminders whose window has already passed at import
+                are not sent.
+              </span>
+              {savingImportCommsPref && (
+                <span className="mt-1 block text-xs text-slate-500">Saving…</span>
+              )}
+            </span>
+          </label>
         </div>
       )}
 

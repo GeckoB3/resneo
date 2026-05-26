@@ -50,6 +50,11 @@ import {
 } from '@/lib/import/import-execute-state';
 import { shouldFlushImportProgressToDb } from '@/lib/import/import-execute-progress';
 import { evaluateClientRowNameRule } from '@/lib/import/client-row-name-rule';
+import {
+  bookingImportCommsFields,
+  parseSendImportRemindersFromSession,
+  recordImportPassedReminderLogs,
+} from '@/lib/import/booking-import-comms';
 
 function hashGuest(email: string | null, phone: string | null): string | null {
   if (!email && !phone) return null;
@@ -123,24 +128,6 @@ function rowShouldSkip(list: IssueRow[] | undefined): boolean {
 
 function shouldUpdateExisting(list: IssueRow[] | undefined): boolean {
   return Boolean(list?.some((i) => i.issue_type === 'existing_client' && i.user_decision === 'update_existing'));
-}
-
-/** Suppress duplicate confirmations; sentinel reminder timestamps when inside reminder windows. */
-function bookingImportCommsFields(dateIso: string, timeForDb: string): Record<string, unknown> {
-  const t = timeForDb.length >= 8 ? timeForDb : `${timeForDb.slice(0, 5)}:00`;
-  const start = new Date(`${dateIso}T${t}`);
-  if (Number.isNaN(start.getTime())) {
-    return { suppress_import_comms: true };
-  }
-  const hours = (start.getTime() - Date.now()) / 3_600_000;
-  const o: Record<string, unknown> = { suppress_import_comms: true };
-  if (hours <= 24) {
-    o.reminder_sent_at = new Date().toISOString();
-    o.final_reminder_sent_at = new Date().toISOString();
-  } else if (hours <= 48) {
-    o.reminder_sent_at = new Date().toISOString();
-  }
-  return o;
 }
 
 async function ensureCustomClientFieldDefinitions(
@@ -232,6 +219,17 @@ export async function runImportExecuteBatch(
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
   };
   const datePref = settings.ambiguous_date_format ?? null;
+  const sendImportReminders = parseSendImportRemindersFromSession(
+    session.session_settings as Record<string, unknown> | null,
+  );
+
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('timezone')
+    .eq('id', venueId)
+    .maybeSingle();
+  const venueTimeZone =
+    (venueRow as { timezone?: string | null } | null)?.timezone ?? 'Europe/London';
 
   const venueMode = await resolveVenueMode(admin, venueId);
   const bookingModel = venueMode.bookingModel;
@@ -1072,7 +1070,14 @@ export async function runImportExecuteBatch(
         insert.area_id = defaultAreaId;
       }
 
-      Object.assign(insert, bookingImportCommsFields(row.booking_date, timeForDb));
+      Object.assign(
+        insert,
+        bookingImportCommsFields({
+          bookingDateYmd: row.booking_date,
+          timeForDb,
+          sendImportReminders,
+        }),
+      );
 
       const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
       if (bErr || !booking) {
@@ -1110,6 +1115,25 @@ export async function runImportExecuteBatch(
         st.stagedRowIndex += 1;
         await bumpProgress();
         continue;
+      }
+
+      if (sendImportReminders && !insert.suppress_import_comms) {
+        try {
+          await recordImportPassedReminderLogs(admin, {
+            venueId,
+            bookingId: booking.id as string,
+            bookingDateYmd: row.booking_date,
+            bookingTimeForDb: timeForDb,
+            bookingModel: bookingModel as BookingModel,
+            venueTimeZone,
+            recipientEmail: em,
+            recipientPhone: ph.e164,
+          });
+        } catch (commsLogErr) {
+          console.error('[import execute] passed reminder log failed:', commsLogErr, {
+            bookingId: booking.id,
+          });
+        }
       }
 
       const refPayload = {
@@ -1452,7 +1476,14 @@ export async function runImportExecuteBatch(
         insert.area_id = defaultAreaId;
       }
 
-      Object.assign(insert, bookingImportCommsFields(dateIso, timeForDb));
+      Object.assign(
+        insert,
+        bookingImportCommsFields({
+          bookingDateYmd: dateIso,
+          timeForDb,
+          sendImportReminders,
+        }),
+      );
 
       const { data: booking, error: bErr } = await admin.from('bookings').insert(insert).select('id').single();
       if (bErr || !booking) {
@@ -1490,6 +1521,25 @@ export async function runImportExecuteBatch(
         st.bookingRowIndex += 1;
         await bumpProgress();
         continue;
+      }
+
+      if (sendImportReminders && !insert.suppress_import_comms) {
+        try {
+          await recordImportPassedReminderLogs(admin, {
+            venueId,
+            bookingId: booking.id as string,
+            bookingDateYmd: dateIso,
+            bookingTimeForDb: timeForDb,
+            bookingModel: bookingModel as BookingModel,
+            venueTimeZone,
+            recipientEmail: em,
+            recipientPhone: ph.e164,
+          });
+        } catch (commsLogErr) {
+          console.error('[import execute] passed reminder log failed:', commsLogErr, {
+            bookingId: booking.id,
+          });
+        }
       }
 
       const csvRefPayload = {

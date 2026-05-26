@@ -10,9 +10,7 @@ import {
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
-import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
-import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
-import { SIGNUP_TRIAL_FOOTER_NOTICE, SIGNUP_TRIAL_SHORT_LABEL } from '@/lib/signup-trial-copy';
+import { SIGNUP_TRIAL_SHORT_LABEL, publicPricingFooterDisclaimer } from '@/lib/signup-trial-copy';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -149,36 +147,20 @@ export function PricingSection() {
           </div>
         )}
 
-        <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-slate-500">
-          {SIGNUP_TRIAL_FOOTER_NOTICE} No per-booking fees. No commission. {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}{' '}
-          {SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}
+        <p className="mx-auto mt-10 max-w-2xl text-center text-sm leading-relaxed text-slate-500">
+          {publicPricingFooterDisclaimer()}
         </p>
 
-        <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">
-          <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900">Founding Partner</h3>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                  Limited
-                </span>
-                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200">
-                  50% off for six months
-                </span>
-              </div>
-              <p className="mt-2 text-sm font-medium text-emerald-900">
-                Choose any Appointments or Restaurant plan (whichever fits your business). We onboard you personally.
-              </p>
-              <p className="mt-1 text-xs text-emerald-700">Limited spots available.</p>
-            </div>
-            <a
-              href="#contact"
-              className="inline-flex h-11 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 sm:min-w-[10rem]"
-            >
-              Apply now
-            </a>
-          </div>
-        </div>
+        <p className="mx-auto mt-10 max-w-2xl text-center text-sm leading-relaxed text-slate-600">
+          Would you like help with onboarding?{' '}
+          <a
+            href="#contact"
+            className="font-semibold text-brand-600 underline decoration-brand-600/30 underline-offset-2 hover:text-brand-700"
+          >
+            Use our contact form
+          </a>{' '}
+          and we will walk you through setup for your business.
+        </p>
       </div>
     </section>
   );

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireImportAdmin } from '@/lib/import/auth';
+import { SEND_IMPORT_REMINDERS_SESSION_KEY } from '@/lib/import/booking-import-comms';
 
 export async function GET(
   _request: NextRequest,
@@ -43,6 +45,79 @@ export async function GET(
     booking_references: bookingReferences ?? [],
     booking_rows_preview: bookingRows ?? [],
   });
+}
+
+const patchBodySchema = z.object({
+  session_settings: z
+    .object({
+      ambiguous_date_format: z.enum(['dd/MM/yyyy', 'MM/dd/yyyy']).optional().nullable(),
+      [SEND_IMPORT_REMINDERS_SESSION_KEY]: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> },
+) {
+  const ctx = await requireImportAdmin();
+  if ('response' in ctx) return ctx.response;
+  const { staff } = ctx;
+  const { sessionId } = await params;
+
+  const body = await request.json().catch(() => ({}));
+  const parsed = patchBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+  }
+  if (!parsed.data.session_settings) {
+    return NextResponse.json({ error: 'session_settings required' }, { status: 400 });
+  }
+
+  const { data: session, error: loadErr } = await staff.db
+    .from('import_sessions')
+    .select('id, status, session_settings')
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+
+  if (loadErr) {
+    console.error('[import session PATCH] load', loadErr);
+    return NextResponse.json({ error: 'Failed to load session' }, { status: 500 });
+  }
+  if (!session) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const st = (session as { status: string }).status;
+  if (st === 'importing' || st === 'complete') {
+    return NextResponse.json(
+      { error: 'Cannot change import settings while importing or after completion.' },
+      { status: 409 },
+    );
+  }
+
+  const prev = ((session as { session_settings?: Record<string, unknown> }).session_settings ??
+    {}) as Record<string, unknown>;
+  const merged = { ...prev, ...parsed.data.session_settings };
+
+  const { data: updated, error: updateErr } = await staff.db
+    .from('import_sessions')
+    .update({
+      session_settings: merged,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .select('id, session_settings')
+    .maybeSingle();
+
+  if (updateErr) {
+    console.error('[import session PATCH]', updateErr);
+    return NextResponse.json({ error: 'Failed to update session' }, { status: 500 });
+  }
+
+  return NextResponse.json({ session: updated });
 }
 
 export async function DELETE(

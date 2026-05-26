@@ -20,7 +20,6 @@ import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
-import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
@@ -1899,13 +1898,7 @@ export function AppointmentBookingsDashboard({
   );
 
   return (
-    <PageFrame>
-      <div className="min-w-0 space-y-6">
-      {realtimeConnected === false && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Updates may be delayed. Reconnecting&hellip;
-        </div>
-      )}
+    <div className="min-w-0 space-y-6">
       {error && (
         <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between sm:px-4">
           <span className="min-w-0">{error}</span>
@@ -2134,7 +2127,6 @@ export function AppointmentBookingsDashboard({
         enabledModels={enabledModels}
         preselectedPractitionerId={practitionerFilter === 'all' ? undefined : practitionerFilter}
       />
-      </div>
-    </PageFrame>
+    </div>
   );
 }

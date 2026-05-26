@@ -357,7 +357,7 @@ function Hero() {
               <span className="rounded bg-emerald-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                 RESERVE50
               </span>
-              <span className="text-emerald-700"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
+              <span className="text-emerald-700"> at checkout for 50% off for 3 months.</span>
             </div>
           </div>
 
@@ -1311,7 +1311,7 @@ function ClosingCta() {
                   <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                     RESERVE50
                   </span>
-                  <span className="text-white/80"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
+                  <span className="text-white/80"> at checkout for 50% off for 3 months.</span>
                 </div>
               </div>
 

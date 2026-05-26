@@ -150,11 +150,11 @@ function LiveStateIndicator({ state }: { state: 'live' | 'reconnecting' }) {
   return (
     <span
       className={`inline-flex h-3 w-3 shrink-0 rounded-full ring-2 ring-white ${
-        isLive ? 'bg-emerald-500' : 'bg-amber-400'
+        isLive ? 'bg-emerald-500' : 'bg-yellow-400'
       }`}
       role="status"
-      aria-label={isLive ? 'Live' : 'Reconnecting'}
-      title={isLive ? 'Live' : 'Reconnecting'}
+      aria-label={isLive ? 'Live updates' : 'Updates may be delayed'}
+      title={isLive ? 'Live updates' : 'Updates may be delayed. Reconnecting…'}
     />
   );
 }

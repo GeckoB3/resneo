@@ -3,6 +3,7 @@ import { after } from 'next/server';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { requireImportAdmin } from '@/lib/import/auth';
+import { SEND_IMPORT_REMINDERS_SESSION_KEY } from '@/lib/import/booking-import-comms';
 import { runImportValidation } from '@/lib/import/run-validation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
@@ -10,6 +11,7 @@ const bodySchema = z.object({
   session_settings: z
     .object({
       ambiguous_date_format: z.enum(['dd/MM/yyyy', 'MM/dd/yyyy']).optional().nullable(),
+      [SEND_IMPORT_REMINDERS_SESSION_KEY]: z.boolean().optional(),
     })
     .optional(),
 });

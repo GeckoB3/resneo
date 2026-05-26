@@ -22,7 +22,6 @@ import {
 import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
 import { readResponseJson } from '@/lib/http/read-response-json';
-import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
@@ -1780,13 +1779,7 @@ export function BookingsDashboard({
   );
 
   return (
-    <PageFrame>
-      <div className="space-y-6">
-      {realtimeConnected === false && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Updates may be delayed. Reconnecting&hellip;
-        </div>
-      )}
+    <div className="min-w-0 space-y-6">
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -2146,8 +2139,7 @@ export function BookingsDashboard({
           </div>
         </div>
       )}
-      </div>
-    </PageFrame>
+    </div>
   );
 }
 

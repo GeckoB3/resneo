@@ -4825,11 +4825,6 @@ export function PractitionerCalendarView({
   return (
     <div className="flex min-w-[320px] flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
-        {realtimeConnected === false && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Updates may be delayed. Reconnecting&hellip;
-          </div>
-        )}
         <PractitionerCalendarToolbar
           viewMode={viewMode}
           onViewModeChange={setViewMode}

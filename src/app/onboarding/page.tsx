@@ -425,6 +425,22 @@ function unifiedTeamStepLabel(terms: { staff: string }): string {
   return `Your ${s}s`;
 }
 
+/** Roster GET is cached for 5 minutes; onboarding must always see calendars saved on the prior step. */
+function fetchOnboardingPractitioners(options?: { roster?: boolean }): Promise<Response> {
+  const params = new URLSearchParams();
+  if (options?.roster) params.set('roster', '1');
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return fetch(`/api/venue/practitioners${suffix}`, { cache: 'no-store' });
+}
+
+function onboardingRosterFromPractitioners(
+  practitioners: Array<{ id: string; name: string; calendar_type?: string | null }> | undefined,
+): Array<{ id: string; name: string }> {
+  return (practitioners ?? [])
+    .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
+    .map((p) => ({ id: p.id, name: p.name }));
+}
+
 type OnboardingStepDef = { key: string; label: string };
 
 /**
@@ -684,6 +700,7 @@ export default function OnboardingPage() {
   const [servicesSyncReady, setServicesSyncReady] = useState(true);
   /** Unified onboarding: calendar roster for service assignment + hours step */
   const [rosterList, setRosterList] = useState<Array<{ id: string; name: string }>>([]);
+  const [rosterLoading, setRosterLoading] = useState(false);
   const [openingHoursDraft, setOpeningHoursDraft] = useState<OpeningHoursSettings>(() => defaultOpeningHoursSettings());
   const [calendarWorkingDraft, setCalendarWorkingDraft] = useState<Record<string, WorkingHours>>({});
 
@@ -1010,9 +1027,9 @@ export default function OnboardingPage() {
 
         // Model B: merge existing calendars (retry / refresh after partial save).
         // Appointments Light is capped at one calendar; higher tiers can add more.
-        if (isUnifiedSchedulingVenue(v.booking_model)) {
+        if (isUnifiedSchedulingVenue(v.booking_model) || isAppointmentPlanTier(v.pricing_tier)) {
           try {
-            const prRes = await fetch('/api/venue/practitioners');
+            const prRes = await fetchOnboardingPractitioners();
             if (prRes.ok) {
               const body = (await prRes.json()) as {
                 practitioners?: Array<{ name: string; email: string | null; sort_order: number }>;
@@ -1211,19 +1228,19 @@ export default function OnboardingPage() {
       return;
     }
     let cancelled = false;
+    setRosterLoading(true);
     (async () => {
       try {
-        const prRes = await fetch('/api/venue/practitioners?roster=1');
+        const prRes = await fetchOnboardingPractitioners({ roster: true });
         if (!prRes.ok || cancelled) return;
         const body = (await prRes.json()) as {
           practitioners?: Array<{ id: string; name: string; calendar_type?: string | null }>;
         };
-        const list = (body.practitioners ?? [])
-          .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
-          .map((p) => ({ id: p.id, name: p.name }));
-        if (!cancelled) setRosterList(list);
+        if (!cancelled) setRosterList(onboardingRosterFromPractitioners(body.practitioners));
       } catch {
         /* non-blocking */
+      } finally {
+        if (!cancelled) setRosterLoading(false);
       }
     })();
     return () => {
@@ -1294,14 +1311,17 @@ export default function OnboardingPage() {
         const practitionerRequest =
           currentStepKey === 'opening_hours'
             ? Promise.resolve(new Response(JSON.stringify({ practitioners: [] }), { status: 200 }))
-            : fetch('/api/venue/practitioners?roster=1');
+            : fetchOnboardingPractitioners({ roster: true });
         const [vRes, pRes] = await Promise.all([venueRequest, practitionerRequest]);
         if (!vRes.ok || !pRes.ok || cancelled) return;
         const venueRow = (await vRes.json()) as { opening_hours?: OpeningHoursSettings | null };
         const prBody = (await pRes.json()) as {
-          practitioners?: Array<{ id: string; working_hours?: WorkingHours }>;
+          practitioners?: Array<{ id: string; name: string; working_hours?: WorkingHours; calendar_type?: string | null }>;
         };
         const pracs = prBody.practitioners ?? [];
+        if (currentStepKey === 'hours' && !cancelled) {
+          setRosterList(onboardingRosterFromPractitioners(prBody.practitioners));
+        }
         let mergedOpening: OpeningHoursSettings;
         if (venueRow.opening_hours && typeof venueRow.opening_hours === 'object') {
           mergedOpening = {
@@ -1608,7 +1628,7 @@ export default function OnboardingPage() {
       }
       setSaving(true);
       try {
-        const listRes = await fetch('/api/venue/practitioners');
+        const listRes = await fetchOnboardingPractitioners();
         if (!listRes.ok) {
           const errBody = (await listRes.json().catch(() => ({}))) as { error?: string };
           throw new Error(errBody.error ?? 'Could not load your team. Please refresh and try again.');
@@ -1620,6 +1640,7 @@ export default function OnboardingPage() {
           (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
         );
 
+        const savedRoster: Array<{ id: string; name: string }> = [];
         for (let i = 0; i < practitioners.length; i++) {
           const p = practitioners[i];
           const existing = sortedExisting[i];
@@ -1642,6 +1663,11 @@ export default function OnboardingPage() {
                   : `Could not update ${terms.staff.toLowerCase()} ${i + 1}.`,
               );
             }
+            const json = (await res.json()) as { id?: string; name?: string };
+            savedRoster.push({
+              id: json.id ?? existing.id,
+              name: typeof json.name === 'string' ? json.name : p.name.trim(),
+            });
           } else {
             const res = await fetch('/api/venue/practitioners', {
               method: 'POST',
@@ -1669,8 +1695,18 @@ export default function OnboardingPage() {
                   : `Could not add ${terms.staff.toLowerCase()} ${i + 1}.`,
               );
             }
+            const json = (await res.json()) as { id?: string; name?: string };
+            if (!json.id) {
+              throw new Error(`Could not add ${terms.staff.toLowerCase()} ${i + 1}. Please try again.`);
+            }
+            savedRoster.push({
+              id: json.id,
+              name: typeof json.name === 'string' ? json.name : p.name.trim(),
+            });
           }
         }
+
+        setRosterList(savedRoster);
 
         if (sortedExisting.length > practitioners.length) {
           const toRemove = sortedExisting.slice(practitioners.length);
@@ -2912,27 +2948,39 @@ export default function OnboardingPage() {
                 <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
               </div>
             )}
-            <div className="space-y-10">
-              {rosterList.map((cal) => (
-                <div key={cal.id} className="min-w-0 max-w-full">
-                  <h3 className="mb-3 break-words text-sm font-semibold text-slate-800">
-                    {cal.name}: working hours
-                  </h3>
-                  <WorkingHoursControl
-                    value={
-                      calendarWorkingDraft[cal.id] ??
-                      defaultCalendarWorkingHoursFromOpeningHours(openingHoursDraft)
-                    }
-                    onChange={(wh) =>
-                      setCalendarWorkingDraft((prev) => ({
-                        ...prev,
-                        [cal.id]: wh,
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
+            {rosterLoading && rosterList.length === 0 ? (
+              <p className="text-sm text-slate-500">Loading your calendars…</p>
+            ) : rosterList.length === 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-medium">No calendars loaded</p>
+                <p className="mt-1">
+                  Go back to the Calendars step, ensure each column has a name, and click Continue to save them.
+                  Then return here to set working hours.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-10">
+                {rosterList.map((cal) => (
+                  <div key={cal.id} className="min-w-0 max-w-full">
+                    <h3 className="mb-3 break-words text-sm font-semibold text-slate-800">
+                      {cal.name}: working hours
+                    </h3>
+                    <WorkingHoursControl
+                      value={
+                        calendarWorkingDraft[cal.id] ??
+                        defaultCalendarWorkingHoursFromOpeningHours(openingHoursDraft)
+                      }
+                      onChange={(wh) =>
+                        setCalendarWorkingDraft((prev) => ({
+                          ...prev,
+                          [cal.id]: wh,
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

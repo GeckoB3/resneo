@@ -142,7 +142,10 @@ export default async function ReferralsPage() {
   const rewardDisplay = formatGbpPence(rewardPenceForThisTier);
 
   const origin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  const shareableLink = code ? `${origin}/signup?ref=${encodeURIComponent(code)}` : '';
+  // Share link lands on the plan-selection page so the referee chooses their plan
+  // (Light/Plus/Pro/Restaurant) before signing up. The referral cookie is set on that
+  // page and persists through the rest of the signup funnel.
+  const shareableLink = code ? `${origin}/signup/choose-plan?ref=${encodeURIComponent(code)}` : '';
 
   const counts = {
     total: referralsForUi.length,

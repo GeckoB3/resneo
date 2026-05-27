@@ -24,7 +24,12 @@ import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-p
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { ensureDefaultRestaurantFamilyBusinessType } from '@/lib/signup-resume';
-import { loadReferralCodeFromCookieOrUrl } from '@/lib/referrals/client';
+import {
+  loadReferralCodeFromCookieOrUrl,
+  validateReferralCodeClient,
+  type ReferralValidationOk,
+} from '@/lib/referrals/client';
+import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
@@ -44,6 +49,23 @@ export default function PaymentPage() {
   const [selectionHydrated, setSelectionHydrated] = useState(false);
   /** Logged-in user already has the other plan family: block checkout before hitting Stripe. */
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
+  /** Referral state — when present, the user gets a 14-day trial + 30 free days. */
+  const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
+
+  // Hydrate referral state from cookie so we can surface the extended trial.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const code = loadReferralCodeFromCookieOrUrl(null);
+      if (!code) return;
+      const result = await validateReferralCodeClient(code);
+      if (cancelled) return;
+      if (result.ok) setReferralValid(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,6 +241,17 @@ export default function PaymentPage() {
         </p>
       </div>
 
+      {referralValid && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p className="font-medium">Referred by {referralValid.referrer_venue_name}</p>
+          <p className="mt-1 text-emerald-800">
+            Your trial is extended to {SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS} days (
+            {SIGNUP_TRIAL_DAYS}-day standard trial + {REFERRAL_REFEREE_BONUS_DAYS}-day referral credit). Your
+            first charge happens after the full {SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS} days.
+          </p>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="space-y-4">
           {businessType && !omitBusinessTypeRow ? (
@@ -300,7 +333,11 @@ export default function PaymentPage() {
                 </div>
                 <div className="mt-2 flex justify-between">
                   <span className="text-base font-semibold text-slate-900">
-                    After {SIGNUP_TRIAL_DAYS}-day trial
+                    After{' '}
+                    {referralValid
+                      ? `${SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS}-day`
+                      : `${SIGNUP_TRIAL_DAYS}-day`}{' '}
+                    trial
                   </span>
                   <span className="text-base font-bold text-slate-900">&pound;{totalPrice}/mo</span>
                 </div>

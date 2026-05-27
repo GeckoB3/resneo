@@ -32,6 +32,27 @@ export default function SignupPage() {
   const searchParams = useSearchParams();
   const supabase = createClient();
 
+  // Backward-compat: /signup?ref=CODE used to drop users straight here and force
+  // them through the appointments-defaulted business-type flow. If no plan has
+  // been selected yet, redirect them to the plan chooser so they can pick.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const refFromUrl = searchParams?.get('ref');
+    if (!refFromUrl) return;
+    const planInStorage = sessionStorage.getItem('signup_plan');
+    if (planInStorage) return;
+    let cancelled = false;
+    void (async () => {
+      const client = createClient();
+      const { data: { session } } = await client.auth.getSession();
+      if (cancelled || session) return;
+      router.replace(`/signup/choose-plan?ref=${encodeURIComponent(refFromUrl)}`);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router, searchParams]);
+
   // Already signed in (e.g. second tab) with plan chosen: skip straight to payment.
   // Account already linked to a venue: dashboard only (cannot run signup again).
   useEffect(() => {

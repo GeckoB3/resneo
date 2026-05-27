@@ -347,7 +347,7 @@ All checks run server-side inside the `referrals` row creation in §5.4. Failure
 
 **UI sections:**
 
-1. **Your referral code** — large code chip + shareable link (`${NEXT_PUBLIC_BASE_URL}/signup?ref=${code}`), copy-to-clipboard button.
+1. **Your referral code** — large code chip + shareable link (`${NEXT_PUBLIC_BASE_URL}/signup/choose-plan?ref=${code}`), copy-to-clipboard button. The link lands on the plan-selection page so the referee can pick Light / Plus / Pro / Restaurant before signing up; the referral cookie persists from that page through the rest of the funnel.
 2. **Share** — WhatsApp / email / copy-link quick actions. `mailto:` and `https://wa.me/?text=...` are fine, no SDK needed.
 3. **How it works** — three-step explainer with the £X amount derived from the referrer's plan.
 4. **Your referrals (table)** — columns: *Referred on*, *Venue*, *Status* (badge: Pending / Signed up — trialling / Credited / Void), *Credit value*. Show void rows greyed.
@@ -409,7 +409,8 @@ Patterns are already established (`*.test.ts` colocated, vitest). Add tests next
 - Webhook: replay an `invoice.payment_succeeded` event twice → exactly one credit, one email.
 
 **E2E (Playwright, already in repo):**
-- Visit `/signup?ref=GREENWAY-X4F2` → banner appears → sign up → checkout has 44-day trial. Stub Stripe Checkout for this.
+- Visit `/signup/choose-plan?ref=GREENWAY-X4F2` → banner appears → pick a plan → continue → sign up → checkout has 44-day trial. Stub Stripe Checkout for this.
+- Visit legacy `/signup?ref=GREENWAY-X4F2` → redirects to `/signup/choose-plan?ref=GREENWAY-X4F2`.
 - Referrer dashboard shows the new referral as "Signed up — trialling".
 
 ---

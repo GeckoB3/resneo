@@ -115,7 +115,8 @@ export async function GET() {
   }
 
   const origin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  const shareableLink = code ? `${origin}/signup?ref=${encodeURIComponent(code)}` : '';
+  // Share link → plan chooser → normal funnel (referral cookie persists).
+  const shareableLink = code ? `${origin}/signup/choose-plan?ref=${encodeURIComponent(code)}` : '';
   const rewardPence = referralRewardPenceForTier(tier);
 
   return NextResponse.json(

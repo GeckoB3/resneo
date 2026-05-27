@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { redirect } from 'next/navigation';
 import { AccountSignOutButton } from '@/app/account/AccountSignOutButton';
 import { AccountNav } from '@/app/account/AccountNav';
@@ -14,17 +16,8 @@ export default async function AccountLayout({ children }: { children: ReactNode 
     redirect('/login?redirectTo=/account');
   }
 
-  const [{ count: staffByUserId }, { count: staffByEmail }] = await Promise.all([
-    supabase.from('staff').select('id', { count: 'exact', head: true }).eq('user_id', user.id).is('revoked_at', null),
-    user.email
-      ? supabase
-          .from('staff')
-          .select('id', { count: 'exact', head: true })
-          .ilike('email', user.email.trim())
-          .is('revoked_at', null)
-      : Promise.resolve({ count: 0 }),
-  ]);
-  const showVenueDashboard = (staffByUserId ?? 0) > 0 || (staffByEmail ?? 0) > 0;
+  const admin = getSupabaseAdminClient();
+  const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user.id, user.email);
 
   const email = user.email?.trim() ?? '';
   const initial = email ? email.charAt(0).toUpperCase() : '?';

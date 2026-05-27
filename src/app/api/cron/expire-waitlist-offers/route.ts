@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { processExpiredWaitlistOffers } from '@/lib/booking/process-expired-waitlist-offers';
+import { syncStaffChooseWaitlistOpportunitiesCron } from '@/lib/booking/sync-staff-choose-waitlist-opportunities';
 
 /**
  * GET/POST /api/cron/expire-waitlist-offers
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
   try {
     const admin = getSupabaseAdminClient();
     const results = await processExpiredWaitlistOffers(admin);
+    const staffChooseSync = await syncStaffChooseWaitlistOpportunitiesCron(admin);
     const outcome = await finalizeCronRun({
       job: 'expire-waitlist-offers',
       results: {
@@ -26,8 +28,10 @@ export async function POST(request: NextRequest) {
         expired: results.expired,
         cascaded: results.cascaded,
         filled: results.filled,
+        staff_choose_venues_scanned: staffChooseSync.venues_scanned,
+        staff_choose_venues_synced: staffChooseSync.venues_synced,
       },
-      errors: results.errors,
+      errors: results.errors + staffChooseSync.errors,
     });
     return NextResponse.json(outcome.body, { status: outcome.httpStatus });
   } catch (err) {

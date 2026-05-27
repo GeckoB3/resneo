@@ -36,6 +36,9 @@ export interface DashboardDetailCacheApi {
 
 export const DashboardDetailCacheContext = createContext<DashboardDetailCacheApi | null>(null);
 
+/** Coalesce parallel warmVenueBookingDetail(id) calls (list prefetch races). */
+const bookingDetailWarmInFlight = new Map<string, Promise<void>>();
+
 function readCacheEntry<T>(cache: ReturnType<typeof useSWRConfig>['cache'], key: readonly unknown[]): T | undefined {
   const entry = cache.get(unstable_serialize(key));
   if (!entry || entry.data === undefined) return undefined;
@@ -71,24 +74,40 @@ export function DashboardDetailCacheProvider({ children }: { children: ReactNode
       const fullKey = venueBookingDetailKey(id);
       if (readCacheEntry<VenueBookingDetailPayload>(cache, fullKey)) return;
 
-      const summaryKey = venueBookingSummaryKey(id);
-      if (!readCacheEntry<VenueBookingDetailPayload>(cache, summaryKey)) {
-        try {
-          await preload(summaryKey, () => fetchVenueBookingSummary(id));
-          const summary = readCacheEntry<VenueBookingDetailPayload>(cache, summaryKey);
-          if (summary && !readCacheEntry<VenueBookingDetailPayload>(cache, fullKey)) {
-            void mutate(fullKey, summary, { revalidate: false });
-          }
-        } catch {
-          /* summary prefetch is best-effort */
-        }
+      const inFlight = bookingDetailWarmInFlight.get(id);
+      if (inFlight) {
+        await inFlight;
+        return;
       }
 
-      try {
-        await preload(fullKey, () => fetchVenueBookingDetail(id));
-      } catch {
-        /* best-effort prefetch */
-      }
+      const run = async () => {
+        if (readCacheEntry<VenueBookingDetailPayload>(cache, fullKey)) return;
+
+        const summaryKey = venueBookingSummaryKey(id);
+        if (!readCacheEntry<VenueBookingDetailPayload>(cache, summaryKey)) {
+          try {
+            await preload(summaryKey, () => fetchVenueBookingSummary(id));
+            const summary = readCacheEntry<VenueBookingDetailPayload>(cache, summaryKey);
+            if (summary && !readCacheEntry<VenueBookingDetailPayload>(cache, fullKey)) {
+              void mutate(fullKey, summary, { revalidate: false });
+            }
+          } catch {
+            /* summary prefetch is best-effort */
+          }
+        }
+
+        try {
+          await preload(fullKey, () => fetchVenueBookingDetail(id));
+        } catch {
+          /* best-effort prefetch */
+        }
+      };
+
+      const promise = run().finally(() => {
+        bookingDetailWarmInFlight.delete(id);
+      });
+      bookingDetailWarmInFlight.set(id, promise);
+      await promise;
     },
     [cache, mutate],
   );

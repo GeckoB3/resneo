@@ -16,7 +16,8 @@ import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-e
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
-import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
+import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
+import { REALTIME_BOOKINGS_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
@@ -652,6 +653,8 @@ export function AppointmentBookingsDashboard({
       const silent = options?.silent ?? false;
       if (invalidCustomRange) {
         setError('Custom date range is invalid. "From" must be before or equal to "To".');
+        setAllStatusBookings([]);
+        setBookings([]);
         setLoading(false);
         return;
       }
@@ -662,11 +665,6 @@ export function AppointmentBookingsDashboard({
         const params = new URLSearchParams(
           viewMode === 'day' ? { date: from } : { from, to },
         );
-        if (selectedStatusFilter?.attendanceConfirmed) {
-          params.set('attendance_confirmed', '1');
-        } else if (selectedStatusFilter?.apiValue) {
-          params.set('status', selectedStatusFilter.apiValue);
-        }
         if (filterGuestId) params.set('guest', filterGuestId);
         const res = await fetch(`/api/venue/bookings/list?${params}`);
         const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
@@ -675,12 +673,13 @@ export function AppointmentBookingsDashboard({
           return;
         }
         const raw = (data.bookings ?? []) as RegistryAppointment[];
-        let visible = raw.filter((b) =>
+        const modelFiltered = raw.filter((b) =>
           venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
         );
-        if (selectedStatusFilter?.excludeAttendanceConfirmed) {
-          visible = visible.filter((booking) => !isAttendanceConfirmed(booking));
-        }
+        setAllStatusBookings(modelFiltered);
+        const visible = modelFiltered.filter((b) =>
+          matchesAppointmentStatusFilter(b, selectedStatusFilter),
+        );
         setBookings(visible);
       } catch {
         setError('Network error loading appointments');
@@ -693,35 +692,9 @@ export function AppointmentBookingsDashboard({
   );
 
 
-  const fetchBookingsForStats = useCallback(async () => {
-    if (invalidCustomRange) {
-      setAllStatusBookings([]);
-      return;
-    }
-    try {
-      const params = new URLSearchParams(viewMode === 'day' ? { date: from } : { from, to });
-      if (filterGuestId) params.set('guest', filterGuestId);
-      const res = await fetch(`/api/venue/bookings/list?${params}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const raw = (data.bookings ?? []) as RegistryAppointment[];
-      setAllStatusBookings(
-        raw.filter((b) =>
-          venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
-        ),
-      );
-    } catch {
-      setAllStatusBookings([]);
-    }
-  }, [filterGuestId, from, to, viewMode, invalidCustomRange, primaryBookingModel, enabledModels]);
-
   useEffect(() => {
     void fetchBookings();
   }, [fetchBookings]);
-
-  useEffect(() => {
-    void fetchBookingsForStats();
-  }, [fetchBookingsForStats]);
 
   const fetchLinkedBookings = useCallback(async () => {
     if (invalidCustomRange) {
@@ -803,6 +776,10 @@ export function AppointmentBookingsDashboard({
     };
   }, []);
 
+  const debouncedSilentFetchBookings = useDebouncedCallback(() => {
+    void fetchBookings({ silent: true });
+  }, REALTIME_BOOKINGS_DEBOUNCE_MS);
+
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -811,8 +788,7 @@ export function AppointmentBookingsDashboard({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` },
         () => {
-          void fetchBookings({ silent: true });
-          void fetchBookingsForStats();
+          debouncedSilentFetchBookings();
         },
       )
       .subscribe((status) => {
@@ -821,7 +797,7 @@ export function AppointmentBookingsDashboard({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [venueId, fetchBookings, fetchBookingsForStats]);
+  }, [venueId, debouncedSilentFetchBookings]);
 
   const registryFiltered = useMemo(
     () =>
@@ -992,29 +968,6 @@ export function AppointmentBookingsDashboard({
     return list;
   }, [scopeBookings, sortKey, sortDir, serviceMap, practitionerMap, linkedPractitionerMap]);
 
-  useEffect(() => {
-    if (sortedBookings.length === 0) return;
-    const ids = sortedBookings
-      .filter((b) => b.status !== 'Cancelled')
-      .slice(0, 28)
-      .map((b) => b.id);
-    const scheduleIdle =
-      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
-        ? window.requestIdleCallback.bind(window)
-        : (cb: IdleRequestCallback) =>
-            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
-    const idleHandle = scheduleIdle(() => {
-      void warmIdsWithConcurrency(ids, warmVenueBookingDetail);
-    });
-    return () => {
-      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleHandle);
-      } else {
-        window.clearTimeout(idleHandle);
-      }
-    };
-  }, [sortedBookings, warmVenueBookingDetail]);
-
   async function updateRowStatus(bookingId: string, nextStatus: string, linked = false) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev && !linked) return;
@@ -1060,7 +1013,7 @@ export function AppointmentBookingsDashboard({
       if (linked) {
         void fetchLinkedBookings();
       }
-      void fetchBookingsForStats();
+      void fetchBookings({ silent: true });
       if (nextStatus === 'Cancelled') {
         scheduleWaitlistAlertsRefresh();
       }
@@ -1601,7 +1554,7 @@ export function AppointmentBookingsDashboard({
                 });
                 void loadBookingDetail(b.id, true);
                 void fetchBookings({ silent: true });
-                void fetchBookingsForStats();
+                void fetchBookings({ silent: true });
                 if (linkedMeta) void fetchLinkedBookings();
               }}
               venueStaffBookingModel={primaryBookingModel}
@@ -1938,7 +1891,7 @@ export function AppointmentBookingsDashboard({
         liveState={realtimeConnected === false ? 'reconnecting' : 'live'}
         onRefresh={() => {
           void fetchBookings({ silent: true });
-          void fetchBookingsForStats();
+          void fetchBookings({ silent: true });
         }}
         onNewBooking={() => setNewBookingOpen(true)}
         onWalkIn={() => setWalkInOpen(true)}
@@ -1955,7 +1908,7 @@ export function AppointmentBookingsDashboard({
             initialDate={viewMode === 'day' ? anchorDate : undefined}
             onBookingCreated={() => {
               void fetchBookings({ silent: true });
-              void fetchBookingsForStats();
+              void fetchBookings({ silent: true });
             }}
           />
         )}
@@ -2091,7 +2044,7 @@ export function AppointmentBookingsDashboard({
               return next;
             });
             void fetchBookings({ silent: true });
-            void fetchBookingsForStats();
+            void fetchBookings({ silent: true });
           }}
         />
       ) : null}
@@ -2103,7 +2056,7 @@ export function AppointmentBookingsDashboard({
         onCreated={() => {
           setNewBookingOpen(false);
           void fetchBookings({ silent: true });
-          void fetchBookingsForStats();
+          void fetchBookings({ silent: true });
         }}
         venueId={venueId}
         currency={currency}
@@ -2119,7 +2072,7 @@ export function AppointmentBookingsDashboard({
         onCreated={() => {
           setWalkInOpen(false);
           void fetchBookings({ silent: true });
-          void fetchBookingsForStats();
+          void fetchBookings({ silent: true });
         }}
         venueId={venueId}
         currency={currency}

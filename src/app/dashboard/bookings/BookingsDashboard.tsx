@@ -69,7 +69,8 @@ import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-inte
 import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
-import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
+import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
+import { REALTIME_BOOKINGS_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 
 interface BookingRow {
   id: string;
@@ -839,6 +840,10 @@ export function BookingsDashboard({
   }, [fetchModeData]);
   useEffect(() => { void fetchBookings(); }, [fetchBookings]);
 
+  const debouncedSilentFetchBookings = useDebouncedCallback(() => {
+    void fetchBookings({ silent: true });
+  }, REALTIME_BOOKINGS_DEBOUNCE_MS);
+
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -846,34 +851,13 @@ export function BookingsDashboard({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` },
-        () => { void fetchBookings({ silent: true }); }
+        () => {
+          debouncedSilentFetchBookings();
+        },
       )
       .subscribe((status) => { setRealtimeConnected(status === 'SUBSCRIBED'); });
     return () => { void supabase.removeChannel(channel); };
-  }, [venueId, fetchBookings]);
-
-  useEffect(() => {
-    if (bookings.length === 0) return;
-    const ids = bookings
-      .filter((b) => b.status !== 'Cancelled')
-      .slice(0, 24)
-      .map((b) => b.id);
-    const scheduleIdle =
-      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
-        ? window.requestIdleCallback.bind(window)
-        : (cb: IdleRequestCallback) =>
-            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
-    const idleHandle = scheduleIdle(() => {
-      void warmIdsWithConcurrency(ids, warmVenueBookingDetail);
-    });
-    return () => {
-      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleHandle);
-      } else {
-        window.clearTimeout(idleHandle);
-      }
-    };
-  }, [bookings, warmVenueBookingDetail]);
+  }, [venueId, debouncedSilentFetchBookings]);
 
   const loadBookingDetail = useCallback(
     async (bookingId: string, force = false) => {

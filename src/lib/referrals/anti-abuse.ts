@@ -82,25 +82,7 @@ export async function detectSelfReferral(
   const refereeDomain = emailDomain(refereeEmail);
   const referrerDomain = emailDomain(referrer.email);
   if (refereeDomain && referrerDomain && refereeDomain === referrerDomain) {
-    // Ignore extremely common consumer providers — operators often use the
-    // same gmail-style address across unrelated businesses.
-    const generic = new Set([
-      'gmail.com',
-      'googlemail.com',
-      'hotmail.com',
-      'hotmail.co.uk',
-      'outlook.com',
-      'outlook.co.uk',
-      'yahoo.com',
-      'yahoo.co.uk',
-      'icloud.com',
-      'me.com',
-      'live.com',
-      'live.co.uk',
-      'aol.com',
-      'btinternet.com',
-    ]);
-    if (!generic.has(refereeDomain)) {
+    if (!isGenericConsumerEmailDomain(refereeDomain)) {
       return 'self_referral_same_email_domain';
     }
   }
@@ -118,4 +100,111 @@ export async function detectSelfReferral(
   }
 
   return null;
+}
+
+/**
+ * Consumer email providers where a shared domain DOES NOT imply self-referral.
+ * Unrelated NI venue operators routinely share addresses on these providers.
+ *
+ * Sourced from: UK & Ireland ISP/email defaults, big-tech consumer providers,
+ * privacy-first mail services, and other widely-used global free providers.
+ */
+const GENERIC_CONSUMER_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  // Google
+  'gmail.com',
+  'googlemail.com',
+  // Microsoft (Hotmail / Outlook / Live / MSN family)
+  'hotmail.com',
+  'hotmail.co.uk',
+  'hotmail.ie',
+  'hotmail.fr',
+  'hotmail.de',
+  'hotmail.it',
+  'hotmail.es',
+  'outlook.com',
+  'outlook.co.uk',
+  'outlook.ie',
+  'outlook.fr',
+  'outlook.de',
+  'outlook.it',
+  'outlook.es',
+  'live.com',
+  'live.co.uk',
+  'live.ie',
+  'live.fr',
+  'live.de',
+  'live.it',
+  'msn.com',
+  'msn.co.uk',
+  // Yahoo
+  'yahoo.com',
+  'yahoo.co.uk',
+  'yahoo.ie',
+  'yahoo.fr',
+  'yahoo.de',
+  'yahoo.it',
+  'yahoo.es',
+  'ymail.com',
+  'rocketmail.com',
+  // Apple
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  // AOL
+  'aol.com',
+  'aol.co.uk',
+  // Proton
+  'proton.me',
+  'protonmail.com',
+  'pm.me',
+  // GMX / Mail.com
+  'gmx.com',
+  'gmx.co.uk',
+  'gmx.de',
+  'mail.com',
+  // Fastmail
+  'fastmail.com',
+  'fastmail.fm',
+  // Tutanota
+  'tutanota.com',
+  'tuta.io',
+  'tutamail.com',
+  // Zoho (free consumer tier widely used)
+  'zoho.com',
+  // Yandex
+  'yandex.com',
+  'yandex.ru',
+  // UK / Ireland ISP-issued mailboxes
+  'btinternet.com',
+  'btopenworld.com',
+  'talktalk.net',
+  'tiscali.co.uk',
+  'virginmedia.com',
+  'virgin.net',
+  'blueyonder.co.uk',
+  'ntlworld.com',
+  'sky.com',
+  'plus.net',
+  'plusnet.com',
+  'freeserve.co.uk',
+  'orange.net',
+  'orange.co.uk',
+  'lineone.net',
+  'supanet.com',
+  'vodafone.net',
+  'vodafonemail.de',
+  'eircom.net',
+  'iol.ie',
+  'indigo.ie',
+  // Other historically common UK/IE providers
+  'cableinet.co.uk',
+  'demon.co.uk',
+  'compuserve.com',
+  'compuserve.co.uk',
+  'mac.co.uk',
+]);
+
+export function isGenericConsumerEmailDomain(domain: string | null | undefined): boolean {
+  if (!domain) return false;
+  return GENERIC_CONSUMER_EMAIL_DOMAINS.has(domain.trim().toLowerCase());
 }

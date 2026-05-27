@@ -7,18 +7,14 @@ interface ReferAndEarnClientProps {
   code: string;
   shareableLink: string;
   rewardDisplay: string;
-  referrerVenueName: string;
 }
 
 export function ReferAndEarnClient({
   code,
   shareableLink,
   rewardDisplay,
-  referrerVenueName,
 }: ReferAndEarnClientProps) {
   const [copied, setCopied] = useState<null | 'code' | 'link'>(null);
-
-  const shareMessage = `${referrerVenueName} thought you might like ReserveNI — the booking platform for NI venues. Use my referral code ${code} when you sign up and get an extra month free on top of the standard 14-day trial: ${shareableLink}`;
 
   function copyToClipboard(value: string, which: 'code' | 'link') {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
@@ -32,11 +28,6 @@ export function ReferAndEarnClient({
       },
     );
   }
-
-  const whatsappHref = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
-  const mailtoHref = `mailto:?subject=${encodeURIComponent(
-    `Try ReserveNI — first month free`,
-  )}&body=${encodeURIComponent(shareMessage)}`;
 
   return (
     <SectionCard elevated>
@@ -80,22 +71,6 @@ export function ReferAndEarnClient({
               >
                 {copied === 'link' ? 'Copied' : 'Copy'}
               </button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <a
-                href={whatsappHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-100"
-              >
-                Share on WhatsApp
-              </a>
-              <a
-                href={mailtoHref}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Email a contact
-              </a>
             </div>
           </div>
         </div>

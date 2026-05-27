@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import type { ReferralsDashboardData, ReferralDashboardStatus } from '@/lib/referrals/load-dashboard';
 import { formatGbpPence } from '@/lib/referrals/constants';
+import { explainReferralOutcome } from '@/lib/referrals/explain-outcome';
 import { ReferAndEarnClient } from './ReferAndEarnClient';
 
 export function ReferralsDashboardContent({ data }: { data: ReferralsDashboardData }) {
@@ -26,7 +27,6 @@ export function ReferralsDashboardContent({ data }: { data: ReferralsDashboardDa
           code={data.code}
           shareableLink={data.shareableLink}
           rewardDisplay={data.rewardDisplay}
-          referrerVenueName={data.referrerVenueName}
         />
       </div>
 
@@ -81,21 +81,36 @@ export function ReferralsDashboardContent({ data }: { data: ReferralsDashboardDa
                     </tr>
                   </thead>
                   <tbody>
-                    {referralsForUi.map((row) => (
-                      <tr
-                        key={row.id}
-                        className={`border-t border-slate-100 ${
-                          row.status === 'void' || row.status === 'failed' ? 'text-slate-400' : 'text-slate-700'
-                        }`}
-                      >
-                        <td className="px-6 py-3 font-medium">{row.refereeName}</td>
-                        <td className="px-6 py-3">
-                          <StatusPill status={row.status} label={row.statusLabel} />
-                        </td>
-                        <td className="px-6 py-3">{row.rewardDisplay ?? '—'}</td>
-                        <td className="px-6 py-3 text-slate-500">{formatDate(row.occurredAt)}</td>
-                      </tr>
-                    ))}
+                    {referralsForUi.map((row) => {
+                      const explanation = explainReferralOutcome(row.status, row.voidReason);
+                      const isMuted = row.status === 'void' || row.status === 'failed';
+                      return (
+                        <tr
+                          key={row.id}
+                          className={`border-t border-slate-100 align-top ${
+                            isMuted ? 'text-slate-400' : 'text-slate-700'
+                          }`}
+                        >
+                          <td className="px-6 py-3 font-medium">
+                            <div>{row.refereeName}</div>
+                            {explanation ? (
+                              <p
+                                className={`mt-1.5 text-xs font-normal leading-relaxed ${
+                                  row.status === 'void' ? 'text-amber-700' : 'text-slate-500'
+                                }`}
+                              >
+                                {explanation}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className="px-6 py-3">
+                            <StatusPill status={row.status} label={row.statusLabel} />
+                          </td>
+                          <td className="px-6 py-3">{row.rewardDisplay ?? '—'}</td>
+                          <td className="px-6 py-3 text-slate-500">{formatDate(row.occurredAt)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

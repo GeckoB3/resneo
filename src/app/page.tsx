@@ -82,7 +82,7 @@ export default function Home() {
         <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(78,107,120,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(78,107,120,0.08) 0%, transparent 50%)' }} />
         <div className="relative mx-auto max-w-4xl px-6 py-20 text-center sm:py-28 lg:py-32">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            ReserveNI
+            Reserve<span className="text-brand-600">NI</span>
           </h1>
           <p className="mt-4 text-lg font-medium text-brand-700 sm:text-xl">
             Booking management for every business in Northern Ireland

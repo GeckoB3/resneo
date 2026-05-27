@@ -41,6 +41,7 @@ const features = [
   },
 ];
 
+
 const businessTypes = [
   "Restaurants", "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
   "Yoga Studios", "Gyms", "Tennis Courts", "Escape Rooms", "Dog Groomers",
@@ -77,9 +78,9 @@ export default function Home() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-emerald-50" />
-        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(13,148,136,0.08) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(5,150,105,0.06) 0%, transparent 50%)' }} />
-        <div className="relative mx-auto max-w-4xl px-6 py-24 text-center sm:py-32 lg:py-40">
+        <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-brand-50/40" />
+        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(78,107,120,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(78,107,120,0.08) 0%, transparent 50%)' }} />
+        <div className="relative mx-auto max-w-4xl px-6 py-20 text-center sm:py-28 lg:py-32">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
             ReserveNI
           </h1>
@@ -151,6 +152,48 @@ export default function Home() {
 
       <PricingSection />
 
+      {/* About teaser — sits just above the FAQ */}
+      <section className="border-t border-slate-100 bg-white py-16 sm:py-20">
+        <div className="mx-auto max-w-4xl px-6">
+          <div className="relative overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-emerald-50 p-8 shadow-sm sm:p-12">
+            <div
+              className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-200/40 blur-3xl"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-emerald-100/40 blur-3xl"
+              aria-hidden
+            />
+            <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="max-w-xl">
+                <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                  Built locally, for Northern Ireland businesses
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-slate-600 sm:text-base">
+                  Meet the team, see why we built ReserveNI, and learn what we stand for.
+                </p>
+              </div>
+              <Link
+                href="/about"
+                className="inline-flex h-12 flex-shrink-0 items-center rounded-xl bg-brand-600 px-7 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:text-base"
+              >
+                About ReserveNI
+                <svg
+                  className="ml-2 h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                </svg>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <HomeFaq />
 
       {/* Contact */}
@@ -182,6 +225,9 @@ export default function Home() {
             &copy; 2026 ReserveNI · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
+            <Link href="/about" className="transition-colors hover:text-slate-900">
+              About
+            </Link>
             <Link href="/signup" className="transition-colors hover:text-slate-900">
               Sign up
             </Link>

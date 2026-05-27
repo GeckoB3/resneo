@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { clearReferralCodeCookie } from '@/lib/referrals/client';
 
 export default function SignupSuccessPage() {
   const router = useRouter();
@@ -30,6 +31,10 @@ export default function SignupSuccessPage() {
           setError(data.error || 'Failed to complete signup.');
           return;
         }
+
+        // Signup complete — clear the referral cookie so it doesn't bleed into
+        // another person's signup on a shared computer.
+        clearReferralCodeCookie();
 
         if (data.redirect_url) {
           router.push(data.redirect_url);

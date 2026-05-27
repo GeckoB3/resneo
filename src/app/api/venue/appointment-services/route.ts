@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import { createClient } from '@/lib/supabase/server';
 import {
   filterIdsToManagedCalendars,
@@ -452,10 +453,13 @@ export async function GET(request: NextRequest) {
         variants: variantMap.get(s.id as string) ?? [],
       }));
 
-      return NextResponse.json({
-        services: servicesWithVariants,
-        practitioner_services,
-      });
+      return NextResponse.json(
+        {
+          services: servicesWithVariants,
+          practitioner_services,
+        },
+        { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
+      );
     }
 
     const [servicesRes, linksRes] = await Promise.all([
@@ -494,10 +498,13 @@ export async function GET(request: NextRequest) {
       variants: variantMap.get(s.id as string) ?? [],
     }));
 
-    return NextResponse.json({
-      services: servicesWithVariants,
-      practitioner_services,
-    });
+    return NextResponse.json(
+      {
+        services: servicesWithVariants,
+        practitioner_services,
+      },
+      { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
+    );
   } catch (err) {
     console.error('GET /api/venue/appointment-services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

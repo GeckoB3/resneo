@@ -1,12 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { getSignupResumePath } from '@/lib/signup-resume';
 import { persistPendingSignupSelection } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady, type SignupPendingPlan } from '@/lib/signup-pending-selection';
+import {
+  loadReferralCodeFromCookieOrUrl,
+  persistReferralCodeCookie,
+  clearReferralCodeCookie,
+  validateReferralCodeClient,
+  type ReferralValidationOk,
+} from '@/lib/referrals/client';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -16,7 +23,13 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   /** Set when sign-up succeeded but Supabase did not return a session (email confirmation required). */
   const [awaitingEmailVerification, setAwaitingEmailVerification] = useState(false);
+  // Referral state — loaded from ?ref= or the reserveni_ref cookie.
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
+  const [referralCheckedAt, setReferralCheckedAt] = useState(0);
+  const [showReferralInput, setShowReferralInput] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
 
   // Already signed in (e.g. second tab) with plan chosen: skip straight to payment.
@@ -59,6 +72,64 @@ export default function SignupPage() {
       cancelled = true;
     };
   }, [router]);
+
+  // On mount, hydrate the referral code from ?ref= (URL wins) or cookie, and
+  // validate it server-side so we can show the "Referred by X" banner.
+  // All setState calls happen inside async callbacks to avoid synchronous
+  // updates inside an effect body (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const fromUrl = searchParams?.get('ref') ?? null;
+      const initial = loadReferralCodeFromCookieOrUrl(fromUrl);
+      if (!initial) {
+        if (!cancelled) setReferralCheckedAt(Date.now());
+        return;
+      }
+      if (cancelled) return;
+      setReferralCodeInput(initial);
+      setShowReferralInput(true);
+      const result = await validateReferralCodeClient(initial);
+      if (cancelled) return;
+      if (result.ok) {
+        setReferralValid(result);
+        persistReferralCodeCookie(result.code);
+      } else {
+        setReferralValid(null);
+        clearReferralCodeCookie();
+      }
+      setReferralCheckedAt(Date.now());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
+  // Debounced validation when the user manually edits the code.
+  useEffect(() => {
+    const code = referralCodeInput.trim();
+    if (!code) {
+      // Schedule async so setState does not fire synchronously in the effect body.
+      const t = setTimeout(() => {
+        setReferralValid(null);
+        clearReferralCodeCookie();
+      }, 0);
+      return () => clearTimeout(t);
+    }
+    if (referralValid && referralValid.code === code.toUpperCase()) return;
+    const t = setTimeout(async () => {
+      const result = await validateReferralCodeClient(code);
+      if (result.ok) {
+        setReferralValid(result);
+        persistReferralCodeCookie(result.code);
+      } else {
+        setReferralValid(null);
+        clearReferralCodeCookie();
+      }
+      setReferralCheckedAt(Date.now());
+    }, 400);
+    return () => clearTimeout(t);
+  }, [referralCodeInput, referralValid]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -160,6 +231,14 @@ export default function SignupPage() {
           Get started with ReserveNI in minutes.
         </p>
       </div>
+      {referralValid && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p className="font-medium">Referred by {referralValid.referrer_venue_name}</p>
+          <p className="mt-1 text-emerald-800">
+            Your first month is free after your 14-day trial.
+          </p>
+        </div>
+      )}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -206,6 +285,39 @@ export default function SignupPage() {
               className={inputClass}
             />
           </div>
+          {!referralValid && (
+            <div>
+              {!showReferralInput ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReferralInput(true)}
+                  className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                >
+                  Have a referral code?
+                </button>
+              ) : (
+                <div>
+                  <label htmlFor="referral-code" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Referral code
+                  </label>
+                  <input
+                    id="referral-code"
+                    type="text"
+                    value={referralCodeInput}
+                    onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                    autoComplete="off"
+                    placeholder="e.g. GREENWAY-X4F2"
+                    className={inputClass}
+                  />
+                  {referralCheckedAt > 0 && referralCodeInput.trim() && !referralValid && (
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      We couldn&apos;t find that code. You can still sign up without it.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
           )}

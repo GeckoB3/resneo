@@ -65,7 +65,11 @@ import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
-import { warmIdsWithConcurrency } from '@/lib/dashboard/venue-detail-swr';
+import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
+import {
+  CALENDAR_CATALOG_STALE_MS,
+  REALTIME_BOOKINGS_DEBOUNCE_MS,
+} from '@/lib/realtime/dashboard-sync-constants';
 import {
   bookingDetailPanelSnapshotFromListRow,
   estimatedEndIsoFromSchedule,
@@ -2540,31 +2544,109 @@ export function PractitionerCalendarView({
     writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
   }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
 
+  const calendarListQuery = useMemo(() => {
+    const { from, to } = listFromTo;
+    const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
+    return `${params}&view=calendar`;
+  }, [listFromTo]);
+
+  const calendarBlockUrl = useMemo(() => {
+    const { from, to } = listFromTo;
+    return from === to
+      ? `/api/venue/practitioner-calendar-blocks?date=${from}`
+      : `/api/venue/practitioner-calendar-blocks?from=${from}&to=${to}`;
+  }, [listFromTo]);
+
+  const calendarScheduleQuery = useMemo(() => {
+    return listFromTo.from === listFromTo.to
+      ? `date=${encodeURIComponent(listFromTo.from)}`
+      : `from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`;
+  }, [listFromTo]);
+
+  const applyBookingsList = useCallback((nextBookings: Booking[]) => {
+    setBookings(nextBookings);
+    setCalendarBookingOverlays((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const next: Record<string, BookingRowOverlay> = { ...prev };
+      for (const row of nextBookings) {
+        const pruned = retainBookingRowOverlay(prev[row.id] ?? {}, row);
+        if (Object.keys(pruned).length === 0) delete next[row.id];
+        else next[row.id] = pruned;
+      }
+      return next;
+    });
+  }, []);
+
+  const refetchBookingsList = useCallback(async () => {
+    const bookRes = await fetch(`/api/venue/bookings/list?${calendarListQuery}`);
+    if (!bookRes.ok) return;
+    const bookData = (await bookRes.json()) as { bookings?: Booking[] };
+    applyBookingsList((bookData.bookings ?? []) as Booking[]);
+  }, [applyBookingsList, calendarListQuery]);
+
+  const refetchBlocks = useCallback(async () => {
+    const blockRes = await fetch(calendarBlockUrl);
+    const bjson = blockRes.ok
+      ? ((await blockRes.json()) as { blocks?: CalendarBlock[] })
+      : { blocks: [] as CalendarBlock[] };
+    setBlocks(bjson.blocks ?? []);
+  }, [calendarBlockUrl]);
+
+  const refetchSchedule = useCallback(async () => {
+    if (!showMergedFeeds) {
+      setScheduleBlocks([]);
+      return;
+    }
+    const scheduleRes = await fetch(`/api/venue/schedule?${calendarScheduleQuery}`);
+    if (!scheduleRes.ok) {
+      setScheduleBlocks([]);
+      return;
+    }
+    const schJson = (await scheduleRes.json()) as { blocks?: ScheduleBlockDTO[] };
+    setScheduleBlocks(schJson.blocks ?? []);
+  }, [calendarScheduleQuery, showMergedFeeds]);
+
+  const catalogLoadedAtRef = useRef(0);
+
+  const fetchCalendarCatalog = useCallback(async (force = false): Promise<boolean> => {
+    const now = Date.now();
+    if (
+      !force &&
+      catalogLoadedAtRef.current > 0 &&
+      now - catalogLoadedAtRef.current < CALENDAR_CATALOG_STALE_MS
+    ) {
+      return true;
+    }
+
+    const [pracRes, svcRes] = await Promise.all([
+      fetch('/api/venue/practitioners?roster=1'),
+      fetch('/api/venue/appointment-services'),
+    ]);
+    if (!pracRes.ok || !svcRes.ok) return false;
+
+    const [pracData, svcData] = await Promise.all([
+      pracRes.json() as Promise<{ practitioners?: Practitioner[] }>,
+      svcRes.json() as Promise<{ services?: AppointmentService[] }>,
+    ]);
+    setPractitioners(pracData.practitioners ?? []);
+    setServices(svcData.services ?? []);
+    catalogLoadedAtRef.current = now;
+    return true;
+  }, []);
+
   const fetchData = useCallback(
-    async (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean; refreshCatalog?: boolean }) => {
       const silent = options?.silent ?? false;
       if (!silent) {
         setLoading(true);
         setFetchError(null);
       }
       try {
-        const { from, to } = listFromTo;
-        const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
-        const listQuery = `${params}&view=calendar`;
-        const blockUrl =
-          from === to
-            ? `/api/venue/practitioner-calendar-blocks?date=${from}`
-            : `/api/venue/practitioner-calendar-blocks?from=${from}&to=${to}`;
-        const schQuery =
-          listFromTo.from === listFromTo.to
-            ? `date=${encodeURIComponent(listFromTo.from)}`
-            : `from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`;
+        const catalogOk = await fetchCalendarCatalog(options?.refreshCatalog ?? false);
 
         const parallel: Promise<Response>[] = [
-          fetch('/api/venue/practitioners?roster=1'),
-          fetch(`/api/venue/bookings/list?${listQuery}`),
-          fetch('/api/venue/appointment-services'),
-          fetch(blockUrl),
+          fetch(`/api/venue/bookings/list?${calendarListQuery}`),
+          fetch(calendarBlockUrl),
         ];
         if (!silent) {
           parallel.push(fetch('/api/venue'));
@@ -2573,28 +2655,24 @@ export function PractitionerCalendarView({
           parallel.push(fetch('/api/venue/resources'));
         }
         if (showMergedFeeds) {
-          parallel.push(fetch(`/api/venue/schedule?${schQuery}`));
+          parallel.push(fetch(`/api/venue/schedule?${calendarScheduleQuery}`));
         }
 
         const responses = await Promise.all(parallel);
         let i = 0;
-        const pracRes = responses[i++]!;
         const bookRes = responses[i++]!;
-        const svcRes = responses[i++]!;
         const blockRes = responses[i++]!;
         const venueRes = !silent ? responses[i++] : undefined;
         const resourcesRes = loadVenueResources ? responses[i++] : undefined;
         const scheduleRes = showMergedFeeds ? responses[i++] : undefined;
 
-        if (!pracRes.ok || !bookRes.ok || !svcRes.ok) {
+        if (!catalogOk || !bookRes.ok) {
           setFetchError('Failed to load calendar data. Please refresh the page.');
           return;
         }
 
-        const [pracData, bookData, svcData, bjson] = await Promise.all([
-          pracRes.json() as Promise<{ practitioners?: Practitioner[] }>,
+        const [bookData, bjson] = await Promise.all([
           bookRes.json() as Promise<{ bookings?: Booking[] }>,
-          svcRes.json() as Promise<{ services?: AppointmentService[] }>,
           blockRes.ok ? blockRes.json() : Promise.resolve({ blocks: [] }),
         ]);
 
@@ -2630,20 +2708,7 @@ export function PractitionerCalendarView({
           setScheduleBlocks([]);
         }
 
-        setPractitioners(pracData.practitioners ?? []);
-        const nextBookings = (bookData.bookings ?? []) as Booking[];
-        setBookings(nextBookings);
-        setCalendarBookingOverlays((prev) => {
-          if (Object.keys(prev).length === 0) return prev;
-          const next: Record<string, BookingRowOverlay> = { ...prev };
-          for (const row of nextBookings) {
-            const pruned = retainBookingRowOverlay(prev[row.id] ?? {}, row);
-            if (Object.keys(pruned).length === 0) delete next[row.id];
-            else next[row.id] = pruned;
-          }
-          return next;
-        });
-        setServices(svcData.services ?? []);
+        applyBookingsList((bookData.bookings ?? []) as Booking[]);
         setBlocks((bjson as { blocks?: CalendarBlock[] }).blocks ?? []);
       } catch {
         setFetchError('Failed to load calendar data. Please check your connection.');
@@ -2651,7 +2716,15 @@ export function PractitionerCalendarView({
         if (!silent) setLoading(false);
       }
     },
-    [listFromTo, showMergedFeeds, loadVenueResources],
+    [
+      applyBookingsList,
+      calendarBlockUrl,
+      calendarListQuery,
+      calendarScheduleQuery,
+      fetchCalendarCatalog,
+      loadVenueResources,
+      showMergedFeeds,
+    ],
   );
 
   useEffect(() => {
@@ -2684,26 +2757,30 @@ export function PractitionerCalendarView({
     }
   }, [linkFeature, listFromTo]);
 
-  /**
-   * Debounced linked-data refetch. Date paging and realtime events both route
-   * through here so rapid day changes (or a burst of linked-venue edits)
-   * collapse into a single request rather than one fetch per tick.
-   */
-  const linkedRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleLinkedRefetch = useCallback(() => {
-    if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
-    linkedRefetchTimerRef.current = setTimeout(() => {
-      linkedRefetchTimerRef.current = null;
-      void loadLinkedData();
-    }, 400);
-  }, [loadLinkedData]);
+  const shouldSyncLinkedCalendar =
+    linkFeature &&
+    (visibleLinkedColumnIds === null || visibleLinkedColumnIds.length > 0);
+
+  const requestLinkedCalendarSync = useCallback(() => {
+    if (!shouldSyncLinkedCalendar) return;
+    void loadLinkedData();
+  }, [loadLinkedData, shouldSyncLinkedCalendar]);
 
   useEffect(() => {
-    scheduleLinkedRefetch();
-    return () => {
-      if (linkedRefetchTimerRef.current) clearTimeout(linkedRefetchTimerRef.current);
-    };
-  }, [scheduleLinkedRefetch]);
+    if (!linkFeature) {
+      setLinkedVenues([]);
+      return;
+    }
+    if (visibleLinkedColumnIds !== null && visibleLinkedColumnIds.length === 0) {
+      setLinkedVenues([]);
+      return;
+    }
+    void loadLinkedData();
+  }, [linkFeature, visibleLinkedColumnIds, listFromTo, loadLinkedData]);
+
+  const debouncedLoadLinkedData = useDebouncedCallback(() => {
+    requestLinkedCalendarSync();
+  }, REALTIME_BOOKINGS_DEBOUNCE_MS);
 
   useEffect(() => {
     if (!showResourceBooking || resourceBookingVenue) return;
@@ -2731,14 +2808,14 @@ export function PractitionerCalendarView({
     };
   }, [showResourceBooking, resourceBookingVenue]);
 
-  const silentRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleSilentCalendarRefetch = useCallback(() => {
-    if (silentRefetchTimerRef.current) clearTimeout(silentRefetchTimerRef.current);
-    silentRefetchTimerRef.current = setTimeout(() => {
-      silentRefetchTimerRef.current = null;
-      void fetchData({ silent: true });
-    }, 400);
-  }, [fetchData]);
+  const debouncedSilentFetchBookings = useDebouncedCallback(() => {
+    void refetchBookingsList();
+  }, REALTIME_BOOKINGS_DEBOUNCE_MS);
+
+  const debouncedSilentFetchBlocks = useDebouncedCallback(() => {
+    void refetchBlocks();
+    void refetchSchedule();
+  }, REALTIME_BOOKINGS_DEBOUNCE_MS);
 
   useEffect(() => {
     if (loading || viewMode !== 'day') return;
@@ -2773,31 +2850,30 @@ export function PractitionerCalendarView({
               });
             }, 2200);
           }
-          scheduleSilentCalendarRefetch();
+          debouncedSilentFetchBookings();
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'practitioner_calendar_blocks', filter: `venue_id=eq.${venueId}` },
         () => {
-          scheduleSilentCalendarRefetch();
+          debouncedSilentFetchBlocks();
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_blocks', filter: `venue_id=eq.${venueId}` },
         () => {
-          scheduleSilentCalendarRefetch();
+          debouncedSilentFetchBlocks();
         },
       )
       .subscribe((status) => {
         setRealtimeConnected(status === 'SUBSCRIBED');
       });
     return () => {
-      if (silentRefetchTimerRef.current) clearTimeout(silentRefetchTimerRef.current);
       void supabase.removeChannel(channel);
     };
-  }, [venueId, scheduleSilentCalendarRefetch]);
+  }, [venueId, debouncedSilentFetchBookings, debouncedSilentFetchBlocks]);
 
   /** Stable key for the set of linked venues — so realtime does not re-subscribe on a plain refetch. */
   const linkedVenueIdsKey = useMemo(
@@ -2823,7 +2899,7 @@ export function PractitionerCalendarView({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${linkedVenueId}` },
         () => {
-          scheduleLinkedRefetch();
+          debouncedLoadLinkedData();
         },
       );
     }
@@ -2831,7 +2907,7 @@ export function PractitionerCalendarView({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [linkFeature, venueId, linkedVenueIdsKey, scheduleLinkedRefetch]);
+  }, [linkFeature, venueId, linkedVenueIdsKey, debouncedLoadLinkedData]);
 
   const activePractitioners = useMemo(
     () => practitioners.filter((p) => p.is_active),
@@ -3331,7 +3407,8 @@ export function PractitionerCalendarView({
         }
       }
       setBlockModal(null);
-      void fetchData({ silent: true });
+      void refetchBlocks();
+      void refetchSchedule();
     } catch {
       addToast(blockModal.blockId ? 'Could not update block' : 'Could not create block', 'error');
     } finally {
@@ -3358,14 +3435,15 @@ export function PractitionerCalendarView({
           addToast((j as { error?: string }).error ?? 'Could not update block duration', 'error');
           setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
         } else {
-          void fetchData({ silent: true });
+          void refetchBlocks();
+          void refetchSchedule();
         }
       } catch {
         addToast('Could not update block duration', 'error');
         setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
       }
     },
-    [addToast, fetchData],
+    [addToast, refetchBlocks, refetchSchedule],
   );
 
   async function patchBlockMove(block: CalendarBlock, newDate: string, newStart: string, newColId: string) {
@@ -3407,7 +3485,8 @@ export function PractitionerCalendarView({
       if (colId !== newColId || block.block_date !== newDate) {
         addToast('Block moved', 'success');
       }
-      void fetchData({ silent: true });
+      void refetchBlocks();
+      void refetchSchedule();
     } catch {
       addToast('Could not move block', 'error');
       setBlocks((rows) => rows.map((bl) => (bl.id === prev.id ? prev : bl)));
@@ -3423,7 +3502,8 @@ export function PractitionerCalendarView({
       if (!res.ok) addToast('Could not remove block', 'error');
       else {
         setBlockModal(null);
-        void fetchData({ silent: true });
+        void refetchBlocks();
+        void refetchSchedule();
       }
     } finally {
       setBlockSaving(false);
@@ -3525,13 +3605,13 @@ export function PractitionerCalendarView({
           clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
         }
-        void fetchData({ silent: true });
-        if (linkedOwnerVenueId) void loadLinkedData();
+        void refetchBookingsList();
+        if (linkedOwnerVenueId) void requestLinkedCalendarSync();
         return 'ok';
       } catch {
         addToast('Could not move appointment', 'error');
         if (linkedOwnerVenueId) {
-          void loadLinkedData();
+          void requestLinkedCalendarSync();
         } else {
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
         }
@@ -3609,18 +3689,18 @@ export function PractitionerCalendarView({
           if (!res.ok) {
             const j = await res.json().catch(() => ({}));
             addToast((j as { error?: string }).error ?? 'Could not update duration', 'error');
-            if (linkedOwnerVenueId) void loadLinkedData();
+            if (linkedOwnerVenueId) void requestLinkedCalendarSync();
             else setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
             setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
             clearScheduleEditFollowUpForBooking(booking.id);
             return 'failed';
           }
-          void fetchData({ silent: true });
-          if (linkedOwnerVenueId) void loadLinkedData();
+          void refetchBookingsList();
+          if (linkedOwnerVenueId) void requestLinkedCalendarSync();
           return 'ok';
         } catch {
           addToast('Could not update duration', 'error');
-          if (linkedOwnerVenueId) void loadLinkedData();
+          if (linkedOwnerVenueId) void requestLinkedCalendarSync();
           else setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
           setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
           clearScheduleEditFollowUpForBooking(booking.id);
@@ -3639,8 +3719,8 @@ export function PractitionerCalendarView({
       addToast,
       beginScheduleEditFollowUp,
       clearScheduleEditFollowUpForBooking,
-      fetchData,
-      loadLinkedData,
+      refetchBookingsList,
+      requestLinkedCalendarSync,
     ],
   );
 
@@ -3713,7 +3793,7 @@ export function PractitionerCalendarView({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           addToast((j as { error?: string }).error ?? 'Could not undo', 'error');
-          void fetchData({ silent: true });
+          void refetchBookingsList();
           return;
         }
       } else {
@@ -3735,7 +3815,7 @@ export function PractitionerCalendarView({
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           addToast((j as { error?: string }).error ?? 'Could not undo', 'error');
-          void fetchData({ silent: true });
+          void refetchBookingsList();
           return;
         }
       }
@@ -3743,23 +3823,23 @@ export function PractitionerCalendarView({
       setLastScheduleEditUndo(null);
       setDragMoveConfirmBookingId(null);
       addToast('Change undone', 'success');
-      void fetchData({ silent: true });
-      if (linkedOwnerVenueId) void loadLinkedData();
+      void refetchBookingsList();
+      if (linkedOwnerVenueId) void requestLinkedCalendarSync();
     } catch {
       addToast('Could not undo', 'error');
-      void fetchData({ silent: true });
+      void refetchBookingsList();
     } finally {
       setScheduleUndoPending(false);
     }
   }, [
     addToast,
-    fetchData,
     lastScheduleEditUndo,
     resourceParentById,
     scheduleUndoPending,
     serviceMapForBooking,
     cancelPendingDeferredModificationGuestNotify,
-    loadLinkedData,
+    refetchBookingsList,
+    requestLinkedCalendarSync,
   ]);
 
   function applyCalendarBookingQuickPatch(b: Booking, body: Record<string, unknown>): Booking {
@@ -3901,10 +3981,10 @@ export function PractitionerCalendarView({
         scheduleWaitlistAlertsRefresh();
       }
       if (!arrivedOnlyPatch) {
-        void fetchData({ silent: true });
-        void loadLinkedData();
+        void refetchBookingsList();
+        if (linkedOwnerVenueId) void requestLinkedCalendarSync();
       } else if (linkedOwnerVenueId) {
-        void loadLinkedData();
+        void requestLinkedCalendarSync();
       }
     } catch {
       addToast('Update failed', 'error');
@@ -4398,11 +4478,24 @@ export function PractitionerCalendarView({
         />
       </div>
 
-      {linkedColumns.length > 0 ? (
+      {linkFeature ? (
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Linked venues
           </p>
+          {linkedColumns.length === 0 &&
+          visibleLinkedColumnIds !== null &&
+          visibleLinkedColumnIds.length === 0 ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-brand-700 hover:text-brand-800"
+              onClick={() => setVisibleLinkedColumnIds(null)}
+            >
+              Show linked calendars
+            </button>
+          ) : linkedColumns.length === 0 ? (
+            <p className="text-xs text-slate-500">Loading linked calendars…</p>
+          ) : (
           <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
             <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
               <input
@@ -4410,8 +4503,12 @@ export function PractitionerCalendarView({
                 className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                 checked={visibleLinkedColumnIds === null}
                 onChange={(e) => {
-                  if (e.target.checked) setVisibleLinkedColumnIds(null);
-                  else setVisibleLinkedColumnIds(linkedColumns.map((c) => c.key));
+                  if (e.target.checked) {
+                    setVisibleLinkedColumnIds(null);
+                    void loadLinkedData();
+                  } else {
+                    setVisibleLinkedColumnIds(linkedColumns.map((c) => c.key));
+                  }
                 }}
               />
               <span className="font-medium">All linked calendars</span>
@@ -4457,6 +4554,7 @@ export function PractitionerCalendarView({
                                 if (ordered.length === linkedColumns.length) return null;
                                 return ordered;
                               });
+                              if (e.target.checked) void loadLinkedData();
                             }}
                           />
                           <span className="truncate">
@@ -4471,6 +4569,7 @@ export function PractitionerCalendarView({
               </div>
             ))}
           </div>
+          )}
         </div>
       ) : null}
 
@@ -4799,29 +4898,6 @@ export function PractitionerCalendarView({
     return linkedVenue?.venueTimezone?.trim() || venueTimezone;
   }, [detailBookingOwnerVenueId, venueId, venueTimezone, linkedVenues]);
 
-  useEffect(() => {
-    if (bookings.length === 0) return;
-    const ids = bookings
-      .filter((b) => b.status !== 'Cancelled')
-      .slice(0, 28)
-      .map((b) => b.id);
-    const scheduleIdle =
-      typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
-        ? window.requestIdleCallback.bind(window)
-        : (cb: IdleRequestCallback) =>
-            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 60);
-    const idleHandle = scheduleIdle(() => {
-      void warmIdsWithConcurrency(ids, prefetchBookingDetail);
-    });
-    return () => {
-      if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleHandle);
-      } else {
-        window.clearTimeout(idleHandle);
-      }
-    };
-  }, [bookings, prefetchBookingDetail]);
-
   return (
     <div className="flex min-w-[320px] flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
@@ -4838,8 +4914,8 @@ export function PractitionerCalendarView({
           endHour={endHour}
           onTimeRangeChange={handleTimeRangeChange}
           onRefresh={() => {
-            void fetchData();
-            void loadLinkedData();
+            void fetchData({ refreshCatalog: true });
+            void requestLinkedCalendarSync();
           }}
           onNewBooking={() => {
             setEventBookPrefill(null);
@@ -4878,7 +4954,6 @@ export function PractitionerCalendarView({
               }
               onBookingCreated={() => {
                 void fetchData();
-                void loadLinkedData();
               }}
             />
           )}
@@ -6420,8 +6495,8 @@ export function PractitionerCalendarView({
         canBook={eventDetailCanBook}
         onBookNow={openEventBookFromDetail}
         onUpdated={() => {
-          void fetchData({ silent: true });
-          void loadLinkedData();
+          void refetchBookingsList();
+          void refetchSchedule();
         }}
       />
 
@@ -6436,7 +6511,7 @@ export function PractitionerCalendarView({
         presentation="popover"
         anchor={resourceInstanceAnchor}
         onUpdated={() => {
-          void fetchData({ silent: true });
+          void refetchBookingsList();
         }}
       />
 
@@ -6480,8 +6555,7 @@ export function PractitionerCalendarView({
                 })
                 .catch(() => undefined);
             }
-            void fetchData({ silent: true });
-            void loadLinkedData();
+            void refetchBookingsList();
           }}
         />
       ) : null}
@@ -6497,8 +6571,7 @@ export function PractitionerCalendarView({
           onCreated={() => {
             setStaffBookingModal(null);
             clearStaffBookingPrefill();
-            void fetchData({ silent: true });
-            void loadLinkedData();
+            void refetchBookingsList();
           }}
           venueId={eventBookPrefill?.linkedOwnerVenueId ?? venueId}
           currency={currency}
@@ -6544,7 +6617,7 @@ export function PractitionerCalendarView({
               venue={resourceBookingVenue}
               bookingAudience="staff"
               staffBookingSource="phone"
-              onBookingCreated={() => void fetchData({ silent: true })}
+              onBookingCreated={() => void refetchBookingsList()}
               onClose={() => {
                 setShowResourceBooking(false);
                 setResourceBookingResourceId(undefined);

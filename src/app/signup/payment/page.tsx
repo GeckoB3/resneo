@@ -24,6 +24,7 @@ import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-p
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { ensureDefaultRestaurantFamilyBusinessType } from '@/lib/signup-resume';
+import { loadReferralCodeFromCookieOrUrl } from '@/lib/referrals/client';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
@@ -134,6 +135,7 @@ export default function PaymentPage() {
     }
 
     try {
+      const referralCode = loadReferralCodeFromCookieOrUrl(null);
       const res = await fetch('/api/signup/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,6 +143,7 @@ export default function PaymentPage() {
         body: JSON.stringify({
           business_type: businessType,
           plan,
+          referral_code: referralCode,
         }),
       });
 

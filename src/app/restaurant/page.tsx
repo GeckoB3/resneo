@@ -74,7 +74,7 @@ const ownerBenefits = [
   {
     title: "See the shift before the doors open",
     description:
-      "Day sheet for service, table timeline and floor plan for the room—a single operational picture.",
+      "Day sheet for service, table timeline and floor plan for the room: a single operational picture.",
     icon: LayoutGridIcon,
   },
   {
@@ -85,19 +85,19 @@ const ownerBenefits = [
   {
     title: "Fewer ghosts, fuller rooms",
     description:
-      "Automated confirmations, reminders, and confirm-or-cancel flows help guests show—or free the table early enough to refill.",
+      "Automated confirmations, reminders, and confirm-or-cancel flows help guests show, or free the table early enough to refill.",
     icon: BellIcon,
   },
   {
     title: "Guest intelligence that survives the crush",
     description:
-      "Dietaries, allergens, celebrations, VIP notes—not lost between shifts. Carry context from booking to greeting.",
+      "Dietaries, allergens, celebrations, VIP notes, not lost between shifts. Carry context from booking to greeting.",
     icon: UserCardIcon,
   },
   {
     title: "Reporting that respects the margins",
     description:
-      "Covers, revenue signals, busiest services—see what drives the till without drowning in spreadsheets.",
+      "Covers, revenue signals, busiest services. See what drives the till without drowning in spreadsheets.",
     icon: TrendUpIcon,
   },
   {
@@ -109,11 +109,11 @@ const ownerBenefits = [
 ];
 
 const clientBenefits = [
-  "Reserve a table in under a minute on any phone—no app, no account wall.",
+  "Reserve a table in under a minute on any phone, with no app and no account wall.",
   "Instant confirmation email with what matters: time, covers, cancellation terms.",
   "SMS and email reminders so the booking does not get lost between life and diary.",
-  "One-tap confirm or reschedule when plans shift—fewer awkward phone calls.",
-  "Deposit and policy spelled out clearly before payment—no surprises at the door.",
+  "One-tap confirm or reschedule when plans shift, with fewer awkward phone calls.",
+  "Deposit and policy spelled out clearly before payment, with no surprises at the door.",
 ];
 
 const howItWorks = [
@@ -121,13 +121,13 @@ const howItWorks = [
     step: "1",
     title: "Shape your venue",
     description:
-      "Services, openings, seating, deposit rules—set the guardrails once. Bring your menus and policies; ReserveNI adapts.",
+      "Services, openings, seating, deposit rules: set the guardrails once. Bring your menus and policies; ReserveNI adapts.",
   },
   {
     step: "2",
     title: "Put booking everywhere guests look",
     description:
-      "Your link, QR on menus and windows, website embed—incoming reservations land in one live diary.",
+      "Your link, QR on menus and windows, website embed. Incoming reservations land in one live diary.",
   },
   {
     step: "3",
@@ -154,7 +154,7 @@ const features = [
   {
     title: "Day sheet tuned for reservations",
     description:
-      "Chronological arrivals and covers visible at arms-length—the view you want clipped to the host stand.",
+      "Chronological arrivals and covers visible at arms-length: the view you want clipped to the host stand.",
   },
   {
     title: "Table grid & live floor plan",
@@ -164,7 +164,7 @@ const features = [
   {
     title: "Allergies & dietaries surfaced",
     description:
-      "Flags that stand out before service—not buried in inbox threads or sticky notes.",
+      "Flags that stand out before service, not buried in inbox threads or sticky notes.",
   },
   {
     title: "Online booking page + widget embed",
@@ -174,7 +174,7 @@ const features = [
   {
     title: "Deposits and pre-payments via Stripe Connect",
     description:
-      "Charge per-booking or per-head; payouts route to your connected account—ReserveNI never holds booking money.",
+      "Charge per-booking or per-head; payouts route to your connected account. ReserveNI never holds booking money.",
   },
   {
     title: "Confirm-or-cancel by SMS",
@@ -184,7 +184,7 @@ const features = [
   {
     title: "Guest profiles & visits",
     description:
-      "Notes, spends, milestones—welcome regulars properly even when staffing changes.",
+      "Notes, spends, milestones. Welcome regulars properly even when staffing changes.",
   },
   {
     title: "Classes or events still available",
@@ -199,18 +199,18 @@ const features = [
   {
     title: "Northern Ireland support humans",
     description:
-      "Real people locally when you hit a snag setting up payouts, timings, or comms—not an endless FAQ maze.",
+      "Real people locally when you hit a snag setting up payouts, timings, or comms, not an endless FAQ maze.",
   },
 ];
 
 const faqs = [
   {
     q: "Is there a discount for founding restaurants?",
-    a: "Yes. Use RESERVE50 at checkout for 50% off eligible plans—including Restaurant—for six months during our founding partner window. Limited availability.",
+    a: "Yes. Use RESERVE50 at checkout for 50% off eligible plans, including Restaurant, for six months during our founding partner window. Limited availability.",
   },
   {
     q: "We already pay for another booking stack. Why switch?",
-    a: "ReserveNI is built for independent Northern Ireland operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack—without per-cover commission.",
+    a: "ReserveNI is built for independent Northern Ireland operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack, without per-cover commission.",
   },
   {
     q: "How do deposits work for restaurants?",
@@ -218,7 +218,7 @@ const faqs = [
   },
   {
     q: "Can we still take walk-ins and phone bookings?",
-    a: "Absolutely. Add walk-ins and phone reservations manually in seconds so every guest—however they arrive—lives in the same operational record.",
+    a: "Absolutely. Add walk-ins and phone reservations manually in seconds so every guest, however they arrive, lives in the same operational record.",
   },
   {
     q: "What about SMS volumes?",
@@ -226,7 +226,7 @@ const faqs = [
   },
   {
     q: "Do you cover cafés and pubs with food?",
-    a: "Yes. If you take timed reservations, covers, or mixed service models, ReserveNI flexes to match—single venue today, built for the founders we know best.",
+    a: "Yes. If you take timed reservations, covers, or mixed service models, ReserveNI flexes to match: single venue today, built for the founders we know best.",
   },
   {
     q: "How fast can we go live?",
@@ -285,12 +285,12 @@ function Nav() {
 function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-amber-50" />
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-brand-50/40" />
       <div
         className="absolute inset-0 opacity-60"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 18% 18%, rgba(78,107,120,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(180,83,9,0.10) 0%, transparent 50%)",
+            "radial-gradient(circle at 18% 18%, rgba(78,107,120,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(78,107,120,0.10) 0%, transparent 50%)",
         }}
       />
       <div
@@ -305,20 +305,20 @@ function Hero() {
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
             Built for Northern Ireland hospitality teams
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Every cover counts.
+            Take every booking.
             <br />
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-amber-600 bg-clip-text text-transparent">
-              Protect the room—and the revenue.
+            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-brand-800 bg-clip-text text-transparent">
+              Protect every cover.
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            Guests book premium experiences at odd hours; no-shows tax your busiest services. ReserveNI turns online demand
-            into seated guests with deposits that stick, reminders that reply, and a live toolkit your floor staff actually
-            uses.
+            Take bookings round the clock without lifting the phone.
+            Reduce no-shows with deposits and automated reminders.
+            Run every service from one live diary, with allergens and table assignments ready before doors open.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -336,17 +336,17 @@ function Hero() {
             </a>
           </div>
 
-          <div className="mt-8 inline-flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <div className="mt-8 inline-flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
               <TagIcon small />
             </span>
             <div className="text-sm">
-              <span className="font-semibold text-emerald-800">Founding Partner Offer: </span>
-              <span className="text-emerald-700">Use code </span>
-              <span className="rounded bg-emerald-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
+              <span className="font-semibold text-brand-800">Founding Partner Offer: </span>
+              <span className="text-brand-700">Use code </span>
+              <span className="rounded bg-brand-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                 RESERVE50
               </span>
-              <span className="text-emerald-700"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
+              <span className="text-brand-700"> at checkout for 50% off for 3 months.</span>
             </div>
           </div>
 
@@ -381,7 +381,7 @@ function Hero() {
 function HeroRestaurantVisual() {
   return (
     <div className="relative mx-auto w-full max-w-sm">
-      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-amber-200/50 blur-2xl" />
+      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-brand-300/50 blur-2xl" />
 
       <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
         <div className="relative overflow-hidden rounded-[1.85rem] bg-white">
@@ -396,7 +396,7 @@ function HeroRestaurantVisual() {
 
           <div className="px-5 pb-6 pt-4">
             <div className="flex items-center gap-2 text-[11px] font-medium text-brand-700">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="inline-block h-2 w-2 rounded-full bg-brand-500" />
               Table reservation confirmed
             </div>
             <h3 className="mt-2 text-lg font-bold text-slate-900">Saturday dinner · Bistro Quay</h3>
@@ -411,7 +411,7 @@ function HeroRestaurantVisual() {
 
             <div className="mt-4 rounded-xl border border-rose-100 bg-rose-50 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-600">Kitchen note</p>
-              <p className="mt-1 text-xs text-rose-800">Severe nut allergy — communicated to brigade.</p>
+              <p className="mt-1 text-xs text-rose-800">Severe nut allergy, communicated to brigade.</p>
             </div>
 
             <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -429,7 +429,7 @@ function HeroRestaurantVisual() {
 
       <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <TickIcon />
           </div>
           <div>
@@ -458,11 +458,11 @@ function InfoTile({ label, value, accent = false }: { label: string; value: stri
   return (
     <div
       className={`rounded-xl border p-3 ${
-        accent ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50"
+        accent ? "border-brand-200 bg-brand-50" : "border-slate-100 bg-slate-50"
       }`}
     >
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`mt-1 text-sm font-bold ${accent ? "text-emerald-700" : "text-slate-900"}`}>{value}</p>
+      <p className={`mt-1 text-sm font-bold ${accent ? "text-brand-700" : "text-slate-900"}`}>{value}</p>
     </div>
   );
 }
@@ -510,7 +510,7 @@ function SolutionIntro() {
         className="absolute inset-0 opacity-30"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 28% 32%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(180,83,9,0.28) 0%, transparent 50%)",
+            "radial-gradient(circle at 28% 32%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(78,107,120,0.28) 0%, transparent 50%)",
         }}
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
@@ -519,8 +519,8 @@ function SolutionIntro() {
         </span>
         <h2 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">One backbone for bookings, money and service.</h2>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
-          Replace voicemail roulette, frantic texts, rogue spreadsheets and siloed notebooks with a cohesive platform—from
-          the moment a guest books online until they walk through your door—with operational clarity for every cover.
+          Replace voicemail roulette, frantic texts, rogue spreadsheets and siloed notebooks with a cohesive platform, from
+          the moment a guest books online until they walk through your door, with operational clarity for every cover.
         </p>
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Link
@@ -549,7 +549,7 @@ function OwnerBenefitsSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">For operators & chefs</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Confidence on the books—and on the pass.
+            Confidence on the books, and on the pass.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Technology should remove anxiety, not add taps. Built-in automation handles repetitive guest comms while you steer
@@ -586,13 +586,13 @@ function ProductPreview() {
             Service intelligence the whole team trusts.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
-            One stack for arrivals, pacing, allergens, deposits, messaging—readable on a mounted iPad behind the podium or on
+            One stack for arrivals, pacing, allergens, deposits, messaging, readable on a mounted iPad behind the podium or on
             a phone in your pocket walking the floor.
           </p>
         </div>
 
         <div className="relative mt-16">
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-amber-200/40 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-brand-300/40 blur-3xl" />
           <RestaurantDashboardMock />
         </div>
       </div>
@@ -614,8 +614,8 @@ function RestaurantDashboardMock() {
     <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10">
       <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
-        <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
-        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80" />
+        <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
+        <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
         <div className="ml-4 hidden h-5 w-72 rounded-md bg-white text-[10px] text-slate-400 sm:flex sm:items-center sm:justify-center sm:gap-1">
           <LockIcon /> reserveni.com/dashboard
         </div>
@@ -645,7 +645,7 @@ function RestaurantDashboardMock() {
               <h3 className="mt-0.5 text-xl font-bold text-slate-900">Evening arrivals</h3>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
                 Covers 148
               </span>
               <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
@@ -665,7 +665,7 @@ function RestaurantDashboardMock() {
                   b.empty
                     ? "border-dashed border-slate-200 bg-slate-50/70"
                     : b.hold
-                      ? "border-amber-200 bg-amber-50/70"
+                      ? "border-brand-200 bg-brand-50/70"
                       : "border-slate-100 bg-white hover:border-brand-200"
                 }`}
               >
@@ -681,7 +681,7 @@ function RestaurantDashboardMock() {
                   </span>
                 ) : null}
                 {!b.empty && !b.hold && b.dep ? (
-                  <span className="hidden rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 sm:inline">
+                  <span className="hidden rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 sm:inline">
                     Deposit
                   </span>
                 ) : null}
@@ -735,7 +735,7 @@ function StatCard({
     <div className="rounded-xl border border-slate-100 bg-white p-3">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-extrabold text-slate-900">{value}</p>
-      <p className="text-[11px] font-semibold text-emerald-600">{trend}</p>
+      <p className="text-[11px] font-semibold text-brand-600">{trend}</p>
     </div>
   );
 }
@@ -786,7 +786,7 @@ function ClientBenefitsSection() {
 function RestaurantBookingFlowVisual() {
   return (
     <div className="relative">
-      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-amber-100 via-brand-50 to-white blur-2xl" />
+      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-brand-100 via-brand-50 to-white blur-2xl" />
       <div className="relative grid gap-3 sm:grid-cols-3">
         <MiniCard step="1" title="Pick sitting">
           <div className="mt-2 grid grid-cols-2 gap-1.5">
@@ -823,7 +823,7 @@ function RestaurantBookingFlowVisual() {
               <span className="font-semibold text-slate-900">£40</span>
             </div>
             <div className="rounded-md bg-slate-50 px-2 py-1 text-[10px] leading-snug text-slate-600">
-              Policy shown before paying—cancellation window clear as glass.
+              Policy shown before paying. Cancellation window clear as glass.
             </div>
             <div className="mt-2 rounded-md bg-brand-600 py-1.5 text-center text-[11px] font-bold text-white">
               Secure reservation
@@ -940,10 +940,10 @@ function BookingChannelsSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Omnichannel demand</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Guests book wherever they discover you—one live diary absorbs it all.
+            Guests book wherever they discover you. One live diary absorbs it all.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Instagram stories, QR on menus, concierge links inside hotel confirmation emails—all route into ReserveNI without
+            Instagram stories, QR on menus, concierge links inside hotel confirmation emails: all route into ReserveNI without
             copy-pasting details into a rogue spreadsheet tonight at midnight.
           </p>
         </div>
@@ -952,20 +952,20 @@ function BookingChannelsSection() {
           <ChannelCard
             label="Embed"
             title="Keep traffic on your own site"
-            description="ReserveNI disappears into your branded pages—fast load, cohesive story, bookings still sync centrally."
+            description="ReserveNI disappears into your branded pages: fast load, cohesive story, bookings still sync centrally."
             visual={<EmbedRestaurantVisual />}
             featured
           />
           <ChannelCard
             label="Hosted booking page"
             title="Dedicated link for guests-on-the-move"
-            description="Premium mobile UX with your story, imagery, openings, dietary reassurance—perfect when SEO or social clicks convert."
+            description="Premium mobile UX with your story, imagery, openings, dietary reassurance, perfect when SEO or social clicks convert."
             visual={<RestaurantMiniSite />}
           />
           <ChannelCard
             label="Share anywhere"
             title="QR menus, concierge notes, influencer bios"
-            description="Paste one URL or print QR codes tuned to brunch vs dinner—all roads lead back to sane availability."
+            description="Paste one URL or print QR codes tuned to brunch vs dinner. All roads lead back to sane availability."
             visual={<RestaurantShareVisual />}
           />
         </div>
@@ -1120,7 +1120,7 @@ function VenueTypesSection() {
             Independent rooms with something to prove.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            From coastal tasting menus to Belfast brunch institutions—ReserveNI aligns with NI operators who obsess over vibe,
+            From coastal tasting menus to Belfast brunch institutions, ReserveNI aligns with NI operators who obsess over vibe,
             pacing, plates, people.
           </p>
         </div>
@@ -1209,7 +1209,7 @@ function ClosingCta() {
             className="absolute inset-0 opacity-30"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 22% 32%, rgba(78,107,120,0.82) 0%, transparent 40%), radial-gradient(circle at 86% 70%, rgba(180,83,9,0.45) 0%, transparent 45%)",
+                "radial-gradient(circle at 22% 32%, rgba(78,107,120,0.82) 0%, transparent 40%), radial-gradient(circle at 86% 70%, rgba(78,107,120,0.45) 0%, transparent 45%)",
             }}
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
@@ -1218,7 +1218,7 @@ function ClosingCta() {
                 Ready to reshape how your room fills up?
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
-                Speak with NI operators who obsess over plating and pacing—tell us where your pain sits and we&apos;ll sketch
+                Speak with NI operators who obsess over plating and pacing. Tell us where your pain sits and we&apos;ll sketch
                 a launch path that respects service, not spreadsheets.
               </p>
 
@@ -1232,7 +1232,7 @@ function ClosingCta() {
                   <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                     RESERVE50
                   </span>
-                  <span className="text-white/80"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
+                  <span className="text-white/80"> at checkout for 50% off for 3 months.</span>
                 </div>
               </div>
 
@@ -1273,7 +1273,7 @@ function ClosingCta() {
               <div className="mt-10 grid grid-cols-2 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
                 <div>
                   <p className="text-2xl font-bold text-white">Floor-first</p>
-                  <p className="text-xs">Day sheet, grid, floor plan—front & back aligned.</p>
+                  <p className="text-xs">Day sheet, grid, floor plan: front and back aligned.</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white">{SMS_INCLUDED_RESTAURANT}</p>

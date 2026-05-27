@@ -1,5 +1,6 @@
 import type Stripe from 'stripe';
 import { SIGNUP_TRIAL_DAYS } from '@/lib/signup-trial-copy';
+import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
 
 /**
  * Metered SMS overage price (Stripe Dashboard -> Products, backed by SMS usage meter).
@@ -101,6 +102,17 @@ export function getPersistedSubscriptionItemIds(sub: Stripe.Subscription): Persi
 export function buildSignupCheckoutSubscriptionData(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
   return {
     trial_period_days: SIGNUP_TRIAL_DAYS,
+  };
+}
+
+/**
+ * Referred signups: extend the standard trial by REFERRAL_REFEREE_BONUS_DAYS so the
+ * referee gets "14-day trial + 30 free days" as a single Stripe trial. The referrer
+ * receives their reward only after the referee's first paid invoice settles.
+ */
+export function buildSignupCheckoutSubscriptionDataWithReferral(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
+  return {
+    trial_period_days: SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS,
   };
 }
 

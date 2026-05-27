@@ -25,6 +25,11 @@ import {
   claimStripeWebhookEvent,
   releaseStripeWebhookEvent,
 } from '@/lib/webhooks/stripe-event-idempotency';
+import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
+import {
+  maybeCreditReferrerForInvoice,
+  markReferralsFailedForReferee,
+} from '@/lib/referrals/credit-referrer';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -145,6 +150,13 @@ export async function POST(request: NextRequest) {
             .update({ plan_status: 'active' })
             .eq('stripe_customer_id', customerId)
             .eq('plan_status', 'past_due');
+        }
+        // Referral programme: if this is the referee's first paid invoice, credit the referrer.
+        // Never throws; failures are logged so they cannot break the wider webhook handler.
+        try {
+          await maybeCreditReferrerForInvoice(supabase, invoice);
+        } catch (e) {
+          console.error('[Subscription webhook] maybeCreditReferrerForInvoice failed:', e);
         }
         break;
       }
@@ -359,6 +371,23 @@ async function handleCheckoutCompleted(
   }
 
   await updateVenueSmsMonthlyAllowance(venue.id);
+
+  // Referral programme: attach the referrals row if this venue signed up via a link.
+  // We do NOT eagerly create the new venue's own referral_codes row here — it's
+  // created lazily on first dashboard view, once onboarding has set the real name.
+  try {
+    const referralCode = (metadata.referral_code ?? '').trim() || null;
+    if (referralCode) {
+      await attachReferralOnSignup({
+        admin: supabase,
+        referralCode,
+        referredVenueId: venue.id,
+        refereeEmail: userEmail ?? null,
+      });
+    }
+  } catch (e) {
+    console.error('[Subscription webhook] referral wiring failed (non-fatal):', e);
+  }
 }
 
 async function handleSubscriptionUpdated(
@@ -436,6 +465,28 @@ async function handleSubscriptionDeleted(
         `[Subscription webhook] Ignoring deleted event ${deletedId}: customer still has another subscription`,
       );
       return;
+    }
+
+    // Referral programme: subscription truly cancelled with no replacement.
+    // If this venue was referred and hadn't yet hit a paid invoice, the referrer
+    // can no longer be credited — mark as failed.
+    try {
+      const { data: refereeVenues } = await supabase
+        .from('venues')
+        .select('id')
+        .eq('stripe_customer_id', customerId);
+      for (const v of refereeVenues ?? []) {
+        const vid = (v as { id?: string }).id;
+        if (vid) {
+          await markReferralsFailedForReferee(
+            supabase,
+            vid,
+            'referee_subscription_cancelled',
+          );
+        }
+      }
+    } catch (e) {
+      console.error('[Subscription webhook] markReferralsFailedForReferee failed:', e);
     }
   } catch (e) {
     console.warn('[Subscription webhook] Could not list subscriptions after delete; continuing cautiously', e);

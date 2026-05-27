@@ -7,8 +7,11 @@ import {
   buildCheckoutLineItems,
   buildLightPlanCheckoutLineItems,
   buildSignupCheckoutSubscriptionData,
+  buildSignupCheckoutSubscriptionDataWithReferral,
 } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
+import { validateReferralCode } from '@/lib/referrals/lookup';
+import { referralProgrammeEnabled } from '@/lib/referrals/constants';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
@@ -27,9 +30,10 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { business_type: rawBusinessType, plan } = body as {
+    const { business_type: rawBusinessType, plan, referral_code: rawReferralCode } = body as {
       business_type?: string | null;
       plan: 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
+      referral_code?: string | null;
     };
     const business_type =
       rawBusinessType?.trim() || (plan === 'appointments' || plan === 'plus' || plan === 'light' ? 'other' : '');
@@ -212,23 +216,46 @@ export async function POST(request: Request) {
       request.headers.get('origin') ||
       'http://localhost:3000';
 
+    // Referral programme: server-re-validate (do not trust the client). Apply only when
+    // the code resolves cleanly; otherwise silently drop so a stale code never blocks signup.
+    let referralForSession: { code: string; referrer_venue_id: string } | null = null;
+    if (referralProgrammeEnabled() && rawReferralCode) {
+      const validation = await validateReferralCode(admin, rawReferralCode);
+      if (validation.ok) {
+        referralForSession = {
+          code: validation.value.code,
+          referrer_venue_id: validation.value.referrer_venue_id,
+        };
+      } else {
+        console.log('[create-checkout] referral code dropped:', validation.reason);
+      }
+    }
+
+    const sessionMetadata: Record<string, string> = {
+      supabase_user_id: user.id,
+      user_id: user.id,
+      business_type,
+      plan,
+      pricing_tier: plan,
+      calendar_count: String(quantity),
+      booking_model: config.model,
+      business_category: config.category,
+    };
+    if (referralForSession) {
+      sessionMetadata.referral_code = referralForSession.code;
+      sessionMetadata.referrer_venue_id = referralForSession.referrer_venue_id;
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
       mode: 'subscription',
       allow_promotion_codes: true,
       payment_method_collection: 'always',
       line_items: lineItems,
-      subscription_data: buildSignupCheckoutSubscriptionData(),
-      metadata: {
-        supabase_user_id: user.id,
-        user_id: user.id,
-        business_type,
-        plan,
-        pricing_tier: plan,
-        calendar_count: String(quantity),
-        booking_model: config.model,
-        business_category: config.category,
-      },
+      subscription_data: referralForSession
+        ? buildSignupCheckoutSubscriptionDataWithReferral()
+        : buildSignupCheckoutSubscriptionData(),
+      metadata: sessionMetadata,
       success_url: `${origin}/signup/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/signup/payment`,
     });

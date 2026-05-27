@@ -296,12 +296,12 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       {/* Layered backgrounds for depth */}
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-emerald-50" />
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-brand-50/40" />
       <div
         className="absolute inset-0 opacity-60"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 15% 20%, rgba(78,107,120,0.12) 0%, transparent 45%), radial-gradient(circle at 85% 80%, rgba(5,150,105,0.10) 0%, transparent 50%)",
+            "radial-gradient(circle at 15% 20%, rgba(78,107,120,0.12) 0%, transparent 45%), radial-gradient(circle at 85% 80%, rgba(78,107,120,0.10) 0%, transparent 50%)",
         }}
       />
       <div
@@ -316,13 +316,13 @@ function Hero() {
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
             Built in Northern Ireland, for Northern Ireland
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
             Stop losing bookings.
             <br />
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-emerald-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-brand-800 bg-clip-text text-transparent">
               Start growing your business.
             </span>
           </h1>
@@ -347,17 +347,17 @@ function Hero() {
             </a>
           </div>
 
-          <div className="mt-8 inline-flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <div className="mt-8 inline-flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
               <TagIcon small />
             </span>
             <div className="text-sm">
-              <span className="font-semibold text-emerald-800">Founding Partner Offer: </span>
-              <span className="text-emerald-700">Use code </span>
-              <span className="rounded bg-emerald-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
+              <span className="font-semibold text-brand-800">Founding Partner Offer: </span>
+              <span className="text-brand-700">Use code </span>
+              <span className="rounded bg-brand-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                 RESERVE50
               </span>
-              <span className="text-emerald-700"> at checkout for 50% off for 3 months.</span>
+              <span className="text-brand-700"> at checkout for 50% off for 3 months.</span>
             </div>
           </div>
 
@@ -398,7 +398,7 @@ function HeroVisual() {
   return (
     <div className="relative mx-auto w-full max-w-sm">
       {/* Glow */}
-      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-emerald-200/60 blur-2xl" />
+      <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-brand-300/50 blur-2xl" />
 
       {/* Phone mock */}
       <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
@@ -416,7 +416,7 @@ function HeroVisual() {
           {/* Booking card */}
           <div className="px-5 pb-6 pt-4">
             <div className="flex items-center gap-2 text-[11px] font-medium text-brand-700">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="inline-block h-2 w-2 rounded-full bg-brand-500" />
               Booking confirmed
             </div>
             <h3 className="mt-2 text-lg font-bold text-slate-900">
@@ -449,7 +449,7 @@ function HeroVisual() {
       {/* Floating receipt card, positioned above the phone so it doesn't obscure the booking details */}
       <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <TickIcon />
           </div>
           <div>
@@ -479,11 +479,11 @@ function InfoTile({ label, value, accent = false }: { label: string; value: stri
   return (
     <div
       className={`rounded-xl border p-3 ${
-        accent ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50"
+        accent ? "border-brand-200 bg-brand-50" : "border-slate-100 bg-slate-50"
       }`}
     >
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`mt-1 text-sm font-bold ${accent ? "text-emerald-700" : "text-slate-900"}`}>
+      <p className={`mt-1 text-sm font-bold ${accent ? "text-brand-700" : "text-slate-900"}`}>
         {value}
       </p>
     </div>
@@ -537,7 +537,7 @@ function SolutionIntro() {
         className="absolute inset-0 opacity-30"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 25% 30%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(5,150,105,0.35) 0%, transparent 50%)",
+            "radial-gradient(circle at 25% 30%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(78,107,120,0.35) 0%, transparent 50%)",
         }}
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
@@ -627,7 +627,7 @@ function ProductPreview() {
 
         <div className="relative mt-16">
           {/* Decorative glow */}
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-emerald-200/40 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-brand-300/40 blur-3xl" />
 
           <DashboardMock />
         </div>
@@ -641,7 +641,7 @@ function DashboardMock() {
     { time: "9:00", name: "James M.", service: "Skin fade", color: "bg-brand-600" },
     { time: "9:45", name: "Conor B.", service: "Cut & beard", color: "bg-brand-500" },
     { time: "10:30", name: "Open slot", service: "Available to book", color: "bg-slate-200", empty: true },
-    { time: "11:15", name: "Daniel K.", service: "Hot towel shave", color: "bg-emerald-600" },
+    { time: "11:15", name: "Daniel K.", service: "Hot towel shave", color: "bg-brand-600" },
     { time: "12:00", name: "Lunch", service: "", color: "bg-amber-200/70", empty: true },
     { time: "13:00", name: "Sarah L.", service: "Consultation", color: "bg-brand-600" },
     { time: "13:45", name: "Open slot", service: "Available to book", color: "bg-slate-200", empty: true },
@@ -654,7 +654,7 @@ function DashboardMock() {
       <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
-        <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80" />
+        <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
         <div className="ml-4 hidden h-5 w-72 rounded-md bg-white text-[10px] text-slate-400 sm:flex sm:items-center sm:justify-center sm:gap-1">
           <LockIcon /> reserveni.com/dashboard
         </div>
@@ -688,7 +688,7 @@ function DashboardMock() {
               <h3 className="mt-0.5 text-xl font-bold text-slate-900">Today&apos;s diary</h3>
             </div>
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
                 6 booked
               </span>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
@@ -780,7 +780,7 @@ function StatCard({
     <div className="rounded-xl border border-slate-100 bg-white p-3">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-extrabold text-slate-900">{value}</p>
-      <p className={`text-[11px] font-semibold ${good ? "text-emerald-600" : "text-emerald-600"}`}>
+      <p className={`text-[11px] font-semibold ${good ? "text-brand-600" : "text-brand-600"}`}>
         {trend}
       </p>
     </div>
@@ -837,7 +837,7 @@ function ClientBenefitsSection() {
 function BookingFlowVisual() {
   return (
     <div className="relative">
-      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-emerald-100 via-brand-50 to-white blur-2xl" />
+      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-brand-100 via-brand-50 to-white blur-2xl" />
 
       <div className="relative grid gap-3 sm:grid-cols-3">
         <MiniCard step="1" title="Pick a service">
@@ -1288,7 +1288,7 @@ function ClosingCta() {
             className="absolute inset-0 opacity-30"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 20% 30%, rgba(78,107,120,0.8) 0%, transparent 40%), radial-gradient(circle at 85% 70%, rgba(5,150,105,0.5) 0%, transparent 45%)",
+                "radial-gradient(circle at 20% 30%, rgba(78,107,120,0.8) 0%, transparent 40%), radial-gradient(circle at 85% 70%, rgba(78,107,120,0.45) 0%, transparent 45%)",
             }}
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
@@ -1384,9 +1384,6 @@ function Footer() {
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">
             Home
-          </Link>
-          <Link href="/restaurant" className="transition-colors hover:text-slate-900">
-            Restaurant plan
           </Link>
           <Link href="/signup" className="transition-colors hover:text-slate-900">
             Sign up

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import { createClient } from '@/lib/supabase/server';
 import {
   getVenueStaff,
@@ -308,7 +309,10 @@ export async function GET(request: NextRequest) {
       } else if (activeOnly) {
         list = list.filter((p) => (p as { is_active?: boolean }).is_active === true);
       }
-      return NextResponse.json({ practitioners: list });
+      return NextResponse.json(
+        { practitioners: list },
+        roster ? { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } } : undefined,
+      );
     }
 
     const { data, error } = await admin
@@ -332,7 +336,10 @@ export async function GET(request: NextRequest) {
       list = list.filter((p) => p.is_active === true);
     }
 
-    return NextResponse.json({ practitioners: list });
+    return NextResponse.json(
+      { practitioners: list },
+      roster ? { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } } : undefined,
+    );
   } catch (err) {
     console.error('GET /api/venue/practitioners failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

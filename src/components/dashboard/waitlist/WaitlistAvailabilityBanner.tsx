@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { WAITLIST_ALERTS_REFRESH_EVENT } from '@/lib/booking/waitlist-alerts-events';
+import { WAITLIST_ALERTS_POLL_MS } from '@/lib/realtime/dashboard-sync-constants';
 
 interface WaitlistAlert {
   id: string;
@@ -57,15 +58,18 @@ export function WaitlistAvailabilityBanner() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 30_000);
-    const onFocus = () => void refresh();
-    const onWaitlistRefresh = () => void refresh();
-    window.addEventListener('focus', onFocus);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    refreshIfVisible();
+    const interval = window.setInterval(refreshIfVisible, WAITLIST_ALERTS_POLL_MS);
+    const onVisibility = () => refreshIfVisible();
+    const onWaitlistRefresh = () => refreshIfVisible();
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener(WAITLIST_ALERTS_REFRESH_EVENT, onWaitlistRefresh);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener(WAITLIST_ALERTS_REFRESH_EVENT, onWaitlistRefresh);
     };
   }, [refresh]);

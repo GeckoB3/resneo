@@ -11,7 +11,6 @@ import { loadWaitlistVenueCapabilities } from '@/lib/booking/load-waitlist-venue
 import {
   dismissWaitlistSlotOpportunity,
   enrichWaitlistSlotOpportunities,
-  ensureStaffChooseOpportunitiesFromWaitlist,
   markWaitlistOpportunitiesFilledForSlot,
   offerWaitlistFromOpportunity,
   opportunityToFreedSlot,
@@ -47,7 +46,7 @@ export async function GET() {
       return NextResponse.json({ alerts: [] });
     }
 
-    await ensureStaffChooseOpportunitiesFromWaitlist(admin, staff.venue_id);
+    // Opportunity discovery runs on cancel hooks and /api/cron/expire-waitlist-offers (every 5 min).
 
     const { data, error } = await admin
       .from('waitlist_slot_opportunities')

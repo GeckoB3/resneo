@@ -251,6 +251,86 @@ export async function getDashboardStaff(
 }
 
 /**
+ * Resolve a single venue_id for an authenticated user (middleware billing gate, etc.).
+ * Uses the service-role client so lookups are not blocked by staff RLS recursion.
+ */
+export async function resolveStaffVenueIdForAuthenticatedUser(
+  admin: SupabaseClient,
+  userId: string,
+  userEmail: string | null | undefined,
+): Promise<string | null> {
+  const { data: byUserId, error: userIdErr } = await admin
+    .from('staff')
+    .select('venue_id')
+    .eq('user_id', userId)
+    .is('revoked_at', null)
+    .order('id', { ascending: true })
+    .limit(10);
+
+  if (userIdErr) {
+    console.error('[resolveStaffVenueIdForAuthenticatedUser] user_id lookup failed:', userIdErr.message, {
+      userId,
+    });
+  }
+
+  const fromUserId = resolveUniqueStaffRow(
+    (byUserId ?? []).map((r) => ({ ...r, id: '', role: 'staff' as const })),
+    'resolveStaffVenueIdForAuthenticatedUser',
+  );
+  if (fromUserId) return fromUserId.venue_id;
+
+  const normalised = userEmail?.trim().toLowerCase() ?? '';
+  if (!normalised) return null;
+
+  const { data: byEmail, error: emailErr } = await admin
+    .from('staff')
+    .select('venue_id')
+    .ilike('email', normalised)
+    .is('revoked_at', null)
+    .order('id', { ascending: true })
+    .limit(10);
+
+  if (emailErr) {
+    console.error('[resolveStaffVenueIdForAuthenticatedUser] email lookup failed:', emailErr.message, {
+      email: normalised,
+    });
+    return null;
+  }
+
+  const fromEmail = resolveUniqueStaffRow(
+    (byEmail ?? []).map((r) => ({ ...r, id: '', role: 'staff' as const })),
+    'resolveStaffVenueIdForAuthenticatedUser',
+  );
+  return fromEmail?.venue_id ?? null;
+}
+
+/** True when the signed-in user has at least one active staff row (any venue). */
+export async function authenticatedUserHasStaffMembership(
+  admin: SupabaseClient,
+  userId: string,
+  userEmail: string | null | undefined,
+): Promise<boolean> {
+  const { count: byUserId } = await admin
+    .from('staff')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .is('revoked_at', null);
+
+  if ((byUserId ?? 0) > 0) return true;
+
+  const normalised = userEmail?.trim().toLowerCase() ?? '';
+  if (!normalised) return false;
+
+  const { count: byEmail } = await admin
+    .from('staff')
+    .select('id', { count: 'exact', head: true })
+    .ilike('email', normalised)
+    .is('revoked_at', null);
+
+  return (byEmail ?? 0) > 0;
+}
+
+/**
  * Require admin role. Use after getVenueStaff; narrows to venue admin when true.
  */
 export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff & { role: 'admin' } {

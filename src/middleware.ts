@@ -7,6 +7,7 @@ import {
   isSignupPaymentReady,
 } from '@/lib/signup-pending-selection';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveStaffVenueIdForAuthenticatedUser } from '@/lib/venue-auth';
 import { SUPPORT_SESSION_COOKIE_NAME } from '@/lib/support-session-constants';
 import {
   fetchActiveSupportSession,
@@ -155,20 +156,16 @@ export async function middleware(request: NextRequest) {
 
     if (!isVenueBillingExemptVenuePath(pathname)) {
       let vid: string | undefined = supportSession?.venue_id;
-      const email = (user?.email ?? '').trim();
+      const admin = getSupabaseAdminClient();
       if (!vid) {
-        if (!email) {
+        if (!user?.id) {
           return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
         }
-        const { data: staffRows } = await supabase
-          .from('staff')
-          .select('venue_id')
-          .ilike('email', email.toLowerCase())
-          .limit(1);
-        vid = staffRows?.[0]?.venue_id as string | undefined;
+        vid =
+          (await resolveStaffVenueIdForAuthenticatedUser(admin, user.id, user.email ?? null)) ?? undefined;
       }
       if (vid) {
-        const { data: venueRow } = await supabase
+        const { data: venueRow } = await admin
           .from('venues')
           .select('plan_status, billing_access_source, subscription_current_period_end')
           .eq('id', vid)

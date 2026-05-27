@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 const portalCardClass =
@@ -71,17 +73,8 @@ export default async function AccountHomePage() {
   const firstName = display.split(/\s+/)[0] ?? display;
   const greeting = firstName === 'Guest' ? 'Welcome' : `Welcome back, ${firstName}`;
 
-  const [{ count: staffByUserId }, { count: staffByEmail }] = await Promise.all([
-    supabase.from('staff').select('id', { count: 'exact', head: true }).eq('user_id', user!.id).is('revoked_at', null),
-    user?.email
-      ? supabase
-          .from('staff')
-          .select('id', { count: 'exact', head: true })
-          .ilike('email', user.email.trim())
-          .is('revoked_at', null)
-      : Promise.resolve({ count: 0 }),
-  ]);
-  const showVenueDashboard = (staffByUserId ?? 0) > 0 || (staffByEmail ?? 0) > 0;
+  const admin = getSupabaseAdminClient();
+  const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user!.id, user?.email);
 
   const shortcuts: Array<{
     href: string;

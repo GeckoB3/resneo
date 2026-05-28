@@ -12,6 +12,7 @@ import {
   toServiceCustomScheduleV2,
 } from '@/lib/service-custom-availability';
 import type {
+  AppointmentCatalogAddonGroup,
   AppointmentService,
   ClassPaymentRequirement,
   PractitionerService,
@@ -41,6 +42,9 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { AddonsLibraryView } from '@/app/dashboard/addons/AddonsLibraryView';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 interface Service {
   id: string;
@@ -71,6 +75,8 @@ interface Service {
   custom_working_hours?: ServiceCustomScheduleStored | null;
   /** Optional sub-options the customer must pick from before completing a booking. */
   variants?: ServiceVariant[];
+  /** Linked add-on groups, returned from the dashboard API. */
+  addon_groups?: AppointmentCatalogAddonGroup[];
   processing_time_blocks?: ProcessingTimeBlock[];
 }
 
@@ -148,6 +154,32 @@ export function AppointmentServicesView({
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Tab navigation: "services" (default) or "addons". Synced to the URL via
+  // `?tab=addons` so deep-links and the back button work as expected.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const initialTab: 'services' | 'addons' =
+    searchParams.get('tab') === 'addons' ? 'addons' : 'services';
+  const [activeTab, setActiveTab] = useState<'services' | 'addons'>(initialTab);
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t === 'addons' && activeTab !== 'addons') setActiveTab('addons');
+    if (t !== 'addons' && activeTab !== 'services') setActiveTab('services');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  function changeTab(next: 'services' | 'addons') {
+    setActiveTab(next);
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (next === 'addons') {
+      params.set('tab', 'addons');
+    } else {
+      params.delete('tab');
+    }
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }
   const [linkSavingKey, setLinkSavingKey] = useState<string | null>(null);
   const [overrideService, setOverrideService] = useState<Service | null>(null);
   const [overrideCalendarId, setOverrideCalendarId] = useState<string | null>(null);
@@ -336,6 +368,7 @@ export function AppointmentServicesView({
       ...DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
       staffMay: { ...DEFAULT_STAFF_MAY_CUSTOMIZE },
       variants: [],
+      addon_group_links: [],
       practitioner_ids: defaultCalendarIds,
     });
     setEditingId(null);
@@ -399,6 +432,9 @@ export function AppointmentServicesView({
           (v as { processing_time_blocks?: unknown }).processing_time_blocks,
         ),
       })),
+      addon_group_links: (svc as { addon_groups?: unknown }).addon_groups
+        ? ((svc as { addon_groups: AppointmentCatalogAddonGroup[] }).addon_groups)
+        : [],
     });
     setEditingId(svc.id);
     setError(null);
@@ -597,6 +633,10 @@ export function AppointmentServicesView({
           is_active: v.is_active,
           processing_time_blocks: v.processing_time_blocks,
         }));
+        payload.addon_group_links = form.addon_group_links.map((link, idx) => ({
+          addon_group_id: link.group.id,
+          sort_order: idx,
+        }));
       }
 
       const res = await fetch('/api/venue/appointment-services', {
@@ -675,20 +715,26 @@ export function AppointmentServicesView({
       .map((p) => ({ id: p.id, name: p.name }));
   }
 
+  const showServicesTab = activeTab === 'services';
+
   return (
     <div className="space-y-4">
       <PageHeader
         eyebrow="Appointments"
-        title="Services"
+        title={showServicesTab ? 'Services' : 'Services & add-ons'}
         subtitle={
-          !isAdmin
-            ? linkedPractitionerIds.length === 0
-              ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
-              : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
-            : 'Define what guests can book, pricing, buffers, and online payment rules.'
+          showServicesTab
+            ? !isAdmin
+              ? linkedPractitionerIds.length === 0
+                ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
+                : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
+              : 'Define what guests can book, pricing, buffers, and online payment rules.'
+            : isAdmin
+              ? 'Build reusable add-on groups. Link them to one or many services from each service’s edit form.'
+              : 'Add-on groups configured by your venue admin.'
         }
         actions={
-          isAdmin || linkedPractitionerIds.length > 0 ? (
+          showServicesTab && (isAdmin || linkedPractitionerIds.length > 0) ? (
             <button
               type="button"
               onClick={openCreate}
@@ -703,6 +749,20 @@ export function AppointmentServicesView({
         }
       />
 
+      <TabBar
+        tabs={[
+          { id: 'services', label: 'Services' },
+          { id: 'addons', label: 'Add-ons' },
+        ] as const}
+        value={activeTab}
+        onChange={changeTab}
+        mobileNote={null}
+      />
+
+      {activeTab === 'addons' ? (
+        <AddonsLibraryView isAdmin={isAdmin} currencySymbol={sym} embedded />
+      ) : (
+        <>
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
           <span>{error}</span>
@@ -908,6 +968,8 @@ export function AppointmentServicesView({
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       <Dialog

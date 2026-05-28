@@ -9,6 +9,10 @@ export interface MultiServiceLine {
   depositPence: number;
   /** When set, refines the total line label (deposit vs full payment). */
   chargeKind?: 'deposit' | 'full_payment';
+  /** Add-ons stacked on this service, shown beneath the service line. */
+  extras?: Array<{ name: string; pricePence: number; durationMinutes: number }>;
+  /** When true and `onEditAddons` is provided, an "Edit extras" control is shown. */
+  editableAddons?: boolean;
 }
 
 interface MultiServiceSummaryCardProps {
@@ -18,6 +22,7 @@ interface MultiServiceSummaryCardProps {
   currencySymbol: string;
   formatPrice: (pence: number | null) => string;
   onRemove?: (index: number) => void;
+  onEditAddons?: (index: number) => void;
 }
 
 export function MultiServiceSummaryCard({
@@ -27,9 +32,14 @@ export function MultiServiceSummaryCard({
   currencySymbol,
   formatPrice,
   onRemove,
+  onEditAddons,
 }: MultiServiceSummaryCardProps) {
   const totalDuration = lines.reduce((sum, l) => sum + l.durationMinutes, 0);
-  const totalPrice = lines.reduce((sum, l) => sum + (l.pricePence ?? 0), 0);
+  const totalExtras = lines.reduce(
+    (sum, l) => sum + (l.extras?.reduce((s, e) => s + e.pricePence, 0) ?? 0),
+    0,
+  );
+  const totalPrice = lines.reduce((sum, l) => sum + (l.pricePence ?? 0), 0) + totalExtras;
   const totalDeposit = lines.reduce((sum, l) => sum + (l.depositPence ?? 0), 0);
   const hasPrice = lines.some((l) => l.pricePence != null);
   const allFull =
@@ -53,6 +63,30 @@ export function MultiServiceSummaryCard({
               {line.pricePence != null && (
                 <div className="mt-0.5 text-xs font-medium text-brand-600">{formatPrice(line.pricePence)}</div>
               )}
+              {line.extras && line.extras.length > 0 ? (
+                <ul className="mt-1 space-y-0.5 border-l-2 border-slate-200 pl-2 text-[11px] text-slate-500">
+                  {line.extras.map((e, i) => (
+                    <li key={`${e.name}-${i}`} className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 truncate">
+                        + {e.name}
+                        {e.durationMinutes > 0 ? ` (+${e.durationMinutes} min)` : ''}
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        {e.pricePence > 0 ? `+${currencySymbol}${(e.pricePence / 100).toFixed(2)}` : 'Free'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {line.editableAddons && onEditAddons ? (
+                <button
+                  type="button"
+                  onClick={() => onEditAddons(idx)}
+                  className="mt-1 text-[11px] font-medium text-brand-600 hover:text-brand-700"
+                >
+                  {line.extras && line.extras.length > 0 ? 'Edit extras' : 'Add extras'}
+                </button>
+              ) : null}
             </div>
             {onRemove ? (
               <button

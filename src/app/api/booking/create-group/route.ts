@@ -15,7 +15,12 @@ import {
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { buildAddonSnapshots, totalsFromSnapshots, type BookingAddonSnapshot } from '@/lib/addons/snapshot-addons';
+import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import {
   applyVariantToAppointmentInput,
   resolveBookableServiceWithVariant,
@@ -41,6 +46,8 @@ const personEntrySchema = z.object({
   appointment_service_id: z.string().uuid(),
   /** Optional sub-option for the parent service. */
   service_variant_id: z.string().uuid().optional(),
+  /** Optional add-ons stacked on this attendee's service. */
+  addons: bookingAddonSelectionArraySchema.optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
 });
@@ -163,6 +170,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Group bookings are only available for appointment businesses' }, { status: 400 });
     }
 
+    const useUnifiedForAddons = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
+    const addonSchema = useUnifiedForAddons ? 'service_item' : 'appointment_service';
+
     // Validate each person's slot, using phantom bookings for already-validated ones
     const validatedPeople: Array<{
       person_label: string;
@@ -178,6 +188,9 @@ export async function POST(request: NextRequest) {
       service_display_name: string;
       service_price_pence: number | null;
       processing_time_blocks: ProcessingTimeBlock[];
+      addon_snapshots: BookingAddonSnapshot[];
+      addons_total_price_pence: number;
+      addons_total_duration_minutes: number;
     }> = [];
 
     const phantoms: PhantomBooking[] = [];
@@ -218,6 +231,56 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Validate this person's add-ons before the slot check so the duration extension
+      // makes the availability engine fit the full wall-clock the booking will occupy.
+      let personAddonSnapshots: BookingAddonSnapshot[] = [];
+      let personAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
+      if (person.addons && person.addons.length > 0) {
+        const { groups, groupsById } = await loadAddonsForBooking({
+          admin: supabase,
+          venueId: venue_id,
+          schema: addonSchema,
+          parentId: person.appointment_service_id,
+          includeHidden: !isOnlineLikeSource,
+        });
+        const validation = validateAddonSelections({
+          selections: person.addons,
+          groupsForService: groups,
+          source: isOnlineLikeSource ? 'public' : 'staff',
+        });
+        if (!validation.ok) {
+          return NextResponse.json(
+            { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+            { status: 400 },
+          );
+        }
+        personAddonSnapshots = buildAddonSnapshots({
+          selected: validation.resolvedAddons,
+          groupsById,
+          segmentIndex: null,
+        });
+        personAddonTotals = totalsFromSnapshots(personAddonSnapshots);
+      }
+
+      // Resolve the authoritative service (variant + practitioner overrides) up front so we can
+      // fold add-on minutes onto it and write the full duration into the engine input before
+      // checking slot availability.
+      const baseSvc = input.services.find((s) => s.id === person.appointment_service_id);
+      const ps = input.practitionerServices.find(
+        (row) => row.practitioner_id === person.practitioner_id && row.service_id === person.appointment_service_id,
+      );
+      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
+      const resolvedBaseDuration = svc?.duration_minutes ?? 30;
+      const durationMins = resolvedBaseDuration + personAddonTotals.total_duration_minutes;
+      const bufferMins = svc?.buffer_minutes ?? 0;
+      if (personAddonTotals.total_duration_minutes > 0) {
+        const idx = input.services.findIndex((s) => s.id === person.appointment_service_id);
+        if (idx >= 0) {
+          input.services[idx] = { ...input.services[idx]!, duration_minutes: durationMins };
+        }
+      }
+
       const svcWindow = await loadServiceEntityBookingWindow(
         supabase,
         venue_id,
@@ -242,14 +305,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const baseSvc = input.services.find((s) => s.id === person.appointment_service_id);
-      const ps = input.practitionerServices.find(
-        (row) => row.practitioner_id === person.practitioner_id && row.service_id === person.appointment_service_id,
-      );
-      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
-      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
-      const durationMins = svc?.duration_minutes ?? 30;
-      const bufferMins = svc?.buffer_minutes ?? 0;
       let estimatedEndTime: string | null = null;
       let depositPence = 0;
 
@@ -257,10 +312,15 @@ export async function POST(request: NextRequest) {
         const [y, mo, d] = person.booking_date.split('-').map(Number);
         const [hh, mm] = timeStr.split(':').map(Number);
         const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-        endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
+        // durationMins includes add-on minutes; use it (not svc.duration_minutes) for the end time.
+        endDate.setMinutes(endDate.getMinutes() + durationMins);
         estimatedEndTime = endDate.toISOString();
 
-        const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
+        // Full payment rolls add-on price into the charge; deposit stays on base+variant.
+        const online = resolveAppointmentServiceOnlineChargeWithAddons({
+          svc,
+          addons_total_price_pence: personAddonTotals.total_price_pence,
+        });
         if (online != null && online.amountPence > 0) {
           depositPence = online.amountPence;
         }
@@ -285,6 +345,9 @@ export async function POST(request: NextRequest) {
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
         processing_time_blocks: processingSnap,
+        addon_snapshots: personAddonSnapshots,
+        addons_total_price_pence: personAddonTotals.total_price_pence,
+        addons_total_duration_minutes: personAddonTotals.total_duration_minutes,
       });
 
       phantoms.push({
@@ -394,6 +457,8 @@ export async function POST(request: NextRequest) {
         group_booking_id: groupBookingId,
         person_label: person.person_label,
         processing_time_blocks: person.processing_time_blocks,
+        addons_total_price_pence: person.addons_total_price_pence,
+        addons_total_duration_minutes: person.addons_total_duration_minutes,
         ...(useUnifiedBookingRows
           ? {
               calendar_id: person.practitioner_id,
@@ -415,6 +480,16 @@ export async function POST(request: NextRequest) {
           await supabase.from('bookings').delete().in('id', bookingIds);
         }
         return NextResponse.json({ error: 'Failed to create group booking' }, { status: 500 });
+      }
+
+      if (person.addon_snapshots.length > 0) {
+        const addonRows = person.addon_snapshots.map((s) => ({ ...s, booking_id: booking.id }));
+        const { error: addErr } = await supabase.from('booking_addons').insert(addonRows);
+        if (addErr) {
+          console.error('Group booking_addons insert failed:', addErr);
+          await supabase.from('bookings').delete().in('id', [...bookingIds, booking.id]);
+          return NextResponse.json({ error: 'Failed to save add-ons for booking' }, { status: 500 });
+        }
       }
 
       bookingIds.push(booking.id);

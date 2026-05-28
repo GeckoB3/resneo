@@ -3,6 +3,7 @@ import type {
   ClassPaymentRequirement,
   ProcessingTimeBlock,
   ServiceCustomScheduleV2,
+  AppointmentCatalogAddonGroup,
 } from '@/types/booking-models';
 
 /** One editable row in the variants section of the appointment service form. */
@@ -70,6 +71,12 @@ export interface AppointmentServiceFormValues {
   custom_working_hours: ServiceCustomScheduleV2;
   variants: AppointmentServiceVariantFormRow[];
   processing_time_blocks: ProcessingTimeBlock[];
+  /**
+   * Linked add-on groups (read-only previews used by the form). On save, the dashboard
+   * sends `addon_group_links: Array<{ addon_group_id, sort_order }>` to the appointment
+   * services API.
+   */
+  addon_group_links: AppointmentCatalogAddonGroup[];
 }
 
 export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValues = {
@@ -92,6 +99,7 @@ export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValu
   custom_working_hours: { version: 2, rules: [] },
   variants: [],
   processing_time_blocks: [],
+  addon_group_links: [],
 };
 
 export const APPOINTMENT_SERVICE_COLOUR_OPTIONS = [

@@ -410,6 +410,66 @@ export async function enrichBookingEmailForSecondaryModels(
   return base;
 }
 
+/**
+ * Load addon snapshots for a booking and render summary lines for the email template.
+ * Returns an empty array (and zero totals) when no add-ons were chosen.
+ */
+async function enrichBookingEmailWithAddons(
+  supabase: SupabaseClient,
+  bookingId: string,
+  base: BookingEmailData,
+): Promise<BookingEmailData> {
+  const { data: rows, error } = await supabase
+    .from('booking_addons')
+    .select(
+      'addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking',
+    )
+    .eq('booking_id', bookingId)
+    .order('created_at', { ascending: true });
+
+  if (error || !rows || rows.length === 0) return base;
+
+  const lines: string[] = [];
+  let totalPrice = 0;
+  let totalDuration = 0;
+  for (const row of rows as Array<{
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    price_pence_at_booking: number;
+    duration_minutes_at_booking: number;
+  }>) {
+    const namePart = row.addon_group_name_snapshot
+      ? `${row.addon_group_name_snapshot}: ${row.addon_name_snapshot}`
+      : row.addon_name_snapshot;
+    const parts: string[] = [];
+    if (row.price_pence_at_booking > 0) {
+      parts.push(`+£${formatDepositAmount(row.price_pence_at_booking)}`);
+    }
+    if (row.duration_minutes_at_booking > 0) {
+      parts.push(`+${row.duration_minutes_at_booking} min`);
+    }
+    lines.push(parts.length > 0 ? `${namePart} (${parts.join(', ')})` : namePart);
+    totalPrice += row.price_pence_at_booking;
+    totalDuration += row.duration_minutes_at_booking;
+  }
+
+  // Roll add-ons into the headline total when the venue uses full-payment-style pricing.
+  const newTotal =
+    base.booking_total_price_pence != null
+      ? base.booking_total_price_pence + totalPrice
+      : totalPrice > 0
+        ? totalPrice
+        : null;
+
+  return {
+    ...base,
+    addon_lines: lines,
+    addons_total_price_pence: totalPrice,
+    addons_total_duration_minutes: totalDuration,
+    booking_total_price_pence: newTotal,
+  };
+}
+
 /** Appointment/USE enrichment then C/D/E labels for transactional and scheduled comms. */
 export async function enrichBookingEmailForComms(
   supabase: SupabaseClient,
@@ -417,7 +477,8 @@ export async function enrichBookingEmailForComms(
   base: BookingEmailData,
 ): Promise<BookingEmailData> {
   const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base);
-  return enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
+  const withSecondary = await enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
+  return enrichBookingEmailWithAddons(supabase, bookingId, withSecondary);
 }
 
 function resourceBookingTotalPence(params: {

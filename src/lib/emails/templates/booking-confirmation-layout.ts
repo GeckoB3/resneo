@@ -259,16 +259,27 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
         ? priceDisplay.trim()
         : null;
     const hasPriceRow = Boolean(lineItemPrice || totalPrice);
+    const addonLines = booking.addon_lines ?? [];
+    const hasAddonRows = addonLines.length > 0;
 
     const subLine = prac
       ? `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED}">with ${escapeHtml(prac)}</p>`
       : '';
 
     const priceCell = lineItemPrice
-      ? `<td style="padding:14px 0;border-bottom:${hasPriceRow && totalPrice ? `1px solid ${RULE}` : 'none'};text-align:right;vertical-align:top;white-space:nowrap">` +
+      ? `<td style="padding:14px 0;border-bottom:${hasPriceRow && (totalPrice || hasAddonRows) ? `1px solid ${RULE}` : 'none'};text-align:right;vertical-align:top;white-space:nowrap">` +
         `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(lineItemPrice)}</p>` +
         `</td>`
       : `<td></td>`;
+
+    const addonRows = hasAddonRows
+      ? `<tr><td colspan="2" style="padding:14px 0 4px;border-bottom:${totalPrice ? `1px solid ${RULE}` : 'none'};vertical-align:top">` +
+        `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em">Extras</p>` +
+        `<ul style="margin:6px 0 0;padding-left:18px;font-size:14px;color:${TEXT_DARK};line-height:1.5">` +
+        addonLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('') +
+        `</ul>` +
+        `</td></tr>`
+      : '';
 
     const totalRow = totalPrice
       ? `<tr>` +
@@ -285,12 +296,13 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0 0">` +
       `<tbody>` +
       `<tr>` +
-      `<td style="padding:14px 0;border-bottom:${totalPrice ? `1px solid ${RULE}` : 'none'};vertical-align:top">` +
+      `<td style="padding:14px 0;border-bottom:${totalPrice || hasAddonRows ? `1px solid ${RULE}` : 'none'};vertical-align:top">` +
       `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(svcName)}</p>` +
       subLine +
       `</td>` +
       priceCell +
       `</tr>` +
+      addonRows +
       totalRow +
       `</tbody>` +
       `</table>`

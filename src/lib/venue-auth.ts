@@ -8,7 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
-import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { isPlatformSuperuser, isPlatformRoleInJwt } from '@/lib/platform-auth';
 import {
   fetchActiveSupportSession,
   fetchStaffRowForSupport,
@@ -62,71 +62,90 @@ function resolveUniqueStaffRow(rows: StaffLookupRow[], context: string): StaffLo
   return rows[0] ?? null;
 }
 
+interface AuthIdentity {
+  id: string;
+  email: string | null;
+  appMetadata: Record<string, unknown>;
+}
+
 /**
- * Get the current user's staff record for their first venue.
- * Returns null if not authenticated or not a staff member.
+ * Resolve the authenticated user's identity from the validated JWT claims.
  *
- * The returned object includes a `db` property (admin client) that API routes
- * should use for all subsequent data queries. This avoids the circular RLS
- * issue where staff, venue, booking, etc. policies all cross-reference staff.
+ * Uses `getClaims()` which verifies the access token locally (via cached JWKS)
+ * when the project has asymmetric JWT signing keys enabled, avoiding a network
+ * round-trip to the Auth server (`/auth/v1/user`) on every request. It falls
+ * back to an Auth-server call only when local verification is not possible
+ * (legacy shared-secret projects), so this is never worse than `getUser()`.
  */
-export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaff | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) return null;
+async function resolveAuthIdentity(supabase: SupabaseClient): Promise<AuthIdentity | null> {
+  const { data, error } = await supabase.auth.getClaims();
+  if (error || !data?.claims) return null;
+  const claims = data.claims as Record<string, unknown>;
+  const id = typeof claims.sub === 'string' ? claims.sub : null;
+  if (!id) return null;
+  const email = typeof claims.email === 'string' ? claims.email : null;
+  const appMetadata =
+    claims.app_metadata && typeof claims.app_metadata === 'object'
+      ? (claims.app_metadata as Record<string, unknown>)
+      : {};
+  return { id, email, appMetadata };
+}
 
-  const admin = getSupabaseAdminClient();
+interface StaffIdentity {
+  id: string;
+  venue_id: string;
+  email: string;
+  role: 'admin' | 'staff';
+}
 
-  if (isPlatformSuperuser(user)) {
-    const cookieSessionId = await getSupportSessionCookieIdFromCookies();
-    if (cookieSessionId) {
-      const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
-      if (session) {
-        const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
-        if (staffRow) {
-          return {
-            id: staffRow.id,
-            venue_id: staffRow.venue_id,
-            email: staffRow.email,
-            role: staffRow.role,
-            db: admin,
-            support: {
-              sessionId: session.id,
-              superuserDisplayName:
-                session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
-              superuserEmail: session.superuser_email,
-              expiresAt: session.expires_at,
-              reason: session.reason,
-            },
-          };
-        }
-      }
-    }
-  }
+/**
+ * Short-lived in-process cache for the `userId -> staff row` resolution.
+ *
+ * Each authenticated venue request previously cost up to two `staff` lookups
+ * (by `user_id`, then an email fallthrough). For a busy dashboard that is a
+ * large, repetitive share of database egress. Caching the resolution per warm
+ * serverless instance collapses that to ~zero on the hot path.
+ *
+ * Trade-off: staff role / venue / revocation changes take up to
+ * {@link STAFF_IDENTITY_TTL_MS} to take effect. Keep this short.
+ */
+const STAFF_IDENTITY_TTL_MS = 30_000;
+const staffIdentityCache = new Map<string, { value: StaffIdentity | null; expires: number }>();
 
+/** Drop a cached staff identity (call after mutating a user's staff membership). */
+export function invalidateCachedStaffIdentity(userId: string): void {
+  staffIdentityCache.delete(userId);
+}
+
+async function resolveStaffIdentityUncached(
+  admin: SupabaseClient,
+  userId: string,
+  email: string | null,
+  context: string,
+): Promise<StaffIdentity | null> {
   const { data: byUserId, error: userIdErr } = await admin
     .from('staff')
     .select('id, venue_id, email, role, user_id')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
 
   if (userIdErr) {
-    console.error('[getVenueStaff] staff user_id lookup failed:', userIdErr.message, { userId: user.id });
+    console.error(`[${context}] staff user_id lookup failed:`, userIdErr.message, { userId });
   }
 
-  const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], 'getVenueStaff');
+  const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], context);
   if (fromUserId) {
     return {
       id: fromUserId.id,
       venue_id: fromUserId.venue_id,
-      email: fromUserId.email ?? user.email ?? '',
-      role: fromUserId.role as 'admin' | 'staff',
-      db: admin,
+      email: fromUserId.email ?? email ?? '',
+      role: fromUserId.role,
     };
   }
 
-  const normalised = user.email?.toLowerCase().trim() ?? '';
+  const normalised = email?.toLowerCase().trim() ?? '';
   if (!normalised) return null;
 
   const { data: rows, error } = await admin
@@ -138,18 +157,90 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
     .limit(10);
 
   if (error) {
-    console.error('[getVenueStaff] staff lookup failed:', error.message, { email: normalised });
+    console.error(`[${context}] staff lookup failed:`, error.message, { email: normalised });
     return null;
   }
 
-  const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], 'getVenueStaff');
+  const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], context);
   if (!row) return null;
 
   return {
     id: row.id,
     venue_id: row.venue_id,
     email: row.email ?? normalised,
-    role: row.role as 'admin' | 'staff',
+    role: row.role,
+  };
+}
+
+async function resolveCachedStaffIdentity(
+  admin: SupabaseClient,
+  userId: string,
+  email: string | null,
+  context: string,
+): Promise<StaffIdentity | null> {
+  const now = Date.now();
+  const cached = staffIdentityCache.get(userId);
+  if (cached && cached.expires > now) return cached.value;
+
+  const value = await resolveStaffIdentityUncached(admin, userId, email, context);
+  staffIdentityCache.set(userId, { value, expires: now + STAFF_IDENTITY_TTL_MS });
+  return value;
+}
+
+/**
+ * Get the current user's staff record for their first venue.
+ * Returns null if not authenticated or not a staff member.
+ *
+ * The returned object includes a `db` property (admin client) that API routes
+ * should use for all subsequent data queries. This avoids the circular RLS
+ * issue where staff, venue, booking, etc. policies all cross-reference staff.
+ */
+export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaff | null> {
+  const identity = await resolveAuthIdentity(supabase);
+  if (!identity) return null;
+
+  const admin = getSupabaseAdminClient();
+
+  // Superuser support sign-in-as: only the rare platform-admin path resolves the
+  // full user object (an Auth-server call); normal staff never hit it here.
+  if (isPlatformRoleInJwt(identity.appMetadata, identity.email ?? undefined)) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && isPlatformSuperuser(user)) {
+      const cookieSessionId = await getSupportSessionCookieIdFromCookies();
+      if (cookieSessionId) {
+        const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
+        if (session) {
+          const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
+          if (staffRow) {
+            return {
+              id: staffRow.id,
+              venue_id: staffRow.venue_id,
+              email: staffRow.email,
+              role: staffRow.role,
+              db: admin,
+              support: {
+                sessionId: session.id,
+                superuserDisplayName:
+                  session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
+                superuserEmail: session.superuser_email,
+                expiresAt: session.expires_at,
+                reason: session.reason,
+              },
+            };
+          }
+        }
+      }
+    }
+  }
+
+  const staff = await resolveCachedStaffIdentity(admin, identity.id, identity.email, 'getVenueStaff');
+  if (!staff) return null;
+
+  return {
+    id: staff.id,
+    venue_id: staff.venue_id,
+    email: staff.email || identity.email || '',
+    role: staff.role,
     db: admin,
   };
 }
@@ -169,83 +260,50 @@ export async function getDashboardStaff(
   support?: ActiveSupportSessionContext;
 }> {
   const admin = getSupabaseAdminClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) return { id: null, email: '', venue_id: null, role: null, db: admin };
+  const identity = await resolveAuthIdentity(supabase);
+  if (!identity) return { id: null, email: '', venue_id: null, role: null, db: admin };
 
-  if (isPlatformSuperuser(user)) {
-    const cookieSessionId = await getSupportSessionCookieIdFromCookies();
-    if (cookieSessionId) {
-      const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
-      if (session) {
-        const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
-        if (staffRow) {
-          return {
-            id: staffRow.id,
-            email: staffRow.email,
-            venue_id: staffRow.venue_id,
-            role: staffRow.role,
-            db: admin,
-            support: {
-              sessionId: session.id,
-              superuserDisplayName:
-                session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
-              superuserEmail: session.superuser_email,
-              expiresAt: session.expires_at,
-              reason: session.reason,
-            },
-          };
+  if (isPlatformRoleInJwt(identity.appMetadata, identity.email ?? undefined)) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && isPlatformSuperuser(user)) {
+      const cookieSessionId = await getSupportSessionCookieIdFromCookies();
+      if (cookieSessionId) {
+        const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
+        if (session) {
+          const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
+          if (staffRow) {
+            return {
+              id: staffRow.id,
+              email: staffRow.email,
+              venue_id: staffRow.venue_id,
+              role: staffRow.role,
+              db: admin,
+              support: {
+                sessionId: session.id,
+                superuserDisplayName:
+                  session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
+                superuserEmail: session.superuser_email,
+                expiresAt: session.expires_at,
+                reason: session.reason,
+              },
+            };
+          }
         }
       }
     }
   }
 
-  const { data: byUserId, error: uidErr } = await admin
-    .from('staff')
-    .select('id, venue_id, role, user_id')
-    .eq('user_id', user.id)
-    .is('revoked_at', null)
-    .order('id', { ascending: true })
-    .limit(10);
-
-  if (uidErr) {
-    console.error('[getDashboardStaff] staff user_id lookup failed:', uidErr.message, { userId: user.id });
-  }
-
-  const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], 'getDashboardStaff');
-  if (fromUserId) {
-    return {
-      id: fromUserId.id,
-      email: user.email?.toLowerCase().trim() ?? '',
-      venue_id: fromUserId.venue_id,
-      role: fromUserId.role as 'admin' | 'staff',
-      db: admin,
-    };
-  }
-
-  const normalised = user.email?.toLowerCase().trim() ?? '';
-  if (!normalised) {
-    return { id: null, email: '', venue_id: null, role: null, db: admin };
-  }
-
-  const { data: rows, error } = await admin
-    .from('staff')
-    .select('id, venue_id, role, user_id')
-    .ilike('email', normalised)
-    .is('revoked_at', null)
-    .order('id', { ascending: true })
-    .limit(10);
-
-  if (error) {
-    console.error('[getDashboardStaff] staff lookup failed:', error.message, { email: normalised });
+  const normalised = identity.email?.toLowerCase().trim() ?? '';
+  const staff = await resolveCachedStaffIdentity(admin, identity.id, identity.email, 'getDashboardStaff');
+  if (!staff) {
     return { id: null, email: normalised, venue_id: null, role: null, db: admin };
   }
 
-  const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], 'getDashboardStaff');
   return {
-    id: row?.id ?? null,
+    id: staff.id,
     email: normalised,
-    venue_id: row?.venue_id ?? null,
-    role: (row?.role as 'admin' | 'staff') ?? null,
+    venue_id: staff.venue_id,
+    role: staff.role,
     db: admin,
   };
 }

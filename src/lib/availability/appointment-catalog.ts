@@ -20,6 +20,8 @@ import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-cal
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
+import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
 
 export interface AppointmentCatalogVariant {
   id: string;
@@ -50,6 +52,8 @@ export interface AppointmentCatalogPractitioner {
     cancellation_notice_hours: number;
     /** Active sub-options. When non-empty the booking flow must collect a variant choice. */
     variants?: AppointmentCatalogVariant[];
+    /** Optional add-on groups (active + visible-online) the booker can stack on the service. */
+    addon_groups?: AppointmentCatalogAddonGroup[];
     /** Salon-style internal processing gaps (single-offering services). */
     processing_time_blocks?: import('@/types/booking-models').ProcessingTimeBlock[];
   }>;
@@ -98,7 +102,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
 async function fetchUnifiedAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
-  options?: { practitionerSlug?: string },
+  options?: { practitionerSlug?: string; includeHiddenAddons?: boolean },
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const calQuery = supabase
     .from('unified_calendars')
@@ -154,12 +158,22 @@ async function fetchUnifiedAppointmentCatalog(
     };
   });
 
-  const variantMap = await loadVariantsForServices({
-    admin: supabase,
-    venueId,
-    schema: 'service_item',
-    parentIds: services.map((s) => s.id),
-  });
+  const [variantMap, addonGroupMap] = await Promise.all([
+    loadVariantsForServices({
+      admin: supabase,
+      venueId,
+      schema: 'service_item',
+      parentIds: services.map((s) => s.id),
+    }),
+    loadAddonGroupsForServices({
+      admin: supabase,
+      venueId,
+      schema: 'service_item',
+      parentIds: services.map((s) => s.id),
+      includeHidden: options?.includeHiddenAddons === true,
+      includeInactive: false,
+    }),
+  ]);
 
   const practitioners: Practitioner[] = calendars.map((row) => unifiedCalendarRowToPractitioner(row));
   const result: AppointmentCatalogPractitioner[] = [];
@@ -183,6 +197,7 @@ async function fetchUnifiedAppointmentCatalog(
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
+        addon_groups: addonGroupMap.get(svc.id) ?? [],
         processing_time_blocks: svc.processing_time_blocks ?? [],
       })),
     });
@@ -194,7 +209,7 @@ async function fetchUnifiedAppointmentCatalog(
 export async function fetchAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
-  options?: { practitionerSlug?: string },
+  options?: { practitionerSlug?: string; includeHiddenAddons?: boolean },
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const { data: venueRow } = await supabase
     .from('venues')
@@ -237,12 +252,22 @@ export async function fetchAppointmentCatalog(
     );
   }
 
-  const variantMap = await loadVariantsForServices({
-    admin: supabase,
-    venueId,
-    schema: 'appointment_service',
-    parentIds: services.map((s) => s.id),
-  });
+  const [variantMap, addonGroupMap] = await Promise.all([
+    loadVariantsForServices({
+      admin: supabase,
+      venueId,
+      schema: 'appointment_service',
+      parentIds: services.map((s) => s.id),
+    }),
+    loadAddonGroupsForServices({
+      admin: supabase,
+      venueId,
+      schema: 'appointment_service',
+      parentIds: services.map((s) => s.id),
+      includeHidden: options?.includeHiddenAddons === true,
+      includeInactive: false,
+    }),
+  ]);
 
   const result: AppointmentCatalogPractitioner[] = [];
 
@@ -265,6 +290,7 @@ export async function fetchAppointmentCatalog(
         payment_requirement: svc.payment_requirement,
         cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
         variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
+        addon_groups: addonGroupMap.get(svc.id) ?? [],
         processing_time_blocks: svc.processing_time_blocks ?? [],
       })),
     });

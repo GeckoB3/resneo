@@ -41,6 +41,11 @@ export interface RegistryAppointment {
   booking_model?: string | null;
   /** Server-resolved service / event / class / resource / dining-service name for the booking bar. */
   booking_item_name?: string | null;
+  /** Aggregate of chosen add-ons; drives the "+N extras" chip in the registry list. */
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
+  /** Number of add-on lines chosen on this booking. */
+  addons_count?: number | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {

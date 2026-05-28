@@ -12,11 +12,13 @@ export function appointmentProgressPhase(
     'mode_choice',
     'service',
     'variant',
+    'addons',
     'practitioner',
     'group_review',
     'group_person_label',
     'group_service',
     'group_variant',
+    'group_addons',
     'group_practitioner',
   ]);
   const schedule = new Set(['slot', 'multi_service', 'group_slot']);

@@ -476,3 +476,70 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
     expect(invalid.ok).toBe(false);
   });
 });
+
+// ── Add-ons: validating the engine sees the EXTENDED duration ─────────────────
+// The plan (§6.1) says callers must apply add-on minutes to the service input
+// BEFORE invoking the engine. These tests fixture the supported pattern: callers
+// stack `additional_duration_minutes` from chosen add-ons onto `service.duration_minutes`
+// so the engine fits slots against the longer total. We verify:
+//   • no add-ons: base behaviour unchanged
+//   • +15 min add-on: a slot whose end would overflow an existing 10:30 booking is hidden
+//   • the same slot becomes available again when the add-on is removed (base duration only)
+describe('appointment engine: add-on duration extends slot fitting', () => {
+  const date = '2030-06-02';
+  const dk = workingHoursDayKey(date);
+  const existingBookingAt1030: AppointmentBooking[] = [
+    {
+      id: 'b-existing',
+      booking_time: '10:30',
+      duration_minutes: 30,
+      buffer_minutes: 0,
+      practitioner_id: 'p1',
+      status: 'Booked',
+    },
+  ];
+  function inputWithDuration(durationMinutes: number): AppointmentEngineInput {
+    return {
+      date,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: durationMinutes,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: PS_P1_S1,
+      existingBookings: existingBookingAt1030,
+    };
+  }
+
+  it('base 30-min duration: 10:00 slot fits before the 10:30 booking', () => {
+    const r = computeAppointmentAvailability(inputWithDuration(30));
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '10:00')).toBe(true);
+  });
+
+  it('base + 15-min add-on (45 total): 10:00 slot is dropped (would overflow the 10:30 booking)', () => {
+    const r = computeAppointmentAvailability(inputWithDuration(30 + 15));
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '10:00')).toBe(false);
+  });
+
+  it('base + larger add-on still leaves the late-afternoon slots bookable when there is room', () => {
+    // 11:00–17:00 is free after the existing booking ends at 11:00. Adding +60 min
+    // turns the service into a 90-min slot; the engine should still find 11:00 / 12:00 / 13:00 etc.
+    const r = computeAppointmentAvailability(inputWithDuration(30 + 60));
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '12:00')).toBe(true);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '13:00')).toBe(true);
+  });
+});

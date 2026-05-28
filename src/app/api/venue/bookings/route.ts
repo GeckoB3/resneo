@@ -39,7 +39,11 @@ import {
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
 import type { BookingModel } from '@/types/booking-models';
-import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { buildAddonSnapshots, totalsFromSnapshots } from '@/lib/addons/snapshot-addons';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import {
   isGuestBookingDateAllowed,
   isStaffWalkInBookingDateAllowed,
@@ -96,6 +100,16 @@ const phoneBookingSchema = z.object({
   returning_guest: z.boolean().optional(),
   /** Create in a linked venue the caller may book on behalf of (requires create_edit_cancel). */
   owner_venue_id: z.string().uuid().optional(),
+  /** Optional add-ons stacked on the appointment service for staff-created bookings. */
+  addons: z
+    .array(
+      z.object({
+        addon_id: z.string().uuid(),
+        booking_segment_index: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .max(50)
+    .optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -856,16 +870,65 @@ export async function POST(request: NextRequest) {
         svcWindow,
       );
 
+      // ── Resolve add-ons before slot validation so the engine fits the longer total.
+      // The snapshots are inserted into `booking_addons` after the parent row is created.
+      let chosenAddonSnapshots: ReturnType<typeof buildAddonSnapshots> = [];
+      let chosenAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
+      if (parsed.data.addons && parsed.data.addons.length > 0) {
+        const useUnifiedForAddons = await venueUsesUnifiedAppointmentServiceData(admin, venueId);
+        const addonSchema = useUnifiedForAddons ? 'service_item' : 'appointment_service';
+        const { groups, groupsById } = await loadAddonsForBooking({
+          admin,
+          venueId,
+          schema: addonSchema,
+          parentId: appointment_service_id,
+          includeHidden: true,
+        });
+        const validation = validateAddonSelections({
+          selections: parsed.data.addons,
+          groupsForService: groups,
+          source: 'staff',
+        });
+        if (!validation.ok) {
+          return NextResponse.json(
+            { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+            { status: 400 },
+          );
+        }
+        chosenAddonSnapshots = buildAddonSnapshots({
+          selected: validation.resolvedAddons,
+          groupsById,
+          segmentIndex: null,
+        });
+        chosenAddonTotals = totalsFromSnapshots(chosenAddonSnapshots);
+
+        // Extend the service duration on the engine input so the slot fit + interval
+        // validation accounts for the longer wall-clock the booking occupies.
+        if (chosenAddonTotals.total_duration_minutes > 0) {
+          const idx = appointmentInput.services.findIndex((s) => s.id === appointment_service_id);
+          if (idx >= 0) {
+            appointmentInput.services[idx] = {
+              ...appointmentInput.services[idx]!,
+              duration_minutes:
+                appointmentInput.services[idx]!.duration_minutes +
+                chosenAddonTotals.total_duration_minutes,
+            };
+          }
+        }
+      }
+
       let matchingSlot: { duration_minutes: number; start_time: string; service_id: string } | null = null;
 
       if (!staffWalkIn) {
         if (parsed.data.duration_minutes != null) {
+          // Staff override: the supplied duration_minutes is the BASE duration; add-ons add on top.
+          const totalEndMinutes = parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes;
           const intervalCheck = validateAppointmentCustomInterval(
             appointmentInput,
             practitioner_id,
             appointment_service_id,
             timeStr,
-            endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
+            endHHmmFromDuration(timeStr, totalEndMinutes),
           );
           if (!intervalCheck.ok) {
             return NextResponse.json(
@@ -930,8 +993,15 @@ export async function POST(request: NextRequest) {
         appointment_price_display:
           svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
       };
+
+      // Booking duration. `svc.duration_minutes` already includes the add-on extension
+      // applied above (we mutated `appointmentInput.services[idx]`). When the staff form
+      // sets `duration_minutes` explicitly, that override is the BASE duration — addons
+      // add on top of it.
       const durationMins =
-        parsed.data.duration_minutes ?? svc.duration_minutes ?? matchingSlot?.duration_minutes ?? 30;
+        parsed.data.duration_minutes != null
+          ? parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes
+          : svc.duration_minutes ?? matchingSlot?.duration_minutes ?? 30;
       const [y, mo, d] = booking_date.split('-').map(Number);
       const timeParts = timeForDb.split(':').map(Number);
       const hh = timeParts[0] ?? 0;
@@ -956,7 +1026,12 @@ export async function POST(request: NextRequest) {
         refundWindowHoursAppt,
       );
 
-      const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
+      const online = svc
+        ? resolveAppointmentServiceOnlineChargeWithAddons({
+            svc,
+            addons_total_price_pence: chosenAddonTotals.total_price_pence,
+          })
+        : null;
       const staffWantsDeposit = !staffWalkIn && (require_deposit ?? false);
       const requiresDeposit =
         !staffWalkIn &&
@@ -995,6 +1070,8 @@ export async function POST(request: NextRequest) {
         occasion: occasion?.trim() || null,
         special_requests: special_requests?.trim() || null,
         estimated_end_time: estimatedEndTime,
+        addons_total_price_pence: chosenAddonTotals.total_price_pence,
+        addons_total_duration_minutes: chosenAddonTotals.total_duration_minutes,
       };
 
       if (useUnifiedAppointmentStorage) {
@@ -1024,6 +1101,17 @@ export async function POST(request: NextRequest) {
       if (apptErr || !apptBooking) {
         console.error('Appointment booking insert failed:', apptErr?.message, apptErr?.details);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+
+      if (chosenAddonSnapshots.length > 0) {
+        const addonRows = chosenAddonSnapshots.map((s) => ({ ...s, booking_id: apptBooking.id }));
+        const { error: addErr } = await admin.from('booking_addons').insert(addonRows);
+        if (addErr) {
+          console.error('booking_addons (staff) insert failed:', addErr);
+          // Roll back the booking to keep things consistent.
+          await admin.from('bookings').delete().eq('id', apptBooking.id);
+          return NextResponse.json({ error: 'Failed to save add-ons for booking' }, { status: 500 });
+        }
       }
 
       if (linkedCreate) {

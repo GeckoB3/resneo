@@ -32,6 +32,12 @@ import {
   resolveBookableServiceWithVariant,
 } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { buildAddonSnapshots, totalsFromSnapshots } from '@/lib/addons/snapshot-addons';
+import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
+import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import {
@@ -114,6 +120,8 @@ const createBookingSchema = z.object({
   collective_id: z.string().uuid().optional(),
   /** Active waitlist offer — bypasses guest min-notice for offered slots. */
   waitlist_offer_id: z.string().uuid().optional(),
+  /** Optional add-ons stacked on the service at booking time. */
+  addons: bookingAddonSelectionArraySchema.optional(),
 });
 
 /**
@@ -605,7 +613,11 @@ async function handleNonTableBooking(
     capacity_used,
     collective_id,
     waitlist_offer_id,
+    addons: requestedAddons,
   } = data;
+  // Validated + canonical-ordered addons (resolved against the chosen service).
+  let chosenAddonSnapshots: ReturnType<typeof buildAddonSnapshots> = [];
+  let chosenAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
 
   const routeAuthClient = await createRouteHandlerClient(request);
   const {
@@ -828,6 +840,57 @@ async function handleNonTableBooking(
       });
     }
 
+    // Resolve + validate add-ons up-front so the slot check below uses the EXTENDED
+    // duration. Otherwise the engine would consider the slot bookable at base
+    // duration and the booking would overlap once add-on minutes are added.
+    let chosenAddonSnapshotsBuilt: ReturnType<typeof buildAddonSnapshots> = [];
+    let chosenAddonTotalsBuilt = { total_price_pence: 0, total_duration_minutes: 0 };
+    {
+      const isPublicSource =
+        source === 'online' || source === 'widget' || source === 'booking_page';
+      const useUnifiedForAddons = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
+      const addonSchema = useUnifiedForAddons ? 'service_item' : 'appointment_service';
+      // Always load the service's linked groups so required (min_select) groups are
+      // enforced even when the client omits `addons`. For venues with no add-ons this
+      // is a single indexed query that returns early.
+      const { groups, groupsById } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId: venue_id,
+        schema: addonSchema,
+        parentId: appointment_service_id,
+        includeHidden: !isPublicSource,
+      });
+      if (groups.length > 0 || (requestedAddons && requestedAddons.length > 0)) {
+        const validation = validateAddonSelections({
+          selections: requestedAddons ?? [],
+          groupsForService: groups,
+          source: isPublicSource ? 'public' : 'staff',
+        });
+        if (!validation.ok) {
+          return NextResponse.json(
+            { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+            { status: 400 },
+          );
+        }
+        chosenAddonSnapshotsBuilt = buildAddonSnapshots({
+          selected: validation.resolvedAddons,
+          groupsById,
+          segmentIndex: null,
+        });
+        chosenAddonTotalsBuilt = totalsFromSnapshots(chosenAddonSnapshotsBuilt);
+        if (chosenAddonTotalsBuilt.total_duration_minutes > 0) {
+          const idx = input.services.findIndex((s) => s.id === appointment_service_id);
+          if (idx >= 0) {
+            input.services[idx] = {
+              ...input.services[idx]!,
+              duration_minutes:
+                input.services[idx]!.duration_minutes + chosenAddonTotalsBuilt.total_duration_minutes,
+            };
+          }
+        }
+      }
+    }
+
     attachVenueClockToAppointmentInput(
       input,
       venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
@@ -878,6 +941,11 @@ async function handleNonTableBooking(
         svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
     };
     if (svc) {
+      // `svc` was derived from the engine input which we already extended with the
+      // add-on duration above. So `svc.duration_minutes` already includes add-ons.
+      chosenAddonSnapshots = chosenAddonSnapshotsBuilt;
+      chosenAddonTotals = chosenAddonTotalsBuilt;
+
       const [y, mo, d] = booking_date.split('-').map(Number);
       const [hh, mm] = timeStr.split(':').map(Number);
       const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
@@ -885,7 +953,11 @@ async function handleNonTableBooking(
       estimatedEndTime = endDate.toISOString();
 
       // Model B: online charge from service payment mode (none / deposit / full payment).
-      const online = resolveAppointmentServiceOnlineCharge(svc);
+      // For full_payment the addon prices roll in; deposit stays on base+variant.
+      const online = resolveAppointmentServiceOnlineChargeWithAddons({
+        svc,
+        addons_total_price_pence: chosenAddonTotals.total_price_pence,
+      });
       if (online != null && online.amountPence > 0) {
         requiresDeposit = true;
         depositAmountPence = online.amountPence;
@@ -1186,6 +1258,8 @@ async function handleNonTableBooking(
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
+    addons_total_price_pence: chosenAddonTotals.total_price_pence,
+    addons_total_duration_minutes: chosenAddonTotals.total_duration_minutes,
   };
 
   if (effectiveModel === 'unified_scheduling') {
@@ -1275,6 +1349,18 @@ async function handleNonTableBooking(
       unit_price_pence: tl.unit_price_pence,
     }));
     await supabase.from('booking_ticket_lines').insert(lines);
+  }
+
+  // Insert booking_addons snapshot rows (immutable record of what was chosen).
+  if (chosenAddonSnapshots.length > 0) {
+    const rows = chosenAddonSnapshots.map((s) => ({ ...s, booking_id: booking.id }));
+    const { error: addErr } = await supabase.from('booking_addons').insert(rows);
+    if (addErr) {
+      console.error('booking_addons insert failed:', addErr);
+      // Roll back the booking to keep things consistent — addons are part of the request.
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json({ error: 'Failed to save add-ons for booking' }, { status: 500 });
+    }
   }
 
   // Stripe payment intent

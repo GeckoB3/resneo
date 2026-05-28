@@ -412,6 +412,13 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? "We're getting ready for your appointment and want to make sure everything is in order."
               : "We're getting ready for your visit and want to make sure everything is in order.",
           ),
+          appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
+            ? htmlRaw(
+                `<strong>Extras:</strong><br/>${opts.booking.addon_lines
+                  .map((l) => escapeHtml(l))
+                  .join('<br/>')}`,
+              )
+            : '',
           policyText ? htmlRaw(escapeHtml(policyText)) : '',
         ].join(''),
         textLines: [
@@ -421,6 +428,9 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? "We're getting ready for your appointment and want to make sure everything is in order."
             : "We're getting ready for your visit and want to make sure everything is in order.",
           appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
+            ? ['Extras:', ...opts.booking.addon_lines.map((l) => `  - ${l}`)]
+            : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -478,6 +488,13 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'This is a friendly reminder about your upcoming appointment:'
               : 'This is a friendly reminder about your upcoming booking:',
           ),
+          appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
+            ? htmlRaw(
+                `<strong>Extras:</strong><br/>${opts.booking.addon_lines
+                  .map((l) => escapeHtml(l))
+                  .join('<br/>')}`,
+              )
+            : '',
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
@@ -491,6 +508,9 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? 'This is a friendly reminder about your upcoming appointment:'
             : 'This is a friendly reminder about your upcoming booking:',
           appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
+            ? ['Extras:', ...opts.booking.addon_lines.map((l) => `  - ${l}`)]
+            : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,

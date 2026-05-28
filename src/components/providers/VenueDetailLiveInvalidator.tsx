@@ -9,13 +9,17 @@ import {
   venueBookingSummaryKey,
 } from '@/lib/dashboard/venue-detail-swr';
 
-function isVenueBookingDetailKey(key: unknown): key is ReturnType<typeof venueBookingDetailKey> {
-  return Array.isArray(key) && key[0] === 'venue-booking-detail' && typeof key[1] === 'string';
-}
-
-function isVenueBookingSummaryKey(key: unknown): key is ReturnType<typeof venueBookingSummaryKey> {
-  return Array.isArray(key) && key[0] === 'venue-booking-summary' && typeof key[1] === 'string';
-}
+/**
+ * No-op refresh for the live-sync polling fallback.
+ *
+ * Previously this revalidated *every* cached booking detail + summary on each
+ * fallback tick (every 30s while the realtime channel is reconnecting). With a
+ * dashboard that has hovered/opened many rows that produced a continuous storm
+ * of booking-detail fan-out fetches (huge database egress). Targeted updates
+ * still happen via the per-row realtime `handler`s below; this only disables the
+ * indiscriminate bulk revalidation.
+ */
+const noopRefresh = () => {};
 
 function bookingIdFromPayload(payload: {
   new?: Record<string, unknown>;
@@ -49,14 +53,6 @@ export function VenueDetailLiveInvalidator() {
     [mutate],
   );
 
-  const revalidateCachedBookings = useCallback(() => {
-    void mutate(
-      (key) => isVenueBookingDetailKey(key) || isVenueBookingSummaryKey(key),
-      undefined,
-      { revalidate: true },
-    );
-  }, [mutate]);
-
   const subscriptions = useMemo(
     () => [
       {
@@ -80,7 +76,7 @@ export function VenueDetailLiveInvalidator() {
 
   useVenuePostgresLiveSync({
     venueId,
-    onRefresh: revalidateCachedBookings,
+    onRefresh: noopRefresh,
     subscriptions,
   });
 

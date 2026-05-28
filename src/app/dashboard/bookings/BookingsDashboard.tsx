@@ -114,6 +114,10 @@ interface BookingRow {
   booking_model?: string | null;
   /** Resolved service / event / class / resource / dining-service label for the booking bar. */
   booking_item_name?: string | null;
+  /** Number of add-ons booked; drives the "+N extras" chip. */
+  addons_count?: number | null;
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
 }
 
 interface BookingDetailLite {
@@ -2316,6 +2320,13 @@ function BookingsAccordionList({
                         </Pill>
                       </span>
                     ) : null}
+                    {(booking.addons_count ?? 0) > 0 && (
+                      <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}>
+                        <Pill variant="info" size="sm">
+                          +{booking.addons_count} {booking.addons_count === 1 ? 'extra' : 'extras'}
+                        </Pill>
+                      </span>
+                    )}
                     {booking.dietary_notes && (
                       <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
                         <Pill variant="warning" size="sm" dot>Dietary</Pill>

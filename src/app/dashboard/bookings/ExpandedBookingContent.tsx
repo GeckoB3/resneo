@@ -23,6 +23,7 @@ import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChan
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { phoneToTelHref } from '@/lib/phone/e164';
 import Link from 'next/link';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
@@ -182,6 +183,21 @@ export interface BookingDetailLite {
   } | null;
   inferred_booking_model?: BookingModel;
   service_variant_name?: string | null;
+  addons?: Array<{
+    id: string;
+    booking_id: string;
+    addon_id: string | null;
+    addon_group_id: string | null;
+    booking_segment_index: number | null;
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    price_pence_at_booking: number;
+    duration_minutes_at_booking: number;
+    cost_to_business_pence_at_booking: number | null;
+    created_at?: string;
+  }>;
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
 }
 
 function formatRelative(value: string | null | undefined): string {
@@ -533,6 +549,8 @@ export function ExpandedBookingContent({
     activeDetail?.guest?.visit_count ?? booking.guest_visit_count ?? profileGuest?.visit_count ?? 0;
   const previousVisitDate = activeDetail?.guest?.last_visit_date ?? profileGuest?.last_visit_date ?? null;
   const tableNames = (activeDetail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
+  const addonCurrencySymbol = currencySymbolFromCode(venueCurrency ?? 'GBP');
+  const bookingAddons = activeDetail?.addons ?? [];
   const depositAmtStr = effectiveBooking.deposit_amount_pence
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
@@ -1018,6 +1036,30 @@ export function ExpandedBookingContent({
               </Fragment>
             ))}
           </div>
+          {bookingAddons.length > 0 ? (
+            <div className="mt-2 border-t border-slate-100 pt-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Extras</p>
+              <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
+                {bookingAddons.map((a) => (
+                  <li key={a.id} className="flex items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      {a.addon_group_name_snapshot ? (
+                        <span className="text-slate-500">{a.addon_group_name_snapshot}: </span>
+                      ) : null}
+                      <span className="font-medium text-slate-800">{a.addon_name_snapshot}</span>
+                      {a.duration_minutes_at_booking > 0 ? (
+                        <span className="ml-1 text-slate-500">(+{a.duration_minutes_at_booking} min)</span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 tabular-nums">
+                      +{addonCurrencySymbol}
+                      {(a.price_pence_at_booking / 100).toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </SectionCard.Body>
       </SectionCard>
 

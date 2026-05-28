@@ -19,6 +19,9 @@ import {
 } from '@/lib/feature-flags';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -118,10 +121,40 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Add-ons: staff path honours hidden_from_online groups.
+    const addonIds = searchParams.getAll('addon_ids').filter(Boolean);
+    let additionalAddonMinutes = 0;
+    if (addonIds.length > 0) {
+      const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, calendarVenueId);
+      const schema = useUnified ? 'service_item' : 'appointment_service';
+      const { groups } = await loadAddonsForBooking({
+        admin,
+        venueId: calendarVenueId,
+        schema,
+        parentId: serviceId,
+        includeHidden: true,
+      });
+      const validation = validateAddonSelections({
+        selections: addonIds.map((id) => ({ addon_id: id })),
+        groupsForService: groups,
+        source: 'staff',
+      });
+      if (!validation.ok) {
+        return NextResponse.json(
+          { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+          { status: 400 },
+        );
+      }
+      for (const a of validation.resolvedAddons) {
+        additionalAddonMinutes += a.additional_duration_minutes;
+      }
+    }
+
     const monthOptions = {
       audience: 'staff' as const,
       variantOverride,
       customDurationMinutes,
+      additionalAddonMinutes,
       excludeBookingId:
         excludeBookingId && UUID_RE.test(excludeBookingId) ? excludeBookingId : null,
     };

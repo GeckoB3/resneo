@@ -34,7 +34,7 @@ export async function GET(
     const bookingTimeStr =
       typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
-    const [areaResult, variantResult, guestResult, tableAssignmentsResult, cde_context] =
+    const [areaResult, variantResult, guestResult, tableAssignmentsResult, cde_context, addonsResult] =
       await Promise.all([
         bookingAreaId
           ? staff.db
@@ -67,6 +67,13 @@ export async function GET(
           staff.db,
           booking as Parameters<typeof resolveCdeBookingContext>[1],
         ),
+        staff.db
+          .from('booking_addons')
+          .select(
+            'id, booking_id, addon_id, addon_group_id, booking_segment_index, addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking, cost_to_business_pence_at_booking, created_at',
+          )
+          .eq('booking_id', id)
+          .order('created_at', { ascending: true }),
       ]);
 
     const area_name = (areaResult.data as { name?: string } | null)?.name ?? null;
@@ -101,6 +108,8 @@ export async function GET(
       },
     );
 
+    const addons = (addonsResult.data ?? []) as Array<Record<string, unknown>>;
+
     return NextResponse.json({
       ...booking,
       area_name,
@@ -114,6 +123,7 @@ export async function GET(
       inferred_booking_model: inferred_booking_model as BookingModel,
       service_variant_name,
       service_variant_price_pence,
+      addons,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id]/summary failed:', err);

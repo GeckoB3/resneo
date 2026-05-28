@@ -503,6 +503,11 @@ export function RegistryBookingAccordionList({
                       {duration} min
                     </span>
                   )}
+                  {(b.addons_count ?? 0) > 0 && (
+                    <Pill variant="info" size="sm">
+                      +{b.addons_count} {b.addons_count === 1 ? 'extra' : 'extras'}
+                    </Pill>
+                  )}
                   {b.party_size > 1 && (
                     <span className="hidden rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 sm:inline-block">
                       {b.party_size} people

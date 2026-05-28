@@ -3,7 +3,7 @@ import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingModel } from '@/types/booking-models';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
@@ -250,7 +250,7 @@ async function runLaneReminder(opts: {
       ]);
       booking.manage_booking_link = manageLink;
       booking.confirm_cancel_link = confirmLink;
-      booking = await enrichBookingEmailForAppointment(opts.supabase, row.id, booking);
+      booking = await enrichBookingEmailForComms(opts.supabase, row.id, booking);
 
       let sentAny = false;
       if (policy.channels.includes('email')) {
@@ -352,7 +352,7 @@ async function runLanePostVisit(opts: {
         bookingId: row.id,
         purpose: 'manage',
       });
-      booking = await enrichBookingEmailForAppointment(opts.supabase, row.id, booking);
+      booking = await enrichBookingEmailForComms(opts.supabase, row.id, booking);
 
       const email = await sendPolicyMessage({
         venueId: opts.venue.id,

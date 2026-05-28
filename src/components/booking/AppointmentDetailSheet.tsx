@@ -109,6 +109,22 @@ export interface BookingDetailRecord {
   service_variant_id?: string | null;
   service_variant_name?: string | null;
   service_variant_price_pence?: number | null;
+  /** Snapshot of add-ons chosen at booking time (renders in the detail sheet). */
+  addons?: Array<{
+    id: string;
+    booking_id: string;
+    addon_id: string | null;
+    addon_group_id: string | null;
+    booking_segment_index: number | null;
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    price_pence_at_booking: number;
+    duration_minutes_at_booking: number;
+    cost_to_business_pence_at_booking: number | null;
+    created_at?: string;
+  }>;
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
   cde_context?: {
     inferred_model: BookingModel;
     title: string;
@@ -723,6 +739,31 @@ export function AppointmentDetailSheet({
                     })()}
                   </dd>
                 </div>
+                {detail.addons && detail.addons.length > 0 ? (
+                  <div className="sm:col-span-2">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Extras</dt>
+                    <dd className="mt-0.5 text-slate-700">
+                      <ul className="space-y-0.5">
+                        {detail.addons.map((a) => (
+                          <li key={a.id} className="flex items-start justify-between gap-3">
+                            <span>
+                              {a.addon_group_name_snapshot ? (
+                                <span className="text-slate-500">{a.addon_group_name_snapshot}: </span>
+                              ) : null}
+                              <span className="text-slate-800">{a.addon_name_snapshot}</span>
+                              {a.duration_minutes_at_booking > 0 ? (
+                                <span className="ml-1 text-slate-500">(+{a.duration_minutes_at_booking} min)</span>
+                              ) : null}
+                            </span>
+                            <span className="tabular-nums text-slate-700">
+                              +{formatMoneyPence(a.price_pence_at_booking, sym)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                ) : null}
                 {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Deposit</dt>

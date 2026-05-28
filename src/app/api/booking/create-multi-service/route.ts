@@ -15,7 +15,12 @@ import {
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { buildAddonSnapshots, totalsFromSnapshots, type BookingAddonSnapshot } from '@/lib/addons/snapshot-addons';
+import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import {
   applyVariantToAppointmentInput,
   resolveBookableServiceWithVariant,
@@ -42,6 +47,8 @@ const serviceEntrySchema = z.object({
   start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   /** Optional sub-option for the parent service. */
   service_variant_id: z.string().uuid().optional(),
+  /** Optional add-ons stacked on this segment's service. */
+  addons: bookingAddonSelectionArraySchema.optional(),
 });
 
 const createMultiServiceSchema = z.object({
@@ -186,10 +193,15 @@ export async function POST(request: NextRequest) {
       service_display_name: string;
       service_price_pence: number | null;
       processing_time_blocks: ProcessingTimeBlock[];
+      addon_snapshots: BookingAddonSnapshot[];
+      addons_total_price_pence: number;
+      addons_total_duration_minutes: number;
     };
 
     const validated: ValidatedSeg[] = [];
     const phantoms: PhantomBooking[] = [];
+    const useUnifiedForAddons = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
+    const addonSchema = useUnifiedForAddons ? 'service_item' : 'appointment_service';
 
     for (let i = 0; i < sorted.length; i++) {
       const seg = sorted[i]!;
@@ -225,6 +237,59 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Validate this segment's add-ons BEFORE the slot check.
+      let segAddonSnapshots: BookingAddonSnapshot[] = [];
+      let segAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
+      if (seg.addons && seg.addons.length > 0) {
+        const { groups, groupsById } = await loadAddonsForBooking({
+          admin: supabase,
+          venueId: venue_id,
+          schema: addonSchema,
+          parentId: seg.service_id,
+          includeHidden:
+            source !== 'online' && source !== 'widget' && source !== 'booking_page',
+        });
+        const validation = validateAddonSelections({
+          selections: seg.addons,
+          groupsForService: groups,
+          source:
+            source === 'online' || source === 'widget' || source === 'booking_page'
+              ? 'public'
+              : 'staff',
+        });
+        if (!validation.ok) {
+          return NextResponse.json(
+            { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+            { status: 400 },
+          );
+        }
+        segAddonSnapshots = buildAddonSnapshots({
+          selected: validation.resolvedAddons,
+          groupsById,
+          segmentIndex: i,
+        });
+        segAddonTotals = totalsFromSnapshots(segAddonSnapshots);
+      }
+
+      // Resolve the authoritative service (variant + practitioner overrides), then fold
+      // add-on minutes onto it and write that exact duration back into the engine input so
+      // the slot/consecutive check fits the full wall-clock the booking will occupy.
+      const baseSvc = input.services.find((s) => s.id === seg.service_id);
+      const ps = input.practitionerServices.find(
+        (row) => row.practitioner_id === practitionerId && row.service_id === seg.service_id,
+      );
+      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
+      const resolvedBaseDuration = svc?.duration_minutes ?? 30;
+      const durationMins = resolvedBaseDuration + segAddonTotals.total_duration_minutes;
+      const bufferMins = svc?.buffer_minutes ?? 0;
+      if (segAddonTotals.total_duration_minutes > 0) {
+        const idx = input.services.findIndex((s) => s.id === seg.service_id);
+        if (idx >= 0) {
+          input.services[idx] = { ...input.services[idx]!, duration_minutes: durationMins };
+        }
+      }
+
       const svcWindow = await loadServiceEntityBookingWindow(supabase, venue_id, venueMode.bookingModel, seg.service_id);
       attachVenueClockToAppointmentInput(
         input,
@@ -238,15 +303,6 @@ export async function POST(request: NextRequest) {
           { status: 409 },
         );
       }
-
-      const baseSvc = input.services.find((s) => s.id === seg.service_id);
-      const ps = input.practitionerServices.find(
-        (row) => row.practitioner_id === practitionerId && row.service_id === seg.service_id,
-      );
-      const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
-      const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
-      const durationMins = svc?.duration_minutes ?? 30;
-      const bufferMins = svc?.buffer_minutes ?? 0;
 
       if (i > 0) {
         const prev = validated[i - 1]!;
@@ -270,9 +326,14 @@ export async function POST(request: NextRequest) {
         const [y, mo, d] = booking_date.split('-').map(Number);
         const [hh, mm] = timeStr.split(':').map(Number);
         const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-        endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
+        // durationMins includes add-on minutes; use it (not svc.duration_minutes) for the end time.
+        endDate.setMinutes(endDate.getMinutes() + durationMins);
         estimatedEndTime = endDate.toISOString();
-        const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
+        // Full payment rolls add-on price into the charge; deposit stays on base+variant.
+        const online = resolveAppointmentServiceOnlineChargeWithAddons({
+          svc,
+          addons_total_price_pence: segAddonTotals.total_price_pence,
+        });
         if (online != null && online.amountPence > 0) {
           depositPence = online.amountPence;
         }
@@ -296,6 +357,9 @@ export async function POST(request: NextRequest) {
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
         processing_time_blocks: processingSnap,
+        addon_snapshots: segAddonSnapshots,
+        addons_total_price_pence: segAddonTotals.total_price_pence,
+        addons_total_duration_minutes: segAddonTotals.total_duration_minutes,
       });
 
       phantoms.push({
@@ -413,6 +477,8 @@ export async function POST(request: NextRequest) {
         person_label: null,
         collective_id: collectiveIdForInsert,
         processing_time_blocks: seg.processing_time_blocks,
+        addons_total_price_pence: seg.addons_total_price_pence,
+        addons_total_duration_minutes: seg.addons_total_duration_minutes,
         ...(useUnifiedBookingRows
           ? {
               calendar_id: seg.practitioner_id,
@@ -433,6 +499,16 @@ export async function POST(request: NextRequest) {
           await supabase.from('bookings').delete().in('id', bookingIds);
         }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+
+      if (seg.addon_snapshots.length > 0) {
+        const addonRows = seg.addon_snapshots.map((s) => ({ ...s, booking_id: booking.id }));
+        const { error: addErr } = await supabase.from('booking_addons').insert(addonRows);
+        if (addErr) {
+          console.error('Multi-service booking_addons insert failed:', addErr);
+          await supabase.from('bookings').delete().in('id', [...bookingIds, booking.id]);
+          return NextResponse.json({ error: 'Failed to save add-ons for booking' }, { status: 500 });
+        }
       }
 
       bookingIds.push(booking.id);

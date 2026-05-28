@@ -10,9 +10,12 @@ import {
   venueBookingDetailKey,
   venueGuestDetailKey,
   VENUE_DETAIL_DEDUPE_MS,
-  VENUE_DETAIL_STALE_MS,
 } from '@/lib/dashboard/venue-detail-swr';
 
+// Live freshness comes from Supabase realtime (per-booking invalidation in
+// VenueDetailLiveInvalidator) plus revalidate-on-focus. A timed `refreshInterval`
+// here re-ran the expensive detail fan-out every minute for every open panel,
+// so it is intentionally omitted to cut database egress.
 export function useVenueBookingDetail(bookingId: string | null | undefined) {
   const id = bookingId?.trim() || null;
   return useSWR<VenueBookingDetailPayload>(
@@ -21,7 +24,6 @@ export function useVenueBookingDetail(bookingId: string | null | undefined) {
     {
       revalidateOnFocus: true,
       dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
-      refreshInterval: VENUE_DETAIL_STALE_MS,
     },
   );
 }
@@ -37,7 +39,6 @@ export function useVenueGuestDetail(
     {
       revalidateOnFocus: true,
       dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
-      refreshInterval: VENUE_DETAIL_STALE_MS,
     },
   );
 }

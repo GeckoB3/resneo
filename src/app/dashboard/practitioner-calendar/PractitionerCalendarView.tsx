@@ -78,7 +78,7 @@ import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSk
 import { Skeleton } from '@/components/ui/Skeleton';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import type { BookingStatus } from '@/lib/table-management/booking-status';
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -100,6 +100,13 @@ import {
   buildMonthDayScheduleCounts,
 } from '@/lib/calendar/schedule-blocks-grouping';
 import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-blocks';
+import {
+  buildPractitionerScheduleClosureBlocks,
+  buildVenueScheduleClosureBlocks,
+  isScheduleClosureBlockType,
+  scheduleClosureBlockLabel,
+  type PractitionerLeavePeriodInput,
+} from '@/lib/calendar/schedule-closure-blocks';
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
@@ -263,6 +270,10 @@ interface Booking {
   event_session_id?: string | null;
   /** Needed to hide attendance actions for walk-ins (same as bookings dashboard). */
   source?: string | null;
+  /** Aggregate add-on totals; drives the "+N extras" badge on the calendar card. */
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
+  addons_count?: number | null;
   /** Set for editable linked-venue bookings rendered on the native day grid. */
   _linkedOwnerVenueId?: string;
   _linkedColumnKey?: string;
@@ -409,13 +420,48 @@ function isBreakCalendarBlock(bl: CalendarBlock): boolean {
   return bl.block_type === 'break';
 }
 
+function isScheduleClosureBlock(bl: CalendarBlock): boolean {
+  return isScheduleClosureBlockType(bl.block_type);
+}
+
 /** Manual blocks staff can drag, resize, and edit (not class-tied or schedule breaks). */
 function isManualEditableBlock(bl: CalendarBlock): boolean {
-  return !isBreakCalendarBlock(bl) && bl.block_type !== 'class_session' && !bl.class_instance_id;
+  return (
+    !isBreakCalendarBlock(bl) &&
+    !isScheduleClosureBlock(bl) &&
+    bl.block_type !== 'class_session' &&
+    !bl.class_instance_id
+  );
 }
 
 function calendarBlockHeading(bl: CalendarBlock): string {
-  return isBreakCalendarBlock(bl) ? 'Break' : 'Blocked';
+  if (isBreakCalendarBlock(bl)) return 'Break';
+  if (isScheduleClosureBlock(bl)) return scheduleClosureBlockLabel(bl.block_type);
+  return 'Blocked';
+}
+
+function calendarBlockShellClass(bl: CalendarBlock): string {
+  if (isBreakCalendarBlock(bl)) {
+    return 'border-amber-200 bg-amber-50/95 hover:bg-amber-50';
+  }
+  if (bl.block_type === 'venue_amended_hours') {
+    return 'border-sky-200 bg-sky-50/95';
+  }
+  if (bl.block_type === 'venue_closed') {
+    return 'border-slate-300 bg-slate-100/95';
+  }
+  if (bl.block_type === 'practitioner_closed') {
+    return 'border-slate-300 bg-slate-200/90';
+  }
+  return 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
+}
+
+function calendarBlockAccentColor(bl: CalendarBlock): string {
+  if (isBreakCalendarBlock(bl)) return '#d97706';
+  if (bl.block_type === 'venue_amended_hours') return '#0284c7';
+  if (bl.block_type === 'venue_closed') return '#64748b';
+  if (bl.block_type === 'practitioner_closed') return '#94a3b8';
+  return '#94a3b8';
 }
 
 function blockDurationMinutes(bl: CalendarBlock): number {
@@ -900,6 +946,14 @@ function BookingBlockPills({ b }: { b: Booking }) {
           title="Confirmed"
         >
           Confirmed
+        </span>
+      )}
+      {(b.addons_count ?? 0) > 0 && (
+        <span
+          className="inline-block rounded-lg bg-white/95 px-1.5 py-0.5 text-center text-[8px] font-semibold leading-snug text-sky-800 shadow-sm ring-1 ring-sky-300 sm:text-[9px]"
+          title={`${b.addons_count} add-on${b.addons_count === 1 ? '' : 's'} on this booking`}
+        >
+          +{b.addons_count} extra{b.addons_count === 1 ? '' : 's'}
         </span>
       )}
     </>
@@ -2048,6 +2102,8 @@ export function PractitionerCalendarView({
   const [monthAnchor, setMonthAnchor] = useState(initialIsoDate);
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueWideBlocks, setVenueWideBlocks] = useState<AvailabilityBlock[]>([]);
+  const [leavePeriods, setLeavePeriods] = useState<PractitionerLeavePeriodInput[]>([]);
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
@@ -2435,9 +2491,32 @@ export function PractitionerCalendarView({
     [practitioners, listFromTo.from, listFromTo.to],
   );
 
+  const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
+    const nativeColumnIds = practitioners
+      .filter((p) => p.is_active && p.calendar_type !== 'resource')
+      .map((p) => p.id);
+    const venueBlocks = buildVenueScheduleClosureBlocks({
+      openingHours,
+      venueWideBlocks,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      columnIds: nativeColumnIds,
+      timeZone: venueTimezone,
+    });
+    const practitionerBlocks = buildPractitionerScheduleClosureBlocks({
+      practitioners: practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+      leavePeriods,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      openingHours,
+      timeZone: venueTimezone,
+    });
+    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
+  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone]);
+
   const displayBlocks = useMemo(
-    () => [...blocks, ...practitionerBreakBlocks],
-    [blocks, practitionerBreakBlocks],
+    () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
+    [scheduleClosureBlocks, blocks, practitionerBreakBlocks],
   );
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
@@ -2647,6 +2726,10 @@ export function PractitionerCalendarView({
         const parallel: Promise<Response>[] = [
           fetch(`/api/venue/bookings/list?${calendarListQuery}`),
           fetch(calendarBlockUrl),
+          fetch('/api/venue/availability-blocks'),
+          fetch(
+            `/api/venue/practitioner-leave?from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`,
+          ),
         ];
         if (!silent) {
           parallel.push(fetch('/api/venue'));
@@ -2662,6 +2745,8 @@ export function PractitionerCalendarView({
         let i = 0;
         const bookRes = responses[i++]!;
         const blockRes = responses[i++]!;
+        const venueWideBlocksRes = responses[i++]!;
+        const leaveRes = responses[i++]!;
         const venueRes = !silent ? responses[i++] : undefined;
         const resourcesRes = loadVenueResources ? responses[i++] : undefined;
         const scheduleRes = showMergedFeeds ? responses[i++] : undefined;
@@ -2671,9 +2756,15 @@ export function PractitionerCalendarView({
           return;
         }
 
-        const [bookData, bjson] = await Promise.all([
+        const [bookData, bjson, venueWideJson, leaveJson] = await Promise.all([
           bookRes.json() as Promise<{ bookings?: Booking[] }>,
           blockRes.ok ? blockRes.json() : Promise.resolve({ blocks: [] }),
+          venueWideBlocksRes.ok
+            ? venueWideBlocksRes.json()
+            : Promise.resolve({ blocks: [] as AvailabilityBlock[] }),
+          leaveRes.ok
+            ? leaveRes.json()
+            : Promise.resolve({ periods: [] as PractitionerLeavePeriodInput[] }),
         ]);
 
         if (!silent && venueRes?.ok) {
@@ -2710,6 +2801,9 @@ export function PractitionerCalendarView({
 
         applyBookingsList((bookData.bookings ?? []) as Booking[]);
         setBlocks((bjson as { blocks?: CalendarBlock[] }).blocks ?? []);
+        const wideRows = (venueWideJson as { blocks?: AvailabilityBlock[] }).blocks ?? [];
+        setVenueWideBlocks(wideRows.filter((row) => row.service_id == null));
+        setLeavePeriods((leaveJson as { periods?: PractitionerLeavePeriodInput[] }).periods ?? []);
       } catch {
         setFetchError('Failed to load calendar data. Please check your connection.');
       } finally {
@@ -2722,6 +2816,8 @@ export function PractitionerCalendarView({
       calendarListQuery,
       calendarScheduleQuery,
       fetchCalendarCatalog,
+      listFromTo.from,
+      listFromTo.to,
       loadVenueResources,
       showMergedFeeds,
     ],
@@ -5056,18 +5152,28 @@ export function PractitionerCalendarView({
                           <div className="flex min-h-[80px] flex-col gap-1">
                             {dayManualBlocks.map((bl) => {
                               const breakBlock = isBreakCalendarBlock(bl);
+                              const closureBlock = isScheduleClosureBlock(bl);
+                              const readOnlyBlock = breakBlock || closureBlock;
                               return (
                               <button
                                 key={bl.id}
                                 type="button"
                                 onClick={() => openEditBlockModal(bl)}
-                                disabled={breakBlock}
+                                disabled={readOnlyBlock}
                                 className={`rounded-lg border px-2 py-1 text-left text-xs ${
-                                  breakBlock
-                                    ? 'cursor-default border-amber-200 bg-amber-50/95 text-amber-950'
+                                  readOnlyBlock
+                                    ? `cursor-default ${calendarBlockShellClass(bl)} ${
+                                        breakBlock ? 'text-amber-950' : 'text-slate-800'
+                                      }`
                                     : 'border-slate-300 bg-slate-200/90 text-slate-800 hover:bg-slate-300/90'
                                 }`}
-                                title={breakBlock ? 'Break (set in Calendar availability)' : bl.reason ?? 'Blocked'}
+                                title={
+                                  breakBlock
+                                    ? 'Break (set in Calendar availability)'
+                                    : closureBlock
+                                      ? scheduleClosureBlockLabel(bl.block_type)
+                                      : bl.reason ?? 'Blocked'
+                                }
                               >
                                 <span className="font-semibold">{calendarBlockHeading(bl)}</span>
                                 <span className="mt-0.5 block text-[10px] tabular-nums text-slate-600">
@@ -5375,19 +5481,28 @@ export function PractitionerCalendarView({
                   aria-hidden
                 />
                 <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
-                  {timeLabels.map((t, i) =>
-                    i % 4 === 0 ? (
+                  {timeLabels.map((t, i) => {
+                    const isHour = i % 4 === 0;
+                    const isHalfHour = i % 4 === 2;
+                    if (!isHour && !isHalfHour) return null;
+                    return (
                       <div
                         key={`time-label-${i}`}
                         className="absolute left-0 flex w-full justify-end pr-1.5"
                         style={{ top: i * SLOT_HEIGHT, transform: 'translateY(-50%)' }}
                       >
-                        <span className="rounded-full border border-slate-200/80 bg-white/90 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-600 shadow-sm shadow-slate-900/5">
+                        <span
+                          className={
+                            isHour
+                              ? 'rounded-full border border-slate-200/80 bg-white/90 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-600 shadow-sm shadow-slate-900/5'
+                              : 'rounded-full bg-white/70 px-1 py-0.5 text-[9px] font-medium tabular-nums text-slate-400'
+                          }
+                        >
                           {t}
                         </span>
                       </div>
-                    ) : null,
-                  )}
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -5657,11 +5772,11 @@ export function PractitionerCalendarView({
                           SLOT_HEIGHT * 0.5,
                         );
                         const breakBlock = isBreakCalendarBlock(bl);
+                        const closureBlock = isScheduleClosureBlock(bl);
+                        const readOnlyBlock = breakBlock || closureBlock;
                         const canDrag = isManualEditableBlock(bl);
-                        const blockAccent = breakBlock ? '#d97706' : '#94a3b8';
-                        const blockShellClass = breakBlock
-                          ? 'border-amber-200 bg-amber-50/95 hover:bg-amber-50'
-                          : 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
+                        const blockAccent = calendarBlockAccentColor(bl);
+                        const blockShellClass = calendarBlockShellClass(bl);
                         const resizeExtra =
                           blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
                         const displayEndHm =
@@ -5705,19 +5820,25 @@ export function PractitionerCalendarView({
                                     if (justResizedBlockIdRef.current === bl.id) return;
                                     openEditBlockModal(bl);
                                   }}
-                                  disabled={breakBlock}
+                                  disabled={readOnlyBlock}
                                   className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
                                     canDrag ? 'pb-[19px]' : ''
-                                  } ${breakBlock ? 'cursor-default' : ''}`}
+                                  } ${readOnlyBlock ? 'cursor-default' : ''}`}
                                   title={
                                     breakBlock
                                       ? 'Break (set in Calendar availability)'
-                                      : 'Click to edit block'
+                                      : closureBlock
+                                        ? scheduleClosureBlockLabel(bl.block_type)
+                                        : 'Click to edit block'
                                   }
                                 >
                                   <span
                                     className={`truncate text-[13px] font-extrabold tracking-tight ${
-                                      breakBlock ? 'text-amber-950' : 'text-slate-900'
+                                      breakBlock
+                                        ? 'text-amber-950'
+                                        : bl.block_type === 'venue_amended_hours'
+                                          ? 'text-sky-950'
+                                          : 'text-slate-900'
                                     }`}
                                   >
                                     {calendarBlockHeading(bl)}

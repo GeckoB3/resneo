@@ -112,6 +112,76 @@ function catalogVariantsForServiceId(catalogStaff: CatalogPractitioner[], servic
   return [];
 }
 
+/** Returns the (active, visible-online) add-on groups for a given service id, or an empty list. */
+function catalogAddonGroupsForServiceId(
+  catalogStaff: CatalogPractitioner[],
+  serviceId: string,
+): import('@/types/booking-models').AppointmentCatalogAddonGroup[] {
+  for (const p of catalogStaff) {
+    const offer = p.services.find((s) => s.id === serviceId);
+    if (offer?.addon_groups && offer.addon_groups.length > 0) return offer.addon_groups;
+  }
+  return [];
+}
+
+type CatalogServiceOffer = CatalogPractitioner['services'][number];
+
+/** Apply chosen variant duration / buffer / price / deposit on a catalog service offer. */
+function catalogOfferWithVariant(
+  offer: CatalogServiceOffer | undefined | null,
+  variantId: string | null,
+): CatalogServiceOffer | null {
+  if (!offer) return null;
+  if (!variantId) return offer;
+  const variant = offer.variants?.find((v) => v.id === variantId);
+  if (!variant) return offer;
+  return {
+    ...offer,
+    duration_minutes: variant.duration_minutes,
+    buffer_minutes: variant.buffer_minutes,
+    price_pence: variant.price_pence,
+    deposit_pence: variant.deposit_pence ?? offer.deposit_pence ?? null,
+  };
+}
+
+/**
+ * Resolve the chosen add-ons for a service into filtered ids, price/duration totals,
+ * and display lines. Shared by the single, multi-service, and group flows so the chain
+ * math, review cards, and create payloads all agree.
+ */
+function addonSelectionDetails(
+  catalogStaff: CatalogPractitioner[],
+  serviceId: string,
+  addonIds: string[],
+): {
+  filteredIds: string[];
+  totalPence: number;
+  totalMinutes: number;
+  lines: Array<{ id: string; name: string; pricePence: number; durationMinutes: number }>;
+} {
+  const groups = catalogAddonGroupsForServiceId(catalogStaff, serviceId);
+  const idSet = new Set(addonIds);
+  const lines: Array<{ id: string; name: string; pricePence: number; durationMinutes: number }> = [];
+  let totalPence = 0;
+  let totalMinutes = 0;
+  for (const g of groups) {
+    for (const a of g.addons) {
+      if (idSet.has(a.id)) {
+        totalPence += a.additional_price_pence;
+        totalMinutes += a.additional_duration_minutes;
+        lines.push({
+          id: a.id,
+          name: a.name,
+          pricePence: a.additional_price_pence,
+          durationMinutes: a.additional_duration_minutes,
+        });
+      }
+    }
+  }
+  const filteredIds = addonIds.filter((id) => groups.some((g) => g.addons.some((a) => a.id === id)));
+  return { filteredIds, totalPence, totalMinutes, lines };
+}
+
 const STAFF_CUSTOM_DURATION_PRESETS = [15, 30, 45, 60, 75, 90, 105, 120] as const;
 
 function StaffCustomDurationPopover({
@@ -206,6 +276,8 @@ interface CatalogPractitioner {
     cancellation_notice_hours?: number;
     /** Optional sub-options. When present, the customer must pick one before slot selection. */
     variants?: CatalogVariant[];
+    /** Add-on groups linked to this service (visible online). Public catalog filters hidden ones. */
+    addon_groups?: import('@/types/booking-models').AppointmentCatalogAddonGroup[];
   }>;
 }
 
@@ -225,15 +297,24 @@ interface PersonSelection {
   label: string;
   serviceId: string;
   serviceName: string;
+  /** Chosen variant for this attendee's service, if the service has variants. */
+  serviceVariantId?: string | null;
   practitionerId: string;
   practitionerName: string;
   date: string;
   time: string;
+  /** Includes add-on minutes. */
   durationMinutes: number;
   bufferMinutes: number;
+  /** Service (+variant) price only; add-on price tracked separately. */
   pricePence: number | null;
+  /** Includes add-on price when the online charge is a full payment. */
   depositPence: number;
   onlineChargeLabel?: 'deposit' | 'full_payment';
+  /** Add-ons chosen for this attendee. */
+  addonIds?: string[];
+  addonTotalPence?: number;
+  addonTotalMinutes?: number;
 }
 
 /** Consecutive services for one practitioner (multi-service booking). */
@@ -245,11 +326,19 @@ export interface MultiServiceSegment {
   practitionerId: string;
   practitionerName: string;
   startTime: string;
+  /** Includes add-on minutes so chain start times line up with the server's consecutive check. */
   durationMinutes: number;
   bufferMinutes: number;
+  /** Service+variant price only (add-on price is tracked separately in `addonTotalPence`). */
   pricePence: number | null;
   depositPence: number;
   onlineChargeLabel?: 'deposit' | 'full_payment';
+  /** Chosen add-on ids for this segment (sent to create-multi-service / validate-slot). */
+  addonIds?: string[];
+  /** Sum of add-on price for display on the review card. */
+  addonTotalPence?: number;
+  /** Sum of add-on minutes folded into `durationMinutes`. */
+  addonTotalMinutes?: number;
 }
 
 function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart: string): MultiServiceSegment[] {
@@ -263,12 +352,12 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
 
 type Step =
   | 'mode_choice'
-  | 'service' | 'variant' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
-  | 'group_person_label' | 'group_service' | 'group_variant' | 'group_practitioner' | 'group_slot'
+  | 'service' | 'variant' | 'addons' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
+  | 'group_person_label' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
-const SINGLE_STEPS: Step[] = ['service', 'variant', 'practitioner', 'slot', 'multi_service', 'details'];
-const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'slot', 'multi_service', 'details'];
+const SINGLE_STEPS: Step[] = ['service', 'variant', 'addons', 'practitioner', 'slot', 'multi_service', 'details'];
+const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'addons', 'slot', 'multi_service', 'details'];
 
 interface AppointmentBookingFlowProps {
   venue: VenuePublic;
@@ -452,6 +541,12 @@ export function AppointmentBookingFlow({
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? preselectedServiceId ?? null);
   /** When the chosen service has variants, this is the picked variant id; null otherwise. */
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  /**
+   * Add-ons chosen by the booker for the current service. Reset whenever the service or
+   * variant changes (linked groups depend on the service). The booking-create payload
+   * includes these as `{ addons: [{ addon_id }] }`.
+   */
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   /** Staff-created appointments can override duration for this booking only. Keyed by parent service id. */
   const [staffDurationOverrides, setStaffDurationOverrides] = useState<Record<string, number>>({});
   /** Staff service-step (no variants): which service id has the duration popover open. */
@@ -476,11 +571,26 @@ export function AppointmentBookingFlow({
 
   const [multiServiceSegments, setMultiServiceSegments] = useState<MultiServiceSegment[] | null>(null);
   const [addingExtraService, setAddingExtraService] = useState(false);
+  /**
+   * Describes what the shared `addons` step is currently configuring:
+   * - `primary`: the first/single service (existing flow → practitioner/slot).
+   * - `append`: extras for a freshly-picked additional multi-service segment.
+   * - `edit`: extras for an existing segment at `segmentIndex`.
+   */
+  const [addonFlowContext, setAddonFlowContext] = useState<
+    | { kind: 'primary' }
+    | { kind: 'append'; serviceId: string }
+    | { kind: 'edit'; segmentIndex: number; serviceId: string }
+  >({ kind: 'primary' });
 
   // Group booking state
   const [groupPeople, setGroupPeople] = useState<PersonSelection[]>([]);
   const [currentPersonLabel, setCurrentPersonLabel] = useState('');
   const [groupServiceId, setGroupServiceId] = useState<string | null>(null);
+  /** In-progress attendee's chosen variant (null until picked / not applicable). */
+  const [groupVariantId, setGroupVariantId] = useState<string | null>(null);
+  /** In-progress attendee's chosen add-on ids. Reset when the service/variant changes. */
+  const [groupSelectedAddonIds, setGroupSelectedAddonIds] = useState<string[]>([]);
   const [groupPractitionerId, setGroupPractitionerId] = useState<string | null>(null);
   const [groupCreateResult, setGroupCreateResult] = useState<{
     group_booking_id: string;
@@ -563,8 +673,12 @@ export function AppointmentBookingFlow({
       setGroupPeople([]);
       setCurrentPersonLabel('');
       setGroupServiceId(null);
+      setGroupVariantId(null);
+      setGroupSelectedAddonIds([]);
       setGroupPractitionerId(null);
       setGroupCreateResult(null);
+      setSelectedAddonIds([]);
+      setAddonFlowContext({ kind: 'primary' });
       setSubmitting(false);
       if (lockedPractitioner?.id && lockedPractitioner?.bookingSlug) {
         setStep('service');
@@ -593,7 +707,7 @@ export function AppointmentBookingFlow({
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const res = await fetch(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug));
+      const res = await fetch(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
@@ -603,7 +717,7 @@ export function AppointmentBookingFlow({
     } finally {
       setCatalogLoading(false);
     }
-  }, [venue.id, lockedPractitioner?.bookingSlug]);
+  }, [venue.id, lockedPractitioner?.bookingSlug, isStaff]);
 
   useEffect(() => {
     fetchCatalog();
@@ -635,7 +749,13 @@ export function AppointmentBookingFlow({
   }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner]);
 
   const fetchAvailability = useCallback(
-    async (opts: { serviceId: string; practitionerId: string; variantId?: string | null; durationMinutes?: number | null }) => {
+    async (opts: {
+      serviceId: string;
+      practitionerId: string;
+      variantId?: string | null;
+      durationMinutes?: number | null;
+      addonIds?: string[];
+    }) => {
       setLoading(true);
       try {
         const params = new URLSearchParams({ venue_id: venue.id, date });
@@ -647,6 +767,9 @@ export function AppointmentBookingFlow({
         }
         if (opts.variantId) params.set('variant_id', opts.variantId);
         if (opts.durationMinutes != null) params.set('duration_minutes', String(opts.durationMinutes));
+        if (opts.addonIds && opts.addonIds.length > 0) {
+          for (const id of opts.addonIds) params.append('addon_ids', id);
+        }
         if (phantomBookings.length > 0) {
           params.set('phantoms', JSON.stringify(phantomBookings));
         }
@@ -672,6 +795,7 @@ export function AppointmentBookingFlow({
       serviceId: string;
       variantId?: string | null;
       durationMinutes?: number | null;
+      addonIds?: string[] | null;
       year: number;
       month: number;
       signal?: AbortSignal;
@@ -687,6 +811,8 @@ export function AppointmentBookingFlow({
         opts.durationMinutes ?? null,
         isAnyAvailablePractitionerId(opts.practitionerId),
         linkedOwnerVenueId ?? null,
+        null,
+        opts.addonIds ?? null,
       );
       const res = await fetch(url, { signal: opts.signal });
       const data = (await res.json()) as { available_dates?: string[]; error?: string };
@@ -702,6 +828,7 @@ export function AppointmentBookingFlow({
       serviceId: string;
       variantId?: string | null;
       durationMinutes?: number | null;
+      addonIds?: string[] | null;
       year: number;
       month: number;
     }): Promise<Set<string>> => {
@@ -712,6 +839,7 @@ export function AppointmentBookingFlow({
         opts.month,
         opts.variantId ?? null,
         opts.durationMinutes ?? null,
+        opts.addonIds ?? null,
       );
       const cached = calendarCacheRef.current.get(key);
       if (cached) return Promise.resolve(cached);
@@ -893,21 +1021,30 @@ export function AppointmentBookingFlow({
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
-    const variantId = isGroup ? null : selectedVariantId;
+    const variantId = isGroup ? groupVariantId : selectedVariantId;
     const durationMinutes =
       !isGroup && svc
         ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null
         : null;
     if (!svc || !prac) return;
-    fetchAvailability({ serviceId: svc, practitionerId: prac, variantId, durationMinutes });
+    fetchAvailability({
+      serviceId: svc,
+      practitionerId: prac,
+      variantId,
+      durationMinutes,
+      addonIds: isGroup ? groupSelectedAddonIds : selectedAddonIds,
+    });
   }, [
     step,
     date,
     selectedServiceId,
     selectedVariantId,
+    selectedAddonIds,
     selectedPractitionerId,
     staffDurationOverrides,
     groupServiceId,
+    groupVariantId,
+    groupSelectedAddonIds,
     groupPractitionerId,
     phantomBookings,
     fetchAvailability,
@@ -989,14 +1126,23 @@ export function AppointmentBookingFlow({
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
-    const variantId = isGroup ? null : selectedVariantId;
+    const variantId = isGroup ? groupVariantId : selectedVariantId;
     const durationMinutes =
       !isGroup && svc
         ? staffDurationOverrides[staffDurationOverrideKey(svc, variantId)] ?? null
         : null;
     if (!svc || !prac) return;
 
-    const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month, variantId, durationMinutes);
+    const addonIdsForCal = isGroup ? groupSelectedAddonIds : selectedAddonIds;
+    const key = appointmentCalendarCacheKey(
+      prac,
+      svc,
+      calendarMonth.year,
+      calendarMonth.month,
+      variantId,
+      durationMinutes,
+      addonIdsForCal,
+    );
     const cached = calendarCache.get(key);
     if (cached) {
       setAvailableDates(cached);
@@ -1013,6 +1159,7 @@ export function AppointmentBookingFlow({
           serviceId: svc,
           variantId,
           durationMinutes,
+          addonIds: addonIdsForCal,
           year: calendarMonth.year,
           month: calendarMonth.month,
         });
@@ -1032,9 +1179,12 @@ export function AppointmentBookingFlow({
     step,
     selectedServiceId,
     selectedVariantId,
+    selectedAddonIds,
     selectedPractitionerId,
     staffDurationOverrides,
     groupServiceId,
+    groupVariantId,
+    groupSelectedAddonIds,
     groupPractitionerId,
     calendarMonth.year,
     calendarMonth.month,
@@ -1226,20 +1376,15 @@ export function AppointmentBookingFlow({
    * needs to reflect the chosen sub-option (summary copy, online charge, end-time previews).
    */
   const effectiveOfferForBooking = useMemo(() => {
-    if (!selectedServiceForPractitioner) return null;
-    const variantOffer = selectedVariant
-      ? {
-          ...selectedServiceForPractitioner,
-          name: `${selectedServiceForPractitioner.name} - ${selectedVariant.name}`,
-          duration_minutes: selectedVariant.duration_minutes,
-          buffer_minutes: selectedVariant.buffer_minutes,
-          price_pence: selectedVariant.price_pence,
-          deposit_pence: selectedVariant.deposit_pence ?? selectedServiceForPractitioner.deposit_pence ?? null,
-        }
-      : selectedServiceForPractitioner;
-    if (staffCustomDurationMinutes == null) return variantOffer;
-    return { ...variantOffer, duration_minutes: staffCustomDurationMinutes };
-  }, [selectedServiceForPractitioner, selectedVariant, staffCustomDurationMinutes]);
+    const merged = catalogOfferWithVariant(selectedServiceForPractitioner, selectedVariantId);
+    if (!merged) return null;
+    const offer =
+      selectedVariant != null
+        ? { ...merged, name: `${selectedServiceForPractitioner!.name} - ${selectedVariant.name}` }
+        : merged;
+    if (staffCustomDurationMinutes == null) return offer;
+    return { ...offer, duration_minutes: staffCustomDurationMinutes };
+  }, [selectedServiceForPractitioner, selectedVariantId, selectedVariant, staffCustomDurationMinutes]);
   const groupedSlots = groupSlotsByPeriod(availableSlots);
 
   const primaryBookingSegment = multiServiceSegments?.[0] ?? null;
@@ -1312,6 +1457,27 @@ export function AppointmentBookingFlow({
           catalogStaff.find((p) => p.id === picked.practitioner_id)?.name ||
           'Staff member';
       }
+      // Fold the current add-on selection into this segment so the chain math,
+      // review card, and server consecutive-slot check all agree.
+      const segmentAddonGroups = catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId);
+      const segmentAddonIdSet = new Set(selectedAddonIds);
+      let addonTotalPence = 0;
+      let addonTotalMinutes = 0;
+      for (const grp of segmentAddonGroups) {
+        for (const a of grp.addons) {
+          if (segmentAddonIdSet.has(a.id)) {
+            addonTotalPence += a.additional_price_pence;
+            addonTotalMinutes += a.additional_duration_minutes;
+          }
+        }
+      }
+      const segmentAddonIds = selectedAddonIds.filter((id) =>
+        segmentAddonGroups.some((g) => g.addons.some((a) => a.id === id)),
+      );
+      // Full payment rolls add-on price into the online charge; deposits do not.
+      const depositWithAddons =
+        (firstOnline?.amountPence ?? 0) +
+        (firstOnline?.chargeLabel === 'full_payment' ? addonTotalPence : 0);
       return {
         serviceId: selectedServiceId,
         serviceVariantId: selectedVariantId,
@@ -1319,17 +1485,21 @@ export function AppointmentBookingFlow({
         practitionerId,
         practitionerName,
         startTime: time,
-        durationMinutes: offer.duration_minutes ?? 30,
+        durationMinutes: (offer.duration_minutes ?? 30) + addonTotalMinutes,
         bufferMinutes: offer.buffer_minutes ?? 0,
         pricePence: offer.price_pence ?? null,
-        depositPence: firstOnline?.amountPence ?? 0,
+        depositPence: depositWithAddons,
         onlineChargeLabel: firstOnline?.chargeLabel,
+        addonIds: segmentAddonIds,
+        addonTotalPence,
+        addonTotalMinutes,
       };
     },
     [
       selectedServiceId,
       selectedVariantId,
       selectedPractitionerId,
+      selectedAddonIds,
       effectiveOfferForBooking,
       selectedPrac,
       availableSlots,
@@ -1400,6 +1570,9 @@ export function AppointmentBookingFlow({
             practitioner_id: seg.practitionerId,
             service_id: seg.serviceId,
             ...(seg.serviceVariantId ? { variant_id: seg.serviceVariantId } : {}),
+            ...(seg.addonIds && seg.addonIds.length > 0
+              ? { addons: seg.addonIds.map((id) => ({ addon_id: id })) }
+              : {}),
             start_time: seg.startTime,
             phantoms,
           }),
@@ -1531,39 +1704,83 @@ export function AppointmentBookingFlow({
   );
 
   const handlePickAdditionalService = useCallback(
-    async (serviceId: string) => {
-      if (!visitPractitioner || !multiServiceSegments?.length) return;
+    async (serviceId: string, addonIds: string[] = []): Promise<string | null> => {
+      if (!visitPractitioner || !multiServiceSegments?.length) return 'Unable to add this service.';
       const offer = visitPractitioner.services.find((s) => s.id === serviceId);
-      if (!offer) return;
+      if (!offer) return 'Service not found.';
       if (multiServiceSegments.length >= 4) {
         setError('You can book up to four services in one visit.');
-        return;
+        return 'You can book up to four services in one visit.';
       }
       const firstStart = multiServiceSegments[0]!.startTime;
       const nextOnline = onlineChargeFromCatalogOffer(offer);
+      const addonInfo = addonSelectionDetails(catalogStaff, serviceId, addonIds);
+      // Full payment rolls add-on price into the online charge; deposits do not.
+      const depositWithAddons =
+        (nextOnline?.amountPence ?? 0) +
+        (nextOnline?.chargeLabel === 'full_payment' ? addonInfo.totalPence : 0);
       const nextSeg: MultiServiceSegment = {
         serviceId: offer.id,
         serviceName: offer.name,
         practitionerId: visitPractitioner.id,
         practitionerName: visitPractitioner.name,
         startTime: '00:00',
-        durationMinutes: offer.duration_minutes,
+        durationMinutes: offer.duration_minutes + addonInfo.totalMinutes,
         bufferMinutes: offer.buffer_minutes ?? 0,
         pricePence: offer.price_pence,
-        depositPence: nextOnline?.amountPence ?? 0,
+        depositPence: depositWithAddons,
         onlineChargeLabel: nextOnline?.chargeLabel,
+        addonIds: addonInfo.filteredIds,
+        addonTotalPence: addonInfo.totalPence,
+        addonTotalMinutes: addonInfo.totalMinutes,
       };
       const chain = recomputeMultiServiceChain([...multiServiceSegments, nextSeg], firstStart);
       const err = await validateMultiServiceChain(chain);
       if (err) {
         setError(err);
-        return;
+        return err;
       }
       setMultiServiceSegments(chain);
       setError(null);
       setAddingExtraService(false);
+      return null;
     },
-    [visitPractitioner, multiServiceSegments, validateMultiServiceChain],
+    [visitPractitioner, multiServiceSegments, validateMultiServiceChain, catalogStaff],
+  );
+
+  /** Re-apply an add-on selection to an existing segment, then revalidate the chain. */
+  const applyAddonsToSegment = useCallback(
+    async (index: number, addonIds: string[]): Promise<string | null> => {
+      if (!multiServiceSegments || index < 0 || index >= multiServiceSegments.length) {
+        return 'Unable to update extras.';
+      }
+      const seg = multiServiceSegments[index]!;
+      const addonInfo = addonSelectionDetails(catalogStaff, seg.serviceId, addonIds);
+      const baseDuration = seg.durationMinutes - (seg.addonTotalMinutes ?? 0);
+      const baseDeposit =
+        seg.depositPence - (seg.onlineChargeLabel === 'full_payment' ? seg.addonTotalPence ?? 0 : 0);
+      const updated: MultiServiceSegment = {
+        ...seg,
+        durationMinutes: baseDuration + addonInfo.totalMinutes,
+        depositPence:
+          baseDeposit + (seg.onlineChargeLabel === 'full_payment' ? addonInfo.totalPence : 0),
+        addonIds: addonInfo.filteredIds,
+        addonTotalPence: addonInfo.totalPence,
+        addonTotalMinutes: addonInfo.totalMinutes,
+      };
+      const firstStart = multiServiceSegments[0]!.startTime;
+      const nextSegments = multiServiceSegments.map((s, i) => (i === index ? updated : s));
+      const chain = recomputeMultiServiceChain(nextSegments, firstStart);
+      const err = await validateMultiServiceChain(chain);
+      if (err) {
+        setError(err);
+        return err;
+      }
+      setMultiServiceSegments(chain);
+      setError(null);
+      return null;
+    },
+    [multiServiceSegments, validateMultiServiceChain, catalogStaff],
   );
 
   const handleRemoveMultiSegment = useCallback(
@@ -1595,6 +1812,9 @@ export function AppointmentBookingFlow({
         }
       }
       const chain = multiServiceSegments;
+      // Single-service create reads add-ons from segment 0 (the authoritative store once a
+      // slot is picked), falling back to the working buffer for edit/prefill entry paths.
+      const singleCreateAddonIds = chain?.[0]?.addonIds ?? selectedAddonIds;
       if (chain && chain.length > 1) {
         const v = await validateMultiServiceChain(chain);
         if (v) {
@@ -1621,6 +1841,9 @@ export function AppointmentBookingFlow({
                 practitioner_id: s.practitionerId,
                 start_time: s.startTime,
                 ...(s.serviceVariantId ? { service_variant_id: s.serviceVariantId } : {}),
+                ...(s.addonIds && s.addonIds.length > 0
+                  ? { addons: s.addonIds.map((id) => ({ addon_id: id })) }
+                  : {}),
               })),
               marketing_consent: details.marketing_consent,
               collective_id: collectiveId,
@@ -1698,6 +1921,9 @@ export function AppointmentBookingFlow({
               ...(staffRebookBootstrap?.guest || details.returning_guest
                 ? { returning_guest: true }
                 : {}),
+              ...(singleCreateAddonIds.length > 0
+                ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
+                : {}),
               ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
           });
@@ -1735,6 +1961,9 @@ export function AppointmentBookingFlow({
             occasion: details.occasion,
             marketing_consent: details.marketing_consent,
             collective_id: collectiveId,
+            ...(singleCreateAddonIds.length > 0
+              ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
+              : {}),
             ...(waitlistOfferEntryId ? { waitlist_offer_id: waitlistOfferEntryId } : {}),
           }),
         });
@@ -1766,6 +1995,7 @@ export function AppointmentBookingFlow({
       selectedPractitionerId,
       selectedServiceId,
       selectedVariantId,
+      selectedAddonIds,
       staffCustomDurationMinutes,
       effectiveOfferForBooking,
       refundNoticeHours,
@@ -1783,6 +2013,7 @@ export function AppointmentBookingFlow({
       publicCreateErrorMessage,
       waitlistOfferEntryId,
       linkedOwnerVenueId,
+      staffRebookBootstrap?.guest,
     ],
   );
 
@@ -1865,31 +2096,49 @@ export function AppointmentBookingFlow({
     const prac = catalogStaff.find((p) => p.id === groupPractitionerId);
     if (!svc || !prac) return;
 
-    const svcOffer = prac.services.find((s) => s.id === groupServiceId);
+    const baseOffer = prac.services.find((s) => s.id === groupServiceId);
+    // Apply the chosen variant (duration / buffer / price / deposit) when one is picked.
+    const svcOffer = catalogOfferWithVariant(baseOffer, groupVariantId) ?? baseOffer;
     const offerForCharge = svcOffer ?? {
       price_pence: svc.price_pence,
       deposit_pence: svc.deposit_pence,
       payment_requirement: svc.payment_requirement,
     };
     const gOnline = onlineChargeFromCatalogOffer(offerForCharge);
+    const addonInfo = addonSelectionDetails(catalogStaff, svc.id, groupSelectedAddonIds);
+    // Full payment rolls add-on price into the online charge; deposits do not.
+    const depositWithAddons =
+      (gOnline?.amountPence ?? 0) +
+      (gOnline?.chargeLabel === 'full_payment' ? addonInfo.totalPence : 0);
+    const variantSuffix =
+      groupVariantId && baseOffer?.variants
+        ? baseOffer.variants.find((v) => v.id === groupVariantId)?.name
+        : null;
     setGroupPeople((prev) => [
       ...prev,
       {
         label: currentPersonLabel,
         serviceId: svc.id,
-        serviceName: svcOffer?.name ?? svc.name,
+        serviceName:
+          (svcOffer?.name ?? svc.name) + (variantSuffix ? ` (${variantSuffix})` : ''),
+        serviceVariantId: groupVariantId,
         practitionerId: prac.id,
         practitionerName: prac.name,
         date,
         time,
-        durationMinutes: svcOffer?.duration_minutes ?? svc.duration_minutes,
-        bufferMinutes: 0,
+        durationMinutes: (svcOffer?.duration_minutes ?? svc.duration_minutes) + addonInfo.totalMinutes,
+        bufferMinutes: svcOffer?.buffer_minutes ?? 0,
         pricePence: svcOffer?.price_pence ?? svc.price_pence,
-        depositPence: gOnline?.amountPence ?? 0,
+        depositPence: depositWithAddons,
         onlineChargeLabel: gOnline?.chargeLabel,
+        addonIds: addonInfo.filteredIds,
+        addonTotalPence: addonInfo.totalPence,
+        addonTotalMinutes: addonInfo.totalMinutes,
       },
     ]);
     setGroupServiceId(null);
+    setGroupVariantId(null);
+    setGroupSelectedAddonIds([]);
     setGroupPractitionerId(null);
     setCurrentPersonLabel('');
     setStep('group_review');
@@ -1926,6 +2175,10 @@ export function AppointmentBookingFlow({
             person_label: p.label,
             practitioner_id: p.practitionerId,
             appointment_service_id: p.serviceId,
+            ...(p.serviceVariantId ? { service_variant_id: p.serviceVariantId } : {}),
+            ...(p.addonIds && p.addonIds.length > 0
+              ? { addons: p.addonIds.map((id) => ({ addon_id: id })) }
+              : {}),
             booking_date: p.date,
             booking_time: p.time,
           })),
@@ -2010,7 +2263,10 @@ export function AppointmentBookingFlow({
     );
   }
 
-  const totalGroupPrice = groupPeople.reduce((sum, p) => sum + (p.pricePence ?? 0), 0);
+  const totalGroupPrice = groupPeople.reduce(
+    (sum, p) => sum + (p.pricePence ?? 0) + (p.addonTotalPence ?? 0),
+    0,
+  );
   const totalGroupDepositPence = groupPeople.reduce((sum, p) => sum + (p.depositPence ?? 0), 0);
 
   const paymentCancellationBlurb = `Full deposit refund if you cancel ≥${refundNoticeHours}h before each appointment.`;
@@ -2204,8 +2460,14 @@ export function AppointmentBookingFlow({
                   queuePrefetchForServicePractitioners(svc.id, staffDurationOverrideForService);
                   setSelectedServiceId(svc.id);
                   setSelectedVariantId(null);
+                  setSelectedAddonIds([]);
                   if (serviceHasVariants) {
                     setStep('variant');
+                    return;
+                  }
+                  const hasAddonGroups = catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
+                  if (hasAddonGroups) {
+                    setStep('addons');
                     return;
                   }
                   if (isEdit) {
@@ -2395,6 +2657,14 @@ export function AppointmentBookingFlow({
                     type="button"
                     onClick={() => {
                       setSelectedVariantId(variant.id);
+                      setSelectedAddonIds([]);
+                      const hasAddonGroups =
+                        selectedServiceId != null &&
+                        catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
+                      if (hasAddonGroups) {
+                        setStep('addons');
+                        return;
+                      }
                       if (
                         staffCalendarSlotPrefillActive &&
                         preselectedPractitionerId &&
@@ -2440,6 +2710,14 @@ export function AppointmentBookingFlow({
                 setDurationPopoverOpenForKey(null);
                 setDurationPopoverServiceId(null);
                 setSelectedVariantId(variant.id);
+                setSelectedAddonIds([]);
+                const hasAddonGroups =
+                  selectedServiceId != null &&
+                  catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
+                if (hasAddonGroups) {
+                  setStep('addons');
+                  return;
+                }
                 if (
                   staffCalendarSlotPrefillActive &&
                   preselectedPractitionerId &&
@@ -2530,10 +2808,240 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {step === 'addons' && (() => {
+        const addonStepServiceId =
+          addonFlowContext.kind === 'primary' ? selectedServiceId : addonFlowContext.serviceId;
+        const addonStepServiceName =
+          addonFlowContext.kind === 'edit'
+            ? multiServiceSegments?.[addonFlowContext.segmentIndex]?.serviceName ?? null
+            : addonStepServiceId
+              ? visitPractitioner?.services.find((s) => s.id === addonStepServiceId)?.name ??
+                uniqueServices.find((s) => s.id === addonStepServiceId)?.name ??
+                null
+              : null;
+        const addonStepIsSegment = addonFlowContext.kind !== 'primary';
+        const addonGroups = addonStepServiceId
+          ? catalogAddonGroupsForServiceId(catalogStaff, addonStepServiceId)
+          : [];
+        const selectedIds = new Set(selectedAddonIds);
+        const totalsPence = addonGroups.reduce((sum, g) => {
+          for (const a of g.addons) {
+            if (selectedIds.has(a.id)) sum += a.additional_price_pence;
+          }
+          return sum;
+        }, 0);
+        const totalsMin = addonGroups.reduce((sum, g) => {
+          for (const a of g.addons) {
+            if (selectedIds.has(a.id)) sum += a.additional_duration_minutes;
+          }
+          return sum;
+        }, 0);
+        const validationProblems: string[] = [];
+        for (const grp of addonGroups) {
+          const chosenInGroup = grp.addons.filter((a) => selectedIds.has(a.id)).length;
+          if (chosenInGroup < grp.group.min_select) {
+            validationProblems.push(
+              grp.group.min_select === 1
+                ? `Choose an option for "${grp.group.name}".`
+                : `Choose at least ${grp.group.min_select} options for "${grp.group.name}".`,
+            );
+          }
+          if (grp.group.max_select != null && chosenInGroup > grp.group.max_select) {
+            validationProblems.push(`"${grp.group.name}" allows at most ${grp.group.max_select} options.`);
+          }
+          if (grp.group.selection_type === 'single' && chosenInGroup > 1) {
+            validationProblems.push(`"${grp.group.name}" allows only one selection.`);
+          }
+        }
+        const continueDisabled = validationProblems.length > 0;
+        function toggleAddon(addonId: string, group: typeof addonGroups[number]) {
+          setSelectedAddonIds((prev) => {
+            const has = prev.includes(addonId);
+            if (group.group.selection_type === 'single') {
+              // Clear any other choice in this group, then add (or remove) this one.
+              const withoutGroup = prev.filter((id) => !group.addons.some((a) => a.id === id));
+              return has ? withoutGroup : [...withoutGroup, addonId];
+            }
+            return has ? prev.filter((id) => id !== addonId) : [...prev, addonId];
+          });
+        }
+        async function goNext() {
+          if (continueDisabled) return;
+          if (addonFlowContext.kind === 'append') {
+            await handlePickAdditionalService(addonFlowContext.serviceId, selectedAddonIds);
+            setAddonFlowContext({ kind: 'primary' });
+            // Restore the buffer to mirror segment 0 (append leaves segment 0 unchanged).
+            setSelectedAddonIds(multiServiceSegments?.[0]?.addonIds ?? []);
+            setStep('multi_service');
+            return;
+          }
+          if (addonFlowContext.kind === 'edit') {
+            const editedIndex = addonFlowContext.segmentIndex;
+            const editedIds = selectedAddonIds;
+            await applyAddonsToSegment(editedIndex, editedIds);
+            setAddonFlowContext({ kind: 'primary' });
+            // Keep the buffer mirroring segment 0 for any later back-to-slot re-pick.
+            setSelectedAddonIds(
+              editedIndex === 0 ? editedIds : multiServiceSegments?.[0]?.addonIds ?? [],
+            );
+            setStep('multi_service');
+            return;
+          }
+          if (
+            staffCalendarSlotPrefillActive &&
+            preselectedPractitionerId &&
+            !isLockedPractitionerFlow &&
+            selectedServiceId
+          ) {
+            void continueStaffCalendarSlotPrefill({
+              serviceId: selectedServiceId,
+              variantId: selectedVariantId ?? null,
+            });
+            return;
+          }
+          if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+            primeSelectedAppointmentCalendar(
+              selectedPractitionerId,
+              selectedServiceId,
+              staffDurationOverrides[staffDurationOverrideKey(selectedServiceId, selectedVariantId)] ?? null,
+              selectedVariantId ?? null,
+            );
+          }
+          setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+        }
+        return (
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                if (addonStepIsSegment) {
+                  setAddonFlowContext({ kind: 'primary' });
+                  setSelectedAddonIds(multiServiceSegments?.[0]?.addonIds ?? []);
+                  setStep('multi_service');
+                  return;
+                }
+                setSelectedAddonIds([]);
+                setStep(serviceHasVariants ? 'variant' : 'service');
+              }}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
+              Back
+            </button>
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">
+              {addonStepIsSegment && addonStepServiceName
+                ? `Add extras to ${addonStepServiceName}`
+                : 'Add extras to your booking'}
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Choose any optional extras you&apos;d like to stack on top of this service.
+            </p>
+            <div className="space-y-4">
+              {addonGroups.map((grp) => {
+                const label = grp.group.prompt_to_client?.trim() || grp.group.name;
+                const single = grp.group.selection_type === 'single';
+                const isRequired = single && grp.group.min_select === 1;
+                const optHint = single
+                  ? isRequired
+                    ? 'Pick one (required)'
+                    : 'Pick one (optional)'
+                  : grp.group.max_select != null
+                    ? grp.group.min_select > 0
+                      ? `Pick between ${grp.group.min_select} and ${grp.group.max_select}`
+                      : `Pick up to ${grp.group.max_select}`
+                    : grp.group.min_select > 0
+                      ? `Pick at least ${grp.group.min_select}`
+                      : 'Pick any';
+                return (
+                  <fieldset key={grp.group.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <legend className="px-1 text-sm font-semibold text-slate-800">{label}</legend>
+                    <p className="mt-0.5 text-xs text-slate-500">{optHint}</p>
+                    <ul className="mt-3 space-y-2">
+                      {grp.addons.map((a) => {
+                        const checked = selectedIds.has(a.id);
+                        return (
+                          <li key={a.id}>
+                            <label
+                              className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 ${
+                                checked
+                                  ? 'border-brand-400 bg-brand-50/40'
+                                  : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <input
+                                type={single ? 'radio' : 'checkbox'}
+                                name={`addon-${grp.group.id}`}
+                                checked={checked}
+                                onChange={() => toggleAddon(a.id, grp)}
+                                className="mt-1 shrink-0"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-slate-900">{a.name}</span>
+                                {a.description ? (
+                                  <span className="mt-0.5 block text-xs text-slate-500">{a.description}</span>
+                                ) : null}
+                              </span>
+                              <span className="shrink-0 text-right text-xs font-semibold text-slate-700 tabular-nums">
+                                {a.additional_price_pence > 0
+                                  ? `+${currencySymbolFromCode(venue.currency ?? 'GBP')}${(a.additional_price_pence / 100).toFixed(2)}`
+                                  : 'Free'}
+                                {a.additional_duration_minutes > 0 ? (
+                                  <span className="block text-[11px] font-normal text-slate-500">
+                                    +{a.additional_duration_minutes} min
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </fieldset>
+                );
+              })}
+            </div>
+            {validationProblems.length > 0 ? (
+              <ul className="mt-4 list-disc rounded-lg border border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900">
+                {validationProblems.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-5 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-700">
+                Extras total: +{currencySymbolFromCode(venue.currency ?? 'GBP')}
+                {(totalsPence / 100).toFixed(2)}
+                {totalsMin > 0 ? ` · +${totalsMin} min` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={continueDisabled}
+                className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Continue
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {step === 'practitioner' && (
         <div>
           <button
             onClick={() => {
+              const hasAddonGroups =
+                selectedServiceId != null &&
+                catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
+              if (hasAddonGroups) {
+                setStep('addons');
+                return;
+              }
               if (serviceHasVariants) {
                 setStep('variant');
                 return;
@@ -2544,6 +3052,7 @@ export function AppointmentBookingFlow({
               }
               setSelectedServiceId(null);
               setSelectedVariantId(null);
+              setSelectedAddonIds([]);
               setDurationPopoverServiceId(null);
               setDurationPopoverOpenForKey(null);
               setSelectedPractitionerId(null);
@@ -2557,7 +3066,7 @@ export function AppointmentBookingFlow({
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {selectedVariant ? formatPrice(selectedVariant.price_pence) : formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
             </div>
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
@@ -2608,7 +3117,10 @@ export function AppointmentBookingFlow({
                 </button>
               ) : null}
               {practitionersForSelectedService.map((prac) => {
-                const offer = prac.services.find((s) => s.id === selectedServiceId);
+                const offer = catalogOfferWithVariant(
+                  prac.services.find((s) => s.id === selectedServiceId),
+                  selectedVariantId,
+                );
                 return (
                   <button
                     key={prac.id}
@@ -2860,12 +3372,27 @@ export function AppointmentBookingFlow({
               durationMinutes: s.durationMinutes,
               pricePence: s.pricePence,
               depositPence: s.depositPence,
+              extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? []).lines.map((l) => ({
+                name: l.name,
+                pricePence: l.pricePence,
+                durationMinutes: l.durationMinutes,
+              })),
+              editableAddons: catalogAddonGroupsForServiceId(catalogStaff, s.serviceId).length > 0,
             }))}
             formatDateHuman={formatDateHuman}
             bookingDate={date}
             currencySymbol={sym}
             formatPrice={formatPrice}
             onRemove={multiServiceSegments.length > 1 ? (idx) => void handleRemoveMultiSegment(idx) : undefined}
+            onEditAddons={(idx) => {
+              const seg = multiServiceSegments[idx];
+              if (!seg) return;
+              setAddonFlowContext({ kind: 'edit', segmentIndex: idx, serviceId: seg.serviceId });
+              setSelectedAddonIds(seg.addonIds ?? []);
+              setAddingExtraService(false);
+              setError(null);
+              setStep('addons');
+            }}
           />
           <div className="mt-4 space-y-3">
             {multiServiceSegments.length < 4 && (
@@ -2888,7 +3415,17 @@ export function AppointmentBookingFlow({
                         <button
                           key={svc.id}
                           type="button"
-                          onClick={() => void handlePickAdditionalService(svc.id)}
+                          onClick={() => {
+                            if (catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0) {
+                              setAddonFlowContext({ kind: 'append', serviceId: svc.id });
+                              setSelectedAddonIds([]);
+                              setAddingExtraService(false);
+                              setError(null);
+                              setStep('addons');
+                              return;
+                            }
+                            void handlePickAdditionalService(svc.id);
+                          }}
                           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-brand-300"
                         >
                           <span className="font-medium text-slate-900">{svc.name}</span>
@@ -2937,6 +3474,11 @@ export function AppointmentBookingFlow({
                   pricePence: s.pricePence,
                   depositPence: s.depositPence,
                   chargeKind: s.onlineChargeLabel,
+                  extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? []).lines.map((l) => ({
+                    name: l.name,
+                    pricePence: l.pricePence,
+                    durationMinutes: l.durationMinutes,
+                  })),
                 }))}
                 formatDateHuman={formatDateHuman}
                 bookingDate={date}
@@ -2958,15 +3500,15 @@ export function AppointmentBookingFlow({
                     <span className="font-medium text-slate-900">{effectiveOfferForBooking.duration_minutes} min</span>
                   </div>
                 )}
-                {selectedServiceForPractitioner?.price_pence != null && (
+                {effectiveOfferForBooking?.price_pence != null && (
                   <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                     <span className="font-medium text-slate-700">Price</span>
-                    <span className="font-semibold text-brand-600">{formatPrice(selectedServiceForPractitioner.price_pence)}</span>
+                    <span className="font-semibold text-brand-600">{formatPrice(effectiveOfferForBooking.price_pence)}</span>
                   </div>
                 )}
                 {(() => {
-                  const o = selectedServiceForPractitioner
-                    ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
+                  const o = effectiveOfferForBooking
+                    ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
                     : null;
                   if (!o || o.amountPence <= 0) return null;
                   return (
@@ -2982,8 +3524,8 @@ export function AppointmentBookingFlow({
             </div>
           )}
           {isStaff && !(multiServiceSegments && multiServiceSegments.length > 1) && (() => {
-            const o = selectedServiceForPractitioner
-              ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
+            const o = effectiveOfferForBooking
+              ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
               : null;
             if (!o || o.amountPence <= 0) return null;
             if (o.chargeLabel === 'full_payment') {
@@ -3045,8 +3587,8 @@ export function AppointmentBookingFlow({
                   ? null
                   : multiServiceSegments && multiServiceSegments.length > 1
                   ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
-                  : selectedServiceForPractitioner
-                    ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)?.amountPence ?? 0
+                  : effectiveOfferForBooking
+                    ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)?.amountPence ?? 0
                     : 0
               }
               appointmentChargeLabel={
@@ -3054,7 +3596,7 @@ export function AppointmentBookingFlow({
                   ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
                     ? 'full_payment'
                     : 'deposit'
-                  : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
+                  : onlineChargeFromCatalogOffer(effectiveOfferForBooking ?? { price_pence: null, deposit_pence: null })
                         ?.chargeLabel === 'full_payment'
                     ? 'full_payment'
                     : 'deposit'
@@ -3116,7 +3658,7 @@ export function AppointmentBookingFlow({
               ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
                 ? 'full_payment'
                 : 'deposit'
-              : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
+              : onlineChargeFromCatalogOffer(effectiveOfferForBooking ?? { price_pence: null, deposit_pence: null })
                     ?.chargeLabel === 'full_payment'
                 ? 'full_payment'
                 : 'deposit'
@@ -3213,6 +3755,21 @@ export function AppointmentBookingFlow({
                       <div className="mt-0.5 text-sm text-slate-600">{person.serviceName} with {person.practitionerName}</div>
                       <div className="mt-0.5 text-xs text-slate-500">{formatDateHuman(person.date)} at {person.time} &middot; {person.durationMinutes} min</div>
                       {person.pricePence != null && <div className="mt-0.5 text-xs font-medium text-brand-600">{formatPrice(person.pricePence)}</div>}
+                      {person.addonIds && person.addonIds.length > 0 ? (
+                        <ul className="mt-1 space-y-0.5 border-l-2 border-slate-200 pl-2 text-[11px] text-slate-500">
+                          {addonSelectionDetails(catalogStaff, person.serviceId, person.addonIds).lines.map((e, i) => (
+                            <li key={`${e.id}-${i}`} className="flex items-baseline justify-between gap-2">
+                              <span className="min-w-0 truncate">
+                                + {e.name}
+                                {e.durationMinutes > 0 ? ` (+${e.durationMinutes} min)` : ''}
+                              </span>
+                              <span className="shrink-0 tabular-nums">
+                                {e.pricePence > 0 ? `+${sym}${(e.pricePence / 100).toFixed(2)}` : 'Free'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
                     <button onClick={() => removePersonFromGroup(idx)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove">
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
@@ -3245,6 +3802,8 @@ export function AppointmentBookingFlow({
               onClick={() => {
                 setCurrentPersonLabel('');
                 setGroupServiceId(null);
+                setGroupVariantId(null);
+                setGroupSelectedAddonIds([]);
                 setGroupPractitionerId(null);
                 setStep('group_person_label');
               }}
@@ -3332,21 +3891,31 @@ export function AppointmentBookingFlow({
               {servicesWithFromPrice.map((svc) => (
                 <button
                   key={svc.id}
+                  type="button"
                   onClick={() => {
                     queuePrefetchForServicePractitioners(svc.id);
                     setGroupServiceId(svc.id);
-                    setStep('group_practitioner');
+                    setGroupVariantId(null);
+                    setGroupSelectedAddonIds([]);
+                    const hasVariants = catalogVariantsForServiceId(catalogStaff, svc.id).length > 0;
+                    const hasAddons = catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
+                    setStep(
+                      hasVariants ? 'group_variant' : hasAddons ? 'group_addons' : 'group_practitioner',
+                    );
                   }}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                  className={choiceCardClass}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{svc.name}</div>
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
+                      <ServiceCatalogDescription description={svc.description} />
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
-                      <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
+                      <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                      </svg>
                     </div>
                   </div>
                 </button>
@@ -3356,10 +3925,221 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {/* Group: select variant */}
+      {step === 'group_variant' && groupServiceId && (() => {
+        const variants = catalogVariantsForServiceId(catalogStaff, groupServiceId);
+        const groupHasAddons = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId).length > 0;
+        return (
+          <div>
+            <button
+              onClick={() => setStep('group_service')}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+            <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
+              <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
+            </div>
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose an option</h2>
+            <p className="mb-4 text-sm text-slate-500">Pick the option that suits {currentPersonLabel}.</p>
+            <div className="space-y-2">
+              {variants.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => {
+                    setGroupVariantId(v.id);
+                    setGroupSelectedAddonIds([]);
+                    setStep(groupHasAddons ? 'group_addons' : 'group_practitioner');
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-900">{v.name}</div>
+                      {v.description ? (
+                        <div className="mt-0.5 text-xs text-slate-500">{v.description}</div>
+                      ) : null}
+                      <div className="mt-0.5 text-xs text-slate-500">{v.duration_minutes} min</div>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <span className="text-sm font-semibold text-brand-600">{formatPrice(v.price_pence)}</span>
+                      <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Group: select add-ons */}
+      {step === 'group_addons' && groupServiceId && (() => {
+        const addonGroups = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId);
+        const groupHasVariants = catalogVariantsForServiceId(catalogStaff, groupServiceId).length > 0;
+        const selectedIds = new Set(groupSelectedAddonIds);
+        const totalsPence = addonGroups.reduce((sum, g) => {
+          for (const a of g.addons) if (selectedIds.has(a.id)) sum += a.additional_price_pence;
+          return sum;
+        }, 0);
+        const totalsMin = addonGroups.reduce((sum, g) => {
+          for (const a of g.addons) if (selectedIds.has(a.id)) sum += a.additional_duration_minutes;
+          return sum;
+        }, 0);
+        const validationProblems: string[] = [];
+        for (const grp of addonGroups) {
+          const chosenInGroup = grp.addons.filter((a) => selectedIds.has(a.id)).length;
+          if (chosenInGroup < grp.group.min_select) {
+            validationProblems.push(
+              grp.group.min_select === 1
+                ? `Choose an option for "${grp.group.name}".`
+                : `Choose at least ${grp.group.min_select} options for "${grp.group.name}".`,
+            );
+          }
+          if (grp.group.max_select != null && chosenInGroup > grp.group.max_select) {
+            validationProblems.push(`"${grp.group.name}" allows at most ${grp.group.max_select} options.`);
+          }
+          if (grp.group.selection_type === 'single' && chosenInGroup > 1) {
+            validationProblems.push(`"${grp.group.name}" allows only one selection.`);
+          }
+        }
+        const continueDisabled = validationProblems.length > 0;
+        function toggleGroupAddon(addonId: string, group: typeof addonGroups[number]) {
+          setGroupSelectedAddonIds((prev) => {
+            const has = prev.includes(addonId);
+            if (group.group.selection_type === 'single') {
+              const withoutGroup = prev.filter((id) => !group.addons.some((a) => a.id === id));
+              return has ? withoutGroup : [...withoutGroup, addonId];
+            }
+            return has ? prev.filter((id) => id !== addonId) : [...prev, addonId];
+          });
+        }
+        return (
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setGroupSelectedAddonIds([]);
+                setStep(groupHasVariants ? 'group_variant' : 'group_service');
+              }}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+            <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
+              <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
+            </div>
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">Add extras for {currentPersonLabel}</h2>
+            <p className="mb-4 text-sm text-slate-500">Choose any optional extras for this person.</p>
+            <div className="space-y-4">
+              {addonGroups.map((grp) => {
+                const label = grp.group.prompt_to_client?.trim() || grp.group.name;
+                const single = grp.group.selection_type === 'single';
+                const isRequired = single && grp.group.min_select === 1;
+                const optHint = single
+                  ? isRequired ? 'Pick one (required)' : 'Pick one (optional)'
+                  : grp.group.max_select != null
+                    ? grp.group.min_select > 0
+                      ? `Pick between ${grp.group.min_select} and ${grp.group.max_select}`
+                      : `Pick up to ${grp.group.max_select}`
+                    : grp.group.min_select > 0
+                      ? `Pick at least ${grp.group.min_select}`
+                      : 'Pick any';
+                return (
+                  <fieldset key={grp.group.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <legend className="px-1 text-sm font-semibold text-slate-800">{label}</legend>
+                    <p className="mt-0.5 text-xs text-slate-500">{optHint}</p>
+                    <ul className="mt-3 space-y-2">
+                      {grp.addons.map((a) => {
+                        const checked = selectedIds.has(a.id);
+                        return (
+                          <li key={a.id}>
+                            <label
+                              className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 ${
+                                checked ? 'border-brand-400 bg-brand-50/40' : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <input
+                                type={single ? 'radio' : 'checkbox'}
+                                name={`group-addon-${grp.group.id}`}
+                                checked={checked}
+                                onChange={() => toggleGroupAddon(a.id, grp)}
+                                className="mt-1 shrink-0"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-slate-900">{a.name}</span>
+                                {a.description ? (
+                                  <span className="mt-0.5 block text-xs text-slate-500">{a.description}</span>
+                                ) : null}
+                              </span>
+                              <span className="shrink-0 text-right text-xs font-semibold text-slate-700 tabular-nums">
+                                {a.additional_price_pence > 0
+                                  ? `+${currencySymbolFromCode(venue.currency ?? 'GBP')}${(a.additional_price_pence / 100).toFixed(2)}`
+                                  : 'Free'}
+                                {a.additional_duration_minutes > 0 ? (
+                                  <span className="block text-[11px] font-normal text-slate-500">
+                                    +{a.additional_duration_minutes} min
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </fieldset>
+                );
+              })}
+            </div>
+            {validationProblems.length > 0 ? (
+              <ul className="mt-4 list-disc rounded-lg border border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900">
+                {validationProblems.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-5 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-700">
+                Extras total: +{currencySymbolFromCode(venue.currency ?? 'GBP')}
+                {(totalsPence / 100).toFixed(2)}
+                {totalsMin > 0 ? ` · +${totalsMin} min` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (continueDisabled) return;
+                  setStep('group_practitioner');
+                }}
+                disabled={continueDisabled}
+                className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Continue
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Group: select practitioner */}
       {step === 'group_practitioner' && (
         <div>
-          <button onClick={() => { setGroupServiceId(null); setStep('group_service'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            onClick={() => {
+              const hasAddons =
+                groupServiceId != null &&
+                catalogAddonGroupsForServiceId(catalogStaff, groupServiceId).length > 0;
+              const hasVariants =
+                groupServiceId != null &&
+                catalogVariantsForServiceId(catalogStaff, groupServiceId).length > 0;
+              setStep(hasAddons ? 'group_addons' : hasVariants ? 'group_variant' : 'group_service');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
@@ -3379,13 +4159,14 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {practitionersForGroupService.map((prac) => {
-                const offer = prac.services.find((s) => s.id === groupServiceId);
+                const baseOffer = prac.services.find((s) => s.id === groupServiceId);
+                const offer = catalogOfferWithVariant(baseOffer, groupVariantId) ?? baseOffer;
                 return (
                   <button
                     key={prac.id}
                     onClick={() => {
                       if (groupServiceId) {
-                        primeSelectedAppointmentCalendar(prac.id, groupServiceId);
+                        primeSelectedAppointmentCalendar(prac.id, groupServiceId, null, groupVariantId);
                       }
                       setGroupPractitionerId(prac.id);
                       setStep('group_slot');

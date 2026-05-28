@@ -38,6 +38,12 @@ describe('enrichBookingEmailForComms', () => {
               }
               return Promise.resolve({ data: ticketLines, error: null });
             }
+            if (table === 'booking_addons') {
+              // No add-ons in these fixtures; satisfy the chained `.order(...)` call.
+              return {
+                order: () => Promise.resolve({ data: [], error: null }),
+              };
+            }
             return {
               maybeSingle: async () => {
                 const row = rows[callIndex];
@@ -205,5 +211,169 @@ describe('enrichBookingEmailForComms', () => {
     expect(out.practitioner_name).toBe('Reception');
     expect(out.booking_total_price_pence).toBe(2500);
     expect(out.appointment_price_display).toBe('£25.00');
+  });
+});
+
+// ── Add-ons enrichment ────────────────────────────────────────────────────────
+describe('enrichBookingEmailForComms with add-ons', () => {
+  const bookingId = 'b-addons-1';
+  const base: BookingEmailData = {
+    id: bookingId,
+    guest_name: 'Alex',
+    guest_email: 'alex@example.com',
+    booking_date: '2026-04-10',
+    booking_time: '14:00',
+    party_size: 1,
+  };
+
+  /**
+   * Mock that returns the appointment anchor row (no add-on labels needed because
+   * the appointment lookup fails over to a quiet return), then returns the supplied
+   * add-on rows when the `booking_addons` table is queried.
+   */
+  function makeAddonClient(addonRows: Array<{
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    price_pence_at_booking: number;
+    duration_minutes_at_booking: number;
+  }>): SupabaseClient {
+    let appointmentAnchorReturned = false;
+    return {
+      from: (table: string) => ({
+        select: () => ({
+          eq: (_col: string, _val: unknown) => {
+            if (table === 'booking_ticket_lines') {
+              return Promise.resolve({ data: [], error: null });
+            }
+            if (table === 'booking_addons') {
+              return { order: () => Promise.resolve({ data: addonRows, error: null }) };
+            }
+            return {
+              maybeSingle: async () => {
+                if (table === 'bookings' && !appointmentAnchorReturned) {
+                  // First call: appointment anchor lookup.
+                  appointmentAnchorReturned = true;
+                  return {
+                    data: {
+                      practitioner_id: null,
+                      appointment_service_id: null,
+                      calendar_id: null,
+                      service_item_id: null,
+                      group_booking_id: null,
+                      guest_id: 'g1',
+                      person_label: null,
+                    },
+                    error: null,
+                  };
+                }
+                if (table === 'bookings') {
+                  // Second call: C/D/E secondary models lookup; return empty so nothing matches.
+                  return {
+                    data: {
+                      experience_event_id: null,
+                      class_instance_id: null,
+                      resource_id: null,
+                      booking_end_time: null,
+                      booking_time: '14:00:00',
+                      party_size: 1,
+                    },
+                    error: null,
+                  };
+                }
+                return { data: null, error: null };
+              },
+            };
+          },
+        }),
+      }),
+    } as unknown as SupabaseClient;
+  }
+
+  it('adds addon_lines + totals when booking has add-ons', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeAddonClient([
+        {
+          addon_name_snapshot: 'Argan oil conditioner',
+          addon_group_name_snapshot: 'Conditioner choice',
+          price_pence_at_booking: 500,
+          duration_minutes_at_booking: 0,
+        },
+        {
+          addon_name_snapshot: 'Olaplex treatment',
+          addon_group_name_snapshot: 'Finishing touches',
+          price_pence_at_booking: 1000,
+          duration_minutes_at_booking: 15,
+        },
+      ]),
+      bookingId,
+      base,
+    );
+
+    expect(out.addon_lines).toEqual([
+      'Conditioner choice: Argan oil conditioner (+£5.00)',
+      'Finishing touches: Olaplex treatment (+£10.00, +15 min)',
+    ]);
+    expect(out.addons_total_price_pence).toBe(1500);
+    expect(out.addons_total_duration_minutes).toBe(15);
+    // No prior total: rolls add-on price into headline total.
+    expect(out.booking_total_price_pence).toBe(1500);
+  });
+
+  it('rolls add-on price into existing booking_total_price_pence', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeAddonClient([
+        {
+          addon_name_snapshot: 'Toner',
+          addon_group_name_snapshot: null,
+          price_pence_at_booking: 800,
+          duration_minutes_at_booking: 0,
+        },
+      ]),
+      bookingId,
+      { ...base, booking_total_price_pence: 4000 },
+    );
+    expect(out.addon_lines).toEqual(['Toner (+£8.00)']);
+    expect(out.addons_total_price_pence).toBe(800);
+    expect(out.booking_total_price_pence).toBe(4800);
+  });
+
+  it('omits price segment for free add-ons but keeps duration', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeAddonClient([
+        {
+          addon_name_snapshot: 'Patch test',
+          addon_group_name_snapshot: 'Staff add-ons',
+          price_pence_at_booking: 0,
+          duration_minutes_at_booking: 10,
+        },
+      ]),
+      bookingId,
+      base,
+    );
+    expect(out.addon_lines).toEqual(['Staff add-ons: Patch test (+10 min)']);
+    expect(out.addons_total_price_pence).toBe(0);
+    expect(out.addons_total_duration_minutes).toBe(10);
+  });
+
+  it('renders bare option name when no group, no price, no duration', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeAddonClient([
+        {
+          addon_name_snapshot: 'Note for stylist',
+          addon_group_name_snapshot: null,
+          price_pence_at_booking: 0,
+          duration_minutes_at_booking: 0,
+        },
+      ]),
+      bookingId,
+      base,
+    );
+    expect(out.addon_lines).toEqual(['Note for stylist']);
+  });
+
+  it('returns unchanged email data when there are no add-ons', async () => {
+    const out = await enrichBookingEmailForComms(makeAddonClient([]), bookingId, base);
+    expect(out.addon_lines).toBeUndefined();
+    expect(out.addons_total_price_pence).toBeUndefined();
   });
 });

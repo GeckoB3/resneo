@@ -15,6 +15,9 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import {
   DEFAULT_ENTITY_BOOKING_WINDOW,
   isStaffWalkInBookingDateAllowed,
@@ -135,6 +138,43 @@ export async function GET(request: NextRequest) {
     if (variantOverride) {
       applyVariantToAppointmentInput({ services: input.services, serviceId, variant: variantOverride });
     }
+
+    // Add-ons: staff path honours hidden_from_online groups; extend service duration.
+    const addonIds = searchParams.getAll('addon_ids').filter(Boolean);
+    if (addonIds.length > 0) {
+      const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, calendarVenueId);
+      const schema = useUnified ? 'service_item' : 'appointment_service';
+      const { groups } = await loadAddonsForBooking({
+        admin,
+        venueId: calendarVenueId,
+        schema,
+        parentId: serviceId,
+        includeHidden: true,
+      });
+      const validation = validateAddonSelections({
+        selections: addonIds.map((id) => ({ addon_id: id })),
+        groupsForService: groups,
+        source: 'staff',
+      });
+      if (!validation.ok) {
+        return NextResponse.json(
+          { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+          { status: 400 },
+        );
+      }
+      let delta = 0;
+      for (const a of validation.resolvedAddons) delta += a.additional_duration_minutes;
+      if (delta > 0) {
+        const idx = input.services.findIndex((s) => s.id === serviceId);
+        if (idx >= 0) {
+          input.services[idx] = {
+            ...input.services[idx]!,
+            duration_minutes: input.services[idx]!.duration_minutes + delta,
+          };
+        }
+      }
+    }
+
     attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
     input.skipPastSlotFilter = true;
 

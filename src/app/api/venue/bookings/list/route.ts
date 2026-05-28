@@ -32,11 +32,11 @@ import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
  *   Cancelled bookings are excluded from this view by default; pass `status=Cancelled` to opt in.
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes';
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes';
 
 export async function GET(request: NextRequest) {
   try {
@@ -207,6 +207,23 @@ export async function GET(request: NextRequest) {
 
     type RawBookingRow = Record<string, unknown> & { guest_id: string };
     const rawRows = (rows ?? []) as RawBookingRow[];
+
+    // Count chosen add-ons per booking for the "+N extras" chip. One batched query
+    // scoped to the page's booking ids; booking_addons is indexed on booking_id.
+    const bookingIdsForAddons = [
+      ...new Set(rawRows.map((r) => r.id).filter((x): x is string => typeof x === 'string')),
+    ];
+    const addonCountByBooking = new Map<string, number>();
+    if (bookingIdsForAddons.length > 0) {
+      const { data: addonRows } = await scopeDb
+        .from('booking_addons')
+        .select('booking_id')
+        .in('booking_id', bookingIdsForAddons);
+      for (const row of (addonRows ?? []) as Array<{ booking_id: string }>) {
+        addonCountByBooking.set(row.booking_id, (addonCountByBooking.get(row.booking_id) ?? 0) + 1);
+      }
+    }
+
     const guestIds = [...new Set(rawRows.map((r) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
       ? await scopeDb
@@ -323,6 +340,9 @@ export async function GET(request: NextRequest) {
         person_label: r.person_label ?? null,
         area_id: aid ?? null,
         area_name: aid ? areaNameById.get(aid) ?? null : null,
+        addons_total_price_pence: (r.addons_total_price_pence as number | null) ?? 0,
+        addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
+        addons_count: addonCountByBooking.get(r.id as string) ?? 0,
       };
     });
 

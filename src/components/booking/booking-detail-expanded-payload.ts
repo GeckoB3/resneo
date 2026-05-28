@@ -97,5 +97,8 @@ export function buildDetailForExpanded(
         }
       : null,
     service_variant_name: d.service_variant_name ?? null,
+    addons: d.addons ?? [],
+    addons_total_price_pence: d.addons_total_price_pence ?? null,
+    addons_total_duration_minutes: d.addons_total_duration_minutes ?? null,
   };
 }

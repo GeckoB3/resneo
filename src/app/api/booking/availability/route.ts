@@ -34,6 +34,9 @@ import {
 import { parseAnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
@@ -575,6 +578,40 @@ async function handleAppointmentAvailability(
     }
   }
 
+  // Add-ons extend the service duration so slot fitting accounts for them.
+  const addonIds = searchParams.getAll('addon_ids').filter(Boolean);
+  let addonDurationDelta = 0;
+  if (addonIds.length > 0) {
+    if (!serviceId) {
+      return NextResponse.json({ error: 'service_id is required when addon_ids are set' }, { status: 400 });
+    }
+    const useUnified = await venueUsesUnifiedAppointmentServiceData(supabase, venueId);
+    const schema = useUnified ? 'service_item' : 'appointment_service';
+    const { groups, addonsById } = await loadAddonsForBooking({
+      admin: supabase,
+      venueId,
+      schema,
+      parentId: serviceId,
+      includeHidden: false,
+    });
+    const validation = validateAddonSelections({
+      selections: addonIds.map((id) => ({ addon_id: id })),
+      groupsForService: groups,
+      source: 'public',
+    });
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+        { status: 400 },
+      );
+    }
+    for (const a of validation.resolvedAddons) {
+      addonDurationDelta += a.additional_duration_minutes;
+    }
+    // suppress unused warning
+    void addonsById;
+  }
+
   const { data: venueClock } = await supabase
     .from('venues')
     .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
@@ -602,6 +639,15 @@ async function handleAppointmentAvailability(
     }
     if (variantOverride && serviceId) {
       applyVariantToAppointmentInput({ services: input.services, serviceId, variant: variantOverride });
+    }
+    if (addonDurationDelta > 0 && serviceId) {
+      const idx = input.services.findIndex((s) => s.id === serviceId);
+      if (idx >= 0) {
+        input.services[idx] = {
+          ...input.services[idx]!,
+          duration_minutes: input.services[idx]!.duration_minutes + addonDurationDelta,
+        };
+      }
     }
     attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
     if (skipPastSlotFilter) {

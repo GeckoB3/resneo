@@ -60,6 +60,22 @@ interface AppointmentInsightsPayload {
     booking_count: number;
   }>;
   by_booking_source: Record<string, number>;
+  addon_revenue?: {
+    total_pence: number;
+    bookings_with_addons: number;
+    top_addons: Array<{
+      addon_name_snapshot: string;
+      addon_group_name_snapshot: string | null;
+      bookings: number;
+      revenue_pence: number;
+      total_duration_minutes: number;
+    }>;
+    by_group: Array<{
+      addon_group_name_snapshot: string;
+      bookings: number;
+      revenue_pence: number;
+    }>;
+  };
 }
 
 interface ReportByBookingModelRow {
@@ -434,6 +450,24 @@ export function ReportsView({
       [],
       ['Channel', `${bookingPlural} in period`],
       ...aggregateBookingSourcesByLabel(r.by_booking_source).map(({ name, value }) => [name, String(value)]),
+      ...(r.addon_revenue && r.addon_revenue.total_pence > 0
+        ? [
+            [],
+            ['Add-on', 'Group', `${bookingPlural}`, 'Revenue (pence)', 'Revenue (£)', 'Total minutes'],
+            ...r.addon_revenue.top_addons.map((row) => [
+              row.addon_name_snapshot,
+              row.addon_group_name_snapshot ?? '',
+              String(row.bookings),
+              String(row.revenue_pence),
+              (row.revenue_pence / 100).toFixed(2),
+              String(row.total_duration_minutes),
+            ]),
+            [],
+            ['Add-on total revenue (pence)', String(r.addon_revenue.total_pence)],
+            ['Add-on total revenue (£)', (r.addon_revenue.total_pence / 100).toFixed(2)],
+            [`${bookingPlural} with add-ons`, String(r.addon_revenue.bookings_with_addons)],
+          ]
+        : []),
     ]);
   }, [data, terminology]);
 
@@ -824,6 +858,52 @@ export function ReportsView({
                       )}
                     </ChartViewport>
                   </div>
+                </div>
+              )}
+
+              {r7?.addon_revenue && r7.addon_revenue.total_pence > 0 && (
+                <div className="sm:col-span-2">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    Add-on revenue
+                  </p>
+                  <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <StatTile
+                      label="Total add-on revenue"
+                      value={`£${(r7.addon_revenue.total_pence / 100).toFixed(2)}`}
+                      color={reportMetricColor('emerald')}
+                    />
+                    <StatTile
+                      label={`${bookingWord}s with add-ons`}
+                      value={String(r7.addon_revenue.bookings_with_addons)}
+                      color={reportMetricColor('teal')}
+                    />
+                  </div>
+                  {r7.addon_revenue.top_addons.length > 0 && (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                            <th className="px-3 py-2 font-semibold">Add-on</th>
+                            <th className="px-3 py-2 font-semibold">Group</th>
+                            <th className="px-3 py-2 text-right font-semibold">{bookingWord}s</th>
+                            <th className="px-3 py-2 text-right font-semibold">Revenue</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r7.addon_revenue.top_addons.map((row, i) => (
+                            <tr key={`${row.addon_group_name_snapshot ?? ''}|${row.addon_name_snapshot}|${i}`} className="border-b border-slate-100 last:border-0">
+                              <td className="px-3 py-2 text-slate-800">{row.addon_name_snapshot}</td>
+                              <td className="px-3 py-2 text-slate-500">{row.addon_group_name_snapshot ?? '—'}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.bookings}</td>
+                              <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">
+                                £{(row.revenue_pence / 100).toFixed(2)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

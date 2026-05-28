@@ -8,6 +8,7 @@ import {
   type AppointmentServiceVariantFormRow,
 } from '@/components/dashboard/appointment-services/appointment-service-form-values';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
+import { AddonGroupsSection } from '@/components/dashboard/appointment-services/AddonGroupsSection';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
@@ -450,6 +451,15 @@ export function AppointmentServiceFormFields({
           </div>
         </div>
       )}
+
+      {isAdmin ? (
+        <AddonGroupsSection
+          links={form.addon_group_links}
+          onChange={(next) => setForm((f) => ({ ...f, addon_group_links: next }))}
+          isAdmin={isAdmin}
+          currencySymbol={sym}
+        />
+      ) : null}
 
       {!usesVariants && (
         <>

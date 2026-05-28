@@ -14,9 +14,16 @@ export function localTodayISO(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function appointmentCatalogUrl(venueId: string, practitionerSlug?: string): string {
+export function appointmentCatalogUrl(
+  venueId: string,
+  practitionerSlug?: string,
+  includeHidden?: boolean,
+): string {
   const qs = new URLSearchParams({ venue_id: venueId });
   if (practitionerSlug) qs.set('practitioner_slug', practitionerSlug);
+  // Staff booking surface needs hidden_from_online add-on groups; the route only
+  // honours this for an authenticated staff session for the same venue.
+  if (includeHidden) qs.set('include_hidden', 'true');
   return `/api/booking/appointment-catalog?${qs}`;
 }
 
@@ -43,6 +50,7 @@ export function appointmentCalendarUrl(
   anyAvailable?: boolean,
   ownerVenueId?: string | null,
   excludeBookingId?: string | null,
+  addonIds?: string[] | null,
 ): string {
   const params = new URLSearchParams({
     practitioner_id: practitionerId,
@@ -61,6 +69,9 @@ export function appointmentCalendarUrl(
   }
   if (excludeBookingId) {
     params.set('exclude_booking_id', excludeBookingId);
+  }
+  if (addonIds && addonIds.length > 0) {
+    for (const id of addonIds) params.append('addon_ids', id);
   }
   if (audience === 'public') {
     params.set('venue_id', venueId);
@@ -90,10 +101,12 @@ export function appointmentCalendarCacheKey(
   month: number,
   variantId?: string | null,
   durationMinutes?: number | null,
+  addonIds?: string[] | null,
 ): string {
   const v = variantId ? `:${variantId}` : '';
   const d = durationMinutes != null ? `:${durationMinutes}m` : '';
-  return `${practitionerId}:${serviceId}${v}${d}:${year}:${month}`;
+  const a = addonIds && addonIds.length > 0 ? `:a-${[...addonIds].sort().join('-')}` : '';
+  return `${practitionerId}:${serviceId}${v}${d}${a}:${year}:${month}`;
 }
 
 export function validateAppointmentSlotUrl(): string {

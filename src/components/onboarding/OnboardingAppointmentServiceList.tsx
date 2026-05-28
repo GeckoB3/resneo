@@ -130,6 +130,7 @@ function appointmentServiceDraftFromApiRow(row: Record<string, unknown>, practit
         ? toServiceCustomScheduleV2(row.custom_working_hours as WorkingHours | Record<string, never>)
         : { version: 2, rules: [] },
     variants,
+    addon_group_links: [],
     processing_time_blocks: parseProcessingTimeBlocksFromDb(
       (row as { processing_time_blocks?: unknown }).processing_time_blocks,
     ),

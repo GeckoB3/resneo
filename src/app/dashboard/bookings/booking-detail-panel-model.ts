@@ -69,6 +69,22 @@ export interface BookingDetail {
   area_name?: string | null;
   cde_context?: { title?: string | null; subtitle?: string | null } | null;
   service_variant_name?: string | null;
+  /** Per-row snapshots of add-ons chosen at booking time. */
+  addons?: Array<{
+    id: string;
+    booking_id: string;
+    addon_id: string | null;
+    addon_group_id: string | null;
+    booking_segment_index: number | null;
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    price_pence_at_booking: number;
+    duration_minutes_at_booking: number;
+    cost_to_business_pence_at_booking: number | null;
+    created_at?: string;
+  }>;
+  addons_total_price_pence?: number | null;
+  addons_total_duration_minutes?: number | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   client_arrived_at?: string | null;

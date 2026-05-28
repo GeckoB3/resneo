@@ -17,6 +17,9 @@ import {
 } from '@/lib/feature-flags';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 /**
  * GET /api/booking/appointment-calendar?venue_id=&practitioner_id=&service_id=&year=&month=
@@ -86,6 +89,36 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid variant_id for this service' }, { status: 400 });
     }
 
+    // Add-ons: extend the service duration so month dates that don't fit the longer
+    // total (base + variant + add-ons) are correctly hidden in the date picker.
+    const addonIds = searchParams.getAll('addon_ids').filter(Boolean);
+    let additionalAddonMinutes = 0;
+    if (addonIds.length > 0) {
+      const useUnified = await venueUsesUnifiedAppointmentServiceData(supabase, venueId);
+      const schema = useUnified ? 'service_item' : 'appointment_service';
+      const { groups } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId,
+        schema,
+        parentId: serviceId,
+        includeHidden: false,
+      });
+      const validation = validateAddonSelections({
+        selections: addonIds.map((id) => ({ addon_id: id })),
+        groupsForService: groups,
+        source: 'public',
+      });
+      if (!validation.ok) {
+        return NextResponse.json(
+          { error: 'INVALID_ADDON_SELECTION', details: validation.errors },
+          { status: 400 },
+        );
+      }
+      for (const a of validation.resolvedAddons) {
+        additionalAddonMinutes += a.additional_duration_minutes;
+      }
+    }
+
     if (anyAvailable) {
       const { data: venueFlagsRow } = await supabase
         .from('venues')
@@ -109,7 +142,7 @@ export async function GET(request: NextRequest) {
           serviceId,
           year,
           month,
-          { audience: 'public', variantOverride, customDurationMinutes },
+          { audience: 'public', variantOverride, customDurationMinutes, additionalAddonMinutes },
         )
       : await computeAppointmentAvailableDatesInMonth(
           supabase,
@@ -118,7 +151,7 @@ export async function GET(request: NextRequest) {
           serviceId,
           year,
           month,
-          { audience: 'public', variantOverride, customDurationMinutes },
+          { audience: 'public', variantOverride, customDurationMinutes, additionalAddonMinutes },
         );
 
     return NextResponse.json(

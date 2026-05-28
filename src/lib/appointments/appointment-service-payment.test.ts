@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAppointmentServiceOnlineCharge } from './appointment-service-payment';
+import {
+  resolveAppointmentServiceOnlineCharge,
+  resolveAppointmentServiceOnlineChargeWithAddons,
+} from './appointment-service-payment';
 
 describe('resolveAppointmentServiceOnlineCharge', () => {
   it('returns null for none', () => {
@@ -40,5 +43,34 @@ describe('resolveAppointmentServiceOnlineCharge', () => {
         price_pence: null,
       }),
     ).toEqual({ amountPence: 300, chargeLabel: 'deposit' });
+  });
+});
+
+describe('resolveAppointmentServiceOnlineChargeWithAddons', () => {
+  it('rolls addon prices into full_payment charge', () => {
+    expect(
+      resolveAppointmentServiceOnlineChargeWithAddons({
+        svc: { payment_requirement: 'full_payment', deposit_pence: 0, price_pence: 2000 },
+        addons_total_price_pence: 800,
+      }),
+    ).toEqual({ amountPence: 2800, chargeLabel: 'full_payment' });
+  });
+
+  it('keeps deposit fixed at base+variant deposit regardless of addons', () => {
+    expect(
+      resolveAppointmentServiceOnlineChargeWithAddons({
+        svc: { payment_requirement: 'deposit', deposit_pence: 500, price_pence: 2000 },
+        addons_total_price_pence: 800,
+      }),
+    ).toEqual({ amountPence: 500, chargeLabel: 'deposit' });
+  });
+
+  it('returns null when payment_requirement is none', () => {
+    expect(
+      resolveAppointmentServiceOnlineChargeWithAddons({
+        svc: { payment_requirement: 'none', deposit_pence: 0, price_pence: 1000 },
+        addons_total_price_pence: 200,
+      }),
+    ).toBeNull();
   });
 });

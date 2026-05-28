@@ -121,6 +121,23 @@ function isArrivedOrCompletedAppointmentBooking(r: {
   return typeof r.client_arrived_at === 'string' && r.client_arrived_at.trim() !== '';
 }
 
+interface AddonRevenueInsights {
+  total_pence: number;
+  bookings_with_addons: number;
+  top_addons: Array<{
+    addon_name_snapshot: string;
+    addon_group_name_snapshot: string | null;
+    bookings: number;
+    revenue_pence: number;
+    total_duration_minutes: number;
+  }>;
+  by_group: Array<{
+    addon_group_name_snapshot: string;
+    bookings: number;
+    revenue_pence: number;
+  }>;
+}
+
 async function buildAppointmentInsights(
   supabase: SupabaseClient,
   venueId: string,
@@ -130,11 +147,19 @@ async function buildAppointmentInsights(
   by_practitioner: AppointmentInsightsRow[];
   by_service: AppointmentServiceInsightsRow[];
   by_booking_source: Record<string, number>;
+  addon_revenue: AddonRevenueInsights;
 }> {
+  const emptyAddonRevenue: AddonRevenueInsights = {
+    total_pence: 0,
+    bookings_with_addons: 0,
+    top_addons: [],
+    by_group: [],
+  };
   const empty = {
     by_practitioner: [] as AppointmentInsightsRow[],
     by_service: [] as AppointmentServiceInsightsRow[],
     by_booking_source: {} as Record<string, number>,
+    addon_revenue: emptyAddonRevenue,
   };
 
   const { data: rows, error } = await supabase
@@ -230,6 +255,93 @@ async function buildAppointmentInsights(
     bySvc.set(skey, scur);
   }
 
+  // ── Add-on revenue (acceptance criterion §20.6) ──
+  // Aggregate snapshot rows in `booking_addons` for the appointment bookings in
+  // this window. Snapshots are immutable, so historic numbers stay accurate even
+  // if the catalog is edited later. Cancelled bookings are already excluded by
+  // the parent query above.
+  const appointmentBookingIds = appointmentRows.map((r) => r.id as string);
+  let addonRevenue: AddonRevenueInsights = emptyAddonRevenue;
+  if (appointmentBookingIds.length > 0) {
+    const { data: addonRows, error: addonErr } = await supabase
+      .from('booking_addons')
+      .select(
+        'booking_id, addon_id, addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking',
+      )
+      .in('booking_id', appointmentBookingIds);
+    if (addonErr) {
+      console.error('[reports] booking_addons query failed:', addonErr);
+    } else if (addonRows && addonRows.length > 0) {
+      // Top add-ons keyed by snapshot name so historic numbers stay accurate
+      // even after the live row's id changes on a save+reinsert.
+      const topMap = new Map<
+        string,
+        { name: string; group: string | null; bookings: Set<string>; revenue: number; duration: number }
+      >();
+      const groupMap = new Map<
+        string,
+        { name: string; bookings: Set<string>; revenue: number }
+      >();
+      const bookingsWithAddons = new Set<string>();
+      let totalPence = 0;
+      for (const row of addonRows as Array<{
+        booking_id: string;
+        addon_id: string | null;
+        addon_name_snapshot: string;
+        addon_group_name_snapshot: string | null;
+        price_pence_at_booking: number;
+        duration_minutes_at_booking: number;
+      }>) {
+        totalPence += row.price_pence_at_booking;
+        bookingsWithAddons.add(row.booking_id);
+        const topKey = `${row.addon_group_name_snapshot ?? ''}|${row.addon_name_snapshot}`;
+        const t =
+          topMap.get(topKey) ??
+          {
+            name: row.addon_name_snapshot,
+            group: row.addon_group_name_snapshot,
+            bookings: new Set<string>(),
+            revenue: 0,
+            duration: 0,
+          };
+        t.bookings.add(row.booking_id);
+        t.revenue += row.price_pence_at_booking;
+        t.duration += row.duration_minutes_at_booking;
+        topMap.set(topKey, t);
+
+        const groupName = row.addon_group_name_snapshot?.trim();
+        if (groupName) {
+          const g =
+            groupMap.get(groupName) ?? { name: groupName, bookings: new Set<string>(), revenue: 0 };
+          g.bookings.add(row.booking_id);
+          g.revenue += row.price_pence_at_booking;
+          groupMap.set(groupName, g);
+        }
+      }
+      addonRevenue = {
+        total_pence: totalPence,
+        bookings_with_addons: bookingsWithAddons.size,
+        top_addons: [...topMap.values()]
+          .map((t) => ({
+            addon_name_snapshot: t.name,
+            addon_group_name_snapshot: t.group,
+            bookings: t.bookings.size,
+            revenue_pence: t.revenue,
+            total_duration_minutes: t.duration,
+          }))
+          .sort((a, b) => b.revenue_pence - a.revenue_pence)
+          .slice(0, 10),
+        by_group: [...groupMap.values()]
+          .map((g) => ({
+            addon_group_name_snapshot: g.name,
+            bookings: g.bookings.size,
+            revenue_pence: g.revenue,
+          }))
+          .sort((a, b) => b.revenue_pence - a.revenue_pence),
+      };
+    }
+  }
+
   return {
     by_practitioner: [...byPrac.entries()]
       .map(([practitioner_id, v]) => ({
@@ -249,6 +361,7 @@ async function buildAppointmentInsights(
     by_booking_source: Object.fromEntries(
       [...bySource.entries()].sort((a, b) => b[1] - a[1]),
     ),
+    addon_revenue: addonRevenue,
   };
 }
 

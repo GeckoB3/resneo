@@ -132,6 +132,10 @@ export function renderBookingConfirmation(
         if (booking.practitioner_name)
           textParts.push(`With: ${booking.practitioner_name}`);
       }
+      if (booking.addon_lines && booking.addon_lines.length > 0) {
+        textParts.push("Extras:");
+        for (const line of booking.addon_lines) textParts.push(`  - ${line}`);
+      }
       const structured = confirmationStructuredPriceText(booking);
       if (structured) {
         textParts.push("Price and payment:", ...structured.split("\n"));

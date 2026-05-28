@@ -177,6 +177,11 @@ export interface AppointmentService {
    * buffer, price and (optionally) deposit; parent payment_requirement is preserved.
    */
   variants?: ServiceVariant[];
+  /**
+   * Optional add-on groups linked to this service. Each group is a set of selectable extras that
+   * stack on top of variant/parent duration & price at booking time.
+   */
+  addon_groups?: AppointmentCatalogAddonGroup[];
 }
 
 export interface PractitionerService {
@@ -216,6 +221,84 @@ export interface ServiceVariant {
   sort_order: number;
   is_active: boolean;
   created_at: string;
+}
+
+// Add-ons (optional extras stacked on a service at booking time)
+
+/**
+ * A container for selection constraints. Linked to one or many services via
+ * `service_addon_groups`. `selection_type='single'` makes radio buttons; combined
+ * with `min_select=1` makes the group required.
+ */
+export interface AddonGroup {
+  id: string;
+  venue_id: string;
+  name: string;
+  prompt_to_client: string | null;
+  description: string | null;
+  selection_type: 'single' | 'multi';
+  min_select: number;
+  max_select: number | null;
+  hidden_from_online: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A selectable option inside an `AddonGroup`. */
+export interface Addon {
+  id: string;
+  addon_group_id: string;
+  venue_id: string;
+  name: string;
+  description: string | null;
+  additional_price_pence: number;
+  additional_duration_minutes: number;
+  cost_to_business_pence: number | null;
+  is_active: boolean;
+  sort_order: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Junction row linking an add-on group to one of either schema's service tables. */
+export interface ServiceAddonGroupLink {
+  id: string;
+  venue_id: string;
+  service_item_id: string | null;
+  appointment_service_id: string | null;
+  addon_group_id: string;
+  sort_order: number;
+}
+
+/** Immutable snapshot of an add-on chosen at booking time. */
+export interface BookingAddonRecord {
+  id: string;
+  booking_id: string;
+  addon_id: string | null;
+  addon_group_id: string | null;
+  booking_segment_index: number | null;
+  addon_name_snapshot: string;
+  addon_group_name_snapshot: string | null;
+  price_pence_at_booking: number;
+  duration_minutes_at_booking: number;
+  cost_to_business_pence_at_booking: number | null;
+  created_at?: string;
+}
+
+/** Group + active options + the link's sort_order, as returned to the booking flow. */
+export interface AppointmentCatalogAddonGroup {
+  group: AddonGroup;
+  addons: Addon[];
+  link_sort_order: number;
+}
+
+/** A single chosen add-on, used in API request bodies / availability queries. */
+export interface BookingAddonSelectionInput {
+  addon_id: string;
+  booking_segment_index?: number;
 }
 
 // Model C: Event / experience ticket

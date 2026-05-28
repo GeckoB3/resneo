@@ -87,6 +87,15 @@ export interface BookingEmailData {
    * (e.g. 90 table, 60 appointment) for the “Add to calendar” link.
    */
   calendar_duration_minutes?: number;
+  /**
+   * Optional add-ons stacked on the booking. Each entry is a human-readable summary
+   * line, e.g. "Olaplex treatment (+£10.00, +15 min)". Renders only when non-empty.
+   */
+  addon_lines?: string[];
+  /** Sum of add-on price (pence) for the booking; used in totals/headlines. */
+  addons_total_price_pence?: number | null;
+  /** Sum of add-on duration (minutes); informational. */
+  addons_total_duration_minutes?: number | null;
 }
 
 export interface RenderedEmail {

@@ -38,3 +38,29 @@ export function resolveAppointmentServiceOnlineCharge(svc: AppointmentServicePay
   if (dep <= 0) return null;
   return { amountPence: dep, chargeLabel: 'deposit' };
 }
+
+/**
+ * Compute the online charge when add-ons are part of the booking.
+ *
+ * Policy (matches Fresha): add-on prices roll into a `full_payment` charge, but
+ * the deposit stays at the service+variant deposit — add-ons are paid at the
+ * venue. Pass `svc` as the **base + variant** service (no addon price folded in);
+ * pass the explicit `addons_total_price_pence`.
+ */
+export function resolveAppointmentServiceOnlineChargeWithAddons(params: {
+  svc: AppointmentServicePaymentFields;
+  addons_total_price_pence: number;
+}): AppointmentOnlineCharge {
+  const { svc, addons_total_price_pence } = params;
+  const req = resolveAppointmentPaymentRequirement(svc);
+  if (req === 'none') return null;
+  if (req === 'full_payment') {
+    const total = (svc.price_pence ?? 0) + Math.max(0, addons_total_price_pence);
+    if (total <= 0) return null;
+    return { amountPence: total, chargeLabel: 'full_payment' };
+  }
+  // Deposit: stays on the base+variant deposit; add-ons are not deposit-eligible.
+  const dep = svc.deposit_pence ?? 0;
+  if (dep <= 0) return null;
+  return { amountPence: dep, chargeLabel: 'deposit' };
+}

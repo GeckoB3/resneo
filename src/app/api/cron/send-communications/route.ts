@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
@@ -248,7 +248,7 @@ async function sendConfirmOrCancelPrompts(results: {
           ]);
           booking.manage_booking_link = manageLink;
           booking.confirm_cancel_link = confirmLink;
-          booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
+          booking = await enrichBookingEmailForComms(supabase, bookingRow.id, booking);
 
           let sentAny = false;
           if (policy.channels.includes('email')) {
@@ -367,7 +367,7 @@ async function sendPreVisitReminders(results: {
           ]);
           booking.manage_booking_link = manageLinkPv;
           booking.confirm_cancel_link = confirmLinkPv;
-          booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
+          booking = await enrichBookingEmailForComms(supabase, bookingRow.id, booking);
 
           let sentAny = false;
           if (policy.channels.includes('email')) {
@@ -474,7 +474,7 @@ async function sendPostVisitThankYous(results: {
             bookingId: bookingRow.id,
             purpose: 'manage',
           });
-          booking = await enrichBookingEmailForAppointment(supabase, bookingRow.id, booking);
+          booking = await enrichBookingEmailForComms(supabase, bookingRow.id, booking);
 
           const email = await sendPolicyMessage({
             venueId: venue.id,

@@ -68,6 +68,10 @@ export function renderDayOfReminderEmail(
         textParts.push(`Service: ${booking.appointment_service_name}`);
       if (booking.practitioner_name)
         textParts.push(`With: ${booking.practitioner_name}`);
+      if (booking.addon_lines && booking.addon_lines.length > 0) {
+        textParts.push("Extras:");
+        for (const line of booking.addon_lines) textParts.push(`  - ${line}`);
+      }
       textParts.push("");
     }
   } else {

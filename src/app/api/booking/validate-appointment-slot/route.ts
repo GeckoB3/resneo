@@ -9,6 +9,10 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -35,6 +39,8 @@ const bodySchema = z.object({
   start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   phantoms: z.array(phantomSchema).optional(),
   waitlist_offer_id: z.string().uuid().optional(),
+  /** Optional add-ons that extend the appointment duration. */
+  addons: bookingAddonSelectionArraySchema.optional(),
 });
 
 /**
@@ -48,7 +54,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
     }
 
-    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms, waitlist_offer_id } = parsed.data;
+    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms, waitlist_offer_id, addons } = parsed.data;
     const supabase = getSupabaseAdminClient();
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
@@ -114,6 +120,41 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Invalid variant_id for this service' });
       }
       applyVariantToAppointmentInput({ services: input.services, serviceId: service_id, variant });
+    }
+
+    if (addons && addons.length > 0) {
+      const useUnified = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
+      const schema = useUnified ? 'service_item' : 'appointment_service';
+      const { groups } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId: venue_id,
+        schema,
+        parentId: service_id,
+        includeHidden: false,
+      });
+      const validation = validateAddonSelections({
+        selections: addons,
+        groupsForService: groups,
+        source: 'public',
+      });
+      if (!validation.ok) {
+        return NextResponse.json({
+          ok: false,
+          error: 'INVALID_ADDON_SELECTION',
+          details: validation.errors,
+        });
+      }
+      let delta = 0;
+      for (const a of validation.resolvedAddons) delta += a.additional_duration_minutes;
+      if (delta > 0) {
+        const idx = input.services.findIndex((s) => s.id === service_id);
+        if (idx >= 0) {
+          input.services[idx] = {
+            ...input.services[idx]!,
+            duration_minutes: input.services[idx]!.duration_minutes + delta,
+          };
+        }
+      }
     }
 
     attachVenueClockToAppointmentInput(

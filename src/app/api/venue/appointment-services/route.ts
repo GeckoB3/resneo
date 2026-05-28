@@ -30,6 +30,9 @@ import {
   replaceServiceVariants,
   variantsArraySchema,
 } from '@/lib/venue/service-variants';
+import { addonGroupLinksArraySchema } from '@/lib/addons/zod-schemas';
+import { replaceServiceAddonGroupLinks } from '@/lib/venue/addon-groups';
+import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import {
   parseProcessingTimeBlocksFromDb,
   processingTimeBlocksSchema,
@@ -442,15 +445,26 @@ export async function GET(request: NextRequest) {
       const services = (servicesRes.data ?? []).map((s) => mapServiceItemRowForDashboard(s as Record<string, unknown>));
 
       const serviceIds = services.map((s) => s.id as string);
-      const variantMap = await loadVariantsForServices({
-        admin,
-        venueId: catalogVenueId,
-        schema: 'service_item',
-        parentIds: serviceIds,
-      });
+      const [variantMap, addonGroupMap] = await Promise.all([
+        loadVariantsForServices({
+          admin,
+          venueId: catalogVenueId,
+          schema: 'service_item',
+          parentIds: serviceIds,
+        }),
+        loadAddonGroupsForServices({
+          admin,
+          venueId: catalogVenueId,
+          schema: 'service_item',
+          parentIds: serviceIds,
+          includeHidden: true,
+          includeInactive: true,
+        }),
+      ]);
       const servicesWithVariants = services.map((s) => ({
         ...s,
         variants: variantMap.get(s.id as string) ?? [],
+        addon_groups: addonGroupMap.get(s.id as string) ?? [],
       }));
 
       return NextResponse.json(
@@ -487,15 +501,26 @@ export async function GET(request: NextRequest) {
 
     const services = (servicesRes.data ?? []) as Array<Record<string, unknown>>;
     const serviceIds = services.map((s) => s.id as string);
-    const variantMap = await loadVariantsForServices({
-      admin,
-      venueId: catalogVenueId,
-      schema: 'appointment_service',
-      parentIds: serviceIds,
-    });
+    const [variantMap, addonGroupMap] = await Promise.all([
+      loadVariantsForServices({
+        admin,
+        venueId: catalogVenueId,
+        schema: 'appointment_service',
+        parentIds: serviceIds,
+      }),
+      loadAddonGroupsForServices({
+        admin,
+        venueId: catalogVenueId,
+        schema: 'appointment_service',
+        parentIds: serviceIds,
+        includeHidden: true,
+        includeInactive: true,
+      }),
+    ]);
     const servicesWithVariants = services.map((s) => ({
       ...s,
       variants: variantMap.get(s.id as string) ?? [],
+      addon_groups: addonGroupMap.get(s.id as string) ?? [],
     }));
 
     return NextResponse.json(
@@ -545,6 +570,20 @@ export async function POST(request: NextRequest) {
       parsedVariants = variantsParsed.data;
     }
 
+    const addonLinksRaw = (body as { addon_group_links?: unknown }).addon_group_links;
+    const addonLinksProvided = addonLinksRaw !== undefined;
+    let parsedAddonLinks: z.infer<typeof addonGroupLinksArraySchema> = [];
+    if (addonLinksProvided) {
+      const linksParsed = addonGroupLinksArraySchema.safeParse(addonLinksRaw);
+      if (!linksParsed.success) {
+        return NextResponse.json(
+          { error: 'Invalid addon_group_links', details: linksParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      parsedAddonLinks = linksParsed.data;
+    }
+
     if (staff.role !== 'admin') {
       if (
         Object.prototype.hasOwnProperty.call(body, 'custom_availability_enabled') ||
@@ -558,6 +597,12 @@ export async function POST(request: NextRequest) {
       if (variantsProvided) {
         return NextResponse.json(
           { error: 'Only venue admins can manage service variants.' },
+          { status: 403 },
+        );
+      }
+      if (addonLinksProvided) {
+        return NextResponse.json(
+          { error: 'Only venue admins can manage add-ons.' },
           { status: 403 },
         );
       }
@@ -682,9 +727,35 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (addonLinksProvided) {
+        const linkRes = await replaceServiceAddonGroupLinks({
+          admin,
+          venueId: staff.venue_id,
+          parent: { kind: 'service_item', service_item_id: data.id as string },
+          links: parsedAddonLinks,
+        });
+        if (!linkRes.ok) {
+          await admin.from('service_items').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
+          return NextResponse.json({ error: linkRes.error }, { status: 500 });
+        }
+      }
+
+      const addonGroupMap = await loadAddonGroupsForServices({
+        admin,
+        venueId: staff.venue_id,
+        schema: 'service_item',
+        parentIds: [data.id as string],
+        includeHidden: true,
+        includeInactive: true,
+      });
+
       const dashboardRow = mapServiceItemRowForDashboard(data as Record<string, unknown>);
       return NextResponse.json(
-        { ...dashboardRow, variants: savedVariants?.ok ? savedVariants.variants : [] },
+        {
+          ...dashboardRow,
+          variants: savedVariants?.ok ? savedVariants.variants : [],
+          addon_groups: addonGroupMap.get(data.id as string) ?? [],
+        },
         { status: 201 },
       );
     }
@@ -751,8 +822,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (addonLinksProvided) {
+      const linkRes = await replaceServiceAddonGroupLinks({
+        admin,
+        venueId: staff.venue_id,
+        parent: { kind: 'appointment_service', appointment_service_id: data.id as string },
+        links: parsedAddonLinks,
+      });
+      if (!linkRes.ok) {
+        await admin.from('appointment_services').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
+        return NextResponse.json({ error: linkRes.error }, { status: 500 });
+      }
+    }
+
+    const addonGroupMapLegacy = await loadAddonGroupsForServices({
+      admin,
+      venueId: staff.venue_id,
+      schema: 'appointment_service',
+      parentIds: [data.id as string],
+      includeHidden: true,
+      includeInactive: true,
+    });
+
     return NextResponse.json(
-      { ...(data as Record<string, unknown>), variants: savedVariantsLegacy?.ok ? savedVariantsLegacy.variants : [] },
+      {
+        ...(data as Record<string, unknown>),
+        variants: savedVariantsLegacy?.ok ? savedVariantsLegacy.variants : [],
+        addon_groups: addonGroupMapLegacy.get(data.id as string) ?? [],
+      },
       { status: 201 },
     );
   } catch (err) {
@@ -769,7 +866,13 @@ export async function PATCH(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const body = await request.json();
-    const { id, practitioner_ids: rawPractitionerIds, variants: variantsRaw, ...rest } = body;
+    const {
+      id,
+      practitioner_ids: rawPractitionerIds,
+      variants: variantsRaw,
+      addon_group_links: addonLinksRaw,
+      ...rest
+    } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
@@ -789,6 +892,19 @@ export async function PATCH(request: NextRequest) {
         );
       }
       parsedVariants = variantsParsed.data;
+    }
+
+    const addonLinksProvided = addonLinksRaw !== undefined;
+    let parsedAddonLinks: z.infer<typeof addonGroupLinksArraySchema> = [];
+    if (addonLinksProvided) {
+      const linksParsed = addonGroupLinksArraySchema.safeParse(addonLinksRaw);
+      if (!linksParsed.success) {
+        return NextResponse.json(
+          { error: 'Invalid addon_group_links', details: linksParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      parsedAddonLinks = linksParsed.data;
     }
 
     if (staff.role !== 'admin') {
@@ -812,6 +928,12 @@ export async function PATCH(request: NextRequest) {
       if (variantsProvided) {
         return NextResponse.json(
           { error: 'Only venue admins can manage service variants.' },
+          { status: 403 },
+        );
+      }
+      if (addonLinksProvided) {
+        return NextResponse.json(
+          { error: 'Only venue admins can manage add-ons.' },
           { status: 403 },
         );
       }
@@ -1007,7 +1129,7 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
         }
         savedRow = (data as Record<string, unknown>) ?? savedRow;
-      } else if (requestedManagedCalendarIds === undefined && !variantsProvided) {
+      } else if (requestedManagedCalendarIds === undefined && !variantsProvided && !addonLinksProvided) {
         return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
       }
 
@@ -1024,16 +1146,39 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
-      const variantMap = await loadVariantsForServices({
-        admin,
-        venueId: staff.venue_id,
-        schema: 'service_item',
-        parentIds: [id as string],
-      });
+      if (addonLinksProvided) {
+        const linkRes = await replaceServiceAddonGroupLinks({
+          admin,
+          venueId: staff.venue_id,
+          parent: { kind: 'service_item', service_item_id: id as string },
+          links: parsedAddonLinks,
+        });
+        if (!linkRes.ok) {
+          return NextResponse.json({ error: linkRes.error }, { status: 500 });
+        }
+      }
+
+      const [variantMap, addonGroupMap] = await Promise.all([
+        loadVariantsForServices({
+          admin,
+          venueId: staff.venue_id,
+          schema: 'service_item',
+          parentIds: [id as string],
+        }),
+        loadAddonGroupsForServices({
+          admin,
+          venueId: staff.venue_id,
+          schema: 'service_item',
+          parentIds: [id as string],
+          includeHidden: true,
+          includeInactive: true,
+        }),
+      ]);
 
       return NextResponse.json({
         ...mapServiceItemRowForDashboard(savedRow),
         variants: variantMap.get(id as string) ?? [],
+        addon_groups: addonGroupMap.get(id as string) ?? [],
       });
     }
 
@@ -1220,7 +1365,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
       }
       savedRow = (data as Record<string, unknown>) ?? savedRow;
-    } else if (requestedPractitionerIds === undefined && !variantsProvided) {
+    } else if (requestedPractitionerIds === undefined && !variantsProvided && !addonLinksProvided) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
@@ -1237,16 +1382,39 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    const variantMapLegacy = await loadVariantsForServices({
-      admin,
-      venueId: staff.venue_id,
-      schema: 'appointment_service',
-      parentIds: [id as string],
-    });
+    if (addonLinksProvided) {
+      const linkRes = await replaceServiceAddonGroupLinks({
+        admin,
+        venueId: staff.venue_id,
+        parent: { kind: 'appointment_service', appointment_service_id: id as string },
+        links: parsedAddonLinks,
+      });
+      if (!linkRes.ok) {
+        return NextResponse.json({ error: linkRes.error }, { status: 500 });
+      }
+    }
+
+    const [variantMapLegacy, addonGroupMapLegacy] = await Promise.all([
+      loadVariantsForServices({
+        admin,
+        venueId: staff.venue_id,
+        schema: 'appointment_service',
+        parentIds: [id as string],
+      }),
+      loadAddonGroupsForServices({
+        admin,
+        venueId: staff.venue_id,
+        schema: 'appointment_service',
+        parentIds: [id as string],
+        includeHidden: true,
+        includeInactive: true,
+      }),
+    ]);
 
     return NextResponse.json({
       ...savedRow,
       variants: variantMapLegacy.get(id as string) ?? [],
+      addon_groups: addonGroupMapLegacy.get(id as string) ?? [],
     });
   } catch (err) {
     console.error('PATCH /api/venue/appointment-services failed:', err);

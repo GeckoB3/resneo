@@ -8,6 +8,7 @@ import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChan
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
@@ -417,6 +418,30 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <CompactInfo dense={isPopover} label="Duration" value={`${durationMinutes} min`} />
                   <CompactInfo dense={isPopover} label="Source" value={d.source} />
                 </div>
+                {d.addons && d.addons.length > 0 ? (
+                  <div className="col-span-2 mt-2.5 border-t border-slate-100 pt-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Extras</p>
+                    <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
+                      {d.addons.map((a) => (
+                        <li key={a.id} className="flex items-start justify-between gap-3">
+                          <span className="min-w-0">
+                            {a.addon_group_name_snapshot ? (
+                              <span className="text-slate-500">{a.addon_group_name_snapshot}: </span>
+                            ) : null}
+                            <span className="font-medium text-slate-800">{a.addon_name_snapshot}</span>
+                            {a.duration_minutes_at_booking > 0 ? (
+                              <span className="ml-1 text-slate-500">(+{a.duration_minutes_at_booking} min)</span>
+                            ) : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            +{currencySymbolFromCode(venueCurrency ?? 'GBP')}
+                            {(a.price_pence_at_booking / 100).toFixed(2)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {isHydrated && !isPopover && (
                   <div className="mt-2.5 border-t border-slate-100 pt-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Created</p>

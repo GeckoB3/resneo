@@ -1472,6 +1472,13 @@ export function AppointmentBookingsDashboard({
                   {duration} min
                 </span>
               )}
+              {(b.addons_count ?? 0) > 0 && (
+                <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}>
+                  <Pill variant="info" size="sm">
+                    +{b.addons_count} {b.addons_count === 1 ? 'extra' : 'extras'}
+                  </Pill>
+                </span>
+              )}
               {b.party_size > 1 && (
                 <span
                   className={

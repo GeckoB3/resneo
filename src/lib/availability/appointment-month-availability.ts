@@ -300,6 +300,12 @@ export interface ComputeAppointmentMonthOptions {
   variantOverride?: ServiceVariant | null;
   /** Staff-only per-booking duration override; filters dates by fitting this custom interval. */
   customDurationMinutes?: number | null;
+  /**
+   * Sum of additional minutes contributed by chosen add-ons. Added to the service's
+   * duration_minutes (after the variant override merges) so month dates that don't
+   * fit the longer total are correctly hidden.
+   */
+  additionalAddonMinutes?: number | null;
   /** When rescheduling, omit this booking from capacity so its slot stays bookable. */
   excludeBookingId?: string | null;
 }
@@ -380,6 +386,12 @@ export async function computeAppointmentAvailableDatesInMonth(
     if (options.variantOverride) {
       input.services = input.services.map((svc) =>
         svc.id === serviceId ? applyVariantToService(svc, options.variantOverride!) : svc,
+      );
+    }
+    if (options.additionalAddonMinutes && options.additionalAddonMinutes > 0) {
+      const delta = options.additionalAddonMinutes;
+      input.services = input.services.map((svc) =>
+        svc.id === serviceId ? { ...svc, duration_minutes: svc.duration_minutes + delta } : svc,
       );
     }
     attachVenueClockToAppointmentInput(input, venueClockRow, bookingWindow);

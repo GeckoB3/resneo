@@ -477,7 +477,7 @@ export function EventBookingFlow({
   }, [createResult?.booking_id]);
 
   return (
-    <div className="mx-auto max-w-lg">
+    <div className={isPublicGuest ? 'w-full' : 'mx-auto w-full max-w-lg'}>
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}

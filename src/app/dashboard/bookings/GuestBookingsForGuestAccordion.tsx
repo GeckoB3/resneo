@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
-import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
+import { isBookingUpcomingBeforeScheduledEnd } from '@/lib/booking/guest-booking-upcoming';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 import {
   bookingExpandAccordionBodyClass,
@@ -17,8 +17,8 @@ import type { StaffRebookBootstrapPayloadV1, StaffRebookGuestPrefill } from '@/l
 import { writeStaffRebookBootstrap } from '@/lib/booking/staff-rebook-bootstrap';
 import { staffBookingSurfaceTabIdToQueryParam } from '@/lib/booking/staff-booking-modal-options';
 import {
+  bookingScheduleWallEndHm,
   bookingSourceDurationMinutes,
-  bookingSourceWallEndHm,
   buildStaffRebookBootstrapFromBookingSource,
 } from '@/lib/booking/staff-rebook-from-booking-source';
 
@@ -91,48 +91,9 @@ function estimatedEndToHHMM(iso: string | null | undefined): string | null {
   return null;
 }
 
-function wallClockHHMMInVenue(now: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(now);
-  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00';
-  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00';
-  return `${hh}:${mm}`;
-}
-
-function isBookingUpcomingInVenue(
-  bookingDate: string,
-  bookingTimeHm: string,
-  now: Date,
-  venueTimeZone: string,
-): boolean {
-  const today = calendarDateInTimeZone(now, venueTimeZone);
-  if (bookingDate > today) return true;
-  if (bookingDate < today) return false;
-  const nowHm = wallClockHHMMInVenue(now, venueTimeZone);
-  return bookingTimeHm >= nowHm;
-}
-
-function parseEstimatedEndInstantMs(iso: string | null | undefined): number | null {
-  if (!iso?.trim()) return null;
-  const ms = new Date(iso.trim()).getTime();
-  return Number.isNaN(ms) ? null : ms;
-}
-
-/** Postgres `time` → HH:mm when parseable */
-function bookingEndWallHm(raw: string | null | undefined): string | null {
-  if (!raw?.trim()) return null;
-  const t = raw.trim();
-  const hm = t.length >= 5 ? t.slice(0, 5) : t;
-  return /^\d{2}:\d{2}$/.test(hm) ? hm : null;
-}
-
 function guestBookingHistoryTimeRange(row: GuestBookingHistoryRow): string {
   const st = row.booking_time.length >= 5 ? row.booking_time.slice(0, 5) : row.booking_time;
-  const endHm = bookingSourceWallEndHm(row);
+  const endHm = bookingScheduleWallEndHm(row);
   if (endHm && endHm !== st) return `${st}–${endHm}`;
   return st;
 }
@@ -255,40 +216,10 @@ function GuestBookingHistoryBar({
   );
 }
 
-/**
- * Upcoming = scheduled end time is still in the future (same instant/wall rules as dashboard).
- * When no end boundary exists, falls back to start-time-based “today / future”.
- */
-function isBookingUpcomingBeforeScheduledEnd(
-  row: GuestBookingHistoryRow,
-  now: Date,
-  venueTimeZone: string,
-): boolean {
-  const endInstant = parseEstimatedEndInstantMs(row.estimated_end_time);
-  if (endInstant !== null) {
-    return now.getTime() < endInstant;
-  }
-
-  const endHm = bookingEndWallHm(row.booking_end_time ?? null);
-  const todayVenue = calendarDateInTimeZone(now, venueTimeZone);
-  const startHm =
-    typeof row.booking_time === 'string' && row.booking_time.length >= 5 ? row.booking_time.slice(0, 5) : '00:00';
-
-  if (row.booking_date > todayVenue) return true;
-  if (row.booking_date < todayVenue) return false;
-
-  if (endHm) {
-    const nowHm = wallClockHHMMInVenue(now, venueTimeZone);
-    return nowHm < endHm;
-  }
-
-  return isBookingUpcomingInVenue(row.booking_date, startHm, now, venueTimeZone);
-}
-
 export function rowToBookingDetailSnapshot(row: GuestBookingHistoryRow, guestDisplayName: string): BookingDetailPanelSnapshot {
   const st = row.booking_time.slice(0, 5);
   const parsedEnd = estimatedEndToHHMM(row.estimated_end_time);
-  const wallEndHm = bookingEndWallHm(row.booking_end_time ?? null);
+  const wallEndHm = bookingScheduleWallEndHm(row);
   const endTime = parsedEnd ?? wallEndHm ?? st;
   const serviceLabel =
     typeof row.booking_item_name === 'string' && row.booking_item_name.trim() !== ''
@@ -406,7 +337,9 @@ export function GuestBookingsForGuestAccordion({
 
   const handleRebookRow = useCallback(
     (row: GuestBookingHistoryRow) => {
-      const payload = buildStaffRebookBootstrapFromBookingSource(row, rebookGuestPrefill);
+      const payload = buildStaffRebookBootstrapFromBookingSource(row, rebookGuestPrefill, {
+        venueTimeZone,
+      });
       if (!payload) return;
       if (staffVenueDefaults?.venueId) {
         setRebookModalEpoch((e) => e + 1);
@@ -416,7 +349,7 @@ export function GuestBookingsForGuestAccordion({
       writeStaffRebookBootstrap(payload);
       void router.push(`/dashboard/bookings/new?tab=${staffBookingSurfaceTabIdToQueryParam(payload.surface)}`);
     },
-    [rebookGuestPrefill, router, staffVenueDefaults?.venueId],
+    [rebookGuestPrefill, router, staffVenueDefaults?.venueId, venueTimeZone],
   );
 
   useEffect(() => {

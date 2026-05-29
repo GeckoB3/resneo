@@ -55,6 +55,11 @@ export function buildBookingForExpanded(
     event_session_id: d.event_session_id,
     cde_context: d.cde_context,
     service_variant_name: d.service_variant_name,
+    group_booking_id: d.group_booking_id ?? null,
+    person_label: d.person_label ?? null,
+    booking_item_name: opts.serviceLine,
+    booking_addon_labels:
+      d.addons?.map((a) => a.addon_name_snapshot).filter((n) => n.trim().length > 0) ?? undefined,
   };
 }
 

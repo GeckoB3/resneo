@@ -66,9 +66,15 @@ import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-
 import type { GuestHistoryRelatedBookingPayload } from '@/app/dashboard/bookings/GuestBookingsForGuestAccordion';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
+import {
+  primeGroupVisitBookingsFromListSeeds,
+  resolveInitialGroupVisitBookings,
+  warmGroupVisitBookings,
+} from '@/lib/booking/group-visit-bookings';
 import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-events';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
 import { bookingDetailLiteFromListRow } from '@/lib/booking/booking-detail-from-row';
+import { resolveBookingListBarSchedule } from '@/lib/booking/booking-list-row-schedule';
 import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
 import { REALTIME_BOOKINGS_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 
@@ -782,12 +788,17 @@ export function BookingsDashboard({
         ? loaded.filter((booking) => !isAttendanceConfirmed(booking))
         : loaded;
       setBookings((prev) => {
-        if (!ids || ids.length === 0) return next;
+        if (!ids || ids.length === 0) {
+          primeGroupVisitBookingsFromListSeeds(next);
+          return next;
+        }
         const map = new Map(prev.map((b) => [b.id, b]));
         for (const row of next) map.set(row.id, row);
-        return Array.from(map.values())
+        const merged = Array.from(map.values())
           .filter((b) => !ids.includes(b.id) || next.some((n) => n.id === b.id))
           .sort((a, b) => `${a.booking_date}${a.booking_time}`.localeCompare(`${b.booking_date}${b.booking_time}`));
+        primeGroupVisitBookingsFromListSeeds(merged);
+        return merged;
       });
       setSelectedIds((prev) => prev.filter((id) => next.some((b: BookingRow) => b.id === id) || !ids));
     } catch {
@@ -907,13 +918,15 @@ export function BookingsDashboard({
   const prefetchBookingDetail = useCallback(
     (bookingId: string) => {
       void (async () => {
+        const row = bookings.find((b) => b.id === bookingId);
+        if (row?.group_booking_id) warmGroupVisitBookings(row.group_booking_id);
         await warmVenueBookingDetail(bookingId);
         const lite = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
         if (!lite) return;
         setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: lite }));
       })();
     },
-    [peekVenueBookingDetail, warmVenueBookingDetail],
+    [bookings, peekVenueBookingDetail, warmVenueBookingDetail],
   );
 
   const toggleExpand = useCallback(
@@ -1859,6 +1872,7 @@ export function BookingsDashboard({
       ) : viewMode === 'day' ? (
         <BookingsAccordionList
           bookings={filteredBookings}
+          allBookingsForSchedule={bookings}
           selectedIds={selectedIds}
           setSelectedIds={setSelectedIds}
           expandedIds={expandedIds}
@@ -1909,6 +1923,7 @@ export function BookingsDashboard({
               </div>
               <BookingsAccordionList
                 bookings={dayBookings}
+                allBookingsForSchedule={bookings}
                 selectedIds={selectedIds}
                 setSelectedIds={setSelectedIds}
                 expandedIds={expandedIds}
@@ -2155,6 +2170,7 @@ function depositBadge(status: string, amountPence: number | null) {
 
 function BookingsAccordionList({
   bookings,
+  allBookingsForSchedule,
   selectedIds,
   setSelectedIds,
   expandedIds,
@@ -2181,6 +2197,8 @@ function BookingsAccordionList({
   venueStaffEnabledBookingModels,
 }: {
   bookings: BookingRow[];
+  /** Full loaded list (for multi-service visit duration across filtered siblings). */
+  allBookingsForSchedule: BookingRow[];
   selectedIds: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
   expandedIds: string[];
@@ -2243,6 +2261,11 @@ function BookingsAccordionList({
               : booking.table_assignments.map((t) => t.name).join(', ')
             : null;
           const displayStatus = bookingStatusDisplayLabel(booking.status, inferredModel === 'table_reservation');
+          const barSchedule = resolveBookingListBarSchedule(
+            booking,
+            allBookingsForSchedule,
+          );
+          const { timeRangeLabel, durationBarLabel, durationDetailLabel } = barSchedule;
           return (
             <div
               key={booking.id}
@@ -2274,7 +2297,28 @@ function BookingsAccordionList({
                     <span className="min-w-0 max-w-[9.5rem] truncate font-semibold text-slate-900 sm:max-w-[14rem]">
                       {booking.guest_name}
                     </span>
-                    <span className="shrink-0 font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
+                    <span className="shrink-0 font-semibold tabular-nums text-slate-700">
+                      {timeRangeLabel.includes('–') ? (
+                        <>
+                          {timeRangeLabel.slice(0, 5)}
+                          <span className="text-slate-400">{timeRangeLabel.slice(5)}</span>
+                        </>
+                      ) : (
+                        timeRangeLabel
+                      )}
+                    </span>
+                    {durationBarLabel ? (
+                      <span
+                        className={
+                          expanded
+                            ? 'inline-block rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500'
+                            : 'hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block'
+                        }
+                        title={durationDetailLabel ?? durationBarLabel}
+                      >
+                        {durationBarLabel}
+                      </span>
+                    ) : null}
                     {booking.booking_item_name?.trim() ? (
                       <>
                         <span className="shrink-0 text-slate-300">·</span>
@@ -2367,6 +2411,7 @@ function BookingsAccordionList({
                 >
                   <ExpandedBookingContent
                     booking={booking}
+                    initialGroupVisitBookings={resolveInitialGroupVisitBookings(bookings, booking.group_booking_id)}
                     detail={detail}
                     detailLoading={detailLoading}
                     tableManagementEnabled={tableManagementEnabled}

@@ -16,6 +16,7 @@ import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
+import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 
 export async function POST(request: Request) {
   try {
@@ -149,6 +150,7 @@ export async function POST(request: Request) {
         appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
         email: ownerEmail,
         daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
+        session_timeout_minutes: SESSION_TIMEOUT_DEFAULT_MINUTES,
       })
       .select('id')
       .single();

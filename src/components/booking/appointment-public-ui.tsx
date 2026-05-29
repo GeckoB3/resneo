@@ -40,6 +40,9 @@ export function appointmentAccentStyle(accentColour?: string | null): CSSPropert
 
 export const APPOINTMENT_PUBLIC_ROOT_CLASS = 'appointment-public';
 
+/** Non-embed public appointment card: compact on small screens, roomier from md up. */
+export const APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS = 'max-w-lg md:max-w-xl lg:max-w-2xl';
+
 export const APPOINTMENT_PUBLIC_CHEVRON = 'ap-chevron h-5 w-5 shrink-0';
 export const APPOINTMENT_PUBLIC_CHEVRON_SM = 'ap-chevron h-4 w-4 shrink-0';
 export const APPOINTMENT_PUBLIC_PRICE = 'ap-price text-sm font-semibold';
@@ -74,7 +77,7 @@ export const AppointmentPublicShell = forwardRef<
   return (
     <div
       ref={ref}
-      className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative mx-auto w-full max-w-lg ${className}`.trim()}
+      className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative w-full ${className}`.trim()}
       style={accentStyle}
     >
       <div className="ap-shell overflow-hidden rounded-2xl border bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">

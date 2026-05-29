@@ -14,6 +14,7 @@ import { CALENDAR_PICKER_SUBPOPOVER_SELECTOR } from '@/components/calendar/Calen
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { isBookingDetailPopoverDismissExempt } from '@/lib/ui/booking-detail-popover-dismiss';
 import { nextBookingsTileContent } from '@/lib/table-management/next-bookings-slot';
+import { OperationsDateWeekShortcuts } from '@/components/dashboard/OperationsDateWeekShortcuts';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -282,6 +283,24 @@ export function OperationsWorkspaceToolbar({
   const inlineTimelineOpen = compact && open === 'timeline';
 
   const close = useCallback(() => setOpen('none'), []);
+
+  const handleWeekShortcutDate = useCallback(
+    (ymd: string) => {
+      onDateChange(ymd);
+      close();
+    },
+    [onDateChange, close],
+  );
+
+  const datePickerPanelContent =
+    showDateNavigator && datePickerPanel != null ? (
+      <>
+        {datePickerPanel}
+        <OperationsDateWeekShortcuts selectedDate={date} onSelectDate={handleWeekShortcutDate} />
+      </>
+    ) : (
+      datePickerPanel
+    );
   const infoPanelId = `${baseId}-info-panel`;
   const summaryNode =
     summaryContent ??
@@ -432,7 +451,7 @@ export function OperationsWorkspaceToolbar({
                   aria-label="Date and calendar"
                   className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
                 >
-                  {datePickerPanel}
+                  {datePickerPanelContent}
                 </ClampedFixedDropdown>
               </div>
               <button
@@ -761,7 +780,7 @@ export function OperationsWorkspaceToolbar({
                   {summaryNode}
                   {infoPanelExtra}
                 </div>
-              ) : open === 'date' ? datePickerPanel : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
+              ) : open === 'date' ? datePickerPanelContent : open === 'timeline' ? timelinePanel : open === 'search' ? searchPanel : controlsPanel}
             </div>
           </div>
         </div>

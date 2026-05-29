@@ -9,6 +9,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 
 interface StaffSectionProps {
   venueId: string;
@@ -28,6 +29,22 @@ interface PractitionerOption {
   is_active?: boolean;
   /** unified_calendars.calendar_type — resource columns are not staff-assignable here. */
   calendar_type?: string | null;
+}
+
+function formatSessionTimeoutLabel(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `${minutes} minutes`;
 }
 
 export function StaffSection({
@@ -108,8 +125,11 @@ export function StaffSection({
       const res = await fetch('/api/venue/staff/session-settings');
       if (!res.ok) return;
       const data = await res.json();
-      setSessionTimeout(data.session_timeout_minutes ?? null);
-      setSessionTimeoutInput(data.session_timeout_minutes ? String(data.session_timeout_minutes) : '');
+      const minutes = data.session_timeout_minutes as number | null | undefined;
+      const normalized =
+        minutes != null && minutes > 0 ? minutes : SESSION_TIMEOUT_DEFAULT_MINUTES;
+      setSessionTimeout(normalized);
+      setSessionTimeoutInput(String(normalized));
     } catch { /* ignore */ }
   }, []);
 
@@ -433,8 +453,9 @@ export function StaffSection({
     setSavingTimeout(true);
     setTimeoutSaved(false);
     const val = sessionTimeoutInput.trim();
-    const minutes = val === '' ? null : parseInt(val, 10);
-    if (val !== '' && (isNaN(minutes!) || minutes! < 0)) return;
+    const minutes = parseInt(val, 10);
+    const maxMinutes = SESSION_TIMEOUT_DEFAULT_MINUTES;
+    if (!val || isNaN(minutes) || minutes < 30 || minutes > maxMinutes) return;
     try {
       const res = await fetch('/api/venue/staff/session-settings', {
         method: 'PUT',
@@ -966,7 +987,7 @@ export function StaffSection({
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Auto-Logout Timer</label>
               <p className="mb-2 text-xs text-slate-500">
-                Set how long staff can be inactive before being automatically logged out. Leave empty to keep users logged in until they manually sign out.
+                Set how long staff can be inactive before being automatically logged out. The longest allowed period is 7 days.
               </p>
               <div className="flex items-center gap-3">
                 <select
@@ -974,7 +995,6 @@ export function StaffSection({
                   onChange={(e) => setSessionTimeoutInput(e.target.value)}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 >
-                  <option value="">No auto-logout</option>
                   <option value="30">30 minutes</option>
                   <option value="60">1 hour</option>
                   <option value="120">2 hours</option>
@@ -982,6 +1002,7 @@ export function StaffSection({
                   <option value="480">8 hours</option>
                   <option value="720">12 hours</option>
                   <option value="1440">24 hours</option>
+                  <option value={String(SESSION_TIMEOUT_DEFAULT_MINUTES)}>7 days</option>
                 </select>
                 <button
                   type="button"
@@ -999,7 +1020,7 @@ export function StaffSection({
               </div>
               {sessionTimeout !== null && sessionTimeout > 0 && (
                 <p className="mt-2 text-xs text-slate-500">
-                  Current setting: {sessionTimeout >= 60 ? `${Math.floor(sessionTimeout / 60)} hour${sessionTimeout >= 120 ? 's' : ''}` : `${sessionTimeout} minutes`} of inactivity
+                  Current setting: {formatSessionTimeoutLabel(sessionTimeout)} of inactivity
                 </p>
               )}
             </div>

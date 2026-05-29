@@ -181,7 +181,7 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
       <div className="flex flex-1 flex-col">
         <div
           id="booking-form-start"
-          className={`mx-auto w-full max-w-lg flex-1 scroll-mt-4 px-4 pb-6 ${isAppointment ? 'py-6 sm:py-8' : 'py-8'}`}
+          className={`mx-auto w-full flex-1 scroll-mt-4 px-4 pb-6 ${isAppointment ? 'py-6 sm:py-8' : 'max-w-lg py-8'}`}
         >
           <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
         </div>

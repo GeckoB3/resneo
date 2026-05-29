@@ -35,6 +35,15 @@ describe('resolveExpandedBookingServiceLine', () => {
     ).toBe('Long hair');
   });
 
+  it('combines base service and variant name', () => {
+    expect(
+      resolveExpandedBookingServiceLine(
+        { service_name: 'Cut', booking_item_name: null },
+        { service_variant_name: 'Short' },
+      ),
+    ).toBe('Cut – Short');
+  });
+
   it('keeps label when API detail has no cde_context (appointments)', () => {
     const row = {
       id: 'b1',

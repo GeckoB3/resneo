@@ -879,6 +879,8 @@ export function BookingDetailPanel({
                 event_session_id: d.event_session_id,
                 service_name: serviceLine,
                 booking_item_name: initialSnapshot?.serviceName ?? serviceLine,
+                group_booking_id: d.group_booking_id ?? null,
+                person_label: d.person_label ?? null,
               }}
               detail={undefined}
               detailLoading={!isHydrated}

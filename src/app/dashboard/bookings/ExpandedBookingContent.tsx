@@ -78,8 +78,18 @@ import { mapContactGuestHistoryToAccordionRows } from '@/lib/booking/map-contact
 import { guestStubFromBookingRow } from '@/lib/booking/booking-row-guest-stub';
 import {
   bookingDetailLiteFromListRow,
+  expandedBookingOfferingLine,
   resolveExpandedBookingServiceLine,
 } from '@/lib/booking/booking-detail-from-row';
+import {
+  fetchGroupVisitBookings,
+  formatDurationMinutesLabel,
+  formatGroupVisitSegmentDurationLabel,
+  peekGroupVisitBookings,
+  type GroupVisitBookingRow,
+} from '@/lib/booking/group-visit-bookings';
+
+export type { GroupVisitBookingRow } from '@/lib/booking/group-visit-bookings';
 import {
   mergeBookingRowOverlay,
   overlayFromPatchBody,
@@ -135,6 +145,8 @@ export interface BookingRow {
   booking_model?: string | null;
   service_name?: string | null;
   booking_item_name?: string | null;
+  service_variant_name?: string | null;
+  booking_addon_labels?: string[];
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   /** Practitioner calendar / day-sheet "Arrived" indicator; PATCH via `client_arrived`. */
@@ -264,6 +276,7 @@ export function ExpandedBookingContent({
   venueStaffBookingModel,
   venueStaffEnabledBookingModels,
   linkedAct,
+  initialGroupVisitBookings,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -291,6 +304,8 @@ export function ExpandedBookingContent({
   venueStaffEnabledBookingModels?: BookingModel[];
   /** When set, restricts toolbar actions to what the linked-account grant allows (§5.3). */
   linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
+  /** Sibling rows already loaded in the parent list — avoids a wait on expand. */
+  initialGroupVisitBookings?: GroupVisitBookingRow[];
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('email');
@@ -308,7 +323,10 @@ export function ExpandedBookingContent({
   const [statusActionPending, setStatusActionPending] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
-  const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
+  const [groupVisitBookings, setGroupVisitBookings] = useState<GroupVisitBookingRow[]>(
+    () => initialGroupVisitBookings ?? [],
+  );
+  const [groupVisitLoading, setGroupVisitLoading] = useState(false);
   /**
    * After lifecycle Confirmed→Booked (“Undo confirm”), the parent often briefly shows `Booked` while
    * attendance timestamps are still present; that wrongly enables PATCH “Cancel confirmation”. Suppress
@@ -373,29 +391,46 @@ export function ExpandedBookingContent({
     rowOverlay.staff_attendance_confirmed_at,
   ]);
 
+  const detailCache = useOptionalDashboardDetailCache();
+  const resolvedGroupBookingId =
+    booking.group_booking_id ??
+    (detailCache?.peekVenueBookingDetail(booking.id) as { group_booking_id?: string | null } | undefined)
+      ?.group_booking_id ??
+    null;
+
   useEffect(() => {
-    if (!booking.group_booking_id) return;
+    if (!resolvedGroupBookingId) {
+      setGroupVisitBookings([]);
+      setGroupVisitLoading(false);
+      return;
+    }
+
+    const cached = peekGroupVisitBookings(resolvedGroupBookingId);
+    const seeded =
+      initialGroupVisitBookings && initialGroupVisitBookings.length > 0
+        ? initialGroupVisitBookings
+        : cached && cached.length > 0
+          ? cached
+          : null;
+
+    if (seeded && seeded.length > 0) {
+      setGroupVisitBookings(seeded);
+      setGroupVisitLoading(seeded.length <= 1);
+    } else {
+      setGroupVisitLoading(true);
+    }
+
     let cancelled = false;
-    fetch(`/api/venue/bookings/list?group_booking_id=${booking.group_booking_id}`)
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        const others = (data.bookings ?? [])
-          .filter((b: { id: string }) => b.id !== booking.id)
-          .map((b: { id: string; person_label: string | null; booking_time: string; status: string }) => ({
-            id: b.id,
-            person_label: b.person_label,
-            booking_time: b.booking_time,
-            status: b.status,
-          }));
-        setLinkedBookings(others);
-      })
-      .catch(() => { /* ignore */ });
+    void fetchGroupVisitBookings(resolvedGroupBookingId).then((rows) => {
+      if (cancelled) return;
+      setGroupVisitBookings(rows);
+      setGroupVisitLoading(false);
+    });
+
     return () => {
       cancelled = true;
     };
-  }, [booking.group_booking_id, booking.id]);
+  }, [resolvedGroupBookingId, initialGroupVisitBookings]);
 
   useEffect(() => {
     setGuestMessageFeedback(null);
@@ -437,9 +472,118 @@ export function ExpandedBookingContent({
     }
   }, [guestMessageChannel, onSendMessage]);
 
-  const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
+  const isGroupPeopleVisit =
+    Boolean(resolvedGroupBookingId) &&
+    groupVisitBookings.some((b) => Boolean(b.person_label?.trim()));
+  const multiServiceVisitSegments = useMemo(() => {
+    if (!resolvedGroupBookingId || isGroupPeopleVisit || groupVisitBookings.length <= 1) {
+      return [];
+    }
+    return groupVisitBookings;
+  }, [resolvedGroupBookingId, groupVisitBookings, isGroupPeopleVisit]);
+  const groupVisitFetchPending =
+    Boolean(resolvedGroupBookingId) &&
+    !isGroupPeopleVisit &&
+    groupVisitLoading &&
+    multiServiceVisitSegments.length === 0;
 
-  const detailCache = useOptionalDashboardDetailCache();
+  const multiServiceVisitCard = useMemo(() => {
+    if (groupVisitFetchPending) {
+      return (
+        <SectionCard className="border-brand-200 bg-brand-50/20" aria-busy="true" aria-label="Loading services in this visit">
+          <SectionCard.Body className="p-4">
+            <div className="h-4 w-40 animate-pulse rounded bg-brand-100" />
+            <div className="mt-2 h-3 w-56 animate-pulse rounded bg-slate-100" />
+            <ul className="mt-3 space-y-2">
+              {[0, 1].map((i) => (
+                <li key={i} className="rounded-lg border border-slate-200/90 bg-white/80 px-3 py-3">
+                  <div className="h-3 w-16 animate-pulse rounded bg-slate-100" />
+                  <div className="mt-2 h-4 w-3/4 max-w-xs animate-pulse rounded bg-slate-200" />
+                </li>
+              ))}
+            </ul>
+          </SectionCard.Body>
+        </SectionCard>
+      );
+    }
+    if (multiServiceVisitSegments.length === 0) return null;
+    return (
+      <SectionCard className="border-brand-200 bg-brand-50/20">
+        <SectionCard.Body className="p-4">
+          <p className="text-xs font-semibold text-brand-900">Services in this visit</p>
+          <p className="mt-0.5 text-[11px] text-slate-600">
+            {multiServiceVisitSegments.length} consecutive{' '}
+            {multiServiceVisitSegments.length === 1 ? 'service' : 'services'} on{' '}
+            {formatDateNice(booking.booking_date)}
+            {(() => {
+              const visitTotal = multiServiceVisitSegments.reduce(
+                (sum, seg) => sum + (seg.duration_minutes ?? 0),
+                0,
+              );
+              return visitTotal > 0 ? ` · ${formatDurationMinutesLabel(visitTotal)} total` : '';
+            })()}
+            .
+          </p>
+          <ul className="mt-3 space-y-2">
+            {multiServiceVisitSegments.map((seg) => {
+              const offeringLine = expandedBookingOfferingLine({
+                serviceName: seg.booking_item_name,
+                variantName: seg.service_variant_name,
+                addonLabels: seg.booking_addon_labels,
+              });
+              const durationLabel = formatGroupVisitSegmentDurationLabel(seg);
+              const endHm = seg.booking_end_time?.slice(0, 5) ?? null;
+              const timeRange = endHm
+                ? `${seg.booking_time.slice(0, 5)}–${endHm}`
+                : seg.booking_time.slice(0, 5);
+              return (
+                <li
+                  key={seg.id}
+                  className="rounded-lg border border-slate-200/90 bg-white/80 px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900">
+                        {offeringLine ?? 'Service'}
+                      </p>
+                      {durationLabel ? (
+                        <p className="mt-1 text-[11px] font-medium text-slate-500">{durationLabel}</p>
+                      ) : null}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="text-xs font-medium tabular-nums text-slate-600">{timeRange}</span>
+                      <div className="mt-1 flex justify-end">
+                        <Pill
+                          variant={
+                            seg.status === 'Confirmed'
+                              ? 'success'
+                              : seg.status === 'Booked'
+                                ? 'info'
+                                : seg.status === 'Pending'
+                                  ? 'warning'
+                                  : seg.status === 'Cancelled'
+                                    ? 'danger'
+                                    : 'neutral'
+                          }
+                          size="sm"
+                        >
+                          {seg.status}
+                        </Pill>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </SectionCard.Body>
+      </SectionCard>
+    );
+  }, [booking.booking_date, booking.id, groupVisitFetchPending, multiServiceVisitSegments]);
+  const displayLinkedBookings = isGroupPeopleVisit
+    ? groupVisitBookings.filter((b) => b.id !== booking.id && b.person_label?.trim())
+    : [];
+
   const activeDetail = useMemo(
     () =>
       detail ??
@@ -554,7 +698,16 @@ export function ExpandedBookingContent({
   const depositAmtStr = effectiveBooking.deposit_amount_pence
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
-  const serviceLine = resolveExpandedBookingServiceLine(booking, activeDetail);
+  const serviceLine = resolveExpandedBookingServiceLine(
+    {
+      service_name: booking.service_name,
+      booking_item_name: booking.booking_item_name,
+      service_variant_name:
+        activeDetail?.service_variant_name ?? booking.service_variant_name ?? null,
+    },
+    activeDetail,
+  );
+  const showGlobalExtras = bookingAddons.length > 0 && multiServiceVisitSegments.length === 0;
   const cdeContextForCard =
     activeDetail?.cde_context &&
     !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) &&
@@ -1036,7 +1189,7 @@ export function ExpandedBookingContent({
               </Fragment>
             ))}
           </div>
-          {bookingAddons.length > 0 ? (
+          {showGlobalExtras ? (
             <div className="mt-2 border-t border-slate-100 pt-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Extras</p>
               <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
@@ -1198,7 +1351,9 @@ export function ExpandedBookingContent({
                 type="button"
                 disabled={toolbarBusy}
                 onClick={() => {
-                  const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill);
+                  const payload = buildStaffRebookBootstrapFromBookingSource(booking, rebookGuestPrefill, {
+                    venueTimeZone: venueTimezone,
+                  });
                   if (!payload) return;
                   setStaffBookingModal({ mode: 'rebook', bootstrap: payload });
                   setShowMessageBox(false);
@@ -1261,6 +1416,8 @@ export function ExpandedBookingContent({
         </div>
       </div>
       ) : null}
+
+      {profileGuestId ? multiServiceVisitCard : null}
 
       {profileGuestId ? (
         <details className={bookingExpandAccordionDetailsClass}>
@@ -1546,6 +1703,8 @@ export function ExpandedBookingContent({
         </div>
       </details>
 
+      {!profileGuestId ? multiServiceVisitCard : null}
+
       {!profileGuestId ? (
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
@@ -1596,32 +1755,67 @@ export function ExpandedBookingContent({
         </SectionCard>
       ) : null}
 
-      {/* Group booking */}
-      {booking.group_booking_id && (
+      {/* Group booking (multiple people, same group id) */}
+      {isGroupPeopleVisit ? (
         <SectionCard className="border-violet-200 bg-violet-50/30">
           <SectionCard.Body className="p-4">
             <div className="flex items-center gap-2">
               <svg className="h-4 w-4 shrink-0 text-violet-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
               <span className="text-xs font-semibold text-violet-800">Group booking</span>
-              {booking.person_label && <span className="text-xs text-violet-600">· {booking.person_label}</span>}
+              {booking.person_label ? (
+                <span className="text-xs text-violet-600">· {booking.person_label}</span>
+              ) : null}
             </div>
-            {displayLinkedBookings.length > 0 && (
+            {displayLinkedBookings.length > 0 ? (
               <div className="mt-3 space-y-2">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-violet-400">Others in this group</p>
-                {displayLinkedBookings.map((lb) => (
-                  <div key={lb.id} className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-violet-800">{lb.person_label ?? 'Unknown'}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs tabular-nums text-violet-600">{lb.booking_time?.slice(0, 5)}</span>
-                      <Pill variant={lb.status === 'Confirmed' ? 'success' : lb.status === 'Booked' ? 'info' : lb.status === 'Pending' ? 'warning' : lb.status === 'Cancelled' ? 'danger' : 'neutral'} size="sm">{lb.status}</Pill>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-violet-400">
+                  Others in this group
+                </p>
+                {displayLinkedBookings.map((lb) => {
+                  const peerOfferingLine = expandedBookingOfferingLine({
+                    serviceName: lb.booking_item_name,
+                    variantName: lb.service_variant_name,
+                    addonLabels: lb.booking_addon_labels,
+                  });
+                  return (
+                  <div key={lb.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-violet-800">
+                        {lb.person_label ?? 'Guest'}
+                      </span>
+                      {peerOfferingLine ? (
+                        <p className="mt-0.5 text-[10px] leading-snug text-violet-700">{peerOfferingLine}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-xs tabular-nums text-violet-600">
+                        {lb.booking_time.slice(0, 5)}
+                      </span>
+                      <Pill
+                        variant={
+                          lb.status === 'Confirmed'
+                            ? 'success'
+                            : lb.status === 'Booked'
+                              ? 'info'
+                              : lb.status === 'Pending'
+                                ? 'warning'
+                                : lb.status === 'Cancelled'
+                                  ? 'danger'
+                                  : 'neutral'
+                        }
+                        size="sm"
+                      >
+                        {lb.status}
+                      </Pill>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
-            )}
+            ) : null}
           </SectionCard.Body>
         </SectionCard>
-      )}
+      ) : null}
 
       {/* Timeline — created, confirmed (guest/staff), modifications, cancellations */}
       <details className={bookingExpandAccordionDetailsClass}>

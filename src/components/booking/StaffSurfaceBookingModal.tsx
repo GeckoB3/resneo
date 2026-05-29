@@ -126,7 +126,7 @@ export function StaffSurfaceBookingModal({
             bookingIntent={intent}
             onCreated={onCreated}
             onClose={onClose}
-            initialDate={preselectedDate}
+            initialDate={preselectedDate ?? staffRebookBootstrap?.initialDate}
             initialTime={preselectedTime}
             initialStaffSurfaceTabId={initialStaffSurfaceTabId}
             preselectedPractitionerId={preselectedPractitionerId}

@@ -214,13 +214,45 @@ export async function GET(request: NextRequest) {
       ...new Set(rawRows.map((r) => r.id).filter((x): x is string => typeof x === 'string')),
     ];
     const addonCountByBooking = new Map<string, number>();
+    const addonLabelsByBooking = new Map<string, string[]>();
     if (bookingIdsForAddons.length > 0) {
       const { data: addonRows } = await scopeDb
         .from('booking_addons')
-        .select('booking_id')
-        .in('booking_id', bookingIdsForAddons);
-      for (const row of (addonRows ?? []) as Array<{ booking_id: string }>) {
+        .select('booking_id, addon_name_snapshot, booking_segment_index, created_at')
+        .in('booking_id', bookingIdsForAddons)
+        .order('booking_segment_index', { ascending: true, nullsFirst: true })
+        .order('created_at', { ascending: true });
+      for (const row of (addonRows ?? []) as Array<{
+        booking_id: string;
+        addon_name_snapshot: string;
+      }>) {
         addonCountByBooking.set(row.booking_id, (addonCountByBooking.get(row.booking_id) ?? 0) + 1);
+        const name = row.addon_name_snapshot?.trim();
+        if (!name) continue;
+        const list = addonLabelsByBooking.get(row.booking_id) ?? [];
+        list.push(name);
+        addonLabelsByBooking.set(row.booking_id, list);
+      }
+    }
+
+    const variantIds = [
+      ...new Set(
+        rawRows
+          .map((r) => r.service_variant_id as string | null | undefined)
+          .filter((vid): vid is string => typeof vid === 'string' && vid.trim().length > 0),
+      ),
+    ];
+    const serviceVariantNameById = new Map<string, string>();
+    if (variantIds.length > 0) {
+      const { data: variantRows } = await scopeDb
+        .from('service_variants')
+        .select('id, name')
+        .eq('venue_id', scopeVenueId)
+        .in('id', variantIds);
+      for (const row of variantRows ?? []) {
+        const v = row as { id: string; name?: string | null };
+        const name = typeof v.name === 'string' ? v.name.trim() : '';
+        if (name) serviceVariantNameById.set(v.id, name);
       }
     }
 
@@ -343,6 +375,11 @@ export async function GET(request: NextRequest) {
         addons_total_price_pence: (r.addons_total_price_pence as number | null) ?? 0,
         addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
         addons_count: addonCountByBooking.get(r.id as string) ?? 0,
+        booking_addon_labels: addonLabelsByBooking.get(r.id as string) ?? [],
+        service_variant_name:
+          typeof r.service_variant_id === 'string' && r.service_variant_id.trim().length > 0
+            ? serviceVariantNameById.get(r.service_variant_id as string) ?? null
+            : null,
       };
     });
 

@@ -1,7 +1,11 @@
 'use client';
 
 export interface MultiServiceLine {
+  /** Group bookings: attendee label shown above the service line. */
+  personLabel?: string;
   serviceName: string;
+  /** Service variant / sub-option, when chosen separately from the base service name. */
+  variantName?: string | null;
   practitionerName: string;
   startTime: string;
   durationMinutes: number;
@@ -21,8 +25,12 @@ interface MultiServiceSummaryCardProps {
   bookingDate: string;
   currencySymbol: string;
   formatPrice: (pence: number | null) => string;
+  /** Card heading; defaults to "Your appointment". */
+  title?: string;
   onRemove?: (index: number) => void;
   onEditAddons?: (index: number) => void;
+  /** Row index currently being removed (shows spinner on that Remove control). */
+  removingSegmentIndex?: number | null;
 }
 
 export function MultiServiceSummaryCard({
@@ -31,9 +39,12 @@ export function MultiServiceSummaryCard({
   bookingDate,
   currencySymbol,
   formatPrice,
+  title = 'Your appointment',
   onRemove,
   onEditAddons,
+  removingSegmentIndex = null,
 }: MultiServiceSummaryCardProps) {
+  const removeBusy = removingSegmentIndex != null;
   const totalDuration = lines.reduce((sum, l) => sum + l.durationMinutes, 0);
   const totalExtras = lines.reduce(
     (sum, l) => sum + (l.extras?.reduce((s, e) => s + e.pricePence, 0) ?? 0),
@@ -48,7 +59,7 @@ export function MultiServiceSummaryCard({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Your appointment</h3>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
       <p className="mb-3 text-sm text-slate-600">
         {formatDateHuman(bookingDate)}
       </p>
@@ -56,7 +67,15 @@ export function MultiServiceSummaryCard({
         {lines.map((line, idx) => (
           <li key={`${line.serviceName}-${idx}-${line.startTime}`} className="flex items-start justify-between gap-3 bg-slate-50/50 px-3 py-2.5">
             <div className="min-w-0 flex-1">
+              {line.personLabel ? (
+                <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  {line.personLabel}
+                </div>
+              ) : null}
               <div className="font-medium text-slate-900">{line.serviceName}</div>
+              {line.variantName && !line.serviceName.includes(line.variantName) ? (
+                <div className="mt-0.5 text-xs text-slate-600">{line.variantName}</div>
+              ) : null}
               <div className="mt-0.5 text-xs text-slate-500">
                 {line.startTime} · {line.durationMinutes} min · {line.practitionerName}
               </div>
@@ -81,8 +100,9 @@ export function MultiServiceSummaryCard({
               {line.editableAddons && onEditAddons ? (
                 <button
                   type="button"
+                  disabled={removeBusy}
                   onClick={() => onEditAddons(idx)}
-                  className="mt-1 text-[11px] font-medium text-brand-600 hover:text-brand-700"
+                  className="mt-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {line.extras && line.extras.length > 0 ? 'Edit extras' : 'Add extras'}
                 </button>
@@ -91,10 +111,25 @@ export function MultiServiceSummaryCard({
             {onRemove ? (
               <button
                 type="button"
-                onClick={() => onRemove(idx)}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600"
+                disabled={removeBusy}
+                aria-busy={removingSegmentIndex === idx}
+                onClick={() => {
+                  if (removeBusy) return;
+                  onRemove(idx);
+                }}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  removingSegmentIndex === idx
+                    ? 'text-slate-600'
+                    : 'text-slate-500 hover:bg-red-50 hover:text-red-600'
+                }`}
               >
-                Remove
+                {removingSegmentIndex === idx ? (
+                  <span
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
+                    aria-hidden
+                  />
+                ) : null}
+                {removingSegmentIndex === idx ? 'Removing…' : 'Remove'}
               </button>
             ) : null}
           </li>

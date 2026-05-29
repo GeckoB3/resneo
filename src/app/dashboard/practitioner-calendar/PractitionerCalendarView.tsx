@@ -74,6 +74,14 @@ import {
   bookingDetailPanelSnapshotFromListRow,
   estimatedEndIsoFromSchedule,
 } from '@/lib/booking/booking-detail-from-row';
+import {
+  primeGroupVisitBookingsFromListSeeds,
+  warmGroupVisitBookings,
+} from '@/lib/booking/group-visit-bookings';
+import {
+  calendarBookingServiceDisplayLine,
+  calendarMultiServiceDisplayTitle,
+} from '@/lib/booking/calendar-booking-service-label';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -190,6 +198,7 @@ interface Practitioner {
 
 interface CalendarVariantRow {
   id: string;
+  name?: string;
   processing_time_blocks?: ProcessingTimeBlock[];
 }
 
@@ -274,6 +283,8 @@ interface Booking {
   addons_total_price_pence?: number | null;
   addons_total_duration_minutes?: number | null;
   addons_count?: number | null;
+  /** Snapshot names from `booking_addons` for calendar bar labels. */
+  booking_addon_labels?: string[];
   /** Set for editable linked-venue bookings rendered on the native day grid. */
   _linkedOwnerVenueId?: string;
   _linkedColumnKey?: string;
@@ -563,8 +574,11 @@ function calendarBookingServiceLabel(
   svc: AppointmentService | null | undefined,
   resourceName: string | null,
 ): string | null {
-  const label = b.booking_item_name?.trim() || svc?.name?.trim() || null;
-  return [resourceName, label].filter(Boolean).join(' · ') || null;
+  return calendarBookingServiceDisplayLine({
+    booking: b,
+    catalogService: svc ?? null,
+    resourceName,
+  });
 }
 
 function CalendarBookingStatusBadge({
@@ -948,7 +962,7 @@ function BookingBlockPills({ b }: { b: Booking }) {
           Confirmed
         </span>
       )}
-      {(b.addons_count ?? 0) > 0 && (
+      {(b.addons_count ?? 0) > 0 && (b.booking_addon_labels?.length ?? 0) === 0 && (
         <span
           className="inline-block rounded-lg bg-white/95 px-1.5 py-0.5 text-center text-[8px] font-semibold leading-snug text-sky-800 shadow-sm ring-1 ring-sky-300 sm:text-[9px]"
           title={`${b.addons_count} add-on${b.addons_count === 1 ? '' : 's'} on this booking`}
@@ -2082,10 +2096,6 @@ export function PractitionerCalendarView({
 }) {
   const { addToast } = useToast();
   const { warmVenueBookingDetail } = useDashboardDetailCache();
-  const prefetchBookingDetail = useCallback(
-    (bookingId: string) => warmVenueBookingDetail(bookingId),
-    [warmVenueBookingDetail],
-  );
   const myCalendarIds = useMemo(
     () => linkedPractitionerIds ?? [],
     [linkedPractitionerIds],
@@ -2643,6 +2653,7 @@ export function PractitionerCalendarView({
   }, [listFromTo]);
 
   const applyBookingsList = useCallback((nextBookings: Booking[]) => {
+    primeGroupVisitBookingsFromListSeeds(nextBookings);
     setBookings(nextBookings);
     setCalendarBookingOverlays((prev) => {
       if (Object.keys(prev).length === 0) return prev;
@@ -2655,6 +2666,15 @@ export function PractitionerCalendarView({
       return next;
     });
   }, []);
+
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => {
+      const row = bookings.find((b) => b.id === bookingId);
+      if (row?.group_booking_id) warmGroupVisitBookings(row.group_booking_id);
+      void warmVenueBookingDetail(bookingId);
+    },
+    [bookings, warmVenueBookingDetail],
+  );
 
   const refetchBookingsList = useCallback(async () => {
     const bookRes = await fetch(`/api/venue/bookings/list?${calendarListQuery}`);
@@ -6232,13 +6252,15 @@ export function PractitionerCalendarView({
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const isOverlapLane = layout.laneCount > 1;
-                        const serviceTitle = items
-                          .map((x) => {
+                        const serviceTitle = calendarMultiServiceDisplayTitle(
+                          items.map((x) => {
                             const sid = serviceIdForBooking(x);
-                            return sid ? serviceMapForBooking(x).get(sid)?.name : null;
-                          })
-                          .filter(Boolean)
-                          .join(' → ');
+                            return {
+                              booking: x,
+                              catalogService: sid ? serviceMapForBooking(x).get(sid) : null,
+                            };
+                          }),
+                        );
                         return (
                           <DraggableBookingShell
                             key={`${first.id}-${first.status}-${first.client_arrived_at ?? ''}`}

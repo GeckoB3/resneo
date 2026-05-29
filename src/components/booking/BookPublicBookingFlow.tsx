@@ -14,8 +14,10 @@ import { PublicBookingAccountGateProvider } from '@/components/booking/PublicBoo
 import type { VenuePublic } from '@/components/booking/types';
 import {
   appointmentAccentStyle,
+  APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS,
   APPOINTMENT_PUBLIC_TAB_INACTIVE,
 } from '@/components/booking/appointment-public-ui';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -108,9 +110,17 @@ export function BookPublicBookingFlow({
   const appointmentTabs =
     activeModel === 'practitioner_appointment' || activeModel === 'unified_scheduling';
 
+  const usesPublicAppointmentColumn = !embed && isUnifiedSchedulingVenue(venue.booking_model);
+
+  const rootWidthClass = usesPublicAppointmentColumn
+    ? `mx-auto w-full ${APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS}`
+    : embed
+      ? 'w-full'
+      : 'mx-auto w-full max-w-lg';
+
   return (
     <div
-      className={`w-full min-w-0 ${embed ? 'space-y-3' : 'space-y-6'} ${appointmentTabs ? 'appointment-public' : ''}`.trim()}
+      className={`min-w-0 ${rootWidthClass} ${embed ? 'space-y-3' : 'space-y-6'} ${appointmentTabs ? 'appointment-public' : ''}`.trim()}
       style={appointmentTabs ? appointmentAccentStyle(accentColour) : undefined}
     >
       {tabs.length > 1 && (

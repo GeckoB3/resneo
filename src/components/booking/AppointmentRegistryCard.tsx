@@ -11,6 +11,7 @@ export interface RegistryAppointment {
   booking_date: string;
   booking_time: string;
   booking_end_time: string | null;
+  estimated_end_time?: string | null;
   service_variant_id?: string | null;
   processing_time_blocks?: unknown | null;
   party_size: number;
@@ -46,6 +47,11 @@ export interface RegistryAppointment {
   addons_total_duration_minutes?: number | null;
   /** Number of add-on lines chosen on this booking. */
   addons_count?: number | null;
+  /** Shared id for multi-service visits and group dining bookings. */
+  group_booking_id?: string | null;
+  person_label?: string | null;
+  service_variant_name?: string | null;
+  booking_addon_labels?: string[];
 }
 
 const STATUS_BADGE: Record<string, string> = {

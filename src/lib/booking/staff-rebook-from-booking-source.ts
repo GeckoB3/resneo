@@ -1,4 +1,5 @@
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { staffRebookInitialDate, type GuestBookingUpcomingRow } from '@/lib/booking/guest-booking-upcoming';
 import {
   buildAppointmentRebookComments,
   type StaffRebookBootstrapPayloadV1,
@@ -6,7 +7,7 @@ import {
 } from '@/lib/booking/staff-rebook-bootstrap';
 
 /** Booking fields sufficient for staff “Rebook” payloads and guest-history time badges. */
-export interface StaffRebookBootstrapBookingSource {
+export interface StaffRebookBootstrapBookingSource extends GuestBookingUpcomingRow {
   booking_time: string;
   party_size: number;
   estimated_end_time: string | null;
@@ -46,11 +47,22 @@ function bookingEndWallHm(raw: string | null | undefined): string | null {
   return /^\d{2}:\d{2}$/.test(hm) ? hm : null;
 }
 
+/** Minimal fields to resolve wall-clock / ISO booking end. */
+export type BookingScheduleEndSource = {
+  booking_time: string;
+  booking_end_time?: string | null;
+  estimated_end_time?: string | null;
+};
+
 /** Prefer wall-clock booking end (`booking_end_time`) before ISO-derived end. */
-export function bookingSourceWallEndHm(row: StaffRebookBootstrapBookingSource): string | null {
+export function bookingScheduleWallEndHm(row: BookingScheduleEndSource): string | null {
   const wallEnd = bookingEndWallHm(row.booking_end_time ?? null);
   if (wallEnd) return wallEnd;
   return estimatedEndToHHMM(row.estimated_end_time);
+}
+
+export function bookingSourceWallEndHm(row: StaffRebookBootstrapBookingSource): string | null {
+  return bookingScheduleWallEndHm(row);
 }
 
 function hmToMinutes(hm: string): number {
@@ -99,16 +111,27 @@ function appointmentRebookIds(row: StaffRebookBootstrapBookingSource): {
  * Build one-shot `/dashboard/bookings/new` bootstrap payload from any booking-like row that staff can rebook:
  * tables, practitioner / unified appointments, and resource bookings. Returns null for unsupported models (classes, bare events).
  */
+export interface BuildStaffRebookBootstrapOptions {
+  /** When set, sets `initialDate` on the payload (upcoming → booking date, previous → today). */
+  venueTimeZone?: string;
+}
+
 export function buildStaffRebookBootstrapFromBookingSource(
   row: StaffRebookBootstrapBookingSource,
   guestPrefill: StaffRebookGuestPrefill | undefined,
+  options?: BuildStaffRebookBootstrapOptions,
 ): StaffRebookBootstrapPayloadV1 | null {
   const guest = guestPrefill ?? {};
   const model = inferBookingRowModel(row);
+  const initialDate = options?.venueTimeZone
+    ? staffRebookInitialDate(row, options.venueTimeZone)
+    : undefined;
+  const withInitialDate = <T extends StaffRebookBootstrapPayloadV1>(payload: T): T =>
+    initialDate ? { ...payload, initialDate } : payload;
 
   if (model === 'table_reservation') {
     const coverMins = bookingSourceDurationMinutes(row) ?? 90;
-    return {
+    return withInitialDate({
       v: 1,
       surface: 'table_reservation',
       table: {
@@ -118,12 +141,12 @@ export function buildStaffRebookBootstrapFromBookingSource(
         coverDurationMinutes: coverMins,
       },
       guest,
-    };
+    });
   }
 
   const apptIds = appointmentRebookIds(row);
   if ((model === 'unified_scheduling' || model === 'practitioner_appointment') && apptIds) {
-    return {
+    return withInitialDate({
       v: 1,
       surface: 'unified_scheduling',
       appointment: {
@@ -134,13 +157,13 @@ export function buildStaffRebookBootstrapFromBookingSource(
       },
       guest,
       appointmentComments: buildAppointmentRebookComments(guest),
-    };
+    });
   }
 
   if (model === 'resource_booking') {
     const resourceId = row.resource_id?.trim();
     if (!resourceId) return null;
-    return {
+    return withInitialDate({
       v: 1,
       surface: 'resource_booking',
       resource: {
@@ -148,7 +171,7 @@ export function buildStaffRebookBootstrapFromBookingSource(
         durationMinutes: bookingSourceDurationMinutes(row),
       },
       guest,
-    };
+    });
   }
 
   return null;

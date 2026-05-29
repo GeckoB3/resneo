@@ -38,6 +38,8 @@ export interface StaffRebookBootstrapPayloadV1 {
   guest: StaffRebookGuestPrefill;
   /** Pre-filled “Comments or requests” on the appointment details step. */
   appointmentComments?: string;
+  /** Default date for staff date pickers (YYYY-MM-DD). */
+  initialDate?: string;
 }
 
 export function writeStaffRebookBootstrap(payload: StaffRebookBootstrapPayloadV1): void {

@@ -38,7 +38,7 @@ export function SessionTimeoutGuard({ venueId }: Props) {
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const minutes = data.session_timeout_minutes;
-        if (minutes && minutes > 0) {
+        if (typeof minutes === 'number' && minutes > 0) {
           timeoutMinutesRef.current = minutes;
           resetTimer();
         }

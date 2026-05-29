@@ -3,9 +3,18 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import {
+  SESSION_TIMEOUT_DEFAULT_MINUTES,
+  SESSION_TIMEOUT_MIN_MINUTES,
+  normalizeSessionTimeoutMinutes,
+} from '@/lib/session-timeout';
 
 const putSchema = z.object({
-  session_timeout_minutes: z.number().int().min(0).max(43200).nullable(),
+  session_timeout_minutes: z
+    .number()
+    .int()
+    .min(SESSION_TIMEOUT_MIN_MINUTES)
+    .max(SESSION_TIMEOUT_DEFAULT_MINUTES),
 });
 
 /** GET /api/venue/staff/session-settings - get session timeout setting. */
@@ -23,7 +32,7 @@ export async function GET() {
       .single();
 
     return NextResponse.json({
-      session_timeout_minutes: venue?.session_timeout_minutes ?? null,
+      session_timeout_minutes: normalizeSessionTimeoutMinutes(venue?.session_timeout_minutes),
     });
   } catch (err) {
     console.error('GET /api/venue/staff/session-settings failed:', err);

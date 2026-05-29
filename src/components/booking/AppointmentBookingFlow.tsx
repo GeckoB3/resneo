@@ -2627,15 +2627,6 @@ export function AppointmentBookingFlow({
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
-          {selectedService && (
-            <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
-              <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="min-w-0 text-sm">
-                <span className="font-medium text-brand-700">{selectedService.name}</span>
-                <ServiceCatalogDescription description={selectedService.description} />
-              </div>
-            </div>
-          )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose your option</h2>
           <p className="mb-4 text-sm text-slate-500">
             This service has a few variations to choose from. Pick one to continue.

@@ -76,24 +76,52 @@ function guestDisplayName(row: BookingListRowSeed): string {
   return row.guest_name?.trim() || 'Guest';
 }
 
+/** Service line with optional variant and add-on snapshots (expanded rows, visit segments). */
+export function expandedBookingOfferingLine(params: {
+  serviceName?: string | null;
+  variantName?: string | null;
+  addonLabels?: string[] | null;
+}): string | null {
+  const base = params.serviceName?.trim() || null;
+  const variantName = params.variantName?.trim() ?? null;
+  let serviceLabel = base;
+  if (base && variantName && !base.includes(variantName)) {
+    serviceLabel = `${base} – ${variantName}`;
+  } else if (!base && variantName) {
+    serviceLabel = variantName;
+  }
+
+  const addonLabels = (params.addonLabels ?? []).map((n) => n.trim()).filter((n) => n.length > 0);
+  const parts: string[] = [];
+  if (serviceLabel) parts.push(serviceLabel);
+  if (addonLabels.length > 0) {
+    parts.push(addonLabels.map((n) => `+ ${n}`).join(', '));
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 /** Service / offering label for expanded booking header — stable across detail hydration. */
 export function resolveExpandedBookingServiceLine(
-  row: Pick<BookingListRowSeed, 'service_name' | 'booking_item_name'>,
+  row: Pick<BookingListRowSeed, 'service_name' | 'booking_item_name'> & {
+    service_variant_name?: string | null;
+  },
   detail?: {
     cde_context?: { title?: string | null } | null;
     service_variant_name?: string | null;
   } | null,
 ): string | null {
-  const fromRow =
+  const base =
     (typeof row.service_name === 'string' && row.service_name.trim()) ||
     (typeof row.booking_item_name === 'string' && row.booking_item_name.trim()) ||
     null;
-  if (fromRow) return fromRow;
-  const fromVariant =
-    typeof detail?.service_variant_name === 'string' && detail.service_variant_name.trim()
-      ? detail.service_variant_name.trim()
-      : null;
-  if (fromVariant) return fromVariant;
+  const variantName =
+    (typeof detail?.service_variant_name === 'string' && detail.service_variant_name.trim()) ||
+    (typeof row.service_variant_name === 'string' && row.service_variant_name.trim()) ||
+    null;
+
+  const combined = expandedBookingOfferingLine({ serviceName: base, variantName });
+  if (combined) return combined;
+
   const fromCde =
     typeof detail?.cde_context?.title === 'string' && detail.cde_context.title.trim()
       ? detail.cde_context.title.trim()

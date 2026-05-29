@@ -19,6 +19,7 @@ import {
   BILLING_ACCESS_SOURCE_SUPERUSER_FREE,
 } from '@/lib/billing/billing-access-source';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
+import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 import { hardDeleteVenueWithLinkedAccountNotifications } from '@/lib/linked-accounts/venue-deletion';
 
 const provisionBodySchema = z
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
       email: ownerEmail,
       enabled_models: enabledModels,
       daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
+      session_timeout_minutes: SESSION_TIMEOUT_DEFAULT_MINUTES,
     };
 
     let authUserId: string | null = null;

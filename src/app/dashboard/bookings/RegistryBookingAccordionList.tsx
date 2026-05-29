@@ -5,8 +5,14 @@ import type { RegistryAppointment } from '@/components/booking/AppointmentRegist
 import {
   ExpandedBookingContent,
   type BookingDetailLite,
-  type BookingRow,
 } from '@/app/dashboard/bookings/ExpandedBookingContent';
+import { registryAppointmentToExpandedBookingRow } from '@/lib/booking/registry-to-expanded-booking-row';
+import {
+  primeGroupVisitBookingsFromListSeeds,
+  resolveInitialGroupVisitBookings,
+  warmGroupVisitBookings,
+} from '@/lib/booking/group-visit-bookings';
+import { resolveBookingListBarSchedule } from '@/lib/booking/booking-list-row-schedule';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
 import { bookingDetailLiteFromCachePayload } from '@/lib/booking/resolve-booking-detail-lite';
@@ -45,27 +51,6 @@ function formatDayHeader(date: string): string {
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
-function timeToMinutesHHMM(t: string): number {
-  const hm = t.trim().slice(0, 5);
-  const [h, m] = hm.split(':').map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
-}
-
-function registryAppointmentDurationMinutes(
-  b: RegistryAppointment,
-  serviceDefaultMinutes: number | null,
-): number | null {
-  const endRaw = b.booking_end_time;
-  if (typeof endRaw === 'string' && endRaw.trim().length >= 5) {
-    const startM = timeToMinutesHHMM(b.booking_time);
-    let endM = timeToMinutesHHMM(endRaw);
-    if (endM <= startM) endM += 24 * 60;
-    const span = endM - startM;
-    return span > 0 ? span : null;
-  }
-  return serviceDefaultMinutes;
-}
-
 function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel({
     booking_model: b.booking_model,
@@ -78,43 +63,6 @@ function inferRegistryModel(b: RegistryAppointment): BookingModel {
     practitioner_id: b.practitioner_id,
     appointment_service_id: b.appointment_service_id,
   });
-}
-
-function registryToExpandedBookingRow(b: RegistryAppointment): BookingRow {
-  return {
-    id: b.id,
-    booking_date: b.booking_date,
-    booking_time: b.booking_time,
-    estimated_end_time: b.booking_end_time ? `${b.booking_date}T${b.booking_end_time.slice(0, 5)}:00.000Z` : null,
-    created_at: null,
-    party_size: b.party_size,
-    status: b.status,
-    source: b.source,
-    deposit_status: b.deposit_status,
-    deposit_amount_pence: b.deposit_amount_pence,
-    dietary_notes: null,
-    occasion: null,
-    guest_name: b.guest_name,
-    guest_email: b.guest_email,
-    guest_phone: b.guest_phone,
-    guest_id: b.guest_id,
-    client_arrived_at: b.client_arrived_at,
-    guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
-    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
-    practitioner_id: b.practitioner_id,
-    calendar_id: b.calendar_id,
-    appointment_service_id: b.appointment_service_id,
-    experience_event_id: b.experience_event_id,
-    class_instance_id: b.class_instance_id,
-    resource_id: b.resource_id,
-    event_session_id: b.event_session_id,
-    service_item_id: b.service_item_id,
-    booking_end_time: b.booking_end_time,
-    service_variant_id: b.service_variant_id ?? null,
-    processing_time_blocks: b.processing_time_blocks ?? null,
-    inferred_booking_model: inferRegistryModel(b),
-    booking_model: b.booking_model,
-  };
 }
 
 function statusBorderClass(b: RegistryAppointment): string {
@@ -218,8 +166,10 @@ export function RegistryBookingAccordionList({
         onBookingsCountChange?.(0);
         return;
       }
-      setBookings(data.bookings ?? []);
-      onBookingsCountChange?.((data.bookings ?? []).filter((b) => b.status !== 'Cancelled').reduce((s, b) => s + (b.party_size ?? 1), 0));
+      const loaded = data.bookings ?? [];
+      setBookings(loaded);
+      primeGroupVisitBookingsFromListSeeds(loaded);
+      onBookingsCountChange?.(loaded.filter((b) => b.status !== 'Cancelled').reduce((s, b) => s + (b.party_size ?? 1), 0));
     } catch {
       setError('Network error loading bookings');
       setBookings([]);
@@ -277,13 +227,15 @@ export function RegistryBookingAccordionList({
   const prefetchBookingDetail = useCallback(
     (bookingId: string) => {
       void (async () => {
+        const row = bookings.find((b) => b.id === bookingId);
+        if (row?.group_booking_id) warmGroupVisitBookings(row.group_booking_id);
         await warmVenueBookingDetail(bookingId);
         const lite = bookingDetailLiteFromCachePayload(bookingId, peekVenueBookingDetail(bookingId));
         if (!lite) return;
         setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: lite }));
       })();
     },
-    [peekVenueBookingDetail, warmVenueBookingDetail],
+    [bookings, peekVenueBookingDetail, warmVenueBookingDetail],
   );
 
   const toggleExpanded = useCallback(
@@ -419,9 +371,8 @@ export function RegistryBookingAccordionList({
         const expanded = expandedIds.includes(b.id);
         const bookingModel = inferRegistryModel(b);
         const typeLabel = bookingModelShortLabel(bookingModel);
-        const startTime = b.booking_time.slice(0, 5);
-        const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
-        const duration = registryAppointmentDurationMinutes(b, null);
+        const barSchedule = resolveBookingListBarSchedule(b, bookings);
+        const { timeRangeLabel, durationBarLabel, durationDetailLabel } = barSchedule;
         const svcName = b.booking_item_name?.trim() || null;
         const priceDisplay =
           b.deposit_amount_pence != null ? formatMoneyPence(b.deposit_amount_pence, sym) : null;
@@ -452,8 +403,14 @@ export function RegistryBookingAccordionList({
                     {b.guest_name}
                   </span>
                   <span className="shrink-0 font-semibold tabular-nums text-slate-700">
-                    {startTime}
-                    {endTime ? <span className="text-slate-400">-{endTime}</span> : null}
+                    {timeRangeLabel.includes('–') ? (
+                      <>
+                        {timeRangeLabel.slice(0, 5)}
+                        <span className="text-slate-400">{timeRangeLabel.slice(5)}</span>
+                      </>
+                    ) : (
+                      timeRangeLabel
+                    )}
                   </span>
                   {!hideDateInSummary ? (
                     <>
@@ -498,11 +455,14 @@ export function RegistryBookingAccordionList({
                       </Pill>
                     </span>
                   ) : null}
-                  {duration != null && (
-                    <span className="hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block">
-                      {duration} min
+                  {durationBarLabel ? (
+                    <span
+                      className="hidden rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500 sm:inline-block"
+                      title={durationDetailLabel ?? durationBarLabel}
+                    >
+                      {durationBarLabel}
                     </span>
-                  )}
+                  ) : null}
                   {(b.addons_count ?? 0) > 0 && (
                     <Pill variant="info" size="sm">
                       +{b.addons_count} {b.addons_count === 1 ? 'extra' : 'extras'}
@@ -541,7 +501,8 @@ export function RegistryBookingAccordionList({
                 className={expandedBookingRowShellClass}
               >
                 <ExpandedBookingContent
-                  booking={registryToExpandedBookingRow(b)}
+                  booking={registryAppointmentToExpandedBookingRow(b)}
+                  initialGroupVisitBookings={resolveInitialGroupVisitBookings(bookings, b.group_booking_id)}
                   detail={detailById[b.id]}
                   detailLoading={detailLoadingIds.includes(b.id)}
                   tableManagementEnabled={false}

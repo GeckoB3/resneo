@@ -2,7 +2,7 @@
 
 import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 
-const BRAND_ACCENT = '#4e6b78';
+const BRAND_ACCENT = '#003B6F';
 
 /** Maps guest flow step to a 3-phase progress indicator (Choose → Schedule → Confirm). */
 export function appointmentProgressPhase(

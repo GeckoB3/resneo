@@ -30,9 +30,9 @@ export async function POST(request: NextRequest) {
       try {
         await sendEmail({
           to: user.email,
-          subject: 'Your ReserveNI account deletion request',
+          subject: 'Your Resneo account deletion request',
           text: [
-            'We have received your ReserveNI account deletion request.',
+            'We have received your Resneo account deletion request.',
             '',
             `Your account is scheduled for deletion on ${String(data).slice(0, 10)}.`,
             'Linked venue guest records have been anonymised.',
@@ -40,14 +40,14 @@ export async function POST(request: NextRequest) {
             'To cancel this deletion before the date above, sign in and use "Cancel deletion request" on Account Security:',
             magicCancel,
             '',
-            'If this was not you, contact ReserveNI support.',
+            'If this was not you, contact Resneo support.',
           ].join('\n'),
           html: `
-            <p>We have received your ReserveNI account deletion request.</p>
+            <p>We have received your Resneo account deletion request.</p>
             <p>Your account is scheduled for deletion on <strong>${String(data).slice(0, 10)}</strong>.</p>
             <p>Linked venue guest records have been anonymised.</p>
             <p><a href="${magicCancelHref}">Cancel deletion request</a> (sign in may be required).</p>
-            <p>If this was not you, contact ReserveNI support.</p>
+            <p>If this was not you, contact Resneo support.</p>
           `,
           disableTracking: true,
         });

@@ -2,7 +2,7 @@
  * Safe public site origin for customer-facing URLs (booking links, widgets, emails).
  * Hardens against malformed `NEXT_PUBLIC_BASE_URL` in .env (e.g. two lines merged without a newline).
  */
-const DEFAULT_PUBLIC_ORIGIN = 'https://www.reserveni.com';
+const DEFAULT_PUBLIC_ORIGIN = 'https://www.resneo.com';
 
 export function normalizePublicBaseUrl(raw: string | undefined): string {
   if (!raw || typeof raw !== 'string') return DEFAULT_PUBLIC_ORIGIN;

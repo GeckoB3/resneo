@@ -63,7 +63,9 @@ function sumGroupAppointmentPricesPence(booking: BookingEmailData): number | nul
   let sum = 0;
   let any = false;
   for (const g of lines) {
-    const p = parseFirstGbpPence(g.price_display ?? undefined);
+    // Prefer the per-person subtotal (service + variant + add-ons) when present,
+    // falling back to the service-line price.
+    const p = parseFirstGbpPence(g.subtotal_display ?? g.price_display ?? undefined);
     if (p != null) {
       sum += p;
       any = true;
@@ -150,6 +152,18 @@ function singleBookingPriceLines(booking: BookingEmailData): string[] {
 
   const normalized = normalizePriceDisplayForCard(booking.appointment_price_display);
   if (normalized) {
+    // The service-line display (`appointment_price_display`) covers the service +
+    // chosen variant only. When add-ons (or other extras) push the booking total
+    // above that line price, surface the true total so the email's "Total" matches
+    // what the guest is actually charged (service + variant + add-ons).
+    const linePence = parseFirstGbpPence(normalized);
+    if (totalPence != null && totalPence > 0 && linePence != null && totalPence > linePence) {
+      const tf = formatMoneyOrNull(totalPence);
+      if (tf) {
+        lines.push(tf);
+        return lines;
+      }
+    }
     lines.push(normalized);
     return lines;
   }

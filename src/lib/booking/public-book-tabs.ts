@@ -1,5 +1,5 @@
 /**
- * Canonical public booking tab slugs (?tab=) - Docs/ReserveNI_Unified_Booking_Functionality.md Appendix A.
+ * Canonical public booking tab slugs (?tab=) - Docs/Resneo_Unified_Booking_Functionality.md Appendix A.
  * Used by /book/[slug], embed iframe, and support links; keep in sync everywhere.
  */
 

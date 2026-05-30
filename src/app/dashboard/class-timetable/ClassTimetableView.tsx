@@ -1127,7 +1127,7 @@ export function ClassTimetableView({
                               >
                                 <span
                                   className="h-10 w-1.5 shrink-0 rounded-full"
-                                  style={{ backgroundColor: ct?.colour ?? '#4E6B78' }}
+                                  style={{ backgroundColor: ct?.colour ?? '#003B6F' }}
                                 />
                                 <span className="w-14 shrink-0 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">
                                   {inst.start_time.slice(0, 5)}

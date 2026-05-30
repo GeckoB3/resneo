@@ -4,7 +4,7 @@ import {
   isDepositRefundAvailableAt,
 } from "@/lib/booking/cancellation-deadline";
 
-const BRAND = "#4E6B78";
+const BRAND = "#003B6F";
 const GREY_BG = "#F5F5F5";
 const AMBER_BG = "#FFF3CD";
 const AMBER_TEXT = "#664D03";
@@ -55,7 +55,7 @@ interface BaseTemplateOptions {
 }
 
 function baseUrl(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL || "https://www.reserveni.com";
+  return process.env.NEXT_PUBLIC_BASE_URL || "https://www.resneo.com";
 }
 
 /** Label + value row matching appointment card typography (table reservation emails). */
@@ -300,7 +300,7 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
 
     // Footer
     `<tr><td style="padding:20px 24px;border-top:1px solid #e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;color:${FOOTER_TEXT}">`,
-    `<p style="margin:0 0 8px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">ReserveNI</a></p>`,
+    `<p style="margin:0 0 8px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">Resneo</a></p>`,
     `<p style="margin:0;color:#aaa">${escapeHtml(footer)}</p>`,
     "</td></tr>",
 

@@ -19,9 +19,14 @@ export interface GroupAppointmentLine {
   booking_date: string;
   booking_time: string;
   practitioner_name: string;
+  /** Service name, including the chosen variant (e.g. "Cut & Blow Dry - Long hair"). */
   service_name: string;
-  /** e.g. "£45.00" or "Price on enquiry" */
+  /** Service + variant line price for this person, e.g. "£45.00" or "Price on enquiry". */
   price_display?: string | null;
+  /** Per-person add-on summary lines, pre-formatted e.g. "Olaplex treatment (+£10.00, +15 min)". */
+  addon_lines?: string[];
+  /** Per-person subtotal including service + variant + add-ons, e.g. "£55.00". Set only when it differs from `price_display`. */
+  subtotal_display?: string | null;
 }
 
 /** Event ticket line for confirmation email price breakdown. */

@@ -58,8 +58,6 @@ import {
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { EventInstanceDetailSheet, type EventInstanceSheetSelection } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
 import { ResourceInstanceDetailSheet } from '@/components/practitioner-calendar/ResourceInstanceDetailSheet';
-import { EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE } from '@/lib/booking/expanded-booking-toolbar-surfaces';
-import { EXP_BOOKING_ST_FOCUS } from '@/app/dashboard/bookings/expanded-booking-toolbar-classes';
 import { useToast } from '@/components/ui/Toast';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
@@ -140,7 +138,7 @@ import {
   showAttendanceConfirmedSupplementPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
-import { BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON } from '@/lib/table-management/booking-status-visual';
+import { bookingTransitionButtonSurface } from '@/lib/table-management/booking-status-visual';
 import {
   bookingStatusDisplayLabel,
   inferBookingRowModel,
@@ -1181,7 +1179,7 @@ function collectBookingRightColumnActionNodes({
         disabled={busy}
         style={buttonStyle}
         onClick={() => onStatus(b.id, 'Seated')}
-        className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
+        className={`${baseClass} rounded-lg font-semibold shadow-sm transition disabled:opacity-50 ${bookingTransitionButtonSurface('Seated')}`}
       >
         Reopen
       </button>,
@@ -1228,7 +1226,7 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={buttonStyle}
           onClick={() => onStatus(b.id, 'Booked')}
-          className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
+          className={`${baseClass} rounded-lg font-semibold shadow-sm transition disabled:opacity-50 ${bookingTransitionButtonSurface('Booked')}`}
         >
           Confirm
         </button>,
@@ -1242,7 +1240,7 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={buttonStyle}
           onClick={() => onStatus(b.id, 'Seated')}
-          className={`${baseClass} rounded-lg bg-emerald-600 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50`}
+          className={`${baseClass} rounded-lg font-semibold shadow-sm transition disabled:opacity-50 ${bookingTransitionButtonSurface('Seated')}`}
         >
           Start
         </button>,
@@ -1258,7 +1256,7 @@ function collectBookingRightColumnActionNodes({
             style={buttonStyle}
             onClick={() => onStatus(b.id, 'Booked')}
             aria-label="Undo start"
-            className={`${baseClass} rounded-lg font-semibold transition disabled:opacity-50 ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`}
+            className={`${baseClass} rounded-lg font-semibold transition disabled:opacity-50 ${bookingTransitionButtonSurface('Booked')}`}
             title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
           >
             {narrow ? 'Undo' : 'Undo start'}
@@ -1272,7 +1270,7 @@ function collectBookingRightColumnActionNodes({
           disabled={busy}
           style={buttonStyle}
           onClick={() => onStatus(b.id, 'Completed')}
-          className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${EXP_BOOKING_ST_FOCUS} ${EXP_BOOKING_LIFECYCLE_PRIMARY_SURFACE}`}
+          className={`${baseClass} rounded-lg font-semibold shadow-sm outline-none transition-colors duration-150 disabled:opacity-50 ${bookingTransitionButtonSurface('Completed')}`}
         >
           Complete
         </button>,
@@ -3999,7 +3997,11 @@ export function PractitionerCalendarView({
     }));
   }
 
-  async function quickPatchBooking(bookingId: string, body: Record<string, unknown>) {
+  async function quickPatchBooking(
+    bookingId: string,
+    body: Record<string, unknown>,
+    opts?: { skipRefetch?: boolean },
+  ) {
     setQuickActionId(bookingId);
     const gridBooking = allGridBookings.find((b) => b.id === bookingId) ?? null;
     const linkedOwnerVenueId = gridBooking?._linkedOwnerVenueId ?? null;
@@ -4096,7 +4098,7 @@ export function PractitionerCalendarView({
       if (body.status === 'Cancelled') {
         scheduleWaitlistAlertsRefresh();
       }
-      if (!arrivedOnlyPatch) {
+      if (!arrivedOnlyPatch && !opts?.skipRefetch) {
         void refetchBookingsList();
         if (linkedOwnerVenueId) void requestLinkedCalendarSync();
       } else if (linkedOwnerVenueId) {
@@ -4122,6 +4124,58 @@ export function PractitionerCalendarView({
     } finally {
       setQuickActionId(null);
     }
+  }
+
+  /**
+   * Apply a status / arrived patch to every booking in a multi-service group so the
+   * whole bar (background, stripe, badge and per-segment pills) transitions together.
+   * The server PATCH does not cascade non-cancel status across a group, so each
+   * sibling is patched; the list refetch runs once at the end.
+   */
+  async function quickPatchBookingCluster(items: Booking[], body: Record<string, unknown>) {
+    // Skip siblings that already match the target so the server is not asked to make a
+    // no-op transition (e.g. Booked -> Booked) that it would reject.
+    const targets = items.filter((item) => {
+      if (typeof body.status === 'string') return item.status !== body.status;
+      if (body.client_arrived !== undefined) {
+        return Boolean(item.client_arrived_at) !== Boolean(body.client_arrived);
+      }
+      return true;
+    });
+    if (targets.length === 0) return;
+    if (targets.length === 1) {
+      await quickPatchBooking(targets[0]!.id, body);
+      return;
+    }
+
+    /**
+     * Recolour the whole multi-service bar immediately and atomically. The bar's colour
+     * derives from its first segment, so every sibling's overlay is applied in a single
+     * state update here — using each item's own current status as the transition source —
+     * rather than relying on each `quickPatchBooking` to resolve the row independently.
+     */
+    setCalendarBookingOverlays((prev) => {
+      const next = { ...prev };
+      for (const item of targets) {
+        const optimistic =
+          typeof body.status === 'string'
+            ? overlayFromStatusTransition(
+                item.status as BookingStatus,
+                body.status as BookingStatus,
+                isTableReservationBooking(item),
+              )
+            : body.client_arrived !== undefined
+              ? overlayFromClientArrivedPatch(Boolean(body.client_arrived))
+              : {};
+        if (Object.keys(optimistic).length > 0) {
+          next[item.id] = mergeBookingRowOverlay(next[item.id] ?? {}, optimistic);
+        }
+      }
+      return next;
+    });
+
+    await Promise.all(targets.map((item) => quickPatchBooking(item.id, body, { skipRefetch: true })));
+    void refetchBookingsList();
   }
 
   function clearCalendarDragUi() {
@@ -6350,8 +6404,8 @@ export function PractitionerCalendarView({
                                         b={first}
                                         busy={qBusy}
                                         blockHeightPx={height}
-                                        onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                        onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                        onStatus={(_id, s) => void quickPatchBookingCluster(items, { status: s })}
+                                        onArrived={(_id, v) => void quickPatchBookingCluster(items, { client_arrived: v })}
                                         narrow={isOverlapLane}
                                         shellRowWidthPx={shellRowWidthPx}
                                         floating={false}

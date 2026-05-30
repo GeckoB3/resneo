@@ -10,7 +10,11 @@ import {
 describe('bookingCalendarBlockPalette', () => {
   it('maps lifecycle statuses to distinct stripe colours', () => {
     expect(bookingCalendarBlockPalette({ status: 'Booked' }).accent).toBe('#0369A1');
-    expect(bookingCalendarBlockPalette({ status: 'Confirmed' }).accent).toBe('#4338CA');
+    expect(bookingCalendarBlockPalette({ status: 'Confirmed' }).accent).toBe('#003B6F');
+    expect(bookingCalendarBlockPalette({ status: 'Confirmed' }).bg).toBe('#C6D8E9');
+    expect(bookingCalendarBlockPalette({ status: 'Booked' }).bg).not.toBe(
+      bookingCalendarBlockPalette({ status: 'Confirmed' }).bg,
+    );
     expect(bookingCalendarBlockPalette({ status: 'Seated' }).accent).toBe('#047857');
     expect(bookingCalendarBlockPalette({ status: 'Completed' }).accent).toBe('#4B5563');
     expect(bookingCalendarBlockPalette({ status: 'No-Show' }).accent).toBe('#DC2626');

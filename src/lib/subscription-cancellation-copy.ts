@@ -1,6 +1,6 @@
 /**
  * Public subscription cancellation wording aligned with Website Terms of Use §4.
- * Use wherever customers are told how they can cancel a ReserveNI subscription.
+ * Use wherever customers are told how they can cancel a Resneo subscription.
  */
 export const SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE =
   'Cancel anytime by giving 30 days\u2019 notice. Your subscription remains active until the end of the notice period.';

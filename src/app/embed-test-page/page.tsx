@@ -4,7 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { EmbedTestSalonSite } from './EmbedTestSalonSite';
 
-const PLUS1_DEV_EMAIL = 'plus1@reserveni.com';
+const PLUS1_DEV_EMAIL = 'plus1@resneo.com';
 
 export const metadata: Metadata = {
   title: 'Book online | Salon embed preview',

@@ -69,7 +69,7 @@ import {
   BOOKING_ATTENDANCE_CONFIRM_SPINNER,
   BOOKING_ATTENDANCE_UNDO_SPINNER,
   BOOKING_BOOKED_LIGHT_BUTTON,
-  BOOKING_START_PRIMARY_BUTTON_CLASSES,
+  bookingTransitionButtonSurface,
 } from '@/lib/table-management/booking-status-visual';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
 import { useOptionalDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
@@ -916,23 +916,13 @@ export function ExpandedBookingContent({
     }
   };
 
-  const forwardActionButtonClass = (action: { label: string; target: BookingStatus }) => {
-    const lbl = forwardPrimaryLabel(action.target, action.label);
-    if (lbl === 'Start') {
-      return `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold ${BOOKING_START_PRIMARY_BUTTON_CLASSES}`;
-    }
-    return `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold border border-transparent bg-brand-600 text-white shadow-sm shadow-brand-900/20 hover:bg-brand-700 focus:ring-brand-500/40 active:bg-brand-800`;
-  };
+  // Each lifecycle button previews the status the bar becomes when pressed.
+  const forwardActionButtonClass = (action: { label: string; target: BookingStatus }) =>
+    `${EXP_BOOKING_BTN} ${EXP_BOOKING_ST_FOCUS} font-semibold ${bookingTransitionButtonSurface(action.target)}`;
 
-  const revertToolbarButtonClass =
-    revertAction &&
-    effectiveBooking.status === 'Seated' &&
-    revertAction.target === 'Booked' &&
-    !tableStyle
-      ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON}`
-      : revertAction && effectiveBooking.status === 'Confirmed' && revertAction.target === 'Booked'
-        ? `${EXP_BOOKING_BTN} font-semibold ${BOOKING_BOOKED_LIGHT_BUTTON}`
-        : EXP_BOOKING_REVERT;
+  const revertToolbarButtonClass = revertAction
+    ? `${EXP_BOOKING_BTN} font-semibold ${bookingTransitionButtonSurface(revertAction.target)}`
+    : EXP_BOOKING_REVERT;
 
   const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [
     {

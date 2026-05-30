@@ -1,5 +1,5 @@
 /**
- * One-time script to create Stripe Products and Prices for ReserveNI billing.
+ * One-time script to create Stripe Products and Prices for Resneo billing.
  * Run with: npx tsx scripts/create-stripe-products.ts
  *
  * Prerequisites: STRIPE_SECRET_KEY must be set in the environment (or .env.local).
@@ -23,10 +23,10 @@ if (!secretKey) {
 const stripe = new Stripe(secretKey, { typescript: true });
 
 async function main() {
-  console.log('Creating Stripe Products and Prices for ReserveNI...\n');
+  console.log('Creating Stripe Products and Prices for Resneo...\n');
 
   const appointmentsProProduct = await stripe.products.create({
-    name: 'ReserveNI Appointments Pro',
+    name: 'Resneo Appointments Pro',
     description: 'Appointments Pro — unlimited calendars and users, 500 SMS/month included, £99/month.',
   });
 
@@ -41,7 +41,7 @@ async function main() {
   console.log(`Appointments Pro Price:   ${appointmentsProPrice.id}`);
 
   const appointmentsPlusProduct = await stripe.products.create({
-    name: 'ReserveNI Appointments Plus',
+    name: 'Resneo Appointments Plus',
     description: 'Appointments Plus — up to 5 calendars and 5 users, 250 SMS/month included, £49/month.',
   });
 
@@ -56,7 +56,7 @@ async function main() {
   console.log(`Appointments Plus Price:   ${appointmentsPlusPrice.id}`);
 
   const restaurantProduct = await stripe.products.create({
-    name: 'ReserveNI Restaurant',
+    name: 'Resneo Restaurant',
     description: 'Restaurant plan - unlimited calendars, table management, 500 SMS/month included. £79/month.',
   });
 
@@ -71,7 +71,7 @@ async function main() {
   console.log(`Restaurant Price:    ${restaurantPrice.id}`);
 
   const lightProduct = await stripe.products.create({
-    name: 'ReserveNI Appointments Light',
+    name: 'Resneo Appointments Light',
     description: 'Appointments Light — £20/month, one calendar, one login, 100 SMS/month included, 6p overage.',
   });
 
@@ -86,7 +86,7 @@ async function main() {
   console.log(`Appointments Light Price:   ${lightPrice.id}`);
 
   const smsProduct = await stripe.products.create({
-    name: 'ReserveNI SMS (metered)',
+    name: 'Resneo SMS (metered)',
     description: 'Metered SMS overage for Appointments and Restaurant plans (6p beyond included allowance).',
   });
 

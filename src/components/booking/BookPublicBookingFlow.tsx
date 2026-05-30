@@ -125,7 +125,7 @@ export function BookPublicBookingFlow({
     >
       {tabs.length > 1 && (
         <div className={`border-b border-slate-200 pb-2 ${embed ? 'space-y-2' : ''}`} aria-busy={tabPending}>
-          <div className={`flex flex-wrap items-center gap-2 ${embed ? 'justify-center' : ''}`}>
+          <div className="flex flex-wrap items-center justify-center gap-2">
             {tabs.map((t) => {
               const isActive = t.slug === activeSlug;
               return (
@@ -147,7 +147,7 @@ export function BookPublicBookingFlow({
             })}
           </div>
           {tabPending ? (
-            <div className={`flex ${embed ? 'justify-center' : ''}`}>
+            <div className="flex justify-center">
               <span className="text-xs text-slate-500" aria-live="polite">
                 Switching…
               </span>

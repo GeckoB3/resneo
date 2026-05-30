@@ -1,11 +1,11 @@
-# ReserveNI Unified Booking Functionality - Delivery Plan & Reference
+# Resneo Unified Booking Functionality - Delivery Plan & Reference
 
 > **Status (May 2026): substantially delivered.** This began as the four-sprint
 > delivery plan to bring Models C/D/E (events, classes, resources) to parity with
 > Models A/B. That parity work has **shipped** — multi-model venues run end-to-end
 > across public booking, staff tools, the unified calendar, bookings list/detail,
 > reports and dashboard home. See
-> `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
+> `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
 > for the current per-model review and any remaining polish items.
 >
 > The document is **retained as a reference**, not a to-do list. The parts that
@@ -18,7 +18,7 @@
 
 ## Normative references
 
-- **`Docs/ReserveNI_Booking_Models_Reference.md`** - Vocabulary for all six `BookingModel` values, public **flow components** (`BookingFlow`, `AppointmentBookingFlow`, `EventBookingFlow`, `ClassBookingFlow`, `ResourceBookingFlow`), and the distinction between **ticketed events** (`experience_events`) vs **calendar sessions** (`event_sessions`). Implementation and UI copy should stay aligned with that document.
+- **`Docs/Resneo_Booking_Models_Reference.md`** - Vocabulary for all six `BookingModel` values, public **flow components** (`BookingFlow`, `AppointmentBookingFlow`, `EventBookingFlow`, `ClassBookingFlow`, `ResourceBookingFlow`), and the distinction between **ticketed events** (`experience_events`) vs **calendar sessions** (`event_sessions`). Implementation and UI copy should stay aligned with that document.
 - **`Docs/archive/ReserveNI_Unified_Scheduling_Engine_Plan.md`** - Unified Scheduling Engine (USE) for Model B (archived — engine shipped; retained for architecture rationale).
 - **`Docs/PRD.md`** - Canonical product / pricing when **billing rules** for secondaries or tiers change (see **Billing and plan limits**).
 - This file - **delivery plan** for multi-model parity and C/D/E completeness.
@@ -70,7 +70,7 @@ A venue **onboards with exactly one primary bookable service type** (`venues.boo
 > **Historical context — written before delivery.** Retained to show the starting
 > point. See the status banner at the top of this document for what shipped.
 
-ReserveNI had Model A (`table_reservation`, complete) and Model B (`practitioner_appointment` / `unified_scheduling`, MVP shipped). Models C (`event_ticket`), D (`class_session`), and E (`resource_booking`) had database tables, availability engines, basic booking flow components, partial dashboard views, and venue API routes - but lacked staff CRUD parity, complete guest booking UX, comms/reminders, and attendee/roster management.
+Resneo had Model A (`table_reservation`, complete) and Model B (`practitioner_appointment` / `unified_scheduling`, MVP shipped). Models C (`event_ticket`), D (`class_session`), and E (`resource_booking`) had database tables, availability engines, basic booking flow components, partial dashboard views, and venue API routes - but lacked staff CRUD parity, complete guest booking UX, comms/reminders, and attendee/roster management.
 
 The goal was to bring C, D, E to parity with B (and operational completeness comparable to A/B where relevant), align post-signup onboarding with signup, and deliver **multi-model venues** end-to-end - including **reports, calendar, and dashboard home** - not only the public booking page and bookings list. **This has since been delivered** (May 2026).
 

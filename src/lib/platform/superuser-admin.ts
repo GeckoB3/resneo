@@ -260,9 +260,9 @@ export async function createPlatformSuperuserWithMagicLink(params: {
       `&type=magiclink` +
       `&next=${encodeURIComponent(nextPath)}`;
 
-    const subject = 'ReserveNI platform access';
+    const subject = 'Resneo platform access';
     const text = [
-      'You have been granted access to the ReserveNI platform dashboard (superuser).',
+      'You have been granted access to the Resneo platform dashboard (superuser).',
       '',
       'Open this link to sign in:',
       confirmUrl,
@@ -271,7 +271,7 @@ export async function createPlatformSuperuserWithMagicLink(params: {
     ].join('\n');
 
     const html = `
-      <p>You have been granted access to the <strong>ReserveNI</strong> platform dashboard (superuser).</p>
+      <p>You have been granted access to the <strong>Resneo</strong> platform dashboard (superuser).</p>
       <p><a href="${escapeHtml(confirmUrl)}">Sign in to the platform</a></p>
       <p style="font-size:12px;color:#64748b;">If you did not expect this email, contact your administrator.</p>
     `;

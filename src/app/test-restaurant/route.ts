@@ -293,7 +293,7 @@ export function GET() {
   </footer>
 
   <div class="powered-by">
-    Reservations powered by <a href="https://www.reserveni.com">ReserveNI</a>
+    Reservations powered by <a href="https://www.reserveni.com">Resneo</a>
   </div>
 
 </body>

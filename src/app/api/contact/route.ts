@@ -9,8 +9,8 @@ if (apiKey) {
   sgMail.setApiKey(apiKey);
 }
 
-const CONTACT_TO = process.env.CONTACT_TO?.trim() || 'hello@reserveni.com';
-const FROM = { email: 'hello@reserveni.com', name: 'ReserveNI' };
+const CONTACT_TO = process.env.CONTACT_TO?.trim() || 'hello@resneo.com';
+const FROM = { email: 'hello@resneo.com', name: 'Resneo' };
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -84,7 +84,7 @@ function buildNotificationHtml(data: ContactPayload): string {
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f8fafc">
 <tr><td style="padding:24px 16px">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
-<tr><td style="padding:24px;border-bottom:3px solid #4E6B78"><h1 style="margin:0;font-size:20px;color:#1e293b">New contact form enquiry</h1></td></tr>
+<tr><td style="padding:24px;border-bottom:3px solid #003B6F"><h1 style="margin:0;font-size:20px;color:#1e293b">New contact form enquiry</h1></td></tr>
 <tr><td style="padding:24px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${tds}</table></td></tr>
 </table>
 </td></tr></table>
@@ -162,11 +162,11 @@ export async function POST(request: NextRequest) {
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f8fafc">
 <tr><td style="padding:24px 16px">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
-<tr><td style="padding:24px;border-bottom:3px solid #4E6B78"><h1 style="margin:0;font-size:20px;color:#1e293b">Thanks for your interest in ReserveNI</h1></td></tr>
+<tr><td style="padding:24px;border-bottom:3px solid #003B6F"><h1 style="margin:0;font-size:20px;color:#1e293b">Thanks for your interest in Resneo</h1></td></tr>
 <tr><td style="padding:24px;font-size:15px;line-height:1.6;color:#1e293b">
 <p>Hi ${escapeHtml(data.name)},</p>
 <p>We've received your enquiry and will be in touch shortly.</p>
-<p>Best regards,<br>The ReserveNI Team</p>
+<p>Best regards,<br>The Resneo Team</p>
 </td></tr>
 </table>
 </td></tr></table>
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
       await sgMail.send({
         to: data.email,
         from: FROM,
-        subject: 'Thanks for your interest in ReserveNI',
+        subject: 'Thanks for your interest in Resneo',
         html: confirmationHtml,
       });
     } catch (err) {

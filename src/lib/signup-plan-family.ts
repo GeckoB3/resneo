@@ -16,4 +16,4 @@ export function pricingTierToSignupFamily(tier: string | null | undefined): Sign
 }
 
 export const SIGNUP_PLAN_CONFLICT_MESSAGE =
-  'Your account already has a ReserveNI plan. Sign in to the dashboard to manage your subscription. You cannot subscribe to both the Appointments plan and the Restaurant plan on one account. Contact support if you need to change plan type.';
+  'Your account already has a Resneo plan. Sign in to the dashboard to manage your subscription. You cannot subscribe to both the Appointments plan and the Restaurant plan on one account. Contact support if you need to change plan type.';

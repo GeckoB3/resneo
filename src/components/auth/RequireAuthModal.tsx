@@ -34,7 +34,7 @@ export function RequireAuthModal({
       onOpenChange={(next) => {
         if (!next) onClose?.();
       }}
-      title={title ?? (isBooking ? 'Continue with ReserveNI' : 'Sign in to continue')}
+      title={title ?? (isBooking ? 'Continue with Resneo' : 'Sign in to continue')}
       description={
         description ??
         (isBooking

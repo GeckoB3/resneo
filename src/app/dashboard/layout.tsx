@@ -208,10 +208,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="mx-auto flex max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <Pill variant="info" size="sm" className="mb-2 w-fit">
-                  ReserveNI support
+                  Resneo support
                 </Pill>
                 <p className="text-sm font-medium text-slate-900">
-                  ReserveNI support ({supportSession.superuserDisplayName}) is currently signed in to your account
+                  Resneo support ({supportSession.superuserDisplayName}) is currently signed in to your account
                   for troubleshooting. They can see your data and make changes.
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
@@ -259,7 +259,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </Pill>
                 <p className="min-w-0 text-sm text-rose-950">
                   {pricingTier === 'light'
-                    ? `Your free period has ended. Add a payment method to continue using ReserveNI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
+                    ? `Your free period has ended. Add a payment method to continue using Resneo at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
                     : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
                 </p>
               </div>

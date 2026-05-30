@@ -57,7 +57,7 @@ function randomUkE164(): string {
 function uniqueTestEmail(used: Set<string>): string {
   for (let attempt = 0; attempt < 500; attempt++) {
     const n = Math.floor(100 + Math.random() * 900);
-    const addr = `test${n}@reserveni.com`;
+    const addr = `test${n}@resneo.com`;
     if (!used.has(addr)) {
       used.add(addr);
       return addr;
@@ -299,7 +299,7 @@ async function main() {
 
     const email = uniqueTestEmail(usedEmails);
     const phone = randomUkE164();
-    const lastSeed = email.replace('@reserveni.com', '').slice(0, 80);
+    const lastSeed = email.replace('@resneo.com', '').slice(0, 80);
 
     const { guest } = await findOrCreateGuest(
       admin,

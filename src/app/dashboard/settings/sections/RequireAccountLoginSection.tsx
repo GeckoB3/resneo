@@ -55,7 +55,7 @@ export function RequireAccountLoginSection({ venue, onUpdate, isAdmin }: Props) 
     <SectionCard elevated>
       <SectionCard.Header
         eyebrow="Guest access"
-        title="Require ReserveNI sign-in to book"
+        title="Require Resneo sign-in to book"
         description="When enabled, guests must click a magic link and complete login before they can finish an online booking at your venue. Manage-booking links in confirmation emails are unchanged."
       />
       <SectionCard.Body className="space-y-3">

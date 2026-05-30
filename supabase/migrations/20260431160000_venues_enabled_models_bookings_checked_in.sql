@@ -1,5 +1,5 @@
 -- Multi-model foundation: secondary bookable types + attendance for C/D/E rosters.
--- See Docs/ReserveNI_Unified_Booking_Functionality.md (Database migrations).
+-- See Docs/Resneo_Unified_Booking_Functionality.md (Database migrations).
 
 ALTER TABLE venues
   ADD COLUMN IF NOT EXISTS enabled_models jsonb NOT NULL DEFAULT '[]'::jsonb;

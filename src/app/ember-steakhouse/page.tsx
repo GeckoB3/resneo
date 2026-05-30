@@ -32,7 +32,7 @@ const menuHighlights = [
 const details = [
   'Open Monday to Saturday',
   '12 Noon \u2013 10pm',
-  'Online booking via ReserveNI',
+  'Online booking via Resneo',
 ];
 
 export default function EmberSteakhousePage() {
@@ -110,7 +110,7 @@ export default function EmberSteakhousePage() {
             long lunches, and the kind of evening that deserves a second bottle.
           </p>
           <p className="mt-4 text-base leading-8 text-stone-300">
-            Every booking is powered by ReserveNI, giving guests instant availability, clear confirmations and a
+            Every booking is powered by Resneo, giving guests instant availability, clear confirmations and a
             smooth experience before they step through the door.
           </p>
         </div>
@@ -182,7 +182,7 @@ export default function EmberSteakhousePage() {
               style={{ border: 'none', overflow: 'hidden' }}
               scrolling="no"
               id="reserveni-widget"
-              title="ReserveNI booking widget for Ember Steakhouse"
+              title="Resneo booking widget for Ember Steakhouse"
             />
           </div>
         </div>
@@ -191,7 +191,7 @@ export default function EmberSteakhousePage() {
       <footer className="border-t border-amber-100/10 bg-[#120d0a] px-6 py-10">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm text-stone-400 sm:flex-row sm:items-center sm:justify-between">
           <p className="font-semibold uppercase tracking-[0.28em] text-amber-200">Ember Steakhouse</p>
-          <p>Online bookings powered by ReserveNI.</p>
+          <p>Online bookings powered by Resneo.</p>
         </div>
       </footer>
 

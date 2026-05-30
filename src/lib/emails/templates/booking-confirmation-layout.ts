@@ -21,7 +21,7 @@ import { escapeHtml, escapeHtmlMultiline, formatDate, formatTime } from './base-
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
-const ACCENT = '#4E6B78';
+const ACCENT = '#003B6F';
 const PAGE_BG = '#f0f2f5';
 const CARD_BG = '#ffffff';
 const CARD_BORDER = '#e2e8f0';
@@ -35,7 +35,7 @@ const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function baseUrl(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.reserveni.com';
+  return process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.resneo.com';
 }
 
 /** Extracts and returns first name; falls back to "there" for generic greeting. */
@@ -64,13 +64,28 @@ function dateTimeLine(booking: BookingEmailData): string {
 
 // ─── Card wrapper ─────────────────────────────────────────────────────────────
 
-function card(inner: string, paddingV = '28px'): string {
+function card(inner: string, paddingV = '28px', opts?: { bg?: string; border?: string }): string {
+  const bg = opts?.bg ?? CARD_BG;
+  const border = opts?.border ?? CARD_BORDER;
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
-    `style="margin:0 0 12px;background:${CARD_BG};border:1px solid ${CARD_BORDER};border-radius:16px;overflow:hidden">` +
+    `style="margin:0 0 12px;background:${bg};border:1px solid ${border};border-radius:16px;overflow:hidden">` +
     `<tr><td style="padding:${paddingV} 28px;font-family:${FONT}">` +
     inner +
     `</td></tr></table>`
+  );
+}
+
+// ─── Account portal callout (rendered as the final card, above the footer) ────
+
+const ACCOUNT_CALLOUT_BG = '#eef4fa';
+const ACCOUNT_CALLOUT_BORDER = '#d6e3ef';
+
+/** Wraps the provided account-link HTML in a centred, brand-tinted end-of-email callout. */
+function buildAccountCalloutInner(linkHtml: string): string {
+  return (
+    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${ACCENT};font-family:${FONT};text-align:center">Your Resneo account</p>` +
+    `<div style="text-align:center;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${linkHtml}</div>`
   );
 }
 
@@ -204,12 +219,6 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
   // Group: multiple services / people
   if (booking.group_appointments && booking.group_appointments.length > 0) {
     const itemRows = booking.group_appointments.map((g) => {
-      const priceCell = g.price_display?.trim()
-        ? `<td style="padding:14px 0;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
-          `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(g.price_display!.trim())}</p>` +
-          `</td>`
-        : `<td></td>`;
-
       const hasLabel = g.person_label?.trim();
       const hasPrac = g.practitioner_name?.trim();
       const subParts: string[] = [];
@@ -219,24 +228,59 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
         ? `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED}">${escapeHtml(subParts.join(' · '))}</p>`
         : '';
 
-      return (
+      // Per-person add-on lines (price is contained in each pre-formatted string).
+      const addonLinesHtml = (g.addon_lines ?? [])
+        .map(
+          (line) =>
+            `<p style="margin:6px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.45">+ ${escapeHtml(line)}</p>`,
+        )
+        .join('');
+
+      const priceTop = g.price_display?.trim()
+        ? `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(g.price_display.trim())}</p>`
+        : '';
+
+      // When add-ons apply, close the person block with an aligned subtotal row.
+      const hasSubtotal = Boolean(g.subtotal_display?.trim());
+      const firstRowBorder = hasSubtotal ? '' : `border-bottom:1px solid ${RULE};`;
+      const firstRowPadBottom = hasSubtotal ? '4px' : '14px';
+
+      const serviceRow =
         `<tr>` +
-        `<td style="padding:14px 0;border-bottom:1px solid ${RULE};vertical-align:top">` +
+        `<td style="padding:14px 0 ${firstRowPadBottom};${firstRowBorder}vertical-align:top">` +
         `<p style="margin:0;font-size:14px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(g.service_name)}</p>` +
         sub +
+        addonLinesHtml +
         `</td>` +
-        priceCell +
-        `</tr>`
-      );
+        `<td style="padding:14px 0 ${firstRowPadBottom};${firstRowBorder}text-align:right;vertical-align:top;white-space:nowrap">` +
+        priceTop +
+        `</td>` +
+        `</tr>`;
+
+      const subtotalRow = hasSubtotal
+        ? `<tr>` +
+          `<td style="padding:0 0 14px;border-bottom:1px solid ${RULE};vertical-align:top">` +
+          `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.05em">Subtotal</p>` +
+          `</td>` +
+          `<td style="padding:0 0 14px;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
+          `<p style="margin:0;font-size:14px;font-weight:700;color:${TEXT_DARK}">${escapeHtml(g.subtotal_display!.trim())}</p>` +
+          `</td>` +
+          `</tr>`
+        : '';
+
+      return serviceRow + subtotalRow;
     });
 
-    const totalRow = priceDisplay?.trim()
+    // The cell already carries a "Total" label, so drop any leading "Total:" prefix
+    // from the structured price text to avoid "Total  Total: £x".
+    const totalValue = priceDisplay?.trim().replace(/^Total:\s*/i, '') ?? '';
+    const totalRow = totalValue
       ? `<tr>` +
         `<td style="padding:14px 0 2px;vertical-align:top">` +
         `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">Total</p>` +
         `</td>` +
         `<td style="padding:14px 0 2px;text-align:right;vertical-align:top;white-space:nowrap">` +
-        `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">${escapeHtmlMultiline(priceDisplay.trim())}</p>` +
+        `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">${escapeHtmlMultiline(totalValue)}</p>` +
         `</td>` +
         `</tr>`
       : '';
@@ -469,10 +513,6 @@ export function renderBookingConfirmationDocumentHtml(input: {
   const bookingRefLine =
     `<p style="margin:20px 0 0;font-size:12px;color:${TEXT_FAINT};font-family:${FONT}">Booking ref: ${escapeHtml(bookingRef(booking.id))}</p>`;
 
-  const accountSection = blocks.postCtaAccountHtml?.trim()
-    ? `<div style="margin:10px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${blocks.postCtaAccountHtml}</div>`
-    : '';
-
   const detailsInner =
     confirmedPill +
     `<p style="margin:14px 0 0;font-size:18px;font-weight:700;color:${TEXT_DARK};font-family:${FONT}">${escapeHtml(detailsHeading)}</p>` +
@@ -481,8 +521,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
     detailRows +
     depositSection +
     customMessageSection +
-    bookingRefLine +
-    accountSection;
+    bookingRefLine;
 
   // ── Location card ──────────────────────────────────────────────────────────
 
@@ -503,16 +542,26 @@ export function renderBookingConfirmationDocumentHtml(input: {
     ? card(buildInfoCardInner('Cancellation policy', blocks.cancellationPolicy.trim()))
     : '';
 
+  // ── Account portal callout (final card, just above the footer) ─────────────
+
+  const accountCardHtml = blocks.postCtaAccountHtml?.trim()
+    ? card(buildAccountCalloutInner(blocks.postCtaAccountHtml), '22px', {
+        bg: ACCOUNT_CALLOUT_BG,
+        border: ACCOUNT_CALLOUT_BORDER,
+      })
+    : '';
+
   // ── Assemble page ──────────────────────────────────────────────────────────
 
   const base = baseUrl();
-  const footerText = `You received this email because you made a booking with ${escapeHtml(venue.name)} via ReserveNI.`;
+  const footerText = `You received this email because you made a booking with ${escapeHtml(venue.name)} via Resneo.`;
 
   const cardRows = [
     `<tr><td style="padding-bottom:0">${card(heroInner)}</td></tr>`,
     `<tr><td style="padding-bottom:0">${card(detailsInner)}</td></tr>`,
     ...(locationCardHtml ? [`<tr><td style="padding-bottom:0">${locationCardHtml}</td></tr>`] : []),
     ...(policyCardHtml   ? [`<tr><td style="padding-bottom:0">${policyCardHtml}</td></tr>`]   : []),
+    ...(accountCardHtml  ? [`<tr><td style="padding-bottom:0">${accountCardHtml}</td></tr>`]  : []),
   ].join('\n');
 
   return [
@@ -527,18 +576,13 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAGE_BG}">`,
     `<tr><td align="center" style="padding:32px 16px 24px">`,
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%">`,
-    // Wordmark
-    `<tr><td style="padding:0 4px 16px;text-align:center">`,
-    `<a href="${escapeHtml(base)}" target="_blank" ` +
-      `style="font-family:${FONT};font-size:14px;font-weight:700;letter-spacing:0.08em;color:${TEXT_FAINT};text-decoration:none">RESERVENI</a>`,
-    `</td></tr>`,
     // Cards
     cardRows,
     // Footer
     `<tr><td style="padding:20px 8px 32px;text-align:center">`,
     `<p style="margin:0 0 8px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.55">${footerText}</p>`,
     `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT}">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#4E6B78;font-weight:600;text-decoration:none">ReserveNI</a></p>`,
+      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">Resneo</a></p>`,
     `</td></tr>`,
     `</table>`,
     `</td></tr>`,
@@ -746,7 +790,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
       : '';
 
   const postCtaSection = opts.postCtaHtml?.trim()
-    ? `<div style="margin:14px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${opts.postCtaHtml}</div>`
+    ? `<div style="margin:24px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT};text-align:center">${opts.postCtaHtml}</div>`
     : '';
 
   const bodySection =
@@ -781,15 +825,11 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${PAGE_BG}">`,
     `<tr><td align="center" style="padding:32px 16px 24px">`,
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%">`,
-    `<tr><td style="padding:0 4px 16px;text-align:center">`,
-    `<a href="${escapeHtml(base)}" target="_blank" ` +
-      `style="font-family:${FONT};font-size:14px;font-weight:700;letter-spacing:0.08em;color:${TEXT_FAINT};text-decoration:none">RESERVENI</a>`,
-    `</td></tr>`,
     `<tr><td>${mainCard}</td></tr>`,
     `<tr><td style="padding:20px 8px 32px;text-align:center">`,
     `<p style="margin:0 0 8px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.55">${escapeHtml(footerText)}</p>`,
     `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT}">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#4E6B78;font-weight:600;text-decoration:none">ReserveNI</a></p>`,
+      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">Resneo</a></p>`,
     `</td></tr>`,
     `</table>`,
     `</td></tr>`,

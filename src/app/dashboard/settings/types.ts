@@ -33,7 +33,7 @@ export interface VenueSettings {
   table_management_enabled?: boolean;
   combination_threshold?: number;
   pricing_tier?: string;
-  /** `stripe` | `superuser_free` — how ReserveNI platform billing is satisfied. */
+  /** `stripe` | `superuser_free` — how Resneo platform billing is satisfied. */
   billing_access_source?: string | null;
   free_access_granted_at?: string | null;
   free_access_granted_by?: string | null;
@@ -62,7 +62,7 @@ export interface VenueSettings {
    */
   public_booking_area_mode?: 'auto' | 'manual';
   /**
-   * When true, guests must sign in to ReserveNI (magic link) before completing an online booking.
+   * When true, guests must sign in to Resneo (magic link) before completing an online booking.
    * See `venues.require_account_login_for_bookings`.
    */
   require_account_login_for_bookings?: boolean;

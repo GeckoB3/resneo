@@ -1,4 +1,4 @@
--- ReserveNI: Linked Accounts — audit hardening (see Docs/reserveni-linked-accounts-spec.md §4.4)
+-- Resneo: Linked Accounts — audit hardening (see Docs/reserveni-linked-accounts-spec.md §4.4)
 --
 -- The original cross-venue audit trigger (20260919120000_linked_accounts.sql)
 -- only wrote an account_link_audit_log row when the linked_apply_* RPCs had set

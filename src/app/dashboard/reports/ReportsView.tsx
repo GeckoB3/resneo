@@ -144,7 +144,7 @@ const DEFAULT_LOG_SCHEDULE: BookingLogEmailScheduleEntry[] = [
 ];
 
 /** Brand-aligned chart segments: brand-600, brand-400, emerald-500, amber-500, slate. */
-const COLORS = ['#4E6B78', '#6B8A9A', '#059669', '#f59e0b', '#d97706', '#64748b'];
+const COLORS = ['#003B6F', '#00C2C7', '#059669', '#f59e0b', '#d97706', '#64748b'];
 
 type RechartsModule = typeof import('recharts');
 
@@ -715,7 +715,7 @@ export function ReportsView({
                           <R.XAxis dataKey="source" tick={{ fontSize: 12 }} />
                           <R.YAxis tick={{ fontSize: 12 }} />
                           <R.Tooltip />
-                          <R.Bar dataKey="count" fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                          <R.Bar dataKey="count" fill="#003B6F" radius={[6, 6, 0, 0]} />
                         </R.BarChart>
                       </R.ResponsiveContainer>
                     )}
@@ -783,7 +783,7 @@ export function ReportsView({
                             <R.YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                             <R.Tooltip formatter={(value: number, name: string) => [value, name]} />
                             <R.Legend />
-                            <R.Bar dataKey="bookings" name={`${bookingWord}s`} fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                            <R.Bar dataKey="bookings" name={`${bookingWord}s`} fill="#003B6F" radius={[6, 6, 0, 0]} />
                             <R.Bar
                               dataKey="completed"
                               name="Arrived or completed"
@@ -820,7 +820,7 @@ export function ReportsView({
                               tick={{ fontSize: 11 }}
                             />
                             <R.Tooltip formatter={(value: number) => [value, `${bookingWord}s`]} />
-                            <R.Bar dataKey="count" fill="#4E6B78" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
+                            <R.Bar dataKey="count" fill="#003B6F" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
                           </R.BarChart>
                         </R.ResponsiveContainer>
                       )}

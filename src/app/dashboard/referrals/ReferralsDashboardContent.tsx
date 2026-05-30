@@ -16,7 +16,7 @@ export function ReferralsDashboardContent({ data }: { data: ReferralsDashboardDa
         subtitle={
           <>
             Share your referral code with another venue. When they sign up and their first paid invoice
-            settles, we&rsquo;ll add a <strong>{data.rewardDisplay} credit</strong> to your next ReserveNI
+            settles, we&rsquo;ll add a <strong>{data.rewardDisplay} credit</strong> to your next Resneo
             invoice and they&rsquo;ll get an extra free month on top of their 14-day trial.
           </>
         }

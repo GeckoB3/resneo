@@ -2,7 +2,7 @@ import sgMail from '@sendgrid/mail';
 
 const apiKey = process.env.SENDGRID_API_KEY;
 /** Verified sender domain address; display name is set per message (business name). */
-const defaultFromAddress = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@reserveni.com';
+const defaultFromAddress = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@resneo.com';
 
 if (apiKey) {
   sgMail.setApiKey(apiKey);

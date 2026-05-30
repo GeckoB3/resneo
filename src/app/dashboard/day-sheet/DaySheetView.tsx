@@ -1795,7 +1795,7 @@ export function DaySheetView({
 
       {/* â”€â”€ Print Footer (print only) â”€â”€ */}
       <div className="hidden print:block print:fixed print:bottom-0 print:left-0 print:right-0 print:border-t print:border-slate-200 print:py-2 print:px-6 print:text-xs print:text-slate-400 print:text-center">
-        Printed {new Date().toLocaleString()} - ReserveNI
+        Printed {new Date().toLocaleString()} - Resneo
       </div>
 
       {/* â”€â”€ Print styles â”€â”€ */}

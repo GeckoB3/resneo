@@ -175,7 +175,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           <p className="font-medium text-slate-800">Supported sources</p>
           <p className="mt-2">
             Most CSV exports from existing salon, clinic, or restaurant booking systems work. On the next step you map
-            each column to a ReserveNI field — manually or with AI suggestions — so the source platform does not need to
+            each column to a Resneo field — manually or with AI suggestions — so the source platform does not need to
             be recognised.
           </p>
         </div>

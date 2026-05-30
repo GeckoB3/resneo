@@ -35,7 +35,7 @@ import {
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
-import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
+import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { AppointmentsWelcomeStep } from '@/components/onboarding/AppointmentsWelcomeStep';
 import { AppointmentsDashboardStep } from '@/components/onboarding/AppointmentsDashboardStep';
@@ -2389,10 +2389,10 @@ export default function OnboardingPage() {
             <p className="mb-3 text-sm text-slate-600">
               Use this step to connect Stripe so you can <strong className="font-medium text-slate-800">accept payments from your customers</strong>{' '}
               (for example deposits, tickets, or paid bookings). Payments are processed by Stripe.{' '}
-              {RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
+              {RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
             </p>
             <p className="mb-4 text-sm text-slate-600">
-              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">ReserveNI subscription</strong>{' '}
+              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">Resneo subscription</strong>{' '}
               is billed separately. Manage your plan and payment method under{' '}
               <Link
                 href="/dashboard/settings?tab=plan"

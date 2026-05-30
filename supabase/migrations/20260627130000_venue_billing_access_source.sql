@@ -1,4 +1,4 @@
--- How ReserveNI platform subscription billing is satisfied (Stripe vs superuser-granted free access).
+-- How Resneo platform subscription billing is satisfied (Stripe vs superuser-granted free access).
 
 ALTER TABLE venues
   ADD COLUMN IF NOT EXISTS billing_access_source text NOT NULL DEFAULT 'stripe',

@@ -111,12 +111,12 @@ ALTER TABLE public.staff
 ALTER TABLE public.staff
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
--- Venue-level override: require a ReserveNI account session before public booking.
+-- Venue-level override: require a Resneo account session before public booking.
 ALTER TABLE public.venues
   ADD COLUMN IF NOT EXISTS require_account_login_for_bookings boolean NOT NULL DEFAULT false;
 
 COMMENT ON COLUMN public.venues.require_account_login_for_bookings IS
-  'When true, public booking flows require an authenticated ReserveNI account session.';
+  'When true, public booking flows require an authenticated Resneo account session.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS staff_user_venue_role_active_key
   ON public.staff (user_id, venue_id, role)

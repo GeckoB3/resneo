@@ -1,6 +1,6 @@
 # Multi-model tenancy - API and RLS audit checklist
 
-Reference: [ReserveNI_Unified_Booking_Functionality.md](ReserveNI_Unified_Booking_Functionality.md) §4.6.
+Reference: [Resneo_Unified_Booking_Functionality.md](Resneo_Unified_Booking_Functionality.md) §4.6.
 
 This document records **application-layer** controls already in place and **database** items to verify in Supabase. Update it when policies change.
 

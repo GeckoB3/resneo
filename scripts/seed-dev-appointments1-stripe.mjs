@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.local') });
 config();
 
-const EMAIL = 'appointments1@reserveni.com';
+const EMAIL = 'appointments1@resneo.com';
 const PASSWORD = 'Password123';
 const VENUE_NAME = 'Appointments1 (dev)';
 const VENUE_SLUG = 'appointments1-dev';

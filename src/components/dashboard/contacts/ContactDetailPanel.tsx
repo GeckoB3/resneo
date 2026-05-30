@@ -585,7 +585,7 @@ export function ContactDetailPanel({
             <button
               type="button"
               onClick={onOpenMerge}
-              className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-900 transition-colors hover:bg-amber-100 sm:text-[11px]"
+              className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-800 transition-colors hover:bg-brand-100 sm:text-[11px]"
             >
               Merge…
             </button>

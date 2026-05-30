@@ -15,7 +15,7 @@ export function buildWaitlistOfferBookingUrl(input: WaitlistOfferBookingUrlInput
   const slug = input.venueSlug?.trim();
   if (!slug) return null;
 
-  const base = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.reserveni.com').replace(/\/$/, '');
+  const base = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.resneo.com').replace(/\/$/, '');
   const params = new URLSearchParams();
   params.set('date', input.desiredDate);
   if (input.serviceId) {

@@ -3,9 +3,9 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'About ReserveNI - Booking management built in Northern Ireland',
+  title: 'About Resneo - The team behind the booking software',
   description:
-    'ReserveNI is booking management built in Holywood for Northern Ireland businesses. No commissions, no per-booking fees, total data ownership, and local support from the founders.',
+    'Resneo is booking management software built by three founders. No commissions, no per-booking fees, total data ownership, and honest support straight from the people who build it.',
 };
 
 const principles = [
@@ -18,7 +18,7 @@ const principles = [
   {
     title: 'Margin Protection',
     description:
-      'NI businesses should not lose hard-earned profits to global marketplace "success taxes".',
+      'Businesses should not lose hard-earned profits to global marketplace "success taxes".',
     icon: ShieldIcon,
   },
   {
@@ -36,7 +36,6 @@ const principles = [
 ];
 
 const businessTypes = [
-  'Restaurants & Cafés',
   'Hairdressers & Barbers',
   'Beauty & Aesthetic Clinics',
   'Gyms & Yoga Studios',
@@ -45,6 +44,7 @@ const businessTypes = [
   'Dog Groomers',
   'Photography Studios',
   'Tutors & Driving Instructors',
+  'Restaurants & Cafés',
 ];
 
 const fixes = [
@@ -52,7 +52,7 @@ const fixes = [
     eyebrow: 'Secured revenue',
     title: 'Wipe out no-shows with upfront payments',
     description:
-      'Built-in Stripe integration lets you take deposits or full payments at the point of booking. Funds go directly to your Stripe account. ReserveNI never holds your money.',
+      'Built-in Stripe integration lets you take deposits or full payments at the point of booking. Funds go directly to your Stripe account. Resneo never holds your money.',
   },
   {
     eyebrow: 'Predictable overheads',
@@ -76,14 +76,14 @@ const founders = [
     accentClass: 'from-brand-500 to-brand-700',
     summary: 'The operational and strategic backbone of the company.',
     body:
-      'John oversees the strategic and operational side of ReserveNI, ensuring our platform runs seamlessly every single day. With a strong background in business operations and compliance, he manages the behind-the-scenes structures, from payment security partnerships to long-term scaling. His focus is on building a stable, sustainable local company that NI businesses can rely on for years to come.',
+      'John oversees the strategic and operational side of Resneo, ensuring our platform runs seamlessly every single day. With a strong background in business operations and compliance, he manages the behind-the-scenes structures, from payment security partnerships to long-term scaling. His focus is on building a stable, sustainable company that businesses can rely on for years to come.',
   },
   {
     name: 'Andrew',
     initials: 'A',
     role: 'Co-Founder & Chief Technology Officer',
     accentClass: 'from-brand-500 to-brand-700',
-    summary: 'The technical architect behind ReserveNI, building from our Holywood office.',
+    summary: 'The technical architect behind Resneo, building from our Holywood office.',
     body:
       'A seasoned software engineer, Andrew builds and maintains our entire platform infrastructure right here in Holywood. He believes business software should be incredibly powerful on the inside but beautifully simple on the outside. Because Andrew owns the code, we don\u2019t rely on third-party developers, so we roll out updates, integrations, and features faster than global corporate alternatives.',
   },
@@ -92,9 +92,9 @@ const founders = [
     initials: 'R',
     role: 'Co-Founder & Head of Growth',
     accentClass: 'from-brand-500 to-brand-700',
-    summary: 'On a mission to help local independent businesses protect their margins.',
+    summary: 'On a mission to help independent businesses protect their margins.',
     body:
-      'Having spent years working closely with independent operators across NI, Ryan saw first-hand how global booking apps were draining local salons and clinics with unfair commissions and hidden fees. He handles partnerships, onboardings, and ensures that our platform is built entirely around the practical, day-to-day needs of our users.',
+      'Having spent years working closely with independent operators, Ryan saw first-hand how global booking apps were draining salons and clinics with unfair commissions and hidden fees. He handles partnerships, onboardings, and ensures that our platform is built entirely around the practical, day-to-day needs of our users.',
   },
 ];
 
@@ -105,7 +105,7 @@ export default function AboutPage() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex-shrink-0">
-            <Image src="/Logo.png" alt="ReserveNI" width={144} height={40} className="h-9 w-auto" priority />
+            <Image src="/Logo.png" alt="Resneo" width={144} height={40} className="h-9 w-auto" priority />
           </Link>
           <div className="flex items-center gap-3">
             <Link
@@ -131,26 +131,26 @@ export default function AboutPage() {
           className="absolute inset-0 opacity-30"
           style={{
             backgroundImage:
-              'radial-gradient(circle at 25% 25%, rgba(78,107,120,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(78,107,120,0.08) 0%, transparent 50%)',
+              'radial-gradient(circle at 25% 25%, rgba(0,59,111,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(0,59,111,0.08) 0%, transparent 50%)',
           }}
         />
         <div className="relative mx-auto max-w-4xl px-6 py-20 text-center sm:py-28 lg:py-32">
           <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-brand-200/60 bg-white/90 px-4 py-1.5 shadow-sm shadow-slate-200/40 backdrop-blur-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500 shadow-sm shadow-brand-600/40" />
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
-              About ReserveNI
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
+              About Resneo
             </p>
           </div>
           <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Built in Northern Ireland, for{' '}
+            Booking software, built for{' '}
             <span className="bg-gradient-to-r from-brand-600 to-brand-800 bg-clip-text text-transparent">
-              the businesses that built it
+              the businesses that rely on it
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
-            ReserveNI was born from a simple frustration: watching hard-working restaurants, salons,
-            clinics, studios and independent businesses across Northern Ireland lose time to admin
-            and margin to global software giants.
+            Resneo was born from a simple frustration: watching hard-working salons, clinics,
+            studios and independent businesses lose time to admin and margin to global software
+            giants.
           </p>
           <div className="mt-10 flex justify-center">
             <Link
@@ -171,12 +171,12 @@ export default function AboutPage() {
               Most booking systems today are either eye-wateringly expensive, overly complicated, or
               built for corporate markets somewhere else. They hit you with enterprise features you
               don&rsquo;t need, take marketplace commissions on clients you earned, and offer
-              &ldquo;support&rdquo; that doesn&rsquo;t have a clue how a business in Northern
-              Ireland actually operates.
+              &ldquo;support&rdquo; that doesn&rsquo;t have a clue how an independent business
+              actually operates.
             </p>
             <p className="font-medium text-slate-900">
-              ReserveNI is different. We are building booking management specifically for the NI
-              economy: simple to set up, straightforward to use, and priced fairly.
+              Resneo is different. We are building booking management specifically for independent
+              businesses: simple to set up, straightforward to use, and priced fairly.
             </p>
           </div>
         </div>
@@ -193,16 +193,16 @@ export default function AboutPage() {
           aria-hidden
         />
         <div className="relative mx-auto max-w-4xl px-6 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
             Our mission
           </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
             Manage your diary with zero fuss. Eliminate no-shows. Keep 100% of what you earn.
           </h2>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
-            Whether you run a busy restaurant in Belfast, a hair studio in Bangor, a clinic in
-            Lisburn, or a gym in Newry, ReserveNI gives you the exact tools you need to stay in
-            control of your time and your money.
+            Whether you run a hair studio, a busy clinic, a fitness studio, or a venue with a large
+            team, Resneo gives you the exact tools you need to stay in control of your time and your
+            money.
           </p>
           <blockquote className="mx-auto mt-10 max-w-2xl rounded-2xl border border-brand-200/60 bg-white px-6 py-6 text-left shadow-sm">
             <p className="text-base font-medium leading-relaxed text-slate-800 sm:text-lg">
@@ -218,8 +218,8 @@ export default function AboutPage() {
       <section className="bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
-              Why we built ReserveNI
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
+              Why we built Resneo
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
               The problems we set out to fix
@@ -237,7 +237,7 @@ export default function AboutPage() {
                 key={fix.title}
                 className="group flex flex-col rounded-2xl border border-slate-100 bg-white p-7 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
               >
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-700">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-700">
                   {fix.eyebrow}
                 </p>
                 <h3 className="mt-3 text-lg font-semibold text-slate-900">{fix.title}</h3>
@@ -252,7 +252,7 @@ export default function AboutPage() {
       <section className="bg-slate-50 py-20 sm:py-28">
         <div className="mx-auto grid max-w-5xl gap-12 px-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               How we operate
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
@@ -267,13 +267,13 @@ export default function AboutPage() {
             </p>
             <p>
               It means giving you total ownership of your data, with the freedom to export your
-              client history whenever you want. And it means hyper-local support. We are based
-              right here in Holywood, just a phone call or a short drive away when you need us.
+              client history whenever you want. And it means real support. We are based right here
+              in Holywood, just a phone call or an email away when you need us.
             </p>
             <p>
-              ReserveNI is designed around the way Northern Ireland businesses actually work: lean
-              teams, busy days, loyal customers, and absolutely no patience for software that gets
-              in the way.
+              Resneo is designed around the way independent businesses actually work: lean teams,
+              busy days, loyal customers, and absolutely no patience for software that gets in the
+              way.
             </p>
           </div>
         </div>
@@ -283,7 +283,7 @@ export default function AboutPage() {
       <section className="bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Who it&rsquo;s for
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
@@ -291,7 +291,7 @@ export default function AboutPage() {
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
               If your business depends on people booking a time, a service, a table or a space,
-              ReserveNI is built for you.
+              Resneo is built for you.
             </p>
           </div>
 
@@ -315,7 +315,7 @@ export default function AboutPage() {
       <section className="bg-slate-50 py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               What we stand for
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
@@ -341,10 +341,9 @@ export default function AboutPage() {
           </div>
 
           <p className="mx-auto mt-12 max-w-2xl text-center text-base leading-relaxed text-slate-600">
-            ReserveNI isn&rsquo;t trying to be a generic global directory. We&rsquo;re a practical,
-            local platform built to help Northern Ireland businesses grow entirely on their own
-            terms. We&rsquo;re proud to be building this here, and we&rsquo;re only getting
-            started.
+            Resneo isn&rsquo;t trying to be a generic global directory. We&rsquo;re a practical,
+            independent platform built to help businesses grow entirely on their own terms.
+            We&rsquo;re proud of what we&rsquo;re building, and we&rsquo;re only getting started.
           </p>
         </div>
       </section>
@@ -353,15 +352,15 @@ export default function AboutPage() {
       <section className="bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Meet the founders
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              The team behind ReserveNI
+              The team behind Resneo
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
-              ReserveNI was founded by three local entrepreneurs who combined their backgrounds in
-              business, technology and operations to build a better alternative for Northern Irish
+              Resneo was founded by three entrepreneurs who combined their backgrounds in
+              business, technology and operations to build a better alternative for independent
               businesses.
             </p>
           </div>
@@ -393,13 +392,13 @@ export default function AboutPage() {
           </div>
 
           <div className="mx-auto mt-14 max-w-3xl rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50 via-white to-brand-50/40 p-8 text-center shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Based in Holywood, Co Down
             </p>
             <p className="mt-3 text-base leading-relaxed text-slate-700">
               When something goes wrong, Ryan is on the phone, Andrew is on the code, and John is
               running the business. No offshore support centre, no faceless ticketing queue. Just
-              the three of us, in Northern Ireland, looking after Northern Ireland businesses.
+              the three of us, looking after the businesses that rely on us.
             </p>
           </div>
         </div>
@@ -435,20 +434,20 @@ export default function AboutPage() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 ReserveNI &middot; JAR 26 LTD (NI740269) &middot; 100a Main Street, Bangor,
+            &copy; 2026 Resneo &middot; JAR 26 LTD (NI740269) &middot; 100a Main Street, Bangor,
             BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/" className="transition-colors hover:text-slate-900">
               Home
             </Link>
-            <Link href="/signup" className="transition-colors hover:text-slate-900">
+            <Link href="/#pricing" className="transition-colors hover:text-slate-900">
               Sign up
             </Link>
             <Link href="/login" className="transition-colors hover:text-slate-900">
               Login
             </Link>
-            <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">
+            <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
               Contact
             </a>
             <Link href="/terms" className="transition-colors hover:text-slate-900">

@@ -312,7 +312,7 @@ export function DashboardHomeClient({
           <DashboardStatCard
             label={useAppointmentPhraseology ? 'Confirmed' : 'Attendance confirmed'}
             value={bookings > 0 ? `${confirmed}/${bookings}` : '—'}
-            color="emerald"
+            color="brand"
             sparklineValues={forecastSpark}
             subValue={
               bookings > 0 && attendanceConfirmedPct != null ? `${attendanceConfirmedPct}% of bookings` : 'No bookings today'
@@ -329,7 +329,7 @@ export function DashboardHomeClient({
             <DashboardStatCard
               label="Arriving soon"
               value={arrivingSoon}
-              color="violet"
+              color="brand"
               subValue={
                 tableFocusSecondariesEnabled
                   ? 'Table covers due in next 30 min'
@@ -340,7 +340,7 @@ export function DashboardHomeClient({
           <DashboardStatCard
             label="Next up"
             value={t.next_booking ? t.next_booking.time : '-'}
-            color="amber"
+            color="brand"
             subValue={
               t.next_booking
                 ? useAppointmentPhraseology

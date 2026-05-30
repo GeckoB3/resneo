@@ -13,10 +13,10 @@ export const EMAIL_GALLERY_DEMO_VENUE: VenueEmailData = {
   name: 'The Golden Whisk',
   address: '12 High Street, Belfast BT1 2AB',
   phone: '028 9000 0000',
-  logo_url: 'https://placehold.co/200x200/4E6B78/ffffff?text=GW',
+  logo_url: 'https://placehold.co/200x200/003B6F/ffffff?text=GW',
   website_url: 'https://example.com/golden-whisk',
   timezone: 'Europe/London',
-  booking_page_url: 'https://www.reserveni.com/book/golden-whisk',
+  booking_page_url: 'https://www.resneo.com/book/golden-whisk',
 };
 
 function enrichDemoBooking(base: BookingEmailData): BookingEmailData {
@@ -28,17 +28,17 @@ function enrichDemoBooking(base: BookingEmailData): BookingEmailData {
     deposit_status: base.deposit_status ?? 'Paid',
     manage_booking_link:
       base.manage_booking_link ??
-      'https://www.reserveni.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
+      'https://www.resneo.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
     confirm_cancel_link:
       base.confirm_cancel_link ??
-      'https://www.reserveni.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
+      'https://www.resneo.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
   };
 }
 
 const SHARED_EMAIL_OPTS = {
-  paymentLink: 'https://www.reserveni.com/pay?t=preview',
-  confirmLink: 'https://www.reserveni.com/confirm/preview',
-  cancelLink: 'https://www.reserveni.com/cancel/preview',
+  paymentLink: 'https://www.resneo.com/pay?t=preview',
+  confirmLink: 'https://www.resneo.com/confirm/preview',
+  cancelLink: 'https://www.resneo.com/cancel/preview',
   refundMessage: '£20.00 deposit refunded to your original payment method.',
   rebookLink: EMAIL_GALLERY_DEMO_VENUE.booking_page_url ?? null,
   paymentDeadline: '20 March 2026 at 17:00',
@@ -182,13 +182,13 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     email: 'new.staff@example.com',
     password: 'ChangeMeAfterLogin!',
     role: 'staff',
-    loginUrl: 'https://www.reserveni.com/login',
+    loginUrl: 'https://www.resneo.com/login',
   });
   items.push({
     id: 'staff-welcome',
     title: 'Staff welcome',
     subtitle: 'Dashboard credentials',
-    subject: 'Your ReserveNI dashboard login details',
+    subject: 'Your Resneo dashboard login details',
     html: staff.html,
   });
 

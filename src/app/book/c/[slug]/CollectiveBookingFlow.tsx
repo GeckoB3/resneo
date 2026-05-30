@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
+import { BookPublicBookingFlowSuspense } from '@/components/booking/BookPublicBookingFlowSuspense';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import type { VenuePublic } from '@/components/booking/types';
 import type { PublicCollective } from '@/lib/linked-accounts/collectives';
@@ -61,7 +61,7 @@ export function CollectiveBookingFlow({
               <p className="text-sm text-slate-500">with {selection.locked.name}</p>
             ) : null}
           </div>
-          <BookPublicBookingFlow
+          <BookPublicBookingFlowSuspense
             venue={selectedVenue}
             lockedPractitioner={selection.locked}
             accentColour={accent}

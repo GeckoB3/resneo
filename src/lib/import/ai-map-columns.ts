@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
 import type { SchemaField } from '@/lib/import/constants';
 
-const SYSTEM = `You are a data mapping assistant for ReserveNI, a booking platform.
-Your job is to map columns from a CSV export of another booking platform to ReserveNI's data schema.
+const SYSTEM = `You are a data mapping assistant for Resneo, a booking platform.
+Your job is to map columns from a CSV export of another booking platform to Resneo's data schema.
 You must return ONLY valid JSON with no additional text, explanation, or markdown.`;
 
 export type AiMappingRow = {
@@ -44,7 +44,7 @@ ${JSON.stringify(headers)}
 Sample data (first 5 rows):
 ${JSON.stringify(sampleRows.slice(0, 5), null, 2)}
 
-ReserveNI target fields:
+Resneo target fields:
 ${JSON.stringify(
     targetFields.map((f) => ({ key: f.key, label: f.label, required: f.required, type: f.type })),
     null,

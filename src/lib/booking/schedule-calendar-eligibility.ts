@@ -5,7 +5,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 const SCHEDULE_CALENDAR_MODELS: BookingModel[] = ['unified_scheduling', 'event_ticket', 'class_session', 'resource_booking'];
 
 /**
- * Whether `/dashboard/calendar` should be available - Docs/ReserveNI_Unified_Booking_Functionality.md §4.2 entry rule.
+ * Whether `/dashboard/calendar` should be available - Docs/Resneo_Unified_Booking_Functionality.md §4.2 entry rule.
  * Table-only venues (no C/D/E primary or secondary) use day sheet / table tools instead.
  */
 export function isVenueScheduleCalendarEligible(

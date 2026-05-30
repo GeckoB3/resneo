@@ -60,7 +60,7 @@ export async function finalizeCronRun(report: CronRunReport): Promise<CronFinali
       try {
         await sendEmail({
           to: opsTo,
-          subject: `ReserveNI cron alert: ${job}`,
+          subject: `Resneo cron alert: ${job}`,
           html: `<p>${summary}</p><pre>${JSON.stringify(results, null, 2)}</pre>`,
           text: `${summary}\n\n${JSON.stringify(results, null, 2)}`,
         });

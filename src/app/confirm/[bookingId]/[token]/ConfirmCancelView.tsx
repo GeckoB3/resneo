@@ -260,7 +260,7 @@ export function ConfirmCancelView({
     <div className="w-full max-w-md">
       {/* Brand */}
       <div className="mb-6">
-        <img src="/Logo.png" alt="ReserveNI" className="h-8 w-auto" />
+        <img src="/Logo.png" alt="Resneo" className="h-8 w-auto" />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -350,7 +350,7 @@ export function ConfirmCancelView({
 
       <p className="mt-4 text-center text-xs text-slate-400">
         <Link href="/" className="hover:text-brand-600">
-          Powered by ReserveNI
+          Powered by Resneo
         </Link>
       </p>
     </div>

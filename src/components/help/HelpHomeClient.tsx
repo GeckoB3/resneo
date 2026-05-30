@@ -44,7 +44,7 @@ export function HelpHomeClient({
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">How can we help?</h1>
         <p className="mt-2 max-w-2xl text-base text-slate-600">
-          Step-by-step guides for running your venue on ReserveNI: dashboard basics, restaurant tables and dining
+          Step-by-step guides for running your venue on Resneo: dashboard basics, restaurant tables and dining
           setup, appointment calendars and services, settings, billing, and fixes for common problems.
         </p>
         {audienceContext.mode === 'venue' ? (
@@ -94,7 +94,7 @@ export function HelpHomeClient({
       <div className="mt-12 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-slate-900">Still stuck?</h2>
         <p className="mt-1 text-sm text-slate-600">
-          From the dashboard, open <strong>Support</strong> to message the ReserveNI team, or review the{' '}
+          From the dashboard, open <strong>Support</strong> to message the Resneo team, or review the{' '}
           <Link href="/help/troubleshooting" className="font-semibold text-brand-700 hover:underline">
             Troubleshooting
           </Link>{' '}

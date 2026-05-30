@@ -842,7 +842,7 @@ export async function runImportExecuteBatch(
             fileId: row.file_id,
             rowNumber: row.row_number,
             code: 'duplicate_external_appointment_id',
-            message: `External appointment ID "${row.raw_external_appointment_id.trim()}" already exists in ReserveNI; the new row was skipped.`,
+            message: `External appointment ID "${row.raw_external_appointment_id.trim()}" already exists in Resneo; the new row was skipped.`,
           });
           skipped += 1;
           st.stagedRowIndex += 1;
@@ -1239,7 +1239,7 @@ export async function runImportExecuteBatch(
             fileId: f.id,
             rowNumber: rowNum,
             code: 'duplicate_external_appointment_id',
-            message: `External appointment ID "${targets.external_appointment_id.trim()}" already exists in ReserveNI; the new row was skipped.`,
+            message: `External appointment ID "${targets.external_appointment_id.trim()}" already exists in Resneo; the new row was skipped.`,
           });
           skipped += 1;
           st.bookingRowIndex += 1;
@@ -1652,8 +1652,8 @@ async function sendImportCompleteEmail(
   if (!to?.trim()) return;
 
   const name = (staff as { name?: string } | null)?.name ?? 'there';
-  const vname = (venue as { name?: string } | null)?.name ?? 'ReserveNI';
-  const subject = 'Your data import to ReserveNI is complete';
+  const vname = (venue as { name?: string } | null)?.name ?? 'Resneo';
+  const subject = 'Your data import to Resneo is complete';
   const undoDate = new Date(summary.undoUntil).toLocaleString('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',

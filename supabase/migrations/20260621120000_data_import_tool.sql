@@ -1,4 +1,4 @@
--- ReserveNI: data import tool — sessions, files, mappings, validation, undo audit, custom fields, storage.
+-- Resneo: data import tool — sessions, files, mappings, validation, undo audit, custom fields, storage.
 
 -- -----------------------------------------------------------------------------
 -- booking_source: historical imports

@@ -2,14 +2,14 @@ import sgMail from '@sendgrid/mail';
 import type { MessageChannel, Recipient, CompiledTemplate, TemplateVariables } from '../types';
 
 const apiKey = process.env.SENDGRID_API_KEY;
-const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'hello@reserveni.com';
+const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'hello@resneo.com';
 
 if (apiKey) {
   sgMail.setApiKey(apiKey);
 }
 
 function getBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+  return process.env.NEXT_PUBLIC_BASE_URL || 'https://www.resneo.com';
 }
 
 /**
@@ -35,7 +35,7 @@ function textToHtml(text: string): string {
       const cleanLabel = (_label as string).replace(/:\s*$/, '');
       return [
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0">',
-        '<tr><td style="background-color:#4E6B78;border-radius:8px;text-align:center">',
+        '<tr><td style="background-color:#003B6F;border-radius:8px;text-align:center">',
         `<a href="${url}" target="_blank" style="display:inline-block;padding:14px 28px;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">${cleanLabel}</a>`,
         '</td></tr></table>',
       ].join('');
@@ -45,7 +45,7 @@ function textToHtml(text: string): string {
   // Convert remaining bare URLs into clickable text links.
   const withLinks = withButtons.replace(
     /(?<!=["'])(https?:\/\/[^\s<>"']+)/g,
-    (url) => buttonUrls.has(url) ? url : `<a href="${url}" target="_blank" style="color:#4E6B78;text-decoration:underline">${url}</a>`,
+    (url) => buttonUrls.has(url) ? url : `<a href="${url}" target="_blank" style="color:#003B6F;text-decoration:underline">${url}</a>`,
   );
 
   const bodyHtml = withLinks.replace(/\n/g, '<br>\n');
@@ -59,13 +59,8 @@ function textToHtml(text: string): string {
     '<tr><td align="center" style="padding:24px 16px">',
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%">',
 
-    // Logo
-    '<tr><td style="padding:0 0 20px 0;border-bottom:3px solid #4E6B78">',
-    `<img src="${base}/Logo.png" alt="ReserveNI" width="120" style="height:auto;display:block" />`,
-    '</td></tr>',
-
     // Body
-    '<tr><td style="padding:24px 0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1e293b">',
+    '<tr><td style="padding:0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1e293b">',
     bodyHtml,
     '</td></tr>',
 
@@ -96,7 +91,7 @@ export class EmailChannel implements MessageChannel {
       await sgMail.send({
         to: email,
         from: fromEmail,
-        subject: template.subject ?? 'ReserveNI',
+        subject: template.subject ?? 'Resneo',
         text: template.body,
         html: template.html ?? textToHtml(template.body),
       });

@@ -6,7 +6,7 @@
 **Out of scope:** Restaurant-only surfaces (floor plan, table grid, dining waitlist, covers mode) except where shared infrastructure affects C/D/E venues.  
 **Audience:** Product, engineering, and founding-venue GTM.
 
-**Companion document:** [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md) — competitive benchmark, checkout/POS strategy, and appointment-first roadmap.
+**Companion document:** [Resneo-Appointments-Review-And-Roadmap.md](./Resneo-Appointments-Review-And-Roadmap.md) — competitive benchmark, checkout/POS strategy, and appointment-first roadmap.
 
 ---
 
@@ -63,8 +63,8 @@ Reserve NI ships **four non-restaurant booking models** on one platform. Recent 
 | Source | Use |
 |--------|-----|
 | **Codebase audit** | `src/app/dashboard/`, `src/app/book/`, `src/app/account/`, `src/app/manage/`, `src/app/api/venue/`, `src/app/api/booking/`, `src/app/api/account/`, `src/components/booking/`, `src/lib/availability/`, `src/lib/class-commerce/`, `src/lib/experience-events/` |
-| **Normative docs** | `Docs/ReserveNI_Unified_Booking_Functionality.md`, `Docs/ReserveNI_Booking_Models_Reference.md`, `Docs/CLASS_COMMERCE_PRODUCT_RULES.md`, `Docs/Embed_Public_Booking_URL_Contract.md` |
-| **Companion review** | `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` — appointments as benchmark |
+| **Normative docs** | `Docs/Resneo_Unified_Booking_Functionality.md`, `Docs/Resneo_Booking_Models_Reference.md`, `Docs/CLASS_COMMERCE_PRODUCT_RULES.md`, `Docs/Embed_Public_Booking_URL_Contract.md` |
+| **Companion review** | `Docs/Resneo-Appointments-Review-And-Roadmap.md` — appointments as benchmark |
 | **Prior unified booking plan** | Sprint parity targets for C/D/E vs Model B |
 
 Maturity key throughout: **● Complete** · **◐ Partial** · **○ Missing**
@@ -87,7 +87,7 @@ Where C/D/E match or exceed appointments, that is called out explicitly (classes
 
 ## 3. Booking models and terminology
 
-From `src/types/booking-models.ts` and `Docs/ReserveNI_Booking_Models_Reference.md`:
+From `src/types/booking-models.ts` and `Docs/Resneo_Booking_Models_Reference.md`:
 
 | Enum | Model | Primary staff surface | Public flow component |
 |------|-------|----------------------|------------------------|
@@ -442,7 +442,7 @@ Code reference — guest modify gate:
   const showGuestModify = canModify && !isCde && (isAppointment || isTableBooking);
 ```
 
-**Product rule (locked):** `Docs/ReserveNI_Unified_Booking_Functionality.md` — guest modify (change time) **out of v1** for C/D/E unless aligned with appointment reschedule shipping.
+**Product rule (locked):** `Docs/Resneo_Unified_Booking_Functionality.md` — guest modify (change time) **out of v1** for C/D/E unless aligned with appointment reschedule shipping.
 
 ### 8.4 Cancellation and refunds
 
@@ -674,9 +674,9 @@ Horizon: **May 2026 → May 2027**. Phases align with appointments review where 
 
 | Document | Relevance |
 |----------|-----------|
-| [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md) | Appointments benchmark, competitive set, roadmap |
-| [ReserveNI_Unified_Booking_Functionality.md](./ReserveNI_Unified_Booking_Functionality.md) | C/D/E parity programme, refund policy, staff-created bookings |
-| [ReserveNI_Booking_Models_Reference.md](./ReserveNI_Booking_Models_Reference.md) | Enum vocabulary, flow component names |
+| [Resneo-Appointments-Review-And-Roadmap.md](./Resneo-Appointments-Review-And-Roadmap.md) | Appointments benchmark, competitive set, roadmap |
+| [Resneo_Unified_Booking_Functionality.md](./Resneo_Unified_Booking_Functionality.md) | C/D/E parity programme, refund policy, staff-created bookings |
+| [Resneo_Booking_Models_Reference.md](./Resneo_Booking_Models_Reference.md) | Enum vocabulary, flow component names |
 | [CLASS_COMMERCE_PRODUCT_RULES.md](./CLASS_COMMERCE_PRODUCT_RULES.md) | Credits, courses, memberships, cart atomicity |
 | [Embed_Public_Booking_URL_Contract.md](./Embed_Public_Booking_URL_Contract.md) | Public tab URLs |
 | [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./UI_EXCELLENCE_REVIEW_AND_PLAN.md) | Shared Dialog/Sheet for modify surfaces |

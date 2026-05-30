@@ -3,7 +3,7 @@
 import { useId, type ReactNode } from 'react';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 
-const brand = '#3d5662';
+const brand = '#00305C';
 const brandLight = '#e8f0f2';
 const slate = '#64748b';
 const slateDark = '#0f172a';
@@ -703,7 +703,7 @@ function PaymentsFlowSvg() {
         </g>
       ))}
       <text x="310" y="140" textAnchor="middle" fill={slate} fontSize="9">
-        Payments flow (concept) — no card data stored in ReserveNI
+        Payments flow (concept) — no card data stored in Resneo
       </text>
     </svg>
   );

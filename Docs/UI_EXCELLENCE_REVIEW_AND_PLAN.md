@@ -1,9 +1,9 @@
-# ReserveNI UI Excellence Review & Improvement Plan
+# Resneo UI Excellence Review & Improvement Plan
 
 **Version:** 1.0  
 **Date:** 18 May 2026  
 **Scope:** Full product UI — marketing site, venue staff dashboard, public booking flows, customer account portal, onboarding/signup, help centre, platform super-admin, and embed widget.  
-**Goal:** Bring ReserveNI to the polish, professionalism, and ease of use of the best booking-management software in market (SevenRooms, Resy, Toast Tables, Fresha, Square Appointments, Mindbody, Calendly-class experiences).
+**Goal:** Bring Resneo to the polish, professionalism, and ease of use of the best booking-management software in market (SevenRooms, Resy, Toast Tables, Fresha, Square Appointments, Mindbody, Calendly-class experiences).
 
 ---
 
@@ -25,7 +25,7 @@
 
 ## 1. Executive summary
 
-ReserveNI has grown from a restaurant-focused MVP into a **multi-model booking platform** (table reservations, appointments, classes, events, resources) with genuinely sophisticated operational surfaces: practitioner calendar, table grid, floor plan editor, day sheet, CRM contacts, import tooling, and Stripe-native billing. The product already demonstrates **strong domain thinking** and several emerging UI foundations (CSS design tokens, dashboard layout primitives, skeleton loaders, mobile safe-area handling).
+Resneo has grown from a restaurant-focused MVP into a **multi-model booking platform** (table reservations, appointments, classes, events, resources) with genuinely sophisticated operational surfaces: practitioner calendar, table grid, floor plan editor, day sheet, CRM contacts, import tooling, and Stripe-native billing. The product already demonstrates **strong domain thinking** and several emerging UI foundations (CSS design tokens, dashboard layout primitives, skeleton loaders, mobile safe-area handling).
 
 However, the front end today reflects **rapid feature velocity more than a unified product design language**. There is no shared component library for buttons, inputs, modals, or menus; styling is applied ad hoc across ~375 TSX files; settings and legacy sections still use divergent colour scales (`neutral-*` vs `slate-*`); and complex workflows (multi-model nav, calendar cards, long settings scroll) create **cognitive load** that best-in-class competitors avoid through ruthless information architecture and repeatable patterns.
 
@@ -55,9 +55,9 @@ This review combined:
 
 ## 3. Competitive benchmark framework
 
-Best-in-class booking software excels on six dimensions. ReserveNI should score itself against each (current rough scores: **3 = adequate**, **4 = good**, **5 = best-in-class**).
+Best-in-class booking software excels on six dimensions. Resneo should score itself against each (current rough scores: **3 = adequate**, **4 = good**, **5 = best-in-class**).
 
-| Dimension | What “5” looks like | ReserveNI today (est.) | Primary gap |
+| Dimension | What “5” looks like | Resneo today (est.) | Primary gap |
 |-----------|---------------------|------------------------|-------------|
 | **Clarity** | One obvious primary action per screen; terminology matches the venue’s business | 3.5 | Multi-model nav; dense toolbars; mixed labels (Appointments vs Bookings) |
 | **Speed** | Sub-100ms perceived interactions; optimistic UI; minimal full-page reloads | 3.5 | Many API round-trips; some loading states; calendar/toolbar complexity |
@@ -73,7 +73,7 @@ Best-in-class booking software excels on six dimensions. ReserveNI should score 
 - **Classes / resources:** Mindbody — timetable clarity, roster actions, capacity at a glance.
 - **Guest booking:** Calendly, Acuity — ruthless step reduction, instant availability feedback.
 
-ReserveNI’s **strategic advantage** is serving **NI hospitality + multi-model** in one product. The UI programme must **simplify the multi-model story** rather than expose every model equally in navigation.
+Resneo’s **strategic advantage** is serving **NI hospitality + multi-model** in one product. The UI programme must **simplify the multi-model story** rather than expose every model equally in navigation.
 
 ---
 
@@ -147,7 +147,7 @@ This is **ahead of many early-stage B2B products** and should be preserved and e
 
 **Impact:** Every new feature reimplements focus traps, escape handling, z-index stacking, and disabled states differently. Visual drift is inevitable.
 
-**Best-in-class approach:** A thin design-system layer (recommend **Radix UI primitives + Tailwind**, e.g. shadcn-style ownership) with ReserveNI tokens applied once.
+**Best-in-class approach:** A thin design-system layer (recommend **Radix UI primitives + Tailwind**, e.g. shadcn-style ownership) with Resneo tokens applied once.
 
 ---
 
@@ -371,7 +371,7 @@ This is **ahead of many early-stage B2B products** and should be preserved and e
 
 Current maturity (Brad Frost / Design System Maturity Model adapted):
 
-| Stage | Description | ReserveNI |
+| Stage | Description | Resneo |
 |-------|-------------|-----------|
 | 1. Informal | Ad hoc styles | **Most of codebase** |
 | 2. Structured | Tokens + documentation | **`globals.css`, dashboard primitives** |
@@ -470,7 +470,7 @@ Phases 2–4 can overlap once Phase 1 primitives exist for each stream.
 
 **Recommendation:** Add `@radix-ui/react-dialog`, `dropdown-menu`, `popover`, `tabs`, `tooltip`, `switch`, `select` (or full shadcn init with Tailwind v4).
 
-**Why not continue custom-only:** ReserveNI already has 50+ hand-rolled overlays. Radix provides focus trap, `aria-*`, and pointer-outside behaviour that would take months to replicate reliably.
+**Why not continue custom-only:** Resneo already has 50+ hand-rolled overlays. Radix provides focus trap, `aria-*`, and pointer-outside behaviour that would take months to replicate reliably.
 
 **Migration rule:** No new bespoke modals. Existing modals migrate when touched or by directory (booking → settings → dashboard).
 
@@ -558,7 +558,7 @@ ACCOUNT
 
 - `Cmd+K` / `Ctrl+K` palette: jump to page, create booking, search guest.
 - Libraries: `cmdk` pattern or lightweight custom.
-- Positions ReserveNI alongside Fresha/Square for keyboard-heavy front-desk staff.
+- Positions Resneo alongside Fresha/Square for keyboard-heavy front-desk staff.
 
 **Exit criteria:** Sidebar items ≤ 9 visible for typical appointments venue; usability test with 2 non-technical staff users completing 5 tasks in &lt; 3 minutes each.
 
@@ -621,7 +621,7 @@ Actions (overflow): Start · Message · Edit · Cancel
 │ └─────────────────────────────────┘ │
 │ Summary card (sticky desktop)       │
 └─────────────────────────────────────┘
-│ Powered by ReserveNI (subtle)       │
+│ Powered by Resneo (subtle)       │
 └─────────────────────────────────────┘
 ```
 
@@ -672,10 +672,10 @@ Actions (overflow): Start · Message · Edit · Cancel
 Per-route `metadata` in App Router:
 
 ```typescript
-export const metadata = { title: 'Bookings · Plus 1 · ReserveNI' };
+export const metadata = { title: 'Bookings · Plus 1 · Resneo' };
 ```
 
-Template in root: `%s · ReserveNI`.
+Template in root: `%s · Resneo`.
 
 #### B. Icon system
 
@@ -784,7 +784,7 @@ Non-exhaustive list of bespoke overlays to migrate to `Dialog`/`Sheet`:
 
 ## Summary
 
-ReserveNI’s UI strength is **deep operational functionality** with an emerging dashboard visual language and thoughtful mobile conventions. The path to best-in-class is not more features—it is **consistency, simplification, and obsessive clarity under pressure**.
+Resneo’s UI strength is **deep operational functionality** with an emerging dashboard visual language and thoughtful mobile conventions. The path to best-in-class is not more features—it is **consistency, simplification, and obsessive clarity under pressure**.
 
 **The single most important investment is Phase 1: a real component layer** built on accessible primitives, fed by the existing CSS tokens, and enforced through CI and PR discipline. Everything else—navigation, calendar density, guest funnel polish—compounds from that foundation.
 

@@ -13,7 +13,7 @@ export const RESERVE_NI_SUBSCRIPTION_PURPOSE = {
   CLASS_MEMBERSHIP: 'class_membership',
 } as const;
 
-export type ReserveNiPaymentIntentPurpose =
+export type ResneoPaymentIntentPurpose =
   (typeof RESERVE_NI_PI_PURPOSE)[keyof typeof RESERVE_NI_PI_PURPOSE];
 
 export type ClassCreditLedgerReason =

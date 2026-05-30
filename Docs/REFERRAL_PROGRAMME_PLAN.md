@@ -1,4 +1,4 @@
-# ReserveNI Referral Programme — Implementation Plan
+# Resneo Referral Programme — Implementation Plan
 
 **Status:** Proposed (no code written yet)
 **Date:** 2026-05-27
@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-Allow existing ReserveNI customers ("venues") to refer new venues. Both referrer and referee receive **one free month** of their subscription:
+Allow existing Resneo customers ("venues") to refer new venues. Both referrer and referee receive **one free month** of their subscription:
 
 - **Referee** — gets an extended trial: the standard 14-day free trial **plus** a 30-day referral month, applied **before** the first paid invoice.
 - **Referrer** — receives a one-month credit on their Stripe customer balance, applied **only after the referee's first paid invoice settles successfully**.
@@ -362,7 +362,7 @@ All checks run server-side inside the `referrals` row creation in §5.4. Failure
 
 ## 9. VAT and accountancy
 
-ReserveNI's headline prices already include VAT (£20 / £49 / £79 / £99). The referral reward equals the referrer's full inc-VAT monthly price, applied as a Stripe customer balance credit. A £79 Restaurant credit fully covers a £79 invoice line.
+Resneo's headline prices already include VAT (£20 / £49 / £79 / £99). The referral reward equals the referrer's full inc-VAT monthly price, applied as a Stripe customer balance credit. A £79 Restaurant credit fully covers a £79 invoice line.
 
 - Document on the Refer & Earn page: *"Reward is applied as a credit on your next invoice. The credit is the full monthly price of your plan."*
 - Per-tier pence amounts are exposed via env vars (§10) so finance can adjust without a code release if pricing ever changes.
@@ -462,7 +462,7 @@ Phased optionality:
 
 **Resolved:**
 - Pricing: £20 / £49 / £99 (Appointments Light / Plus / Pro) and £79 (Restaurant) — confirmed by product. Codebase constants in [src/lib/pricing-constants.ts](../src/lib/pricing-constants.ts) match.
-- VAT: ReserveNI prices already include VAT. Reward equals full inc-VAT monthly price.
+- VAT: Resneo prices already include VAT. Reward equals full inc-VAT monthly price.
 
 ---
 

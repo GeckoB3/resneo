@@ -48,7 +48,7 @@ export function WelcomeStep({ onContinue }: Props) {
           </svg>
         </div>
         <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900">Welcome to ReserveNI</h2>
+          <h2 className="text-lg font-bold text-slate-900">Welcome to Resneo</h2>
           <p className="mt-1 text-sm text-slate-500">
             Let&apos;s get your restaurant ready to take online bookings. This takes about 10 minutes and
             every step is skippable, and you can always finish later from your dashboard.

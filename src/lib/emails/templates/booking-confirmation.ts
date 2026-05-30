@@ -69,7 +69,7 @@ export function renderBookingConfirmation(
   const accountPortal =
     booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
   const postCtaAccountHtml = accountPortal
-    ? `<p style="margin:0;font-size:14px;line-height:1.55;color:#475569">All your bookings: <a href="${escapeHtml(accountPortal)}" style="color:#4E6B78;font-weight:600">View or sign in to your account</a></p>`
+    ? `<p style="margin:0;font-size:14px;line-height:1.55;color:#475569">All your bookings: <a href="${escapeHtml(accountPortal)}" style="color:#003B6F;font-weight:600">View or sign in to your account</a></p>`
     : null;
 
   let preambleHtml = "";
@@ -111,6 +111,12 @@ export function renderBookingConfirmation(
         textParts.push(
           `* ${g.person_label}: ${formatDate(g.booking_date)} at ${formatTime(g.booking_time)}. ${g.service_name} with ${g.practitioner_name}${g.price_display ? ` (${g.price_display})` : ""}`,
         );
+        for (const addon of g.addon_lines ?? []) {
+          textParts.push(`    + ${addon}`);
+        }
+        if (g.subtotal_display) {
+          textParts.push(`    Subtotal: ${g.subtotal_display}`);
+        }
       }
       const structuredGroup = confirmationStructuredPriceText(booking);
       if (structuredGroup) {

@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import {
-  RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
-  RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD,
+  RESNEO_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
+  RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD,
 } from "@/lib/booking-funds-copy";
 import { SMS_INCLUDED_RESTAURANT } from "@/lib/billing/sms-allowance";
 import { RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
@@ -12,13 +12,13 @@ import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fe
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 
 export const metadata: Metadata = {
-  title: "ReserveNI for Restaurants | Table Booking & Deposit Protection for NI",
+  title: "Resneo for Restaurants | Table Booking & Deposit Protection",
   description:
-    "Fill more covers with 24/7 online booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan. ReserveNI for restaurants in Northern Ireland.",
+    "Fill more covers with 24/7 online booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan.",
   openGraph: {
-    title: "ReserveNI for Restaurants",
+    title: "Resneo for Restaurants",
     description:
-      "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan. Built for Northern Ireland.",
+      "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan.",
     type: "website",
   },
 };
@@ -79,7 +79,7 @@ const ownerBenefits = [
   },
   {
     title: "Cover your risk with deposits",
-    description: `Require a deposit or pre-payment where it suits you. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
+    description: `Require a deposit or pre-payment where it suits you. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}`,
     icon: ShieldPoundIcon,
   },
   {
@@ -121,7 +121,7 @@ const howItWorks = [
     step: "1",
     title: "Shape your venue",
     description:
-      "Services, openings, seating, deposit rules: set the guardrails once. Bring your menus and policies; ReserveNI adapts.",
+      "Services, openings, seating, deposit rules: set the guardrails once. Bring your menus and policies; Resneo adapts.",
   },
   {
     step: "2",
@@ -169,12 +169,12 @@ const features = [
   {
     title: "Online booking page + widget embed",
     description:
-      "Branded journeys on ReserveNI-hosted pages or tucked into your own site without redirect fatigue.",
+      "Branded journeys on Resneo-hosted pages or tucked into your own site without redirect fatigue.",
   },
   {
     title: "Deposits and pre-payments via Stripe Connect",
     description:
-      "Charge per-booking or per-head; payouts route to your connected account. ReserveNI never holds booking money.",
+      "Charge per-booking or per-head; payouts route to your connected account. Resneo never holds booking money.",
   },
   {
     title: "Confirm-or-cancel by SMS",
@@ -197,9 +197,9 @@ const features = [
       "Engineered around sensible data stewardship with row-level safeguards so rival venues never see yours.",
   },
   {
-    title: "Northern Ireland support humans",
+    title: "Real support humans",
     description:
-      "Real people locally when you hit a snag setting up payouts, timings, or comms, not an endless FAQ maze.",
+      "Real people when you hit a snag setting up payouts, timings, or comms, not an endless FAQ maze.",
   },
 ];
 
@@ -210,11 +210,11 @@ const faqs = [
   },
   {
     q: "We already pay for another booking stack. Why switch?",
-    a: "ReserveNI is built for independent Northern Ireland operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack, without per-cover commission.",
+    a: "Resneo is built for independent operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack, without per-cover commission.",
   },
   {
     q: "How do deposits work for restaurants?",
-    a: `Connect Stripe in minutes. When a guest pays, ${RESERVENI_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON} You define policy, amounts, and when charges apply.`,
+    a: `Connect Stripe in minutes. When a guest pays, ${RESNEO_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON} You define policy, amounts, and when charges apply.`,
   },
   {
     q: "Can we still take walk-ins and phone bookings?",
@@ -226,7 +226,7 @@ const faqs = [
   },
   {
     q: "Do you cover cafés and pubs with food?",
-    a: "Yes. If you take timed reservations, covers, or mixed service models, ReserveNI flexes to match: single venue today, built for the founders we know best.",
+    a: "Yes. If you take timed reservations, covers, or mixed service models, Resneo flexes to match: single venue today, built for the founders we know best.",
   },
   {
     q: "How fast can we go live?",
@@ -261,7 +261,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <a
@@ -290,7 +290,7 @@ function Hero() {
         className="absolute inset-0 opacity-60"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 18% 18%, rgba(78,107,120,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(78,107,120,0.10) 0%, transparent 50%)",
+            "radial-gradient(circle at 18% 18%, rgba(0,59,111,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(0,59,111,0.10) 0%, transparent 50%)",
         }}
       />
       <div
@@ -306,7 +306,7 @@ function Hero() {
         <div className="lg:col-span-3 lg:pt-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-            Built for Northern Ireland hospitality teams
+            Built for hospitality teams
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
             Take every booking.
@@ -472,14 +472,14 @@ function ProblemSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Sound familiar?</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Sound familiar?</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Hospitality never stops.
             <br className="hidden sm:block" />
             <span className="text-slate-500">Busy service still needs perfect information.</span>
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            You are choreographing heat, timing, and guest emotion in real time. ReserveNI keeps booking, money, and guest
+            You are choreographing heat, timing, and guest emotion in real time. Resneo keeps booking, money, and guest
             context off your mental load so the team can focus on the room.
           </p>
         </div>
@@ -510,14 +510,14 @@ function SolutionIntro() {
         className="absolute inset-0 opacity-30"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 28% 32%, rgba(78,107,120,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(78,107,120,0.28) 0%, transparent 50%)",
+            "radial-gradient(circle at 28% 32%, rgba(0,59,111,0.6) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(0,59,111,0.28) 0%, transparent 50%)",
         }}
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
-          ReserveNI for Restaurants
+          Resneo for Restaurants
         </span>
-        <h2 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">One backbone for bookings, money and service.</h2>
+        <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">One backbone for bookings, money and service.</h2>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
           Replace voicemail roulette, frantic texts, rogue spreadsheets and siloed notebooks with a cohesive platform, from
           the moment a guest books online until they walk through your door, with operational clarity for every cover.
@@ -547,7 +547,7 @@ function OwnerBenefitsSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">For operators & chefs</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">For operators & chefs</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Confidence on the books, and on the pass.
           </h2>
@@ -581,7 +581,7 @@ function ProductPreview() {
     <section className="relative overflow-hidden bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Ops cockpit</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Ops cockpit</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
             Service intelligence the whole team trusts.
           </h2>
@@ -617,7 +617,7 @@ function RestaurantDashboardMock() {
         <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
         <div className="ml-4 hidden h-5 w-72 rounded-md bg-white text-[10px] text-slate-400 sm:flex sm:items-center sm:justify-center sm:gap-1">
-          <LockIcon /> reserveni.com/dashboard
+          <LockIcon /> resneo.com/dashboard
         </div>
       </div>
 
@@ -757,13 +757,13 @@ function ClientBenefitsSection() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid gap-12 lg:grid-cols-2 lg:items-center lg:gap-16">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">For your guests</span>
+            <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">For your guests</span>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
               Booking that feels like the first course.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
               Modern diners expect concierge-level certainty: instant confirmations, humane reminders, respectful deposit
-              language. ReserveNI makes your digital handshake as warm as your welcome at the door.
+              language. Resneo makes your digital handshake as warm as your welcome at the door.
             </p>
             <ul className="mt-8 space-y-3">
               {clientBenefits.map((c) => (
@@ -900,7 +900,7 @@ function HowItWorksSection() {
     <section id="how" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Rollout playbook</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Rollout playbook</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Taste-test today. Full service tonight.
           </h2>
@@ -938,12 +938,12 @@ function BookingChannelsSection() {
       />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Omnichannel demand</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Omnichannel demand</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Guests book wherever they discover you. One live diary absorbs it all.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Instagram stories, QR on menus, concierge links inside hotel confirmation emails: all route into ReserveNI without
+            Instagram stories, QR on menus, concierge links inside hotel confirmation emails: all route into Resneo without
             copy-pasting details into a rogue spreadsheet tonight at midnight.
           </p>
         </div>
@@ -952,7 +952,7 @@ function BookingChannelsSection() {
           <ChannelCard
             label="Embed"
             title="Keep traffic on your own site"
-            description="ReserveNI disappears into your branded pages: fast load, cohesive story, bookings still sync centrally."
+            description="Resneo disappears into your branded pages: fast load, cohesive story, bookings still sync centrally."
             visual={<EmbedRestaurantVisual />}
             featured
           />
@@ -997,7 +997,7 @@ function ChannelCard({
         {visual}
       </div>
       <div className="mt-6">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-brand-600">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-accent-700">{label}</span>
         <h3 className="mt-2 text-lg font-semibold text-slate-900">{title}</h3>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{description}</p>
       </div>
@@ -1013,7 +1013,7 @@ function RestaurantMiniSite() {
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <div className="ml-1 flex h-2.5 flex-1 items-center justify-center rounded bg-white px-1 text-[7px] font-semibold text-slate-500">
-          reserveni.com/book/bistro-quay
+          resneo.com/book/bistro-quay
         </div>
       </div>
       <div className="w-full rounded-b-md border border-slate-200 bg-white p-2.5">
@@ -1115,12 +1115,12 @@ function VenueTypesSection() {
     <section className="bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Who we obsess over</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Who we obsess over</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Independent rooms with something to prove.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            From coastal tasting menus to Belfast brunch institutions, ReserveNI aligns with NI operators who obsess over vibe,
+            From coastal tasting menus to city brunch institutions, Resneo aligns with operators who obsess over vibe,
             pacing, plates, people.
           </p>
         </div>
@@ -1149,7 +1149,7 @@ function FeaturesSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Under the hood</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Under the hood</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Restaurant-grade tooling without enterprise theatre.
           </h2>
@@ -1178,7 +1178,7 @@ function FaqSection() {
     <section className="bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">Still curious?</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Still curious?</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Answers before dessert.</h2>
         </div>
 
@@ -1209,7 +1209,7 @@ function ClosingCta() {
             className="absolute inset-0 opacity-30"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 22% 32%, rgba(78,107,120,0.82) 0%, transparent 40%), radial-gradient(circle at 86% 70%, rgba(78,107,120,0.45) 0%, transparent 45%)",
+                "radial-gradient(circle at 22% 32%, rgba(0,59,111,0.82) 0%, transparent 40%), radial-gradient(circle at 86% 70%, rgba(0,59,111,0.45) 0%, transparent 45%)",
             }}
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
@@ -1263,10 +1263,10 @@ function ClosingCta() {
                   Compare all plans
                 </Link>
                 <a
-                  href="mailto:hello@reserveni.com"
+                  href="mailto:hello@resneo.com"
                   className="inline-flex h-12 items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
                 >
-                  hello@reserveni.com
+                  hello@resneo.com
                 </a>
               </div>
 
@@ -1302,7 +1302,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ReserveNI · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">
@@ -1311,13 +1311,13 @@ function Footer() {
           <Link href="/appointments-plan" className="transition-colors hover:text-slate-900">
             Appointments plan
           </Link>
-          <Link href="/signup" className="transition-colors hover:text-slate-900">
+          <Link href="/#pricing" className="transition-colors hover:text-slate-900">
             Sign up
           </Link>
           <Link href="/login" className="transition-colors hover:text-slate-900">
             Login
           </Link>
-          <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">
+          <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
             Contact
           </a>
           <Link href="/terms" className="transition-colors hover:text-slate-900">

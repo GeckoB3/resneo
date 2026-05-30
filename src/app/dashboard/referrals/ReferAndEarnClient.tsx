@@ -50,7 +50,7 @@ export function ReferAndEarnClient({
             </div>
             <p className="mt-3 text-xs text-slate-500">
               Both you and the venue you refer get a free month worth {rewardDisplay} of credit. Your reward is
-              applied to your next ReserveNI invoice once their first paid month settles.
+              applied to your next Resneo invoice once their first paid month settles.
             </p>
           </div>
 
@@ -78,7 +78,7 @@ export function ReferAndEarnClient({
       <SectionCard.Footer>
         <p className="text-xs text-slate-500">
           How it works: share your link → they get 14 days trial + 30 free days → on their first paid invoice
-          you get {rewardDisplay} credit on your next ReserveNI invoice.
+          you get {rewardDisplay} credit on your next Resneo invoice.
         </p>
       </SectionCard.Footer>
     </SectionCard>

@@ -1,9 +1,9 @@
-# ReserveNI - Bookable Services Landscape & Unified Architecture
+# Resneo - Bookable Services Landscape & Unified Architecture
 
 **From Restaurant Bookings to Every Bookable Service in Northern Ireland**
 **Originally March 2026** · **Last reviewed:** May 2026
 
-This document is the **conceptual master reference** for ReserveNI's booking
+This document is the **conceptual master reference** for Resneo's booking
 models: what each scheduling pattern means, which business types map to it, and
 the shared architecture that lets one codebase serve them all.
 
@@ -16,9 +16,9 @@ the shared architecture that lets one codebase serve them all.
 > which remain current. For up-to-date *functionality* status and the
 > development roadmap, the authoritative sources are:
 >
-> - `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` (Models A/B-appointments)
-> - `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` (Models C/D/E)
-> - `Docs/ReserveNI_Booking_Models_Reference.md` (canonical model definitions)
+> - `Docs/Resneo-Appointments-Review-And-Roadmap.md` (Models A/B-appointments)
+> - `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` (Models C/D/E)
+> - `Docs/Resneo_Booking_Models_Reference.md` (canonical model definitions)
 
 ---
 
@@ -70,7 +70,7 @@ the top for detailed, current functionality status.
 
 #### Model B (`practitioner_appointment` / `unified_scheduling`)
 
-**Status: shipped, including reception-parity Phase 1a.** Beyond the core scheduling surfaces below, the following shipped in May 2026 (behind per-venue feature flags pending pilot rollout): **any-available practitioner**, **guest self-reschedule**, **appointment waitlist v2**, **calendar blocks UI**, and a unified booking detail surface. See `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`.
+**Status: shipped, including reception-parity Phase 1a.** Beyond the core scheduling surfaces below, the following shipped in May 2026 (behind per-venue feature flags pending pilot rollout): **any-available practitioner**, **guest self-reschedule**, **appointment waitlist v2**, **calendar blocks UI**, and a unified booking detail surface. See `Docs/Resneo-Appointments-Review-And-Roadmap.md`.
 
 Core implementation surfaces:
 
@@ -94,7 +94,7 @@ Core implementation surfaces:
 - **Availability:** Dedicated engines ([`src/lib/availability/event-ticket-engine.ts`](../src/lib/availability/event-ticket-engine.ts) and siblings) + `POST /api/booking/create` validation branches.
 - **Dashboard:** Full managers — event manager, class timetable (+ class commerce products), resource timeline.
 
-**Known maturity gaps (not "incomplete", but uneven vs appointments):** post-booking **guest self-modify** and **staff slot reschedule** for C/D/E are intentionally limited to view/cancel + cancel-and-rebook; resources lack an instance detail sheet and calendar drag. These are documented and code-enforced — see `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` for the full per-model review and remaining polish items.
+**Known maturity gaps (not "incomplete", but uneven vs appointments):** post-booking **guest self-modify** and **staff slot reschedule** for C/D/E are intentionally limited to view/cancel + cancel-and-rebook; resources lack an instance detail sheet and calendar drag. These are documented and code-enforced — see `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` for the full per-model review and remaining polish items.
 
 ---
 
@@ -268,10 +268,10 @@ roadmap docs, not here:
 - **Appointments-family roadmap** — checkout/payment surface, compliance
   (consultation forms, patch tests), retention (packages, reviews, loyalty),
   growth channels, native staff app. See
-  `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`.
+  `Docs/Resneo-Appointments-Review-And-Roadmap.md`.
 - **Classes / events / resources** — post-booking guest self-modify and staff
   reschedule parity, resource calendar ops, account-portal depth. See
-  `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`.
+  `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`.
 
 ---
 
@@ -407,7 +407,7 @@ Single Next.js app: shared shell, conditional nav and pages by `booking_model`. 
 
 > **Out of date — indicative only.** This predates the **Appointments Light /
 > Plus** tiers. For current pricing see `Docs/PRD.md` §6 and
-> `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` §2.2.
+> `Docs/Resneo-Appointments-Review-And-Roadmap.md` §2.2.
 
 | Model | Pricing | Rationale |
 |---|---|---|

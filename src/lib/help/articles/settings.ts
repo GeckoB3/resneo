@@ -17,7 +17,7 @@ export const settingsCategory: HelpCategory = {
       content: `
 # Settings overview
 
-ReserveNI splits **venue configuration** from **personal login details**. What you see depends on whether you are a **venue admin** or **staff**, and on whether the venue is on an **Appointments** (Light, Plus, or Pro) plan or a **Restaurant / Founding Partner** plan.
+Resneo splits **venue configuration** from **personal login details**. What you see depends on whether you are a **venue admin** or **staff**, and on whether the venue is on an **Appointments** (Light, Plus, or Pro) plan or a **Restaurant / Founding Partner** plan.
 
 ## Venue admins
 
@@ -58,13 +58,13 @@ Your venue runs on an **Appointments** subscription (Light, Plus, or Pro). **Set
 - **Profile**
   - **Personal details & security** for your own login (name, email, phone, password).
   - **Venue profile & contact details**: trading name, address, phone, email, website, and **timezone** (IANA style value). Timezone drives reminders and exception logic with your wall clock.
-  - **Models on your public page**: which experiences are active (for example services, classes, events, resources) and whether guests must use a **ReserveNI account** before booking online.
+  - **Models on your public page**: which experiences are active (for example services, classes, events, resources) and whether guests must use a **Resneo account** before booking online.
 - **Booking Page**
   - **URL & branding**: public **slug**, logo, cover photo, and a link to preview \`/book/[slug]\`.
   - **Website widget & QR code**: copy the **iframe** snippet, optional tab deep links (\`?tab=appointments\`, \`events\`, \`classes\`, \`resources\` as your venue exposes), the **resize.js** script from \`/embed/resize.js\`, and a QR that opens your public page.
 - **Business hours**: weekly grid with a dedicated **Save opening hours** strip, then **Closures & special days** for venue wide blocks (see the Business hours help article).
 - **Plan**: tier name, subscription state, period dates, **SMS segments** (included bundle vs pay as you go on Light), **calendar usage** against your tier cap, **Manage Billing** (Stripe Customer Portal for card, invoices, cancellation), and **Change Appointments plan** when Stripe shows an active subscription that is not stuck in a blocked state. After checkout or portal return you may see banners or \`?upgraded=\`, \`?downgraded=\`, \`?resubscribed=\`, \`?card_updated=\`, or \`?plan_changed=\` style query params; read them before navigating away. Returning from the portal may also sync via \`portal_return=1\`.
-- **Payments**: **Stripe Connect** onboarding so **guests** pay the **venue**; ReserveNI does not hold deposits (see Payments help).
+- **Payments**: **Stripe Connect** onboarding so **guests** pay the **venue**; Resneo does not hold deposits (see Payments help).
 - **Communications**: templates and policies for automated guest email and SMS, respecting your tier SMS rules.
 - **Staff**: invite **admin** or **staff** users, assign **staff** to bookable **calendar columns** so **Appointment Calendar** and **Mine** views line up, resend invites, reset passwords, and set optional **session timeout** for shared tablets.
 - **Data import**: opens the guided importer at \`/dashboard/import\`.
@@ -261,7 +261,7 @@ Go to **Settings → Staff** and use **Add user**.
 
 1. Enter email (required) and display name.
 2. Pick **Staff** or **Admin**. New **staff** invites should pick at least one **bookable calendar** when your venue runs unified scheduling so their appointments appear on the right columns.
-3. Submit. ReserveNI emails a link to set a password.
+3. Submit. Resneo emails a link to set a password.
 
 Use **Resend** if the inbox missed the first mail. Password reset helpers live in the same staff table when you need to force a rotation.
 
@@ -346,17 +346,17 @@ Checkout and plan flows can append \`?upgraded=true\`, \`?downgraded=true\`, \`?
 
 ## Not guest payments
 
-This tab is **ReserveNI subscription billing**. Guest card charges remain under **Settings → Payments** (Stripe Connect).
+This tab is **Resneo subscription billing**. Guest card charges remain under **Settings → Payments** (Stripe Connect).
 `.trim(),
       markdownAppointments: `
 # Plan & billing (Appointments plans)
 
-Open **Settings → Plan**. Everything here is about your **ReserveNI subscription** and SMS entitlements. Guest card payments are configured under **Settings → Payments**.
+Open **Settings → Plan**. Everything here is about your **Resneo subscription** and SMS entitlements. Guest card payments are configured under **Settings → Payments**.
 
 ## Header copy
 
 - Complimentary venues see explanatory text that billing is waived but limits still apply.
-- Paid venues see guidance that plan moves happen in ReserveNI while card and invoice administration sits in Stripe’s portal.
+- Paid venues see guidance that plan moves happen in Resneo while card and invoice administration sits in Stripe’s portal.
 
 ## What you can read
 
@@ -378,7 +378,7 @@ Query params such as \`?upgraded=true\` or \`?card_updated=1\` raise banners whi
 
 ## Distinction
 
-Do not confuse this page with **Stripe Connect** onboarding. Connect is about money from guests; this tab is about your subscription to ReserveNI.
+Do not confuse this page with **Stripe Connect** onboarding. Connect is about money from guests; this tab is about your subscription to Resneo.
 `.trim(),
       markdownRestaurant: `
 # Plan & billing (Restaurant and Founding Partner)
@@ -432,11 +432,11 @@ Operational sheets still let you adjust **tags** and **internal notes** without 
 
 ## Terminology
 
-Venues can rename guest facing words (**client** vs **guest**, **booking** labels) via **terminology** settings; ReserveNI uses those labels in charts and exports when present.
+Venues can rename guest facing words (**client** vs **guest**, **booking** labels) via **terminology** settings; Resneo uses those labels in charts and exports when present.
 
 ## Compliance
 
-You are responsible for lawful marketing and consent. ReserveNI provides tooling, not legal advice.
+You are responsible for lawful marketing and consent. Resneo provides tooling, not legal advice.
 `.trim(),
       markdownAppointments: `
 # Guest and client records (Appointments plans)

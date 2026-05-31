@@ -1,3 +1,14 @@
+import {
+  sanitizeBookingPageCoverCrop,
+  type BookingPageCoverCrop,
+} from '@/lib/booking/booking-page-cover';
+import {
+  sanitizeBookingPageLogoCrop,
+  type BookingPageLogoCrop,
+} from '@/lib/booking/booking-page-logo';
+
+export type { BookingPageCoverCrop, BookingPageLogoCrop };
+
 /**
  * Public booking-page branding (Phase 1 of the Booking Site Studio).
  *
@@ -18,9 +29,16 @@ export interface BookingPageSocialLinks {
 export const BOOKING_FONT_PRESET_KEYS = [
   'default',
   'modern',
-  'elegant',
-  'editorial',
+  'montserrat',
+  'raleway',
   'rounded',
+  'josefin',
+  'elegant',
+  'luxury',
+  'editorial',
+  'boutique',
+  'spa',
+  'cinzel',
 ] as const;
 export type BookingFontPreset = (typeof BOOKING_FONT_PRESET_KEYS)[number];
 
@@ -32,9 +50,16 @@ export function isBookingFontPreset(value: unknown): value is BookingFontPreset 
 export const BOOKING_FONT_PRESET_LABELS: Record<BookingFontPreset, string> = {
   default: 'Clean (Inter)',
   modern: 'Modern (Poppins)',
-  elegant: 'Elegant (Cormorant)',
-  editorial: 'Editorial (Lora)',
+  montserrat: 'Classic (Montserrat)',
+  raleway: 'Light (Raleway)',
   rounded: 'Rounded (Nunito)',
+  josefin: 'Chic (Josefin Sans)',
+  elegant: 'Elegant (Cormorant)',
+  luxury: 'Luxury (Playfair Display)',
+  editorial: 'Editorial (Lora)',
+  boutique: 'Boutique (Great Vibes)',
+  spa: 'Spa (Marcellus)',
+  cinzel: 'Refined (Cinzel)',
 };
 
 export interface BookingPageConfig {
@@ -44,6 +69,12 @@ export interface BookingPageConfig {
   brand_accent?: string | null;
   /** Curated heading/body font pairing. */
   font_preset?: BookingFontPreset | null;
+  /** Circular logo framing on the public booking page header. */
+  logo_crop?: BookingPageLogoCrop | null;
+  /** Cover banner framing on the public booking page. */
+  cover_crop?: BookingPageCoverCrop | null;
+  /** When false, cover sits in the content column instead of edge-to-edge (default full width). */
+  cover_full_width?: boolean;
   /** Short "about / welcome" text shown under the header. */
   about?: string | null;
   /** Announcement banner shown at the very top of the page. */
@@ -51,10 +82,40 @@ export interface BookingPageConfig {
   social_links?: BookingPageSocialLinks | null;
   /** Public photo gallery: ordered list of image URLs (stored in `venue-gallery` bucket). */
   gallery?: string[] | null;
+  /** Per-service photos for the public Services tab only (not the booking form), keyed by service id. */
+  service_photos?: Record<string, string> | null;
+  /** When true, show a Services tab (photos + descriptions) on the public booking page. */
+  show_services_tab?: boolean;
+  /** When true, show a Meet the team tab on the public booking page. */
+  show_team_tab?: boolean;
+  /** When true, show the About tab on the public booking page (off by default for new venues). */
+  show_about_tab?: boolean;
+  /** "Meet the team" profiles keyed by practitioner / calendar id. */
+  team_profiles?: Record<string, BookingTeamProfile> | null;
+}
+
+export interface BookingTeamProfile {
+  /** Short bio shown under the name. */
+  bio?: string | null;
+  /** Public photo URL (stored in `venue-team-photos` bucket). */
+  photo?: string | null;
+  /** Comma-separated specialties, rendered as chips. */
+  specialties?: string | null;
+  /** Hide this member from the public "Meet the team" section. */
+  hidden?: boolean;
 }
 
 /** Maximum gallery photos shown on the booking page. */
 export const BOOKING_GALLERY_MAX = 12;
+
+/**
+ * Defaults seeded for new appointment venues: extra tabs off, cover uses contained width.
+ * Empty `{}` in the database behaves the same via opt-in tab flags and contained cover default.
+ */
+export const DEFAULT_BOOKING_PAGE_CONFIG_FOR_NEW_VENUE: BookingPageConfig = {
+  cover_full_width: false,
+  show_about_tab: false,
+};
 
 /** One-click colour palettes shown in the settings editor. */
 export const BOOKING_THEME_PRESETS: Array<{
@@ -262,6 +323,15 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
     config.font_preset = src.font_preset;
   }
 
+  const logoCrop = sanitizeBookingPageLogoCrop(src.logo_crop);
+  if (logoCrop) config.logo_crop = logoCrop;
+
+  const coverCrop = sanitizeBookingPageCoverCrop(src.cover_crop);
+  if (coverCrop) config.cover_crop = coverCrop;
+
+  if (src.cover_full_width === true) config.cover_full_width = true;
+  else if (src.cover_full_width === false) config.cover_full_width = false;
+
   const about = trimToNull(src.about, ABOUT_MAX);
   if (about) config.about = about;
 
@@ -274,7 +344,104 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
   const gallery = sanitizeGallery(src.gallery);
   if (gallery.length > 0) config.gallery = gallery;
 
+  const servicePhotos = sanitizeServicePhotos(src.service_photos);
+  if (Object.keys(servicePhotos).length > 0) config.service_photos = servicePhotos;
+
+  const teamProfiles = sanitizeTeamProfiles(src.team_profiles);
+  if (Object.keys(teamProfiles).length > 0) config.team_profiles = teamProfiles;
+
+  if (src.show_services_tab === true) config.show_services_tab = true;
+  if (src.show_team_tab === true) config.show_team_tab = true;
+  if (src.show_about_tab === false) config.show_about_tab = false;
+  else if (src.show_about_tab === true) config.show_about_tab = true;
+
   return config;
+}
+
+/**
+ * Merge a partial booking_page_config PATCH onto the stored config.
+ * Keys present on `incoming` replace stored values; `service_photos: null` clears photos.
+ */
+export function mergeBookingPageConfigPatch(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): BookingPageConfig {
+  const merged: Record<string, unknown> = { ...existing, ...incoming };
+  if ('service_photos' in incoming && incoming.service_photos === null) {
+    delete merged.service_photos;
+  }
+  if ('cover_full_width' in incoming) {
+    merged.cover_full_width = incoming.cover_full_width === true;
+  }
+  if ('show_services_tab' in incoming) {
+    if (incoming.show_services_tab === true) {
+      merged.show_services_tab = true;
+    } else {
+      delete merged.show_services_tab;
+    }
+  }
+  if ('show_team_tab' in incoming) {
+    if (incoming.show_team_tab === true) {
+      merged.show_team_tab = true;
+    } else {
+      delete merged.show_team_tab;
+    }
+  }
+  if ('show_about_tab' in incoming) {
+    if (incoming.show_about_tab === false) {
+      merged.show_about_tab = false;
+    } else if (incoming.show_about_tab === true) {
+      merged.show_about_tab = true;
+    } else {
+      delete merged.show_about_tab;
+    }
+  }
+  return sanitizeBookingPageConfig(merged);
+}
+
+function sanitizeTeamProfiles(raw: unknown): Record<string, BookingTeamProfile> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, BookingTeamProfile> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!UUID_RE.test(key) || !value || typeof value !== 'object') continue;
+    const src = value as Record<string, unknown>;
+    const profile: BookingTeamProfile = {};
+    const bio = trimToNull(src.bio, 600);
+    if (bio) profile.bio = bio;
+    const specialties = trimToNull(src.specialties, 200);
+    if (specialties) profile.specialties = specialties;
+    if (typeof src.photo === 'string') {
+      const photo = src.photo.trim();
+      if (photo && photo.length <= 2000 && /^https?:\/\//i.test(photo)) profile.photo = photo;
+    }
+    if (src.hidden === true) profile.hidden = true;
+    // Keep only profiles that carry something meaningful.
+    if (profile.bio || profile.photo || profile.specialties || profile.hidden) {
+      out[key] = profile;
+      count += 1;
+      if (count >= 200) break;
+    }
+  }
+  return out;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function sanitizeServicePhotos(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!UUID_RE.test(key)) continue;
+    if (typeof value !== 'string') continue;
+    const url = value.trim();
+    if (!url || url.length > 2000 || !/^https?:\/\//i.test(url)) continue;
+    out[key] = url;
+    count += 1;
+    if (count >= 200) break;
+  }
+  return out;
 }
 
 function sanitizeGallery(raw: unknown): string[] {

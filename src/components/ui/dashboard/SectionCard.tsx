@@ -26,21 +26,39 @@ function SectionCardHeader({
   title,
   description,
   right,
+  eyebrowClassName,
+  titleClassName,
 }: {
   eyebrow?: string;
   title?: string;
   description?: ReactNode;
   right?: ReactNode;
+  eyebrowClassName?: string;
+  titleClassName?: string;
 }) {
   if (!eyebrow && !title && !description && !right) return null;
   return (
     <div className="flex flex-col gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50/80 to-white px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-5">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{eyebrow}</p>
+          <p
+            className={
+              eyebrowClassName ??
+              'text-[10px] font-semibold uppercase tracking-widest text-slate-500'
+            }
+          >
+            {eyebrow}
+          </p>
         ) : null}
         {title ? (
-          <h2 className="mt-1 break-words text-lg font-bold tracking-tight text-slate-900 sm:text-xl">{title}</h2>
+          <h2
+            className={
+              titleClassName ??
+              'mt-1 break-words text-lg font-bold tracking-tight text-slate-900 sm:text-xl'
+            }
+          >
+            {title}
+          </h2>
         ) : null}
         {description ? <p className="mt-1 break-words text-sm text-slate-600">{description}</p> : null}
       </div>

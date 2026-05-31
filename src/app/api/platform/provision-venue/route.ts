@@ -21,6 +21,7 @@ import {
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 import { hardDeleteVenueWithLinkedAccountNotifications } from '@/lib/linked-accounts/venue-deletion';
+import { DEFAULT_BOOKING_PAGE_CONFIG_FOR_NEW_VENUE } from '@/lib/booking/booking-page-theme';
 
 const provisionBodySchema = z
   .object({
@@ -131,6 +132,9 @@ export async function POST(request: Request) {
       enabled_models: enabledModels,
       daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
       session_timeout_minutes: SESSION_TIMEOUT_DEFAULT_MINUTES,
+      ...(isAppointmentPlanTier(body.plan)
+        ? { booking_page_config: DEFAULT_BOOKING_PAGE_CONFIG_FOR_NEW_VENUE }
+        : {}),
     };
 
     let authUserId: string | null = null;

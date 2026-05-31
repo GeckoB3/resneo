@@ -15,7 +15,14 @@ import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
-import { sanitizeBookingPageConfig } from '@/lib/booking/booking-page-theme';
+import { mergeBookingPageConfigPatch } from '@/lib/booking/booking-page-theme';
+
+/** Pan/zoom framing for logo and cover on the public booking page (sanitised again after parse). */
+const bookingPageImageFramingSchema = z.object({
+  x: z.number().min(0).max(100).optional(),
+  y: z.number().min(0).max(100).optional(),
+  zoom: z.number().min(0.5).max(3).optional(),
+});
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -50,7 +57,29 @@ const venueProfileSchema = z.object({
       about: z.string().max(4000).nullable().optional(),
       announcement: z.string().max(600).nullable().optional(),
       font_preset: z.string().max(40).nullable().optional(),
+      logo_crop: bookingPageImageFramingSchema.nullable().optional(),
+      cover_crop: bookingPageImageFramingSchema.nullable().optional(),
+      /** When false, cover is constrained to the booking content column instead of edge-to-edge. */
+      cover_full_width: z.boolean().optional(),
       gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
+      service_photos: z.record(z.string(), z.string().max(2000)).nullable().optional(),
+      show_services_tab: z.boolean().optional(),
+      show_team_tab: z.boolean().optional(),
+      show_about_tab: z.boolean().optional(),
+      team_profiles: z
+        .record(
+          z.string(),
+          z
+            .object({
+              bio: z.string().max(2000).nullable().optional(),
+              photo: z.string().max(2000).nullable().optional(),
+              specialties: z.string().max(400).nullable().optional(),
+              hidden: z.boolean().optional(),
+            })
+            .partial(),
+        )
+        .nullable()
+        .optional(),
       social_links: z
         .object({
           instagram: z.string().max(400).nullable().optional(),
@@ -218,7 +247,24 @@ export async function PATCH(request: NextRequest) {
       }
     }
     if (data.booking_page_config !== undefined) {
-      update.booking_page_config = sanitizeBookingPageConfig(data.booking_page_config);
+      const { data: existingRow, error: configLoadErr } = await staff.db
+        .from('venues')
+        .select('booking_page_config')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      if (configLoadErr) {
+        console.error('PATCH /api/venue: could not load booking_page_config', configLoadErr);
+        return NextResponse.json({ error: 'Failed to load venue settings' }, { status: 500 });
+      }
+      const existing =
+        existingRow?.booking_page_config && typeof existingRow.booking_page_config === 'object'
+          ? (existingRow.booking_page_config as Record<string, unknown>)
+          : {};
+      const incoming =
+        data.booking_page_config && typeof data.booking_page_config === 'object'
+          ? (data.booking_page_config as Record<string, unknown>)
+          : {};
+      update.booking_page_config = mergeBookingPageConfigPatch(existing, incoming);
     }
 
     let nextActiveModels: BookingModel[] | null = null;
@@ -299,7 +345,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour, booking_page_config',
       )
       .single();
 

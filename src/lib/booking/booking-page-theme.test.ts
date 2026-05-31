@@ -3,9 +3,11 @@ import {
   bookingPageThemeVars,
   buildBrandRamp,
   contrastRatio,
+  DEFAULT_BOOKING_PAGE_CONFIG_FOR_NEW_VENUE,
   normalizeHexColor,
   primaryNeedsDarkText,
   readableTextColor,
+  mergeBookingPageConfigPatch,
   sanitizeBookingPageConfig,
 } from './booking-page-theme';
 
@@ -97,11 +99,130 @@ describe('sanitizeBookingPageConfig', () => {
     expect(out.social_links).toEqual({ instagram: 'https://insta/x' });
   });
 
+  it('sanitises team profiles (uuid keys, trims, drops empty/invalid photo)', () => {
+    const out = sanitizeBookingPageConfig({
+      team_profiles: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': {
+          bio: '  Senior stylist  ',
+          specialties: ' Colour, Balayage ',
+          photo: 'https://cdn/p.jpg',
+          hidden: false,
+        },
+        'b1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { photo: 'javascript:alert(1)' }, // invalid → empty → dropped
+        'not-a-uuid': { bio: 'x' },
+      },
+    });
+    expect(out.team_profiles).toEqual({
+      'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': {
+        bio: 'Senior stylist',
+        specialties: 'Colour, Balayage',
+        photo: 'https://cdn/p.jpg',
+      },
+    });
+  });
+
+  it('clears service photos when PATCH sends service_photos null', () => {
+    const existing = {
+      service_photos: { 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/s.jpg' },
+      about: 'Hello',
+    };
+    const out = mergeBookingPageConfigPatch(existing, { service_photos: null, about: 'Hello' });
+    expect(out.service_photos).toBeUndefined();
+    expect(out.about).toBe('Hello');
+  });
+
+  it('persists full-width cover when PATCH sets cover_full_width true', () => {
+    const existing = { cover_full_width: false, about: 'Hi' };
+    const out = mergeBookingPageConfigPatch(existing, { cover_full_width: true, about: 'Hi' });
+    expect(out.cover_full_width).toBe(true);
+    expect(out.about).toBe('Hi');
+  });
+
+  it('clears services and team tabs when PATCH turns them off', () => {
+    const existing = {
+      show_services_tab: true,
+      show_team_tab: true,
+      show_about_tab: true,
+    };
+    const out = mergeBookingPageConfigPatch(existing, {
+      show_services_tab: false,
+      show_team_tab: false,
+      show_about_tab: false,
+    });
+    expect(out.show_services_tab).toBeUndefined();
+    expect(out.show_team_tab).toBeUndefined();
+    expect(out.show_about_tab).toBe(false);
+  });
+
+  it('enables services and team tabs when PATCH turns them on', () => {
+    const out = mergeBookingPageConfigPatch(
+      { show_about_tab: false },
+      { show_services_tab: true, show_team_tab: true, show_about_tab: true },
+    );
+    expect(out.show_services_tab).toBe(true);
+    expect(out.show_team_tab).toBe(true);
+    expect(out.show_about_tab).toBe(true);
+  });
+
+  it('replaces service photos when PATCH sends an updated map', () => {
+    const existing = {
+      service_photos: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/old.jpg',
+        'b1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/remove.jpg',
+      },
+    };
+    const out = mergeBookingPageConfigPatch(existing, {
+      service_photos: { 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/new.jpg' },
+    });
+    expect(out.service_photos).toEqual({
+      'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/new.jpg',
+    });
+  });
+
+  it('keeps service photos only for uuid keys with http(s) urls', () => {
+    const out = sanitizeBookingPageConfig({
+      service_photos: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/s.jpg',
+        'not-a-uuid': 'https://cdn/x.jpg',
+        'b1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'ftp://bad',
+      },
+    });
+    expect(out.service_photos).toEqual({
+      'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/s.jpg',
+    });
+  });
+
   it('keeps only valid http(s) gallery URLs, de-duped and capped', () => {
     const out = sanitizeBookingPageConfig({
       gallery: ['https://cdn/x.jpg', 'https://cdn/x.jpg', 'not-a-url', '  https://cdn/y.png  ', 42],
     });
     expect(out.gallery).toEqual(['https://cdn/x.jpg', 'https://cdn/y.png']);
+  });
+
+  it('keeps booking page tab flags when true', () => {
+    const out = sanitizeBookingPageConfig({
+      show_services_tab: true,
+      show_team_tab: true,
+      show_about_tab: true,
+    });
+    expect(out.show_services_tab).toBe(true);
+    expect(out.show_team_tab).toBe(true);
+    expect(out.show_about_tab).toBe(true);
+    expect(sanitizeBookingPageConfig({ show_services_tab: false }).show_services_tab).toBeUndefined();
+    expect(sanitizeBookingPageConfig({ show_about_tab: false }).show_about_tab).toBe(false);
+  });
+
+  it('stores cover_full_width when explicitly true or false', () => {
+    expect(sanitizeBookingPageConfig({ cover_full_width: false }).cover_full_width).toBe(false);
+    expect(sanitizeBookingPageConfig({ cover_full_width: true }).cover_full_width).toBe(true);
+    expect(sanitizeBookingPageConfig({}).cover_full_width).toBeUndefined();
+  });
+
+  it('exposes new-venue booking page defaults', () => {
+    expect(DEFAULT_BOOKING_PAGE_CONFIG_FOR_NEW_VENUE).toEqual({
+      cover_full_width: false,
+      show_about_tab: false,
+    });
   });
 
   it('drops invalid colours, unknown/default font presets, and empty fields', () => {

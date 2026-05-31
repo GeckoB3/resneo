@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { buildVenueEmbedSnippet, normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
+import {
+  BOOKING_PAGE_FIELD_HEADING_MB1_CLASS,
+  BOOKING_PAGE_FIELD_HEADING_MB15_CLASS,
+  BOOKING_PAGE_SECTION_HEADING_CLASS,
+} from '../sections/booking-page-settings-typography';
 
 interface WidgetSectionProps {
   venueName: string;
@@ -184,16 +189,28 @@ export function WidgetSection({
     img.src = qrDataUrl;
   }, [qrDataUrl, venueName, venueSlug]);
 
+  const embedAccentHex = normalizeEmbedAccentHex(accentColour);
+  const embedAccentPickerValue = embedAccentHex ? `#${embedAccentHex}` : '#4f46e5';
+
+  const clearEmbedAccent = useCallback(() => {
+    if (accentSaveTimerRef.current) {
+      clearTimeout(accentSaveTimerRef.current);
+      accentSaveTimerRef.current = null;
+    }
+    setAccentColour('');
+    void persistAccent('');
+  }, [persistAccent]);
+
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-neutral-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-neutral-900">Embed code</h2>
+        <h2 className={BOOKING_PAGE_SECTION_HEADING_CLASS}>Embed code</h2>
         <p className="mt-1 text-sm text-neutral-600">
           Add this to your website to show the booking form in an iframe. The widget will resize to fit the content.
         </p>
         {collectives.length > 0 ? (
           <div className="mt-4">
-            <label htmlFor="embed-target" className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="embed-target" className={BOOKING_PAGE_FIELD_HEADING_MB1_CLASS}>
               What to embed
             </label>
             <select
@@ -217,8 +234,21 @@ export function WidgetSection({
           </div>
         ) : null}
         <div className="mt-4">
-          <label htmlFor="accent" className="block text-sm font-medium text-neutral-700 mb-1">Accent colour (optional)</label>
-          <div className="flex items-center gap-2">
+          <label htmlFor="accent" className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
+            Accent colour <span className="font-normal text-neutral-400">(optional)</span>
+          </label>
+          <div className="flex max-w-md items-center gap-2">
+            <input
+              type="color"
+              aria-label="Accent colour"
+              value={embedAccentPickerValue}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAccentColour(next);
+                scheduleAccentSave(next);
+              }}
+              className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-neutral-200 bg-white p-1"
+            />
             <input
               id="accent"
               type="text"
@@ -236,17 +266,21 @@ export function WidgetSection({
                 void persistAccent(accentColour);
               }}
               placeholder="#4F46E5"
-              className="w-32 rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="min-w-0 flex-1 rounded border border-neutral-300 px-3 py-2 text-sm"
             />
-            {accentColour && normalizeEmbedAccentHex(accentColour) ? (
-              <div
-                className="h-8 w-8 rounded border border-neutral-300"
-                style={{ backgroundColor: `#${normalizeEmbedAccentHex(accentColour)}` }}
-              />
+            {embedAccentHex ? (
+              <button
+                type="button"
+                onClick={clearEmbedAccent}
+                className="shrink-0 text-xs font-medium text-neutral-500 hover:text-neutral-700"
+              >
+                Reset
+              </button>
             ) : null}
           </div>
           <p className="mt-1 text-xs text-neutral-500">
-            Hex colour for buttons in the embedded widget (e.g. 4F46E5). Saved automatically for your venue embed.
+            Buttons and highlights in the embedded widget. Pick a colour or enter a 6-digit hex value — saved
+            automatically.
           </p>
           {accentSaveState === 'saving' ? (
             <p className="mt-1 text-xs text-neutral-500">Saving accent…</p>
@@ -283,7 +317,7 @@ export function WidgetSection({
       </section>
 
       <section className="rounded-lg border border-neutral-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-neutral-900">QR code</h2>
+        <h2 className={BOOKING_PAGE_SECTION_HEADING_CLASS}>QR code</h2>
         <p className="mt-1 text-sm text-neutral-600">
           Link to your booking page. Suitable for table cards, menus, or window stickers.
         </p>

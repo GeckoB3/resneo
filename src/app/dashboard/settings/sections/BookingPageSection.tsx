@@ -4,8 +4,31 @@ import Link from 'next/link';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { BookingPageCoverPhoto } from '@/components/booking/BookingPageCoverPhoto';
+import { BookingPageLogo } from '@/components/booking/BookingPageLogo';
+import { BookingFontPresetSelect } from './BookingFontPresetSelect';
+import {
+  BOOKING_PAGE_COVER_SETTINGS_FRAME_CLASS,
+  BOOKING_PAGE_COVER_SETTINGS_PLACEHOLDER_FRAME_CLASS,
+  DEFAULT_BOOKING_PAGE_COVER_CROP,
+  resolveBookingPageCoverCrop,
+  sanitizeBookingPageCoverCrop,
+  type BookingPageCoverCrop,
+} from '@/lib/booking/booking-page-cover';
+import { BookingPageDraggableCover } from './BookingPageDraggableCover';
+import { BookingPageDraggableLogo } from './BookingPageDraggableLogo';
+import { BookingPageImageFramingControls } from './BookingPageImageFramingControls';
+import { BookingPageLogoFramingControls } from './BookingPageLogoFramingControls';
 import { BookingPageLivePreview } from './BookingPageLivePreview';
+import {
+  BOOKING_PAGE_EYEBROW_CLASS,
+  BOOKING_PAGE_FIELD_HEADING_MB1_CLASS,
+  BOOKING_PAGE_FIELD_HEADING_MB15_CLASS,
+  BOOKING_PAGE_FIELD_HEADING_MB2_CLASS,
+  BOOKING_PAGE_PRIMARY_HEADING_CLASS,
+  BOOKING_PAGE_SECTION_HEADING_CLASS,
+} from './booking-page-settings-typography';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -27,17 +50,29 @@ const previewAccordionChevron = (
 import type { VenueSettings } from '../types';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
+import {
+  blurFileInput,
+  preserveSettingsScrollDuring,
+  SETTINGS_HIDDEN_FILE_INPUT_CLASS,
+} from '../preserve-settings-scroll';
 import { readResponseJson } from '@/lib/http/read-response-json';
 import {
-  BOOKING_FONT_PRESET_KEYS,
-  BOOKING_FONT_PRESET_LABELS,
   BOOKING_GALLERY_MAX,
   BOOKING_THEME_PRESETS,
   normalizeHexColor,
   primaryNeedsDarkText,
   type BookingFontPreset,
   type BookingPageConfig,
+  type BookingTeamProfile,
 } from '@/lib/booking/booking-page-theme';
+import {
+  DEFAULT_BOOKING_PAGE_LOGO_CROP,
+  resolveBookingPageLogoCrop,
+  sanitizeBookingPageLogoCrop,
+  type BookingPageLogoCrop,
+} from '@/lib/booking/booking-page-logo';
+import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const BOOKING_SLUG_TAKEN_MESSAGE =
   'That booking page address is already taken by another venue. Choose a different slug (letters, numbers, and hyphens only).';
@@ -70,6 +105,59 @@ function slugFingerprint(slug: string): string {
   return slug.trim().toLowerCase();
 }
 
+type BookingPageTabToggle =
+  | { kind: 'always-on' }
+  | {
+      id: string;
+      checked: boolean;
+      disabled?: boolean;
+      onChange: (checked: boolean) => void;
+    };
+
+function BookingPageSettingsGroup({
+  title,
+  description,
+  tabToggle,
+  children,
+}: {
+  title: string;
+  description?: string;
+  tabToggle?: BookingPageTabToggle;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4 border-t border-slate-100 pt-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <h3 className={BOOKING_PAGE_SECTION_HEADING_CLASS}>{title}</h3>
+          {description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p> : null}
+        </div>
+        {tabToggle && 'kind' in tabToggle ? (
+          <span className="shrink-0 pt-0.5 text-xs font-medium text-slate-500">Always shown</span>
+        ) : tabToggle ? (
+          <label
+            htmlFor={tabToggle.id}
+            className={`flex shrink-0 cursor-pointer items-center gap-2 pt-0.5 ${
+              tabToggle.disabled ? 'cursor-not-allowed opacity-60' : ''
+            }`}
+          >
+            <input
+              id={tabToggle.id}
+              type="checkbox"
+              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              checked={tabToggle.checked}
+              disabled={tabToggle.disabled}
+              onChange={(e) => tabToggle.onChange(e.target.checked)}
+            />
+            <span className="text-xs font-medium text-slate-700">Show on booking page</span>
+          </label>
+        ) : null}
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
+
 export function BookingPageSection({
   venue,
   onUpdate,
@@ -94,6 +182,13 @@ export function BookingPageSection({
   const [brandPrimary, setBrandPrimary] = useState(cfg0.brand_primary ?? '');
   const [brandAccent, setBrandAccent] = useState(cfg0.brand_accent ?? '');
   const [fontPreset, setFontPreset] = useState<BookingFontPreset>(cfg0.font_preset ?? 'default');
+  const [logoCrop, setLogoCrop] = useState<BookingPageLogoCrop>(() =>
+    resolveBookingPageLogoCrop(cfg0.logo_crop),
+  );
+  const [coverCrop, setCoverCrop] = useState<BookingPageCoverCrop>(() =>
+    resolveBookingPageCoverCrop(cfg0.cover_crop),
+  );
+  const [coverFullWidth, setCoverFullWidth] = useState(cfg0.cover_full_width === true);
   const [about, setAbout] = useState(cfg0.about ?? '');
   const [announcement, setAnnouncement] = useState(cfg0.announcement ?? '');
   const [instagram, setInstagram] = useState(cfg0.social_links?.instagram ?? '');
@@ -103,13 +198,40 @@ export function BookingPageSection({
   const [gallery, setGallery] = useState<string[]>(cfg0.gallery ?? []);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [servicePhotos, setServicePhotos] = useState<Record<string, string>>(cfg0.service_photos ?? {});
+  const [showServicesTab, setShowServicesTab] = useState(cfg0.show_services_tab === true);
+  const [showTeamTab, setShowTeamTab] = useState(cfg0.show_team_tab === true);
+  const [showAboutTab, setShowAboutTab] = useState(cfg0.show_about_tab === true);
+  const [serviceList, setServiceList] = useState<
+    Array<{ id: string; name: string; description?: string | null; price_pence?: number | null; duration_minutes?: number }>
+  >([]);
+  const [servicePhotoBusyId, setServicePhotoBusyId] = useState<string | null>(null);
+  const [servicePhotoError, setServicePhotoError] = useState<string | null>(null);
+  const [teamProfiles, setTeamProfiles] = useState<Record<string, BookingTeamProfile>>(cfg0.team_profiles ?? {});
+  const [teamList, setTeamList] = useState<Array<{ id: string; name: string }>>([]);
+  const [teamPhotoBusyId, setTeamPhotoBusyId] = useState<string | null>(null);
   const lastSavedConfigRef = useRef<string | null>(null);
   // Live preview of the public booking page.
-  const [previewDevice, setPreviewDevice] = useState<'mobile' | 'desktop'>('mobile');
+  const [previewDevice, setPreviewDevice] = useState<'mobile' | 'desktop'>('desktop');
   const [previewToken, setPreviewToken] = useState(0);
   /** Lazy-load preview on first expand; keep mounted when collapsed so re-open is instant. */
   const [previewMounted, setPreviewMounted] = useState(false);
   const bumpPreview = useCallback(() => setPreviewToken((t) => t + 1), []);
+
+  const servicePhotosForConfig = useCallback(
+    (photos: Record<string, string>): Record<string, string> => {
+      const liveServiceIds = new Set(serviceList.map((s) => s.id));
+      const out: Record<string, string> = {};
+      for (const [id, url] of Object.entries(photos)) {
+        const trimmed = url?.trim();
+        if (!trimmed) continue;
+        if (liveServiceIds.size > 0 && !liveServiceIds.has(id)) continue;
+        out[id] = trimmed;
+      }
+      return out;
+    },
+    [serviceList],
+  );
 
   const buildConfigFromState = useCallback((): BookingPageConfig => {
     const config: BookingPageConfig = {};
@@ -127,8 +249,84 @@ export function BookingPageSection({
     if (xUrl.trim()) social.x = xUrl.trim();
     if (Object.keys(social).length > 0) config.social_links = social;
     if (gallery.length > 0) config.gallery = gallery;
+    const photos = servicePhotosForConfig(servicePhotos);
+    config.service_photos = Object.keys(photos).length > 0 ? photos : null;
+    config.show_services_tab = showServicesTab;
+    config.show_team_tab = showTeamTab;
+    config.show_about_tab = showAboutTab;
+    // Team profiles: keep only members that still exist and carry content.
+    const liveTeamIds = new Set(teamList.map((m) => m.id));
+    const profiles: Record<string, BookingTeamProfile> = {};
+    for (const [id, p] of Object.entries(teamProfiles)) {
+      if (liveTeamIds.size > 0 && !liveTeamIds.has(id)) continue;
+      const clean: BookingTeamProfile = {};
+      if (p.bio?.trim()) clean.bio = p.bio.trim();
+      if (p.specialties?.trim()) clean.specialties = p.specialties.trim();
+      if (p.photo?.trim()) clean.photo = p.photo.trim();
+      if (!showTeamTab || p.hidden) clean.hidden = true;
+      if (clean.bio || clean.specialties || clean.photo || clean.hidden) profiles[id] = clean;
+    }
+    if (Object.keys(profiles).length > 0) config.team_profiles = profiles;
+    if (venue.logo_url) {
+      const framed = sanitizeBookingPageLogoCrop(logoCrop);
+      if (framed) config.logo_crop = framed;
+    }
+    if (venue.cover_photo_url) {
+      const framed = sanitizeBookingPageCoverCrop(coverCrop);
+      if (framed) config.cover_crop = framed;
+    }
+    config.cover_full_width = coverFullWidth;
     return config;
-  }, [brandPrimary, brandAccent, fontPreset, about, announcement, instagram, facebook, tiktok, xUrl, gallery]);
+  }, [
+    brandPrimary,
+    brandAccent,
+    fontPreset,
+    logoCrop,
+    coverCrop,
+    coverFullWidth,
+    venue.logo_url,
+    venue.cover_photo_url,
+    about,
+    announcement,
+    instagram,
+    facebook,
+    tiktok,
+    xUrl,
+    gallery,
+    servicePhotos,
+    servicePhotosForConfig,
+    showServicesTab,
+    showTeamTab,
+    showAboutTab,
+    teamProfiles,
+    teamList,
+  ]);
+
+  const persistBookingPageConfig = useCallback(
+    async (photosOverride?: Record<string, string>) => {
+      const config = buildConfigFromState();
+      if (photosOverride !== undefined) {
+        const photos = servicePhotosForConfig(photosOverride);
+        config.service_photos = Object.keys(photos).length > 0 ? photos : null;
+      }
+      report({ status: 'saving', message: null });
+      const res = await fetch('/api/venue', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_page_config: config }),
+      });
+      const body = await readResponseJson<{ error?: string; booking_page_config?: BookingPageConfig | null }>(
+        res,
+      );
+      if (!res.ok) throw new Error(body.error ?? 'Failed to save');
+      const savedConfig = body.booking_page_config ?? config;
+      lastSavedConfigRef.current = JSON.stringify(savedConfig);
+      onUpdate({ booking_page_config: savedConfig });
+      report({ status: 'saved', message: 'Booking page updated.' });
+      return savedConfig;
+    },
+    [buildConfigFromState, servicePhotosForConfig, onUpdate, report],
+  );
 
   const primaryHasColour = Boolean(normalizeHexColor(brandPrimary));
   const primaryLowContrast = primaryHasColour && primaryNeedsDarkText(normalizeHexColor(brandPrimary)!);
@@ -161,6 +359,21 @@ export function BookingPageSection({
   const bookUrl = bookPath ? `${publicBaseUrl.replace(/\/$/, '')}${bookPath}` : null;
 
   const draftBookingPageConfig = useMemo(() => buildConfigFromState(), [buildConfigFromState]);
+  const isAppointmentVenue = isUnifiedSchedulingVenue(venue.booking_model);
+
+  const previewServices = useMemo((): BookingPagePublicService[] => {
+    if (!showServicesTab) return [];
+    return serviceList.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: typeof s.description === 'string' && s.description.trim() ? s.description.trim() : null,
+        image_url: servicePhotos[s.id]?.trim() || null,
+        price_pence: typeof s.price_pence === 'number' ? s.price_pence : null,
+        duration_minutes: typeof s.duration_minutes === 'number' && s.duration_minutes > 0 ? s.duration_minutes : 60,
+      }));
+  }, [showServicesTab, serviceList, servicePhotos]);
+
+  const previewTeam = showTeamTab ? teamList : [];
 
   const persistSlug = useCallback(
     async (slug: string) => {
@@ -314,9 +527,85 @@ export function BookingPageSection({
     setTiktok(c.social_links?.tiktok ?? '');
     setXUrl(c.social_links?.x ?? '');
     setGallery(c.gallery ?? []);
+    setServicePhotos(c.service_photos ?? {});
+    setShowServicesTab(c.show_services_tab === true);
+    setShowTeamTab(c.show_team_tab === true);
+    setShowAboutTab(c.show_about_tab === true);
+    setTeamProfiles(c.team_profiles ?? {});
+    setLogoCrop(resolveBookingPageLogoCrop(c.logo_crop));
+    setCoverCrop(resolveBookingPageCoverCrop(c.cover_crop));
+    setCoverFullWidth(c.cover_full_width === true);
     lastSavedConfigRef.current = JSON.stringify(c ?? {});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reseed only when the venue changes
   }, [venue.id]);
+
+  useEffect(() => {
+    const c = venue.booking_page_config ?? {};
+    setShowServicesTab(c.show_services_tab === true);
+    setShowTeamTab(c.show_team_tab === true);
+    setShowAboutTab(c.show_about_tab === true);
+    setCoverFullWidth(c.cover_full_width === true);
+  }, [venue.booking_page_config]);
+
+  // Load the venue's services so admins can attach a photo to each (appointment venues only).
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/appointment-services');
+        if (!res.ok) return;
+        const data = await readResponseJson<{
+          services?: Array<{
+            id: string;
+            name: string;
+            description?: string | null;
+            price_pence?: number | null;
+            duration_minutes?: number;
+            is_active?: boolean;
+          }>;
+        }>(res);
+        if (!cancelled && Array.isArray(data.services)) {
+          setServiceList(
+            data.services.map((s) => ({
+              id: s.id,
+              name: s.name,
+              description: s.description ?? null,
+              price_pence: s.price_pence ?? null,
+              duration_minutes: s.duration_minutes,
+              is_active: s.is_active,
+            })),
+          );
+        }
+      } catch {
+        /* non-appointment venues / fetch errors: leave the section hidden */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, venue.id]);
+
+  // Load the bookable team so admins can add a "Meet the team" profile per member.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/booking-page-team');
+        if (!res.ok) return;
+        const data = await readResponseJson<{ team?: Array<{ id: string; name: string }> }>(res);
+        if (!cancelled && Array.isArray(data.team)) {
+          setTeamList(data.team.map((m) => ({ id: m.id, name: m.name })));
+        }
+      } catch {
+        /* leave the section hidden */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, venue.id]);
 
   // Debounced auto-save for branding & content.
   useEffect(() => {
@@ -334,11 +623,13 @@ export function BookingPageSection({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ booking_page_config: config }),
           });
-          const body = await readResponseJson<{ error?: string }>(res);
+          const body = await readResponseJson<{ error?: string; booking_page_config?: BookingPageConfig | null }>(
+            res,
+          );
           if (!res.ok) throw new Error(body.error ?? 'Failed to save');
-          lastSavedConfigRef.current = serialized;
-          onUpdate({ booking_page_config: config });
-          bumpPreview();
+          const savedConfig = body.booking_page_config ?? config;
+          lastSavedConfigRef.current = JSON.stringify(savedConfig);
+          onUpdate({ booking_page_config: savedConfig });
           report({ status: 'saved', message: 'Booking page branding saved.' });
         } catch (err) {
           report({
@@ -349,50 +640,54 @@ export function BookingPageSection({
       })();
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [buildConfigFromState, isAdmin, onUpdate, report, bumpPreview]);
+  }, [buildConfigFromState, isAdmin, onUpdate, report]);
 
   const onLogoChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      const input = e.target;
       if (!file || !isAdmin) return;
-      setLogoSaving(true);
-      setLogoError(null);
-      report({ status: 'saving', message: null });
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch('/api/venue/logo', { method: 'POST', body: form });
-        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
-        if (!res.ok) {
-          throw new Error(uploadJson.error ?? 'Upload failed');
+      await preserveSettingsScrollDuring(async () => {
+        setLogoSaving(true);
+        setLogoError(null);
+        report({ status: 'saving', message: null });
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/venue/logo', { method: 'POST', body: form });
+          const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
+          if (!res.ok) {
+            throw new Error(uploadJson.error ?? 'Upload failed');
+          }
+          if (!uploadJson.url) {
+            throw new Error('Upload failed');
+          }
+          const patchRes = await fetch('/api/venue', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logo_url: uploadJson.url }),
+          });
+          const patchJson = await readResponseJson<{ error?: string }>(patchRes);
+          if (!patchRes.ok) {
+            throw new Error(patchJson.error ?? 'Failed to update logo URL');
+          }
+          setLogoCrop({ ...DEFAULT_BOOKING_PAGE_LOGO_CROP });
+          onUpdate({ logo_url: uploadJson.url });
+          report({ status: 'saved', message: 'Logo updated.' });
+        } catch (err) {
+          setLogoError(err instanceof Error ? err.message : 'Upload failed');
+          report({
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Upload failed',
+          });
+        } finally {
+          setLogoSaving(false);
+          input.value = '';
+          blurFileInput(input);
         }
-        if (!uploadJson.url) {
-          throw new Error('Upload failed');
-        }
-        const patchRes = await fetch('/api/venue', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logo_url: uploadJson.url }),
-        });
-        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
-        if (!patchRes.ok) {
-          throw new Error(patchJson.error ?? 'Failed to update logo URL');
-        }
-        onUpdate({ logo_url: uploadJson.url });
-        bumpPreview();
-        report({ status: 'saved', message: 'Logo updated.' });
-      } catch (err) {
-        setLogoError(err instanceof Error ? err.message : 'Upload failed');
-        report({
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Upload failed',
-        });
-      } finally {
-        setLogoSaving(false);
-        e.target.value = '';
-      }
+      });
     },
-    [isAdmin, onUpdate, report, bumpPreview],
+    [isAdmin, onUpdate, report],
   );
 
   const onLogoRemove = useCallback(async () => {
@@ -408,8 +703,8 @@ export function BookingPageSection({
       });
       const body = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(body.error ?? 'Failed to remove logo');
+      setLogoCrop({ ...DEFAULT_BOOKING_PAGE_LOGO_CROP });
       onUpdate({ logo_url: null });
-      bumpPreview();
       report({ status: 'saved', message: 'Logo removed.' });
     } catch (err) {
       setLogoError(err instanceof Error ? err.message : 'Failed to remove');
@@ -420,50 +715,54 @@ export function BookingPageSection({
     } finally {
       setLogoRemoving(false);
     }
-  }, [isAdmin, logoRemoving, onUpdate, report, bumpPreview]);
+  }, [isAdmin, logoRemoving, onUpdate, report]);
 
   const onCoverChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      const input = e.target;
       if (!file || !isAdmin) return;
-      setCoverSaving(true);
-      setCoverError(null);
-      report({ status: 'saving', message: null });
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch('/api/venue/cover', { method: 'POST', body: form });
-        const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
-        if (!res.ok) {
-          throw new Error(uploadJson.error ?? 'Upload failed');
+      await preserveSettingsScrollDuring(async () => {
+        setCoverSaving(true);
+        setCoverError(null);
+        report({ status: 'saving', message: null });
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/venue/cover', { method: 'POST', body: form });
+          const uploadJson = await readResponseJson<{ error?: string; url?: string }>(res);
+          if (!res.ok) {
+            throw new Error(uploadJson.error ?? 'Upload failed');
+          }
+          if (!uploadJson.url) {
+            throw new Error('Upload failed');
+          }
+          const patchRes = await fetch('/api/venue', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cover_photo_url: uploadJson.url }),
+          });
+          const patchJson = await readResponseJson<{ error?: string }>(patchRes);
+          if (!patchRes.ok) {
+            throw new Error(patchJson.error ?? 'Failed to update cover URL');
+          }
+          setCoverCrop({ ...DEFAULT_BOOKING_PAGE_COVER_CROP });
+          onUpdate({ cover_photo_url: uploadJson.url });
+          report({ status: 'saved', message: 'Cover photo updated.' });
+        } catch (err) {
+          setCoverError(err instanceof Error ? err.message : 'Upload failed');
+          report({
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Upload failed',
+          });
+        } finally {
+          setCoverSaving(false);
+          input.value = '';
+          blurFileInput(input);
         }
-        if (!uploadJson.url) {
-          throw new Error('Upload failed');
-        }
-        const patchRes = await fetch('/api/venue', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cover_photo_url: uploadJson.url }),
-        });
-        const patchJson = await readResponseJson<{ error?: string }>(patchRes);
-        if (!patchRes.ok) {
-          throw new Error(patchJson.error ?? 'Failed to update cover URL');
-        }
-        onUpdate({ cover_photo_url: uploadJson.url });
-        bumpPreview();
-        report({ status: 'saved', message: 'Cover photo updated.' });
-      } catch (err) {
-        setCoverError(err instanceof Error ? err.message : 'Upload failed');
-        report({
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Upload failed',
-        });
-      } finally {
-        setCoverSaving(false);
-        e.target.value = '';
-      }
+      });
     },
-    [isAdmin, onUpdate, report, bumpPreview],
+    [isAdmin, onUpdate, report],
   );
 
   const onCoverRemove = useCallback(async () => {
@@ -479,8 +778,8 @@ export function BookingPageSection({
       });
       const body = await readResponseJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(body.error ?? 'Failed to remove cover photo');
+      setCoverCrop({ ...DEFAULT_BOOKING_PAGE_COVER_CROP });
       onUpdate({ cover_photo_url: null });
-      bumpPreview();
       report({ status: 'saved', message: 'Cover photo removed.' });
     } catch (err) {
       setCoverError(err instanceof Error ? err.message : 'Failed to remove');
@@ -491,33 +790,36 @@ export function BookingPageSection({
     } finally {
       setCoverRemoving(false);
     }
-  }, [isAdmin, coverRemoving, onUpdate, report, bumpPreview]);
+  }, [isAdmin, coverRemoving, onUpdate, report]);
 
   const onGalleryAdd = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      const input = e.target;
       if (!file || !isAdmin) return;
       if (gallery.length >= BOOKING_GALLERY_MAX) {
         setGalleryError(`You can add up to ${BOOKING_GALLERY_MAX} photos.`);
-        e.target.value = '';
+        input.value = '';
         return;
       }
-      setGalleryUploading(true);
-      setGalleryError(null);
-      const form = new FormData();
-      form.append('file', file);
-      try {
-        const res = await fetch('/api/venue/gallery', { method: 'POST', body: form });
-        const json = await readResponseJson<{ error?: string; url?: string }>(res);
-        if (!res.ok || !json.url) throw new Error(json.error ?? 'Upload failed');
-        // Appending updates the config, which the debounced effect saves automatically.
-        setGallery((g) => [...g, json.url!]);
-      } catch (err) {
-        setGalleryError(err instanceof Error ? err.message : 'Upload failed');
-      } finally {
-        setGalleryUploading(false);
-        e.target.value = '';
-      }
+      await preserveSettingsScrollDuring(async () => {
+        setGalleryUploading(true);
+        setGalleryError(null);
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/venue/gallery', { method: 'POST', body: form });
+          const json = await readResponseJson<{ error?: string; url?: string }>(res);
+          if (!res.ok || !json.url) throw new Error(json.error ?? 'Upload failed');
+          setGallery((g) => [...g, json.url!]);
+        } catch (err) {
+          setGalleryError(err instanceof Error ? err.message : 'Upload failed');
+        } finally {
+          setGalleryUploading(false);
+          input.value = '';
+          blurFileInput(input);
+        }
+      });
     },
     [isAdmin, gallery.length],
   );
@@ -538,6 +840,124 @@ export function BookingPageSection({
     });
   }, []);
 
+  const onServicePhotoChange = useCallback(
+    async (serviceId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      const input = e.target;
+      if (!file || !isAdmin) return;
+      await preserveSettingsScrollDuring(async () => {
+        setServicePhotoBusyId(serviceId);
+        setServicePhotoError(null);
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/venue/service-photo', { method: 'POST', body: form });
+          const json = await readResponseJson<{ error?: string; url?: string }>(res);
+          if (!res.ok || !json.url) throw new Error(json.error ?? 'Upload failed');
+          let nextPhotos: Record<string, string> = {};
+          setServicePhotos((prev) => {
+            nextPhotos = { ...prev, [serviceId]: json.url! };
+            return nextPhotos;
+          });
+          await persistBookingPageConfig(nextPhotos);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Upload failed';
+          setServicePhotoError(message);
+          report({ status: 'error', message });
+        } finally {
+          setServicePhotoBusyId(null);
+          input.value = '';
+          blurFileInput(input);
+        }
+      });
+    },
+    [isAdmin, persistBookingPageConfig, report],
+  );
+
+  const removeServicePhoto = useCallback(
+    (serviceId: string) => {
+      const removedUrl = servicePhotos[serviceId]?.trim() ?? '';
+      const next = { ...servicePhotos };
+      delete next[serviceId];
+      setServicePhotos(next);
+      setServicePhotoError(null);
+      void (async () => {
+        report({ status: 'saving', message: null });
+        try {
+          await persistBookingPageConfig(next);
+          if (removedUrl) {
+            const res = await fetch('/api/venue/service-photo', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: removedUrl }),
+            });
+            const body = await readResponseJson<{ error?: string }>(res);
+            if (!res.ok) {
+              console.warn('Service photo storage delete failed:', body.error ?? res.status);
+            }
+          }
+          report({ status: 'saved', message: 'Service photo removed.' });
+        } catch (err) {
+          setServicePhotos(servicePhotos);
+          const message = err instanceof Error ? err.message : 'Failed to remove photo';
+          setServicePhotoError(message);
+          report({ status: 'error', message });
+        }
+      })();
+    },
+    [persistBookingPageConfig, report, servicePhotos],
+  );
+
+  const hideAllTeamProfilesOnPage = useCallback(() => {
+    setTeamProfiles((prev) => {
+      if (teamList.length === 0) return prev;
+      const next = { ...prev };
+      for (const m of teamList) {
+        const existing = next[m.id] ?? {};
+        next[m.id] = { ...existing, hidden: true };
+      }
+      return next;
+    });
+  }, [teamList]);
+
+  const onShowTeamTabChange = useCallback(
+    (checked: boolean) => {
+      setShowTeamTab(checked);
+      if (!checked) hideAllTeamProfilesOnPage();
+    },
+    [hideAllTeamProfilesOnPage],
+  );
+
+  const updateTeamProfile = useCallback((memberId: string, patch: Partial<BookingTeamProfile>) => {
+    setTeamProfiles((prev) => ({ ...prev, [memberId]: { ...prev[memberId], ...patch } }));
+  }, []);
+
+  const onTeamPhotoChange = useCallback(
+    async (memberId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      const input = e.target;
+      if (!file || !isAdmin) return;
+      await preserveSettingsScrollDuring(async () => {
+        setTeamPhotoBusyId(memberId);
+        const form = new FormData();
+        form.append('file', file);
+        try {
+          const res = await fetch('/api/venue/team-photo', { method: 'POST', body: form });
+          const json = await readResponseJson<{ error?: string; url?: string }>(res);
+          if (!res.ok || !json.url) throw new Error(json.error ?? 'Upload failed');
+          updateTeamProfile(memberId, { photo: json.url });
+        } catch {
+          /* debounced branding save surfaces errors */
+        } finally {
+          setTeamPhotoBusyId(null);
+          input.value = '';
+          blurFileInput(input);
+        }
+      });
+    },
+    [isAdmin, updateTeamProfile],
+  );
+
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50';
 
@@ -545,7 +965,9 @@ export function BookingPageSection({
     <SectionCard elevated>
       <SectionCard.Header
         eyebrow="Guest-facing"
+        eyebrowClassName={BOOKING_PAGE_EYEBROW_CLASS}
         title="Your booking page"
+        titleClassName={BOOKING_PAGE_PRIMARY_HEADING_CLASS}
         description={
           isAdmin
             ? 'Customise how your public booking page looks and where guests find it. Changes save automatically.'
@@ -555,7 +977,7 @@ export function BookingPageSection({
       <SectionCard.Body className="space-y-6">
         {bookUrl && (
           <div className="rounded-xl border border-brand-200/80 bg-brand-50/50 px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">Public booking page</p>
+            <p className={BOOKING_PAGE_FIELD_HEADING_MB1_CLASS}>Public booking page</p>
             <p className="mt-1 break-all text-sm text-slate-600">{bookUrl}</p>
             <Link
               href={bookPath!}
@@ -628,6 +1050,8 @@ export function BookingPageSection({
                     previewSlug={previewSlug}
                     device={previewDevice}
                     remountKey={previewToken}
+                    services={previewServices}
+                    team={previewTeam}
                   />
                   <p className="text-xs text-slate-500">
                     Updates as you edit colours and content. Logo, cover, and gallery photos appear after upload.
@@ -652,114 +1076,21 @@ export function BookingPageSection({
           </details>
         ) : null}
 
-        <div>
-          <span className="mb-2 block text-sm font-medium text-slate-700">Logo</span>
-          <div className="flex items-center gap-4">
-            <div className="flex-shrink-0">
-              {venue.logo_url ? (
-                <div className="h-16 w-16 rounded-full bg-white p-1 ring-1 ring-slate-200 shadow-[0_2px_10px_rgba(15,23,42,0.08)]">
-                  <img src={venue.logo_url} alt="Logo" className="h-full w-full rounded-full object-cover bg-white" />
-                </div>
-              ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400 ring-1 ring-slate-200">
-                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"
-                    />
-                  </svg>
-                </div>
-              )}
-            </div>
-            {isAdmin && (
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label
-                    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${logoSaving || logoRemoving ? 'pointer-events-none opacity-50' : ''}`}
-                  >
-                    <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-                      />
-                    </svg>
-                    {venue.logo_url ? 'Change logo' : 'Upload logo'}
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={onLogoChange}
-                      disabled={logoSaving || logoRemoving}
-                      className="sr-only"
-                    />
-                  </label>
-                  {venue.logo_url && (
-                    <button
-                      type="button"
-                      onClick={onLogoRemove}
-                      disabled={logoSaving || logoRemoving}
-                      className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      {logoRemoving ? 'Removing…' : 'Remove logo'}
-                    </button>
-                  )}
-                </div>
-                {logoSaving && <p className="text-sm text-amber-700">Uploading…</p>}
-                {logoError && <p className="text-sm text-red-600">{logoError}</p>}
-                <p className="text-xs text-slate-500">Shown on your booking page and in guest emails.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <span className="mb-1 block text-sm font-medium text-slate-700">Cover photo</span>
-          {venue.cover_photo_url ? (
-            <img src={venue.cover_photo_url} alt="Cover" className="mb-2 h-40 w-full rounded-xl object-cover" />
-          ) : (
-            <div className="mb-2 flex h-40 w-full items-center justify-center rounded-xl bg-slate-100 text-slate-500">
-              No cover photo
-            </div>
-          )}
-          {isAdmin && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <label
-                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${coverSaving || coverRemoving ? 'pointer-events-none opacity-50' : ''}`}
-                >
-                  {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={onCoverChange}
-                    disabled={coverSaving || coverRemoving}
-                    className="sr-only"
-                  />
-                </label>
-                {venue.cover_photo_url && (
-                  <button
-                    type="button"
-                    onClick={onCoverRemove}
-                    disabled={coverSaving || coverRemoving}
-                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {coverRemoving ? 'Removing…' : 'Remove photo'}
-                  </button>
-                )}
-              </div>
-              {coverSaving && <p className="mt-2 text-sm text-amber-700">Uploading…</p>}
-              {coverError && <p className="mt-2 text-sm text-red-600">{coverError}</p>}
-            </>
-          )}
-        </div>
-
+        <BookingPageSettingsGroup
+          title="Book now"
+          description={
+            isAppointmentVenue
+              ? 'Header, booking flow, and styling for the Book now tab. Address and phone are edited under Profile.'
+              : 'Logo, cover, branding, and your public booking flow.'
+          }
+          tabToggle={isAppointmentVenue ? { kind: 'always-on' } : undefined}
+        >
         <form
           onSubmit={(e) => {
             e.preventDefault();
           }}
         >
-          <label htmlFor="booking-page-slug" className="mb-1 block text-sm font-medium text-slate-700">
+          <label htmlFor="booking-page-slug" className={BOOKING_PAGE_FIELD_HEADING_MB1_CLASS}>
             Booking page address
           </label>
           <div className="flex max-w-md items-center gap-0 rounded-xl border border-slate-200 bg-white shadow-sm focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20">
@@ -792,18 +1123,210 @@ export function BookingPageSection({
           )}
         </form>
 
-        {/* Brand & content (Booking Site Studio) */}
-        <div className="space-y-5 border-t border-slate-100 pt-6">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Brand &amp; content</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Personalise the colours and wording guests see on your booking page. Changes save automatically.
-            </p>
+        <div>
+          <span className={BOOKING_PAGE_FIELD_HEADING_MB2_CLASS}>Logo</span>
+          <div className="flex flex-wrap items-center gap-3">
+            {venue.logo_url ? (
+              isAdmin ? (
+                <BookingPageDraggableLogo
+                  logoUrl={venue.logo_url}
+                  crop={logoCrop}
+                  disabled={logoSaving || logoRemoving}
+                  onCropChange={setLogoCrop}
+                />
+              ) : (
+                <BookingPageLogo logoUrl={venue.logo_url} alt="Logo" crop={logoCrop} size="md" />
+              )
+            ) : (
+              <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400 ring-1 ring-slate-200">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"
+                  />
+                </svg>
+              </div>
+            )}
+            {isAdmin && (
+              <>
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${logoSaving || logoRemoving ? 'pointer-events-none opacity-50' : ''}`}
+                >
+                  <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                    />
+                  </svg>
+                  {venue.logo_url ? 'Change logo' : 'Upload logo'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={onLogoChange}
+                    disabled={logoSaving || logoRemoving}
+                    className={SETTINGS_HIDDEN_FILE_INPUT_CLASS}
+                    tabIndex={-1}
+                  />
+                </label>
+                {venue.logo_url && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onLogoRemove}
+                      disabled={logoSaving || logoRemoving}
+                      className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {logoRemoving ? 'Removing…' : 'Remove logo'}
+                    </button>
+                    <BookingPageLogoFramingControls
+                      crop={logoCrop}
+                      disabled={logoSaving || logoRemoving}
+                      onChange={setLogoCrop}
+                    />
+                  </>
+                )}
+              </>
+            )}
           </div>
+          {isAdmin && (
+            <div className="mt-2 space-y-1">
+              {logoSaving && <p className="text-sm text-amber-700">Uploading…</p>}
+              {logoError && <p className="text-sm text-red-600">{logoError}</p>}
+              <p className="text-xs text-slate-500">
+                {venue.logo_url
+                  ? 'Drag the logo to reposition it. Shown on your booking page and in guest emails.'
+                  : 'Shown on your booking page and in guest emails.'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <span className={BOOKING_PAGE_FIELD_HEADING_MB2_CLASS}>Cover photo</span>
+          {isAdmin ? (
+            <fieldset className="mb-3">
+              <legend className="sr-only">Cover photo layout</legend>
+              <div className="flex flex-wrap gap-2">
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                    coverFullWidth
+                      ? 'border-brand-300 bg-brand-50 text-brand-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="bp-cover-layout"
+                    className="sr-only"
+                    checked={coverFullWidth}
+                    onChange={() => setCoverFullWidth(true)}
+                  />
+                  Full width
+                </label>
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                    !coverFullWidth
+                      ? 'border-brand-300 bg-brand-50 text-brand-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="bp-cover-layout"
+                    className="sr-only"
+                    checked={!coverFullWidth}
+                    onChange={() => setCoverFullWidth(false)}
+                  />
+                  Contained width
+                </label>
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500">
+                {coverFullWidth
+                  ? 'Spans the full screen width. Best for wide photos.'
+                  : 'Stays the same width as your booking content on all screen sizes. Best when cropping is awkward.'}
+              </p>
+            </fieldset>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            {venue.cover_photo_url ? (
+              isAdmin ? (
+                <BookingPageDraggableCover
+                  coverUrl={venue.cover_photo_url}
+                  crop={coverCrop}
+                  disabled={coverSaving || coverRemoving}
+                  onCropChange={setCoverCrop}
+                />
+              ) : (
+                <div className={BOOKING_PAGE_COVER_SETTINGS_FRAME_CLASS}>
+                  <BookingPageCoverPhoto
+                    coverUrl={venue.cover_photo_url}
+                    alt="Cover"
+                    crop={coverCrop}
+                    className="h-full w-full"
+                  />
+                </div>
+              )
+            ) : (
+              <div className={BOOKING_PAGE_COVER_SETTINGS_PLACEHOLDER_FRAME_CLASS}>No cover photo</div>
+            )}
+            {isAdmin && (
+              <>
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 ${coverSaving || coverRemoving ? 'pointer-events-none opacity-50' : ''}`}
+                >
+                  {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={onCoverChange}
+                    disabled={coverSaving || coverRemoving}
+                    className={SETTINGS_HIDDEN_FILE_INPUT_CLASS}
+                    tabIndex={-1}
+                  />
+                </label>
+                {venue.cover_photo_url && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onCoverRemove}
+                      disabled={coverSaving || coverRemoving}
+                      className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {coverRemoving ? 'Removing…' : 'Remove photo'}
+                    </button>
+                    <BookingPageImageFramingControls
+                      controlId="cover"
+                      crop={coverCrop}
+                      disabled={coverSaving || coverRemoving}
+                      onChange={setCoverCrop}
+                    />
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          {isAdmin && (
+            <div className="mt-2 space-y-1">
+              {coverSaving && <p className="text-sm text-amber-700">Uploading…</p>}
+              {coverError && <p className="text-sm text-red-600">{coverError}</p>}
+              <p className="text-xs text-slate-500">
+                {venue.cover_photo_url
+                  ? coverFullWidth
+                    ? 'Drag to reposition. Shown as a full-width banner at the top of your booking page (fixed height, crops to fit).'
+                    : 'Drag to reposition. Shown above your venue name at a fixed content width on all screen sizes (fixed height, crops to fit).'
+                  : coverFullWidth
+                    ? 'Upload a photo to show as a full-width banner at the top of your booking page (fixed height).'
+                    : 'Upload a photo to show above your venue name at a fixed content width (fixed height).'}
+              </p>
+            </div>
+          )}
+        </div>
 
           {isAdmin && (
             <div>
-              <span className="mb-1.5 block text-sm font-medium text-slate-700">Quick palettes</span>
+              <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Quick palettes</span>
               <div className="flex flex-wrap gap-2">
                 {BOOKING_THEME_PRESETS.map((preset) => {
                   const active =
@@ -837,7 +1360,7 @@ export function BookingPageSection({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Brand colour</label>
+              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Brand colour</label>
               <div className="flex items-center gap-2">
                 <input
                   type="color"
@@ -868,13 +1391,13 @@ export function BookingPageSection({
               <p className="mt-1 text-xs text-slate-500">Buttons, highlights and accents on your booking page.</p>
               {primaryLowContrast && (
                 <p className="mt-1 text-xs text-amber-800">
-                  This colour is quite light — white button text may be hard to read. A darker shade works best.
+                  This colour is quite light. White button text may be hard to read; a darker shade works best.
                 </p>
               )}
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
                 Accent colour <span className="font-normal text-slate-400">(optional)</span>
               </label>
               <div className="flex items-center gap-2">
@@ -908,27 +1431,230 @@ export function BookingPageSection({
           </div>
 
           <div>
-            <label htmlFor="bp-font" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="bp-font" className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
               Font style
             </label>
-            <select
+            <BookingFontPresetSelect
               id="bp-font"
               disabled={!isAdmin}
               value={fontPreset}
-              onChange={(e) => setFontPreset(e.target.value as BookingFontPreset)}
+              onChange={setFontPreset}
               className={inputClass}
-            >
-              {BOOKING_FONT_PRESET_KEYS.map((key) => (
-                <option key={key} value={key}>
-                  {BOOKING_FONT_PRESET_LABELS[key]}
-                </option>
-              ))}
-            </select>
+            />
             <p className="mt-1 text-xs text-slate-500">Sets the headings and text style on your booking page.</p>
           </div>
 
           <div>
-            <label htmlFor="bp-about" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="bp-announcement" className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
+              Announcement banner
+            </label>
+            <input
+              id="bp-announcement"
+              type="text"
+              disabled={!isAdmin}
+              value={announcement}
+              onChange={(e) => setAnnouncement(e.target.value)}
+              maxLength={300}
+              placeholder="e.g. Closed bank holiday Monday"
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-slate-500">Shown as a coloured bar across the top of your booking page.</p>
+          </div>
+        </BookingPageSettingsGroup>
+
+        {isAppointmentVenue && isAdmin ? (
+          <BookingPageSettingsGroup
+            title="Services"
+            description="Photos for each bookable service. Names and descriptions come from your appointment services."
+            tabToggle={{
+              id: 'bp-tab-services',
+              checked: showServicesTab,
+              disabled: !isAdmin,
+              onChange: setShowServicesTab,
+            }}
+          >
+              {serviceList.length > 0 ? (
+              <div>
+              <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Service photos</span>
+              <p className="mb-2 text-xs text-slate-500">
+                Add a photo to each service. Shown on the Services tab when that tab is enabled.
+              </p>
+              {servicePhotoError ? (
+                <p className="mb-2 text-sm text-red-600" role="alert">
+                  {servicePhotoError}
+                </p>
+              ) : null}
+              <div className="space-y-2">
+                {serviceList.map((svc) => {
+                  const url = servicePhotos[svc.id];
+                  const busy = servicePhotoBusyId === svc.id;
+                  return (
+                    <div key={svc.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5">
+                      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
+                        {url ? (
+                          <img src={url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-slate-300">
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M18 14.25v4.5m-9-12.75h.008v.008H9V6Z" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{svc.name}</span>
+                      <label
+                        className={`cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 ${
+                          busy ? 'pointer-events-none opacity-50' : ''
+                        }`}
+                      >
+                        {busy ? 'Uploading…' : url ? 'Change' : 'Add photo'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={(e) => onServicePhotoChange(svc.id, e)}
+                          disabled={busy}
+                          className={SETTINGS_HIDDEN_FILE_INPUT_CLASS}
+                      tabIndex={-1}
+                        />
+                      </label>
+                      {url && (
+                        <button
+                          type="button"
+                          onClick={() => removeServicePhoto(svc.id)}
+                          className="text-xs font-medium text-red-600 hover:text-red-700"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              </div>
+              ) : (
+                <p className="text-xs text-slate-500">Add appointment services to upload photos for each one.</p>
+              )}
+            </BookingPageSettingsGroup>
+          ) : null}
+
+          {isAppointmentVenue && isAdmin ? (
+            <BookingPageSettingsGroup
+              title="Meet the team"
+              description="Staff photos, bios, and specialties on your public booking page."
+              tabToggle={{
+                id: 'bp-tab-team',
+                checked: showTeamTab,
+                disabled: !isAdmin,
+                onChange: onShowTeamTabChange,
+              }}
+            >
+              {teamList.length > 0 ? (
+              <div>
+              <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Team profiles</span>
+              <p className="mb-2 text-xs text-slate-500">
+                Add a photo, short bio, and specialties for each team member.
+              </p>
+              <div className="space-y-3">
+                {teamList.map((m) => {
+                  const profile = teamProfiles[m.id] ?? {};
+                  const busy = teamPhotoBusyId === m.id;
+                  return (
+                    <div key={m.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex items-start gap-3">
+                        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
+                          {profile.photo ? (
+                            <img src={profile.photo} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-400">
+                              {m.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-semibold text-slate-900">{m.name}</span>
+                            <label
+                              className={`inline-flex shrink-0 items-center gap-1.5 text-xs text-slate-600 ${
+                                !showTeamTab ? 'opacity-50' : ''
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={showTeamTab && !profile.hidden}
+                                disabled={!showTeamTab}
+                                onChange={(e) => updateTeamProfile(m.id, { hidden: !e.target.checked })}
+                              />
+                              Show on page
+                            </label>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label
+                              className={`cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 ${
+                                busy ? 'pointer-events-none opacity-50' : ''
+                              }`}
+                            >
+                              {busy ? 'Uploading…' : profile.photo ? 'Change photo' : 'Add photo'}
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={(e) => onTeamPhotoChange(m.id, e)}
+                                disabled={busy}
+                                className={SETTINGS_HIDDEN_FILE_INPUT_CLASS}
+                      tabIndex={-1}
+                              />
+                            </label>
+                            {profile.photo && (
+                              <button
+                                type="button"
+                                onClick={() => updateTeamProfile(m.id, { photo: null })}
+                                className="text-xs font-medium text-red-600 hover:text-red-700"
+                              >
+                                Remove photo
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={profile.specialties ?? ''}
+                            onChange={(e) => updateTeamProfile(m.id, { specialties: e.target.value })}
+                            placeholder="Specialties (comma-separated)"
+                            maxLength={200}
+                            className={inputClass}
+                          />
+                          <textarea
+                            value={profile.bio ?? ''}
+                            onChange={(e) => updateTeamProfile(m.id, { bio: e.target.value })}
+                            rows={2}
+                            maxLength={600}
+                            placeholder="Short bio"
+                            className={`${inputClass} resize-y`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              </div>
+              ) : (
+                <p className="text-xs text-slate-500">Add bookable team members to configure their profiles.</p>
+              )}
+            </BookingPageSettingsGroup>
+          ) : null}
+
+        {isAppointmentVenue ? (
+          <BookingPageSettingsGroup
+            title="About"
+            description="Welcome message, map, gallery, and social links for the About tab."
+            tabToggle={{
+              id: 'bp-tab-about',
+              checked: showAboutTab,
+              disabled: !isAdmin,
+              onChange: setShowAboutTab,
+            }}
+          >
+          <div>
+            <label htmlFor="bp-about" className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
               About / welcome message
             </label>
             <textarea
@@ -944,24 +1670,7 @@ export function BookingPageSection({
           </div>
 
           <div>
-            <label htmlFor="bp-announcement" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Announcement banner
-            </label>
-            <input
-              id="bp-announcement"
-              type="text"
-              disabled={!isAdmin}
-              value={announcement}
-              onChange={(e) => setAnnouncement(e.target.value)}
-              maxLength={300}
-              placeholder="e.g. Closed bank holiday Monday"
-              className={inputClass}
-            />
-            <p className="mt-1 text-xs text-slate-500">Shown as a coloured bar across the top of your booking page.</p>
-          </div>
-
-          <div>
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">
+            <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
               Social links <span className="font-normal text-slate-400">(optional)</span>
             </span>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -972,13 +1681,12 @@ export function BookingPageSection({
             </div>
           </div>
 
-          {/* Photo gallery */}
           <div>
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">
+            <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
               Photo gallery <span className="font-normal text-slate-400">({gallery.length}/{BOOKING_GALLERY_MAX})</span>
             </span>
             <p className="mb-2 text-xs text-slate-500">
-              Showcase your space and work. Photos appear on your booking page — venues with more photos get more bookings.
+              Showcase your space and work. Photos appear on the About tab when it is enabled.
             </p>
             {gallery.length > 0 && (
               <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -1032,14 +1740,16 @@ export function BookingPageSection({
                     accept="image/jpeg,image/png,image/webp"
                     onChange={onGalleryAdd}
                     disabled={galleryUploading || gallery.length >= BOOKING_GALLERY_MAX}
-                    className="sr-only"
+                    className={SETTINGS_HIDDEN_FILE_INPUT_CLASS}
+                    tabIndex={-1}
                   />
                 </label>
                 {galleryError && <p className="mt-2 text-sm text-red-600">{galleryError}</p>}
               </>
             )}
           </div>
-        </div>
+          </BookingPageSettingsGroup>
+        ) : null}
       </SectionCard.Body>
     </SectionCard>
   );

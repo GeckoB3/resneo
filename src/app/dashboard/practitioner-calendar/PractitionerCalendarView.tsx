@@ -446,6 +446,7 @@ function isManualEditableBlock(bl: CalendarBlock): boolean {
 function calendarBlockHeading(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) return 'Break';
   if (isScheduleClosureBlock(bl)) return scheduleClosureBlockLabel(bl.block_type);
+  if (isManualEditableBlock(bl)) return 'Break';
   return 'Blocked';
 }
 
@@ -1682,11 +1683,8 @@ function DragBlockPreview({
   block: CalendarBlock;
   movePreview?: { label: string; invalid: boolean } | null;
 }) {
-  const label = isBreakCalendarBlock(block)
-    ? 'Break'
-    : block.reason?.trim()
-      ? `Blocked: ${block.reason}`
-      : 'Blocked';
+  const heading = calendarBlockHeading(block);
+  const label = block.reason?.trim() ? `${heading}: ${block.reason.trim()}` : heading;
   const accent = isBreakCalendarBlock(block) ? '#d97706' : '#94a3b8';
   const shellClass = isBreakCalendarBlock(block)
     ? 'border-amber-300 bg-amber-50/95'
@@ -5253,7 +5251,9 @@ export function PractitionerCalendarView({
                                     ? 'Break (set in Calendar availability)'
                                     : closureBlock
                                       ? scheduleClosureBlockLabel(bl.block_type)
-                                      : bl.reason ?? 'Blocked'
+                                      : bl.reason?.trim()
+                                        ? `${calendarBlockHeading(bl)}: ${bl.reason.trim()}`
+                                        : calendarBlockHeading(bl)
                                 }
                               >
                                 <span className="font-semibold">{calendarBlockHeading(bl)}</span>

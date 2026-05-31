@@ -9,6 +9,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
+import { slugFromBusinessNameOrFallback } from '@/lib/venue/slug-from-business-name';
 import { defaultCalendarWorkingHoursFromOpeningHours } from '@/lib/availability/opening-hours-to-working-hours';
 import {
   defaultPractitionerWorkingHours,
@@ -1522,12 +1523,7 @@ export default function OnboardingPage() {
       });
       setSaving(true);
       try {
-        const slug = name
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/-+$/, '');
-        const finalSlug = slug || `venue-${Date.now()}`;
+        const finalSlug = slugFromBusinessNameOrFallback(name, () => `venue-${Date.now()}`);
         const nextStep = Math.max(step + 1, maxCompletedStep);
         const res = await fetch('/api/venue/onboarding', {
           method: 'PATCH',

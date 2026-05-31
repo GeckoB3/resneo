@@ -43,6 +43,12 @@ export const APPOINTMENT_PUBLIC_ROOT_CLASS = 'appointment-public';
 /** Non-embed public appointment card: compact on small screens, roomier from md up. */
 export const APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS = 'max-w-lg md:max-w-xl lg:max-w-2xl';
 
+/** Width + horizontal centering for booking page tab panels (Services, Team, About). */
+export const BOOKING_TAB_PANEL_CLASS = `mx-auto w-full min-w-0 ${APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS}`;
+
+/** Padding aligned with the Book now tab content column. */
+export const BOOKING_TAB_PANEL_INSET_CLASS = 'scroll-mt-4 px-4 pb-6 py-6 sm:py-8';
+
 export const APPOINTMENT_PUBLIC_CHEVRON = 'ap-chevron h-5 w-5 shrink-0';
 export const APPOINTMENT_PUBLIC_CHEVRON_SM = 'ap-chevron h-4 w-4 shrink-0';
 export const APPOINTMENT_PUBLIC_PRICE = 'ap-price text-sm font-semibold';

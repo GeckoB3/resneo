@@ -18,6 +18,13 @@ export function buildGoogleMapsDirectionsUrl(address: string | null | undefined)
   return `https://www.google.com/maps/search/?${params.toString()}`;
 }
 
+/** Embed URL for an iframe map preview (no API key; query is the venue address). */
+export function buildGoogleMapsEmbedUrl(address: string | null | undefined): string | null {
+  const a = (address ?? '').trim();
+  if (!a) return null;
+  return `https://www.google.com/maps?q=${encodeURIComponent(a)}&output=embed`;
+}
+
 /**
  * Normalise a stored business website URL for safe use in `<a href="…">`.
  * Mirrors the storage normaliser in `lib/urls/website-url.ts` but is tolerant of legacy

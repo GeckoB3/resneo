@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getPublicVenueForBookBySlug } from '@/lib/booking/get-public-venue-for-book';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookPublicLayout } from '@/components/booking/BookPublicLayout';
+import { loadBookPublicLayoutData } from '@/lib/booking/load-book-public-layout-data';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 
 async function getActivePractitionerForBook(
@@ -38,5 +39,9 @@ export default async function BookPractitionerPage({
   const lockedPractitioner = await getActivePractitionerForBook(venue.id, practitionerSlug);
   if (!lockedPractitioner) notFound();
 
-  return <BookPublicLayout venue={venue} lockedPractitioner={lockedPractitioner} />;
+  const { services, team } = await loadBookPublicLayoutData(getSupabaseAdminClient(), venue);
+
+  return (
+    <BookPublicLayout venue={venue} lockedPractitioner={lockedPractitioner} team={team} services={services} />
+  );
 }

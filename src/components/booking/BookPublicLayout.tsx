@@ -19,8 +19,6 @@ import { BOOKING_FONT_STYLESHEET, bookingPageFontVars } from '@/lib/booking/book
 
 import {
 
-  bookingPageHasExtraTabs,
-
   bookingPageHideAboutTabContentFromHeader,
 
   bookingPageShowsAboutTab,
@@ -199,7 +197,6 @@ export function BookPublicLayout({
 
   const servicesForTab = showServicesTab && isAppointment ? services : [];
 
-  const hasExtraTabs = bookingPageHasExtraTabs(pageConfig, venue.booking_model);
   const showAboutTab = bookingPageShowsAboutTab(pageConfig, venue.booking_model);
   const hideAboutTabContentFromHeader = bookingPageHideAboutTabContentFromHeader(
     pageConfig,

@@ -298,7 +298,6 @@ export function BookingPageSection({
     showServicesTab,
     showTeamTab,
     showAboutTab,
-    serviceList,
     teamProfiles,
     teamList,
   ]);
@@ -310,7 +309,6 @@ export function BookingPageSection({
         const photos = servicePhotosForConfig(photosOverride);
         config.service_photos = Object.keys(photos).length > 0 ? photos : null;
       }
-      const serialized = JSON.stringify(config);
       report({ status: 'saving', message: null });
       const res = await fetch('/api/venue', {
         method: 'PATCH',

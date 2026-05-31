@@ -365,7 +365,6 @@ function PlanSection({
   const tier = venue.pricing_tier ?? 'appointments';
   const planStatus = venue.plan_status ?? 'active';
   const isFreeAccess = isSuperuserFreeBillingAccess(venue.billing_access_source);
-  const isLight = tier === 'light';
   const appointmentsTier = isAppointmentsPlanTierValue(tier) ? tier : null;
   const isAppointmentsPlan = appointmentsTier !== null;
   const currentPlanDetails = appointmentsTier ? APPOINTMENTS_PLAN_DETAILS[appointmentsTier] : null;

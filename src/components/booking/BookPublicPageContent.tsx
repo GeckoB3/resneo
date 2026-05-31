@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { BookPublicBookingFlowSuspense } from '@/components/booking/BookPublicBookingFlowSuspense';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -225,17 +225,12 @@ export function BookPublicPageContent({
   );
   const hasExtraTabs = tabs.length > 1;
   const [activeTab, setActiveTab] = useState<BookingPageTabId>('book');
+  const effectiveTab = tabs.includes(activeTab) ? activeTab : 'book';
 
-  useEffect(() => {
-    if (!tabs.includes(activeTab)) {
-      setActiveTab('book');
-    }
-  }, [tabs, activeTab]);
-
-  const showBookPanel = !hasExtraTabs || activeTab === 'book';
-  const showServicesPanel = hasExtraTabs && activeTab === 'services';
-  const showTeamPanel = hasExtraTabs && activeTab === 'team';
-  const showAboutPanel = hasExtraTabs && activeTab === 'about';
+  const showBookPanel = !hasExtraTabs || effectiveTab === 'book';
+  const showServicesPanel = hasExtraTabs && effectiveTab === 'services';
+  const showTeamPanel = hasExtraTabs && effectiveTab === 'team';
+  const showAboutPanel = hasExtraTabs && effectiveTab === 'about';
 
   return (
     <>
@@ -248,7 +243,7 @@ export function BookPublicPageContent({
               aria-label="Booking page sections"
             >
               {tabs.map((tab) => {
-                const selected = activeTab === tab;
+                const selected = effectiveTab === tab;
                 return (
                   <button
                     key={tab}

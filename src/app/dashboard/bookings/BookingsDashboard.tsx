@@ -48,6 +48,7 @@ import {
 } from '@/lib/booking/booking-staff-indicators';
 import {
   applyBookingRowOverlayFields,
+  applyOptimisticStatusToBookingRows,
   overlayFromPatchPayload,
 } from '@/lib/booking/booking-row-overlay';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
@@ -987,17 +988,7 @@ export function BookingsDashboard({
     const previous = bookings.find((b) => b.id === bookingId)?.status;
     if (!previous || previous === newStatus || !canTransitionBookingStatus(previous, newStatus)) return;
     setBookings((prev) =>
-      prev.map((row) => {
-        if (row.id !== bookingId) return row;
-        const updated = { ...row, status: newStatus };
-        if (previous === 'Confirmed' && newStatus === 'Booked') {
-          updated.staff_attendance_confirmed_at = null;
-          updated.guest_attendance_confirmed_at = null;
-        } else if (newStatus === 'Confirmed' && previous !== 'Confirmed') {
-          updated.staff_attendance_confirmed_at = new Date().toISOString();
-        }
-        return updated;
-      }),
+      applyOptimisticStatusToBookingRows(prev, bookingId, newStatus, isTableReservationBooking),
     );
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
@@ -1010,12 +1001,14 @@ export function BookingsDashboard({
       }
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (payload && typeof payload === 'object' && !('error' in payload)) {
+        const groupId = bookings.find((row) => row.id === bookingId)?.group_booking_id;
+        const patchOverlay = overlayFromPatchPayload(payload);
         setBookings((prev) =>
-          prev.map((row) =>
-            row.id === bookingId
-              ? applyBookingRowOverlayFields(row, overlayFromPatchPayload(payload))
-              : row,
-          ),
+          prev.map((row) => {
+            const inGroup = Boolean(groupId && row.group_booking_id === groupId);
+            if (row.id !== bookingId && !inGroup) return row;
+            return applyBookingRowOverlayFields(row, patchOverlay);
+          }),
         );
       }
       const row = bookings.find((x) => x.id === bookingId);
@@ -1033,7 +1026,7 @@ export function BookingsDashboard({
         scheduleWaitlistAlertsRefresh();
       }
     } catch {
-      setBookings((prev) => prev.map((booking) => booking.id === bookingId ? { ...booking, status: previous } : booking));
+      void fetchBookings({ silent: true });
       setError(`Could not update booking status for ${bookingId.slice(0, 8).toUpperCase()}.`);
     }
   }, [bookings, fetchBookings, addToast]);

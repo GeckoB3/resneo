@@ -1,4 +1,5 @@
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
+import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 
 /** Row shape for “Services in this visit” / group dining linked bookings. */
 export interface GroupVisitBookingRow {
@@ -6,6 +7,8 @@ export interface GroupVisitBookingRow {
   booking_time: string;
   booking_end_time: string | null;
   status: string;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   person_label: string | null;
   booking_item_name: string | null;
   service_variant_name: string | null;
@@ -83,6 +86,174 @@ export function formatDurationMinutesLabel(totalMinutes: number): string {
   return `${hours} hr ${mins} min`;
 }
 
+/** Apply the same lifecycle status to every segment in a multi-service visit (optimistic UI). */
+export function applyStatusToAllGroupVisitRows(
+  rows: GroupVisitBookingRow[],
+  status: string,
+): GroupVisitBookingRow[] {
+  return rows.map((row) => (row.status === status ? row : { ...row, status }));
+}
+
+const VISIT_STATUS_RANK: Record<string, number> = {
+  Pending: 0,
+  'Deposit Pending': 0,
+  Booked: 1,
+  Confirmed: 2,
+  Arrived: 2,
+  Seated: 3,
+  Started: 3,
+  Completed: 4,
+  'No-Show': 5,
+  Cancelled: 6,
+};
+
+/** When two sources disagree, keep the further-along lifecycle (avoids stale list seeds regressing Confirmed → Booked). */
+export function preferLaterBookingStatus(a: string, b: string): string {
+  const ra = VISIT_STATUS_RANK[a] ?? -1;
+  const rb = VISIT_STATUS_RANK[b] ?? -1;
+  if (ra === rb) return a;
+  return rb > ra ? b : a;
+}
+
+/** Status shown on visit segment pills — never below the expanded row’s effective status. */
+export function resolveGroupVisitSegmentDisplayStatus(
+  segmentStatus: string,
+  anchorStatus: string,
+): string {
+  return preferLaterBookingStatus(segmentStatus, anchorStatus);
+}
+
+/** Visit-wide anchor for segment pills (expanded row + every loaded segment). */
+export function resolveVisitPillAnchorStatus(
+  anchorStatus: string,
+  segments: ReadonlyArray<Pick<GroupVisitBookingRow, 'status'>>,
+  visitAttendanceConfirmed: boolean,
+): string {
+  let anchor = anchorStatus;
+  if (visitAttendanceConfirmed) {
+    anchor = preferLaterBookingStatus(anchor, 'Confirmed');
+  }
+  for (const seg of segments) {
+    anchor = preferLaterBookingStatus(anchor, seg.status);
+  }
+  return anchor;
+}
+
+/** Lifecycle status for a visit segment pill (attendance timestamps + visit anchor). */
+export function groupVisitSegmentPillStatus(
+  segment: Pick<
+    GroupVisitBookingRow,
+    'status' | 'guest_attendance_confirmed_at' | 'staff_attendance_confirmed_at'
+  >,
+  visitAnchorStatus: string,
+  visitAttendanceConfirmed: boolean,
+): string {
+  let status = segment.status;
+  if (isAttendanceConfirmed(segment)) {
+    status = preferLaterBookingStatus(status, 'Confirmed');
+  }
+  if (visitAttendanceConfirmed) {
+    status = preferLaterBookingStatus(status, 'Confirmed');
+  }
+  return resolveGroupVisitSegmentDisplayStatus(status, visitAnchorStatus);
+}
+
+/** Merge fetched visit rows with in-memory rows without regressing lifecycle status. */
+export function mergePreferLaterGroupVisitRows(
+  previous: GroupVisitBookingRow[],
+  fetched: GroupVisitBookingRow[],
+): GroupVisitBookingRow[] {
+  if (fetched.length === 0) return previous;
+  if (previous.length === 0) return fetched;
+  const byId = new Map<string, GroupVisitBookingRow>();
+  for (const row of [...previous, ...fetched]) {
+    const existing = byId.get(row.id);
+    if (!existing) {
+      byId.set(row.id, row);
+      continue;
+    }
+    byId.set(row.id, {
+      ...existing,
+      ...row,
+      status: preferLaterBookingStatus(existing.status, row.status),
+      guest_attendance_confirmed_at:
+        row.guest_attendance_confirmed_at ?? existing.guest_attendance_confirmed_at ?? null,
+      staff_attendance_confirmed_at:
+        row.staff_attendance_confirmed_at ?? existing.staff_attendance_confirmed_at ?? null,
+    });
+  }
+  return sortGroupVisitRows([...byId.values()]);
+}
+
+/** Optimistic visit confirm: every pre-arrival segment shows Confirmed in the visit card. */
+export function applyVisitAttendanceConfirmToGroupVisitRows(
+  rows: GroupVisitBookingRow[],
+  confirmed: boolean,
+): GroupVisitBookingRow[] {
+  const confirmedAt = confirmed ? new Date().toISOString() : null;
+  return rows.map((row) => {
+    if (confirmed) {
+      if (row.status === 'Booked' || row.status === 'Pending' || row.status === 'Deposit Pending') {
+        return {
+          ...row,
+          status: 'Confirmed',
+          staff_attendance_confirmed_at: confirmedAt,
+          guest_attendance_confirmed_at: null,
+        };
+      }
+      return row;
+    }
+    if (row.status === 'Confirmed') {
+      return {
+        ...row,
+        status: 'Booked',
+        staff_attendance_confirmed_at: null,
+        guest_attendance_confirmed_at: null,
+      };
+    }
+    return {
+      ...row,
+      staff_attendance_confirmed_at: null,
+      guest_attendance_confirmed_at: null,
+    };
+  });
+}
+
+/** Prefer fresher `status` from parent list rows when the group-visit cache lags. */
+export function mergeGroupVisitRowsWithSeeds(
+  rows: GroupVisitBookingRow[],
+  seeds: Array<Pick<GroupVisitListSeed, 'id' | 'status'>>,
+): GroupVisitBookingRow[] {
+  if (rows.length === 0 || seeds.length === 0) return rows;
+  const statusById = new Map(seeds.map((s) => [s.id, s.status]));
+  return rows.map((row) => {
+    const seedStatus = statusById.get(row.id);
+    if (seedStatus === undefined) return row;
+    const merged = preferLaterBookingStatus(row.status, seedStatus);
+    return merged === row.status ? row : { ...row, status: merged };
+  });
+}
+
+/**
+ * Short date phrase for “N consecutive services …” copy.
+ * Returns `today`, `tomorrow`, or `on Mon, 3 Jun` (no “on” for relative days).
+ */
+export function multiServiceVisitDatePhrase(isoDate: string): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return `on ${isoDate}`;
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.toDateString() === today.toDateString()) return 'today';
+  if (d.toDateString() === tomorrow.toDateString()) return 'tomorrow';
+  const label = d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+  return `on ${label}`;
+}
+
 export function formatGroupVisitSegmentDurationLabel(seg: {
   duration_minutes: number | null;
   addons_total_duration_minutes: number;
@@ -110,6 +281,14 @@ export function mapGroupVisitListRow(raw: Record<string, unknown>): GroupVisitBo
         ? raw.booking_end_time
         : null,
     status: String(raw.status),
+    guest_attendance_confirmed_at:
+      typeof raw.guest_attendance_confirmed_at === 'string' && raw.guest_attendance_confirmed_at.trim()
+        ? raw.guest_attendance_confirmed_at
+        : null,
+    staff_attendance_confirmed_at:
+      typeof raw.staff_attendance_confirmed_at === 'string' && raw.staff_attendance_confirmed_at.trim()
+        ? raw.staff_attendance_confirmed_at
+        : null,
     person_label:
       typeof raw.person_label === 'string' && raw.person_label.trim() ? raw.person_label.trim() : null,
     booking_item_name:
@@ -206,7 +385,9 @@ export async function fetchGroupVisitBookings(groupBookingId: string): Promise<G
   const inFlight = groupVisitFetchInFlight.get(gid);
   if (inFlight) return inFlight;
 
-  const promise = fetch(`/api/venue/bookings/list?group_booking_id=${encodeURIComponent(gid)}`)
+  const promise = fetch(
+    `/api/venue/bookings/list?group_booking_id=${encodeURIComponent(gid)}&_=${Date.now()}`,
+  )
     .then(async (res) => {
       if (!res.ok) return peekGroupVisitBookings(gid) ?? [];
       const data = (await res.json()) as { bookings?: Record<string, unknown>[] };

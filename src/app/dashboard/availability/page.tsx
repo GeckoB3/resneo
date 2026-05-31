@@ -55,10 +55,6 @@ export default async function AvailabilitySettingsPage({
   searchParams: Promise<{ tab?: string; fp?: string }>;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/availability');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {

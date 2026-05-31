@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -8,8 +7,6 @@ import { NewBookingPageClient } from './NewBookingPageClient';
 
 export default async function NewBookingPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/bookings/new');
 
   const staff = await getDashboardStaff(supabase);
   const venueId = staff.venue_id;

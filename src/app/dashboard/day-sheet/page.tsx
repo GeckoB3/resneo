@@ -16,8 +16,6 @@ import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/day-sheet');
 
   const staff = await getDashboardStaff(supabase);
   const venueId = staff.venue_id;

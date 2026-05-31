@@ -16,5 +16,12 @@ export default async function EmbedPage({
   const venue = await getPublicVenueForBookBySlug(slug);
   if (!venue) notFound();
 
-  return <EmbedBookingClient venue={venue} accentColour={typeof accent === 'string' ? accent : null} />;
+  // Explicit ?accent= wins; otherwise fall back to the booking page's brand colour so the
+  // embedded widget matches the venue's branding by default.
+  const effectiveAccent =
+    typeof accent === 'string' && accent.trim()
+      ? accent
+      : venue.booking_page_config?.brand_primary ?? null;
+
+  return <EmbedBookingClient venue={venue} accentColour={effectiveAccent} />;
 }

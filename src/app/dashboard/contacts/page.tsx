@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ContactsDashboard } from './ContactsDashboard';
@@ -23,11 +22,6 @@ function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminol
 
 export default async function ContactsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/contacts');
-
   const staff = await getDashboardStaff(supabase);
   const venueId = staff.venue_id;
 

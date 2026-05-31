@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { createClient } from '@/lib/supabase/browser';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { DASHBOARD_LIVE_POLL_MS } from '@/lib/realtime/dashboard-sync-constants';
+import {
+  registerVenuePostgresLiveSync,
+  subscribeVenuePostgresLiveSyncState,
+  syncVenuePostgresLiveSyncRegistration,
+  unregisterVenuePostgresLiveSync,
+} from '@/lib/realtime/venue-postgres-live-sync-registry';
 
 export type LiveSyncState = 'live' | 'reconnecting';
 
@@ -16,7 +22,7 @@ export type PostgresLiveSubscription = {
   }) => void;
 };
 
-export const DASHBOARD_LIVE_POLL_MS = 30_000;
+export { DASHBOARD_LIVE_POLL_MS };
 
 interface UseVenuePostgresLiveSyncOptions {
   venueId?: string;
@@ -29,8 +35,8 @@ interface UseVenuePostgresLiveSyncOptions {
 }
 
 /**
- * Subscribe to Supabase postgres changes for staff dashboard views, with polling fallback
- * while the channel is reconnecting (same pattern as day sheet / table grid).
+ * Subscribe to Supabase postgres changes for staff dashboard views.
+ * One shared channel + one poll timer per venue (all dashboard views combined).
  */
 export function useVenuePostgresLiveSync({
   venueId,
@@ -40,97 +46,55 @@ export function useVenuePostgresLiveSync({
   enabled = true,
 }: UseVenuePostgresLiveSyncOptions): LiveSyncState {
   const [state, setState] = useState<LiveSyncState>('reconnecting');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasSubscribedRef = useRef(false);
+  const registrationId = useId();
   const onRefreshRef = useRef(onRefresh);
   const subscriptionsRef = useRef(subscriptions);
-
-  useEffect(() => {
-    onRefreshRef.current = onRefresh;
-    subscriptionsRef.current = subscriptions;
-  });
 
   const subscriptionKey = subscriptions
     .map((sub) => `${sub.table}:${sub.filter ?? ''}:${sub.handler ? 'h' : 'r'}`)
     .join('|');
 
-  /** Single stable dependency — React requires useEffect deps to stay a constant length. */
   const effectSignature = `${enabled ? '1' : '0'}|${venueId ?? ''}|${pollMs}|${subscriptionKey}`;
+
+  const buildRegistration = () => ({
+    getSubscriptions: () => subscriptionsRef.current,
+    onRefresh: () => {
+      onRefreshRef.current();
+    },
+    pollMs,
+  });
+
+  useLayoutEffect(() => {
+    onRefreshRef.current = onRefresh;
+    subscriptionsRef.current = subscriptions;
+  });
+
+  useLayoutEffect(() => {
+    if (!enabled || !venueId || subscriptionsRef.current.length === 0) return;
+    syncVenuePostgresLiveSyncRegistration(venueId, registrationId, buildRegistration());
+  });
 
   useEffect(() => {
     if (!enabled || !venueId || subscriptionsRef.current.length === 0) {
       return undefined;
     }
 
-    const supabase = createClient();
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const stableVenueId = venueId;
+    const stableRegistrationId = registrationId;
 
-    const handlePayload = (
-      sub: PostgresLiveSubscription,
-      payload: { new?: Record<string, unknown>; old?: Record<string, unknown> },
-    ) => {
-      if (sub.handler) {
-        sub.handler(payload);
-        return;
-      }
-      onRefreshRef.current();
-    };
+    registerVenuePostgresLiveSync(stableVenueId, stableRegistrationId, buildRegistration());
 
-    channel = supabase.channel(`venue-postgres-live-${venueId}-${subscriptionsRef.current.map((s) => s.table).join('-')}`);
-
-    for (let index = 0; index < subscriptionsRef.current.length; index += 1) {
-      const subscriptionIndex = index;
-      channel = channel.on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: subscriptionsRef.current[subscriptionIndex]!.table,
-          ...(subscriptionsRef.current[subscriptionIndex]!.filter
-            ? { filter: subscriptionsRef.current[subscriptionIndex]!.filter }
-            : {}),
-        },
-        (payload) => {
-          const sub = subscriptionsRef.current[subscriptionIndex];
-          if (!sub) return;
-          handlePayload(sub, payload as { new?: Record<string, unknown>; old?: Record<string, unknown> });
-        },
-      );
-    }
-
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        const hadConnectionBefore = hasSubscribedRef.current;
-        hasSubscribedRef.current = true;
-        setState('live');
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        if (hadConnectionBefore) {
-          onRefreshRef.current();
-        }
-      } else {
-        setState('reconnecting');
-        if (!pollRef.current) {
-          pollRef.current = setInterval(() => {
-            onRefreshRef.current();
-          }, pollMs);
-        }
-      }
-    });
+    const unsubscribeState = subscribeVenuePostgresLiveSyncState(
+      stableVenueId,
+      stableRegistrationId,
+      setState,
+    );
 
     return () => {
-      hasSubscribedRef.current = false;
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      unsubscribeState();
+      unregisterVenuePostgresLiveSync(stableVenueId, stableRegistrationId);
     };
-  }, [effectSignature]);
+  }, [effectSignature, pollMs, registrationId, venueId]);
 
   return state;
 }

@@ -1,6 +1,7 @@
 import type { BookingModel } from '@/types/booking-models';
 import type { VenueFeatureFlags, ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
+import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 
 /** Venue shape used by the settings dashboard (matches API). */
 export interface VenueSettings {
@@ -72,6 +73,8 @@ export interface VenueSettings {
   feature_flags_resolved?: ResolvedAppointmentsFeatureFlags;
   /** 6-digit hex (no #) for guest embed widget accent (`?accent=` on iframe URL). */
   embed_accent_colour?: string | null;
+  /** Public booking-page branding/content (Booking Site Studio). */
+  booking_page_config?: BookingPageConfig | null;
 }
 
 export type OpeningHoursDaySettings =

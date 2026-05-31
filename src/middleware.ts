@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { resolveAuthIdentity, resolveAuthUserMetadata } from '@/lib/auth/resolve-auth-identity';
 import { isPlatformRoleInJwt } from '@/lib/platform-auth';
 import {
   SIGNUP_PENDING_BUSINESS_TYPE_KEY,
@@ -18,6 +19,13 @@ import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 import { areVenueSubscriptionMutationsBlocked } from '@/lib/billing/subscription-entitlement';
 
+type MiddlewareUser = {
+  id: string;
+  email: string | undefined;
+  app_metadata: Record<string, unknown>;
+  user_metadata: Record<string, unknown>;
+};
+
 async function loadSupportSessionRow(request: NextRequest, userId: string) {
   const raw = request.cookies.get(SUPPORT_SESSION_COOKIE_NAME)?.value;
   const sid = parseSupportSessionCookieValue(raw);
@@ -30,6 +38,14 @@ function isNonPersistingVenuePath(p: string): boolean {
   if (p === '/api/venue/communication-preview') return true;
   if (p === '/api/venue/appointments-plan/preview') return true;
   return false;
+}
+
+function isSignupPath(pathname: string): boolean {
+  return (
+    pathname === '/signup' ||
+    pathname === '/signup/business-type' ||
+    pathname === '/signup/plan'
+  );
 }
 
 /** Public embed iframe: allow framing on any parent origin (overrides any stray X-Frame-Options). */
@@ -78,8 +94,26 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session; required so server and client stay in sync
-  const { data: { user } } = await supabase.auth.getUser();
+  // Refresh session cookies without calling Auth `/user` on every request.
+  await supabase.auth.getSession();
+
+  const identity = await resolveAuthIdentity(supabase);
+  let user: MiddlewareUser | null = null;
+
+  if (identity) {
+    let userMetadata = identity.userMetadata;
+    if (pathname === '/login' || isSignupPath(pathname)) {
+      userMetadata = await resolveAuthUserMetadata(supabase, identity, {
+        fetchFromServer: true,
+      });
+    }
+    user = {
+      id: identity.id,
+      email: identity.email ?? undefined,
+      app_metadata: identity.appMetadata,
+      user_metadata: userMetadata,
+    };
+  }
 
   const isDashboard = pathname.startsWith('/dashboard');
   const isAccount = pathname.startsWith('/account');
@@ -95,13 +129,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (
-    user &&
-    (pathname === '/signup' || pathname === '/signup/business-type' || pathname === '/signup/plan')
-  ) {
-    const meta = user.user_metadata as Record<string, unknown> | undefined;
-    const pendingPlan = meta?.[SIGNUP_PENDING_PLAN_KEY];
-    const pendingBusinessType = meta?.[SIGNUP_PENDING_BUSINESS_TYPE_KEY];
+  if (user && isSignupPath(pathname)) {
+    const meta = user.user_metadata;
+    const pendingPlan = meta[SIGNUP_PENDING_PLAN_KEY];
+    const pendingBusinessType = meta[SIGNUP_PENDING_BUSINESS_TYPE_KEY];
     if (
       isSignupPaymentReady(
         typeof pendingPlan === 'string' ? pendingPlan : null,
@@ -125,7 +156,7 @@ export async function middleware(request: NextRequest) {
 
   const jwtSuperuser =
     !!user &&
-    isPlatformRoleInJwt(user.app_metadata as Record<string, unknown> | undefined, user.email);
+    isPlatformRoleInJwt(user.app_metadata, user.email);
 
   if (user && jwtSuperuser && (pathname.startsWith('/dashboard') || pathname.startsWith('/onboarding'))) {
     const session = await loadSupportSessionRow(request, user.id);
@@ -151,18 +182,20 @@ export async function middleware(request: NextRequest) {
     return false;
   }
 
-  if (isVenueMutating) {
-    const supportSession = jwtSuperuser ? await loadSupportSessionRow(request, user.id) : null;
+  if (isVenueMutating && user) {
+    const authedUser = user;
+    const supportSession = jwtSuperuser ? await loadSupportSessionRow(request, authedUser.id) : null;
 
     if (!isVenueBillingExemptVenuePath(pathname)) {
       let vid: string | undefined = supportSession?.venue_id;
       const admin = getSupabaseAdminClient();
       if (!vid) {
-        if (!user?.id) {
-          return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-        }
         vid =
-          (await resolveStaffVenueIdForAuthenticatedUser(admin, user.id, user.email ?? null)) ?? undefined;
+          (await resolveStaffVenueIdForAuthenticatedUser(
+            admin,
+            authedUser.id,
+            authedUser.email ?? null,
+          )) ?? undefined;
       }
       if (vid) {
         const { data: venueRow } = await admin
@@ -209,10 +242,7 @@ export async function middleware(request: NextRequest) {
 
   // Platform routes: require superuser role + email allowlist
   if ((isPlatformUI || isPlatformAPI) && user) {
-    const isSuperuser = isPlatformRoleInJwt(
-      user.app_metadata as Record<string, unknown> | undefined,
-      user.email,
-    );
+    const isSuperuser = isPlatformRoleInJwt(user.app_metadata, user.email);
     if (!isSuperuser) {
       if (isPlatformAPI) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -233,8 +263,8 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(sess ? '/dashboard' : '/super', request.url));
     }
     const admin = getSupabaseAdminClient();
-    const meta = user.user_metadata as Record<string, unknown> | undefined;
-    const needsSetPassword = meta?.has_set_password === false;
+    const meta = user.user_metadata;
+    const needsSetPassword = meta.has_set_password === false;
     let dest = await resolvePostLoginDestination({
       admin,
       userId: user.id,

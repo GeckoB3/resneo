@@ -9,10 +9,6 @@ import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
 
 export default async function DashboardHomePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard');
 
   const staff = await getVenueStaff(supabase);
   if (!staff) redirect('/login?redirectTo=/dashboard');

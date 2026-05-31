@@ -23,7 +23,10 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
-import type { BookingStatus } from '@/lib/table-management/booking-status';
+import {
+  canTransitionBookingStatus,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
 import {
   applyBookingLifecycleStatusEffects,
   clearTableStatusesForBooking,
@@ -47,7 +50,13 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
-import { loadBookingDetailCommunications } from '@/lib/booking/booking-detail-communications';
+import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
+import {
+  applyGroupBookingStatusChange,
+  applyGroupClientArrivedChange,
+  applyGroupStaffAttendanceChange,
+  loadGroupBookingSiblings,
+} from '@/lib/booking/group-booking-status-sync';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
@@ -92,74 +101,24 @@ export async function GET(
     const { booking, ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant } = loaded.ctx;
     const scopeDb = isOwnVenue ? staff.db : getSupabaseAdminClient();
 
-    const bookingAreaId = (booking as { area_id?: string | null }).area_id;
-    const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
     const bookingTimeStr = typeof booking.booking_time === 'string'
       ? booking.booking_time.slice(0, 5)
       : '';
 
-    const [
-      areaResult,
-      variantResult,
-      guestResult,
-      eventsResult,
-      communicationsResult,
-      tableAssignmentsResult,
-      cde_context,
-      addonsResult,
-    ] = await Promise.all([
-      bookingAreaId
-        ? scopeDb
-            .from('areas')
-            .select('name')
-            .eq('id', bookingAreaId)
-            .eq('venue_id', scopeVenueId)
-            .maybeSingle()
-        : Promise.resolve({ data: null as { name?: string } | null }),
-      bookingVariantId
-        ? scopeDb
-            .from('service_variants')
-            .select('name, price_pence')
-            .eq('id', bookingVariantId)
-            .eq('venue_id', scopeVenueId)
-            .maybeSingle()
-        : Promise.resolve({ data: null as { name?: string; price_pence?: number | null } | null }),
-      scopeDb
-        .from('guests')
-        .select('id, first_name, last_name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes')
-        .eq('id', booking.guest_id)
-        .maybeSingle(),
-      scopeDb
-        .from('events')
-        .select('id, event_type, payload, created_at')
-        .eq('booking_id', id)
-        .order('created_at', { ascending: true }),
-      loadBookingDetailCommunications(scopeDb, id),
-      scopeDb
-        .from('booking_table_assignments')
-        .select('table_id, table:venue_tables(id, name)')
-        .eq('booking_id', id),
+    const [detailBundle, cde_context] = await Promise.all([
+      loadStaffBookingDetailBundle(scopeDb, id, scopeVenueId, { includeTimeline: true }),
       resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
-      scopeDb
-        .from('booking_addons')
-        .select(
-          'id, booking_id, addon_id, addon_group_id, booking_segment_index, addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking, cost_to_business_pence_at_booking, created_at',
-        )
-        .eq('booking_id', id)
-        .order('created_at', { ascending: true }),
     ]);
 
-    const area_name = (areaResult.data as { name?: string } | null)?.name ?? null;
-
-    let service_variant_name: string | null = null;
-    let service_variant_price_pence: number | null = null;
-    const sv = variantResult.data;
-    if (sv) {
-      service_variant_name = (sv as { name?: string }).name ?? null;
-      service_variant_price_pence = (sv as { price_pence?: number | null }).price_pence ?? null;
+    if (!detailBundle) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    let guest = guestResult.data as {
+    const area_name = detailBundle.area_name;
+    const service_variant_name = detailBundle.service_variant_name;
+    const service_variant_price_pence = detailBundle.service_variant_price_pence;
+
+    let guest = detailBundle.guest as {
       id: string;
       first_name: string | null;
       last_name: string | null;
@@ -201,14 +160,9 @@ export async function GET(
         }
       }
     }
-    const events = eventsResult.data;
-    const communications = communicationsResult;
-    const tableAssignments = tableAssignmentsResult.data;
-
-    const assignedTables = (tableAssignments ?? []).map((a: { table_id: string; table: unknown }) => {
-      const tbl = a.table as { id: string; name: string } | null;
-      return { id: tbl?.id ?? a.table_id, name: tbl?.name ?? 'Unknown' };
-    });
+    const events = detailBundle.events;
+    const communications = detailBundle.communications;
+    const assignedTables = detailBundle.table_assignments;
     const inferred_booking_model = inferBookingRowModel(
       booking as {
         booking_model?: string | null;
@@ -247,7 +201,7 @@ export async function GET(
       }
     }
 
-    const addons = (addonsResult.data ?? []) as Array<Record<string, unknown>>;
+    const addons = detailBundle.addons;
 
     return NextResponse.json({
       ...booking,
@@ -321,43 +275,62 @@ export async function PATCH(
       }
       const on = Boolean(body.staff_attendance_confirmed);
       const currentStatus = booking.status as string;
-      const attPayload: Record<string, unknown> = {
-        staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      };
-      // Mirror the full handler: promote Booked → Confirmed on confirm; turning off
-      // clears guest + staff attendance for pre-arrival states and reverts Confirmed → Booked.
-      if (on && currentStatus === 'Booked') {
-        attPayload.status = 'Confirmed';
-      } else if (
-        !on &&
-        (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
-      ) {
-        attPayload.guest_attendance_confirmed_at = null;
-        if (currentStatus === 'Confirmed') {
-          attPayload.status = 'Booked';
-        }
-      }
-      const { error: attErr } = await staff.db
-        .from('bookings')
-        .update(attPayload)
-        .eq('id', id)
-        .eq('venue_id', scopeVenueId);
-      if (attErr) {
-        console.error('PATCH staff_attendance_confirmed failed:', attErr);
-        return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
-      }
-      // Run lifecycle hooks when the status changed.
-      if (attPayload.status && attPayload.status !== currentStatus) {
-        const adminForHooks = getSupabaseAdminClient();
-        await applyBookingLifecycleStatusEffects(adminForHooks, {
-          bookingId: id,
-          guestId: booking.guest_id,
-          previousStatus: currentStatus,
-          nextStatus: attPayload.status as BookingStatus,
+      const groupBookingId = booking.group_booking_id as string | null | undefined;
+      const adminForHooks = getSupabaseAdminClient();
+
+      if (groupBookingId) {
+        const updatedIds = await applyGroupStaffAttendanceChange({
+          db: staff.db,
+          admin: adminForHooks,
+          venueId: scopeVenueId,
+          groupBookingId,
+          confirmed: on,
           actorId: staff.id,
         });
+        if (updatedIds.length === 0) {
+          return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+        }
+      } else {
+        const attPayload: Record<string, unknown> = {
+          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        };
+        if (
+          on &&
+          (currentStatus === 'Booked' ||
+            currentStatus === 'Pending' ||
+            currentStatus === 'Deposit Pending')
+        ) {
+          attPayload.status = 'Confirmed';
+        } else if (
+          !on &&
+          (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
+        ) {
+          attPayload.guest_attendance_confirmed_at = null;
+          if (currentStatus === 'Confirmed') {
+            attPayload.status = 'Booked';
+          }
+        }
+        const { error: attErr } = await staff.db
+          .from('bookings')
+          .update(attPayload)
+          .eq('id', id)
+          .eq('venue_id', scopeVenueId);
+        if (attErr) {
+          console.error('PATCH staff_attendance_confirmed failed:', attErr);
+          return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+        }
+        if (attPayload.status && attPayload.status !== currentStatus) {
+          await applyBookingLifecycleStatusEffects(adminForHooks, {
+            bookingId: id,
+            guestId: booking.guest_id,
+            previousStatus: currentStatus,
+            nextStatus: attPayload.status as BookingStatus,
+            actorId: staff.id,
+          });
+        }
       }
+
       const { data: updatedAttendance, error: selErr } = await staff.db
         .from('bookings')
         .select('*')
@@ -763,12 +736,42 @@ export async function PATCH(
           });
         }
       } else if (newStatus === 'No-Show') {
+        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        const noShowTargets = groupBookingId
+          ? await loadGroupBookingSiblings(staff.db, scopeVenueId, groupBookingId)
+          : [
+              {
+                id,
+                status: booking.status as string,
+                deposit_status: booking.deposit_status as string | null | undefined,
+                guest_id: booking.guest_id as string,
+              },
+            ];
+
+        for (const row of noShowTargets) {
+          if (!canTransitionBookingStatus(row.status, 'No-Show')) continue;
+          const hadPaidDeposit = row.deposit_status === 'Paid';
+          const depositStatus = hadPaidDeposit ? 'Forfeited' : row.deposit_status;
+          const previousStatus = row.status;
+          await staff.db
+            .from('bookings')
+            .update({
+              status: 'No-Show',
+              deposit_status: depositStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', row.id)
+            .eq('venue_id', scopeVenueId);
+          await applyBookingLifecycleStatusEffects(admin, {
+            bookingId: row.id,
+            guestId: row.guest_id,
+            previousStatus,
+            nextStatus: 'No-Show',
+            actorId: staff.id,
+          });
+        }
+
         const hadPaidDeposit = booking.deposit_status === 'Paid';
-        const depositStatus = hadPaidDeposit ? 'Forfeited' : booking.deposit_status;
-        await staff.db
-          .from('bookings')
-          .update({ status: 'No-Show', deposit_status: depositStatus, updated_at: new Date().toISOString() })
-          .eq('id', id);
 
         const { data: guestNoShow } = await staff.db
           .from('guests')
@@ -808,27 +811,10 @@ export async function PATCH(
           });
         }
       } else {
-        const statusPayload: Record<string, unknown> = {
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        };
-        // Table bookings: clear "arrived" when seated. Appointment (practitioner) bookings keep client_arrived_at
-        // so staff can undo start and return to the held state with waiting state restored.
-        if (newStatus === 'Seated' && !booking.practitioner_id && !booking.calendar_id) {
-          statusPayload.client_arrived_at = null;
-        }
-        // Manual transition to `Confirmed` via the status dropdown is treated
-        // as staff confirming attendance — record the timestamp so attendance
-        // pills and `attendanceConfirmationSources` stay in sync.
-        if (newStatus === 'Confirmed' && booking.status !== 'Confirmed') {
-          statusPayload.staff_attendance_confirmed_at = new Date().toISOString();
-        }
-        // Reverting away from `Confirmed` clears both attendance timestamps so the
-        // booking is unconfirmed regardless of whether the guest or staff confirmed.
-        if (booking.status === 'Confirmed' && newStatus === 'Booked') {
-          statusPayload.staff_attendance_confirmed_at = null;
-          statusPayload.guest_attendance_confirmed_at = null;
-        }
+        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        let statusLifecycleHandled = false;
+
+        let actualDepartedTime: string | undefined;
         if (newStatus === 'Completed') {
           const parsedDepartedTime =
             body.actual_departed_time !== undefined
@@ -837,32 +823,68 @@ export async function PATCH(
           if (body.actual_departed_time !== undefined && !parsedDepartedTime?.success) {
             return NextResponse.json({ error: 'Invalid actual departed time' }, { status: 400 });
           }
-          statusPayload.actual_departed_time = parsedDepartedTime?.success
+          actualDepartedTime = parsedDepartedTime?.success
             ? parsedDepartedTime.data
             : new Date().toISOString();
         }
-        if (booking.status === 'Completed' && newStatus === 'Seated') {
-          statusPayload.actual_departed_time = null;
-        }
-        if (
-          booking.status === 'No-Show' &&
-          (newStatus === 'Booked' || newStatus === 'Confirmed') &&
-          booking.deposit_status === 'Forfeited'
-        ) {
-          statusPayload.deposit_status = 'Paid';
-        }
-        await staff.db.from('bookings').update(statusPayload).eq('id', id);
 
-        // Booking confirmation comms: send when the slot first becomes "active",
-        // i.e. Pending → Booked. (Was previously Pending → Confirmed under the
-        // old overloaded enum.)
+        if (groupBookingId) {
+          const updatedIds = await applyGroupBookingStatusChange({
+            db: staff.db,
+            admin,
+            venueId: scopeVenueId,
+            groupBookingId,
+            newStatus,
+            actorId: staff.id,
+            primaryBookingId: id,
+            primaryPreviousStatus: booking.status as string,
+            actualDepartedTime,
+          });
+          if (updatedIds.length === 0) {
+            return NextResponse.json(
+              { error: 'Status could not be applied to this visit' },
+              { status: 400 },
+            );
+          }
+          statusLifecycleHandled = true;
+        } else {
+          const statusPayload: Record<string, unknown> = {
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          };
+          if (newStatus === 'Seated' && !booking.practitioner_id && !booking.calendar_id) {
+            statusPayload.client_arrived_at = null;
+          }
+          if (newStatus === 'Confirmed' && booking.status !== 'Confirmed') {
+            statusPayload.staff_attendance_confirmed_at = new Date().toISOString();
+          }
+          if (booking.status === 'Confirmed' && newStatus === 'Booked') {
+            statusPayload.staff_attendance_confirmed_at = null;
+            statusPayload.guest_attendance_confirmed_at = null;
+          }
+          if (newStatus === 'Completed') {
+            statusPayload.actual_departed_time = actualDepartedTime ?? new Date().toISOString();
+          }
+          if (booking.status === 'Completed' && newStatus === 'Seated') {
+            statusPayload.actual_departed_time = null;
+          }
+          if (
+            booking.status === 'No-Show' &&
+            (newStatus === 'Booked' || newStatus === 'Confirmed') &&
+            booking.deposit_status === 'Forfeited'
+          ) {
+            statusPayload.deposit_status = 'Paid';
+          }
+          await staff.db.from('bookings').update(statusPayload).eq('id', id);
+        }
+
         if (booking.status === 'Pending' && newStatus === 'Booked') {
           const { sendBookingConfirmationNotifications } = await import('@/lib/communications/send-templated');
           const { data: guestRow } = await staff.db
-          .from('guests')
-          .select('first_name, last_name, email, phone')
-          .eq('id', booking.guest_id)
-          .single();
+            .from('guests')
+            .select('first_name, last_name, email, phone')
+            .eq('id', booking.guest_id)
+            .single();
           const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', scopeVenueId).single();
           if (guestRow?.email && venueRow?.name) {
             const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
@@ -893,15 +915,16 @@ export async function PATCH(
           }
         }
 
+        if (!statusLifecycleHandled) {
+          await applyBookingLifecycleStatusEffects(admin, {
+            bookingId: id,
+            guestId: booking.guest_id,
+            previousStatus: booking.status as string,
+            nextStatus: newStatus,
+            actorId: staff.id,
+          });
+        }
       }
-
-      await applyBookingLifecycleStatusEffects(admin, {
-        bookingId: id,
-        guestId: booking.guest_id,
-        previousStatus: booking.status as string,
-        nextStatus: newStatus,
-        actorId: staff.id,
-      });
 
       if (newStatus === 'Seated' && Array.isArray(body.table_ids) && body.table_ids.length > 0) {
         const tableIds = body.table_ids as string[];
@@ -936,14 +959,19 @@ export async function PATCH(
         );
       }
       const arrived = Boolean(body.client_arrived);
-      await staff.db
-        .from('bookings')
-        .update({
-          client_arrived_at: arrived ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('venue_id', scopeVenueId);
+      const groupBookingId = booking.group_booking_id as string | null | undefined;
+      if (groupBookingId) {
+        await applyGroupClientArrivedChange(staff.db, scopeVenueId, groupBookingId, arrived);
+      } else {
+        await staff.db
+          .from('bookings')
+          .update({
+            client_arrived_at: arrived ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .eq('venue_id', scopeVenueId);
+      }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
@@ -952,41 +980,57 @@ export async function PATCH(
     if (body.staff_attendance_confirmed !== undefined) {
       const on = Boolean(body.staff_attendance_confirmed);
       const currentStatus = booking.status as string;
-      const updatePayload: Record<string, unknown> = {
-        staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      };
-      // Tie the timestamp to the lifecycle status:
-      //   on=true,  status=Booked    → promote to Confirmed
-      //   on=false, Pending/Booked/Confirmed → clear guest + staff attendance markers;
-      //            if Confirmed, revert to Booked (staff or guest may have confirmed)
-      if (on && currentStatus === 'Booked') {
-        updatePayload.status = 'Confirmed';
-      } else if (
-        !on &&
-        (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
-      ) {
-        updatePayload.guest_attendance_confirmed_at = null;
-        if (currentStatus === 'Confirmed') {
-          updatePayload.status = 'Booked';
-        }
-      }
+      const groupBookingId = booking.group_booking_id as string | null | undefined;
 
-      await staff.db
-        .from('bookings')
-        .update(updatePayload)
-        .eq('id', id)
-        .eq('venue_id', scopeVenueId);
-
-      // Run lifecycle hooks if status changed (mirrors the status-PATCH path).
-      if (updatePayload.status && updatePayload.status !== currentStatus) {
-        await applyBookingLifecycleStatusEffects(admin, {
-          bookingId: id,
-          guestId: booking.guest_id,
-          previousStatus: currentStatus,
-          nextStatus: updatePayload.status as BookingStatus,
+      if (groupBookingId) {
+        const updatedIds = await applyGroupStaffAttendanceChange({
+          db: staff.db,
+          admin,
+          venueId: scopeVenueId,
+          groupBookingId,
+          confirmed: on,
           actorId: staff.id,
         });
+        if (updatedIds.length === 0) {
+          return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+        }
+      } else {
+        const updatePayload: Record<string, unknown> = {
+          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        };
+        if (
+          on &&
+          (currentStatus === 'Booked' ||
+            currentStatus === 'Pending' ||
+            currentStatus === 'Deposit Pending')
+        ) {
+          updatePayload.status = 'Confirmed';
+        } else if (
+          !on &&
+          (currentStatus === 'Pending' || currentStatus === 'Booked' || currentStatus === 'Confirmed')
+        ) {
+          updatePayload.guest_attendance_confirmed_at = null;
+          if (currentStatus === 'Confirmed') {
+            updatePayload.status = 'Booked';
+          }
+        }
+
+        await staff.db
+          .from('bookings')
+          .update(updatePayload)
+          .eq('id', id)
+          .eq('venue_id', scopeVenueId);
+
+        if (updatePayload.status && updatePayload.status !== currentStatus) {
+          await applyBookingLifecycleStatusEffects(admin, {
+            bookingId: id,
+            guestId: booking.guest_id,
+            previousStatus: currentStatus,
+            nextStatus: updatePayload.status as BookingStatus,
+            actorId: staff.id,
+          });
+        }
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();

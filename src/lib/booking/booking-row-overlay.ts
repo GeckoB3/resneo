@@ -1,5 +1,8 @@
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
-import type { BookingStatus } from '@/lib/table-management/booking-status';
+import {
+  canTransitionBookingStatus,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
 
 /** List-row fields that drive ExpandedBookingContent action buttons. */
 export type BookingRowOverlayFields = {
@@ -144,7 +147,10 @@ export function overlayFromPatchBody(
     const overlay: BookingRowOverlay = {
       staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
     };
-    if (on && row.status === 'Booked') {
+    if (
+      on &&
+      (row.status === 'Booked' || row.status === 'Pending' || row.status === 'Deposit Pending')
+    ) {
       overlay.status = 'Confirmed';
     }
     if (!on) {
@@ -159,6 +165,30 @@ export function overlayFromPatchBody(
 }
 
 /** Optimistic overlay for lifecycle status changes (mirrors status PATCH branch in venue route). */
+/** Optimistic list/calendar update for one row or every sibling in a multi-service visit. */
+export function applyOptimisticStatusToBookingRows<
+  T extends BookingRowOverlayFields & { id: string; group_booking_id?: string | null; status: string },
+>(
+  rows: T[],
+  bookingId: string,
+  newStatus: BookingStatus,
+  isTableReservation: (row: T) => boolean,
+): T[] {
+  const anchor = rows.find((row) => row.id === bookingId);
+  const groupId = anchor?.group_booking_id;
+  return rows.map((row) => {
+    const inGroup = Boolean(groupId && row.group_booking_id === groupId);
+    if (!inGroup && row.id !== bookingId) return row;
+    if (!canTransitionBookingStatus(row.status, newStatus)) return row;
+    const overlay = overlayFromStatusTransition(
+      row.status as BookingStatus,
+      newStatus,
+      isTableReservation(row),
+    );
+    return applyBookingRowOverlayFields(row, overlay);
+  });
+}
+
 export function overlayFromStatusTransition(
   fromStatus: BookingStatus,
   toStatus: BookingStatus,

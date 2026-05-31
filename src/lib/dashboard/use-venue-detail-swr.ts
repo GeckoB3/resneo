@@ -22,7 +22,7 @@ export function useVenueBookingDetail(bookingId: string | null | undefined) {
     id ? venueBookingDetailKey(id) : null,
     () => fetchVenueBookingDetail(id!),
     {
-      revalidateOnFocus: true,
+      revalidateOnFocus: false,
       dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
     },
   );
@@ -37,7 +37,7 @@ export function useVenueGuestDetail(
     id ? venueGuestDetailKey(id, historyLimit) : null,
     () => fetchVenueGuestDetail(id!, historyLimit),
     {
-      revalidateOnFocus: true,
+      revalidateOnFocus: false,
       dedupingInterval: VENUE_DETAIL_DEDUPE_MS,
     },
   );

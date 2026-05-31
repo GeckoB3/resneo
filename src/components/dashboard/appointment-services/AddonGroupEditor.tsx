@@ -240,7 +240,7 @@ export function AddonGroupEditor({
             type="text"
             value={value.name}
             onChange={(e) => update('name', e.target.value)}
-            placeholder="e.g. Conditioner choice"
+            placeholder="e.g. Optional extras"
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <p className="mt-1 text-xs text-slate-500">
@@ -254,7 +254,7 @@ export function AddonGroupEditor({
             type="text"
             value={value.prompt_to_client}
             onChange={(e) => update('prompt_to_client', e.target.value)}
-            placeholder="e.g. Choose your conditioner"
+            placeholder="e.g. Would you like any extras?"
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <p className="mt-1 text-xs text-slate-500">
@@ -364,7 +364,7 @@ export function AddonGroupEditor({
                   <div className="flex-1 space-y-2">
                     <input
                       type="text"
-                      placeholder="Option name (e.g. Argan oil conditioner)"
+                      placeholder="e.g. Premium upgrade"
                       value={a.name}
                       onChange={(e) => updateAddon(idx, { name: e.target.value })}
                       aria-label="Option name"

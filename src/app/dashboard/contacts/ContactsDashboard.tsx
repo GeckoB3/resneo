@@ -28,6 +28,8 @@ import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/Operat
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
+import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
+import { CONTACTS_BOOKINGS_REFRESH_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
@@ -631,12 +633,29 @@ export function ContactsDashboard({
     void loadList({ silent: true });
   }, [loadList]);
 
+  const refreshContactsFromBookings = useDebouncedCallback(
+    refreshContacts,
+    CONTACTS_BOOKINGS_REFRESH_DEBOUNCE_MS,
+  );
+
   const liveState = useVenuePostgresLiveSync({
     venueId,
     onRefresh: refreshContacts,
     subscriptions: [
-      { table: 'guests', filter: `venue_id=eq.${venueId}` },
-      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+      {
+        table: 'guests',
+        filter: `venue_id=eq.${venueId}`,
+        handler: () => {
+          refreshContacts();
+        },
+      },
+      {
+        table: 'bookings',
+        filter: `venue_id=eq.${venueId}`,
+        handler: () => {
+          refreshContactsFromBookings();
+        },
+      },
     ],
   });
 

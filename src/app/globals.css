@@ -7,10 +7,31 @@
   --brand: #003B6F;
   --brand-dark: #00305C;
   --brand-light: #C6D8E9;
-  --brand-50: #E8EFF6;
   --brand-accent: #00C2C7;
   --brand-accent-dark: #00A0A4;
   --brand-accent-light: #C2F4F5;
+  /* Brand colour ramp — overridable per booking page (Booking Site Studio). */
+  --brand-50: #E8EFF6;
+  --brand-100: #C6D8E9;
+  --brand-200: #9DBBD7;
+  --brand-300: #6E9AC2;
+  --brand-400: #3D72A0;
+  --brand-500: #1A5587;
+  --brand-600: #003B6F;
+  --brand-700: #00305C;
+  --brand-800: #00264A;
+  --brand-900: #001B36;
+  /* Accent ramp — overridable per booking page. */
+  --accent-50: #E6FBFB;
+  --accent-100: #C2F4F5;
+  --accent-200: #8FEAEB;
+  --accent-300: #54DCDE;
+  --accent-400: #22CDD1;
+  --accent-500: #00C2C7;
+  --accent-600: #00A0A4;
+  --accent-700: #007E81;
+  --accent-800: #005F61;
+  --accent-900: #004244;
   --surface: #ffffff;
   --surface-secondary: #F4F6F9;
   --border: #e2e8f0;
@@ -78,29 +99,29 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  /* Brand colour palette - ResNeo Night #003B6F as the 600 anchor */
-  --color-brand-50: #E8EFF6;
-  --color-brand-100: #C6D8E9;
-  --color-brand-200: #9DBBD7;
-  --color-brand-300: #6E9AC2;
-  --color-brand-400: #3D72A0;
-  --color-brand-500: #1A5587;
-  --color-brand-600: #003B6F;
-  --color-brand-700: #00305C;
-  --color-brand-800: #00264A;
-  --color-brand-900: #001B36;
+  /* Brand colour palette — reference :root vars so booking pages can re-skin at runtime. */
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
 
-  /* Accent palette - Neo Teal #00C2C7 as the 500 anchor */
-  --color-accent-50: #E6FBFB;
-  --color-accent-100: #C2F4F5;
-  --color-accent-200: #8FEAEB;
-  --color-accent-300: #54DCDE;
-  --color-accent-400: #22CDD1;
-  --color-accent-500: #00C2C7;
-  --color-accent-600: #00A0A4;
-  --color-accent-700: #007E81;
-  --color-accent-800: #005F61;
-  --color-accent-900: #004244;
+  /* Accent palette — reference :root vars so booking pages can re-skin at runtime. */
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
 
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
@@ -151,6 +172,14 @@ h2:not([class*="text-white"]):not([class*="text-transparent"]) {
 h3:not([class*="text-white"]):not([class*="text-transparent"]) {
   color: var(--brand);
   font-weight: 500;
+}
+
+/* Booking Site Studio: a venue's chosen heading font (set via --font-heading) applies to
+   the booking-page headings without touching individual components. */
+[data-bp-fonts] h1,
+[data-bp-fonts] h2,
+[data-bp-fonts] h3 {
+  font-family: var(--font-heading, var(--font-sans));
 }
 
 /* Safe-area helpers for fixed headers, drawers, and bottom sheets (notched phones / home indicator). */

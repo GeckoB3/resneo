@@ -15,6 +15,7 @@ import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
+import { sanitizeBookingPageConfig } from '@/lib/booking/booking-page-theme';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -41,6 +42,28 @@ const venueProfileSchema = z.object({
   require_account_login_for_bookings: z.boolean().optional(),
   /** 6-digit hex (optional `#`) for embed iframe `?accent=` query param. Empty string clears. */
   embed_accent_colour: z.string().max(7).optional(),
+  /** Public booking-page branding/content (Booking Site Studio); sanitised server-side. */
+  booking_page_config: z
+    .object({
+      brand_primary: z.string().max(7).nullable().optional(),
+      brand_accent: z.string().max(7).nullable().optional(),
+      about: z.string().max(4000).nullable().optional(),
+      announcement: z.string().max(600).nullable().optional(),
+      font_preset: z.string().max(40).nullable().optional(),
+      gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
+      social_links: z
+        .object({
+          instagram: z.string().max(400).nullable().optional(),
+          facebook: z.string().max(400).nullable().optional(),
+          tiktok: z.string().max(400).nullable().optional(),
+          x: z.string().max(400).nullable().optional(),
+        })
+        .partial()
+        .nullable()
+        .optional(),
+    })
+    .partial()
+    .optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue - return the authenticated user's venue profile. */
@@ -55,7 +78,7 @@ export async function GET(request: NextRequest) {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
       .eq('id', staff.venue_id)
       .single();
 
@@ -193,6 +216,9 @@ export async function PATCH(request: NextRequest) {
         }
         update.embed_accent_colour = normalised;
       }
+    }
+    if (data.booking_page_config !== undefined) {
+      update.booking_page_config = sanitizeBookingPageConfig(data.booking_page_config);
     }
 
     let nextActiveModels: BookingModel[] | null = null;

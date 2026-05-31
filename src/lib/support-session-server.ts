@@ -4,10 +4,10 @@ import { SUPPORT_SESSION_COOKIE_NAME, SUPPORT_SESSION_DURATION_MS } from '@/lib/
 import {
   fetchActiveSupportSession,
   parseSupportSessionCookieValue,
-  superuserDisplayNameFromUser,
 } from '@/lib/support-session-core';
+import { resolveAuthIdentity } from '@/lib/auth/resolve-auth-identity';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { isPlatformSuperuserFromIdentity } from '@/lib/platform-auth';
 
 const maxAgeSeconds = Math.floor(SUPPORT_SESSION_DURATION_MS / 1000);
 
@@ -45,14 +45,12 @@ export async function clearSupportSessionCookie(): Promise<void> {
 
 /** True when the signed-in platform superuser has a valid, non-expired support session cookie. */
 export async function hasActiveVenueSupportSession(supabase: SupabaseClient): Promise<boolean> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isPlatformSuperuser(user)) return false;
+  const identity = await resolveAuthIdentity(supabase);
+  if (!identity || !isPlatformSuperuserFromIdentity(identity)) return false;
   const sid = await getSupportSessionCookieIdFromCookies();
   if (!sid) return false;
   const admin = getSupabaseAdminClient();
-  const session = await fetchActiveSupportSession(admin, sid, user.id);
+  const session = await fetchActiveSupportSession(admin, sid, identity.id);
   return Boolean(session);
 }
 
@@ -62,18 +60,18 @@ export async function getActiveSupportSessionForBanner(
   superuserDisplayName: string;
   expiresAt: string;
 } | null> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isPlatformSuperuser(user)) return null;
+  const identity = await resolveAuthIdentity(supabase);
+  if (!identity || !isPlatformSuperuserFromIdentity(identity)) return null;
   const sid = await getSupportSessionCookieIdFromCookies();
   if (!sid) return null;
   const admin = getSupabaseAdminClient();
-  const session = await fetchActiveSupportSession(admin, sid, user.id);
+  const session = await fetchActiveSupportSession(admin, sid, identity.id);
   if (!session) return null;
   return {
     superuserDisplayName:
-      session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
+      session.superuser_display_name?.trim() ||
+      identity.email?.split('@')[0] ||
+      'Support',
     expiresAt: session.expires_at,
   };
 }

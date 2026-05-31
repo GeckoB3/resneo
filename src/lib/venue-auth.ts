@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { resolveAuthIdentity } from '@/lib/auth/resolve-auth-identity';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
 import { isPlatformSuperuser, isPlatformRoleInJwt } from '@/lib/platform-auth';
@@ -60,35 +61,6 @@ function resolveUniqueStaffRow(rows: StaffLookupRow[], context: string): StaffLo
     return null;
   }
   return rows[0] ?? null;
-}
-
-interface AuthIdentity {
-  id: string;
-  email: string | null;
-  appMetadata: Record<string, unknown>;
-}
-
-/**
- * Resolve the authenticated user's identity from the validated JWT claims.
- *
- * Uses `getClaims()` which verifies the access token locally (via cached JWKS)
- * when the project has asymmetric JWT signing keys enabled, avoiding a network
- * round-trip to the Auth server (`/auth/v1/user`) on every request. It falls
- * back to an Auth-server call only when local verification is not possible
- * (legacy shared-secret projects), so this is never worse than `getUser()`.
- */
-async function resolveAuthIdentity(supabase: SupabaseClient): Promise<AuthIdentity | null> {
-  const { data, error } = await supabase.auth.getClaims();
-  if (error || !data?.claims) return null;
-  const claims = data.claims as Record<string, unknown>;
-  const id = typeof claims.sub === 'string' ? claims.sub : null;
-  if (!id) return null;
-  const email = typeof claims.email === 'string' ? claims.email : null;
-  const appMetadata =
-    claims.app_metadata && typeof claims.app_metadata === 'object'
-      ? (claims.app_metadata as Record<string, unknown>)
-      : {};
-  return { id, email, appMetadata };
 }
 
 interface StaffIdentity {

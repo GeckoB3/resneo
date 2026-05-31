@@ -3,6 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
+import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -29,70 +30,26 @@ export async function GET(
     }
     const { booking, ownerVenueId: scopeVenueId } = loaded.ctx;
 
-    const bookingAreaId = (booking as { area_id?: string | null }).area_id;
-    const bookingVariantId = (booking as { service_variant_id?: string | null }).service_variant_id;
     const bookingTimeStr =
       typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
-    const [areaResult, variantResult, guestResult, tableAssignmentsResult, cde_context, addonsResult] =
-      await Promise.all([
-        bookingAreaId
-          ? staff.db
-              .from('areas')
-              .select('name')
-              .eq('id', bookingAreaId)
-              .eq('venue_id', scopeVenueId)
-              .maybeSingle()
-          : Promise.resolve({ data: null as { name?: string } | null }),
-        bookingVariantId
-          ? staff.db
-              .from('service_variants')
-              .select('name, price_pence')
-              .eq('id', bookingVariantId)
-              .eq('venue_id', scopeVenueId)
-              .maybeSingle()
-          : Promise.resolve({ data: null as { name?: string; price_pence?: number | null } | null }),
-        staff.db
-          .from('guests')
-          .select(
-            'id, first_name, last_name, email, phone, visit_count, last_visit_date, tags, customer_profile_notes',
-          )
-          .eq('id', booking.guest_id)
-          .single(),
-        staff.db
-          .from('booking_table_assignments')
-          .select('table_id, table:venue_tables(id, name)')
-          .eq('booking_id', id),
-        resolveCdeBookingContext(
-          staff.db,
-          booking as Parameters<typeof resolveCdeBookingContext>[1],
-        ),
-        staff.db
-          .from('booking_addons')
-          .select(
-            'id, booking_id, addon_id, addon_group_id, booking_segment_index, addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking, cost_to_business_pence_at_booking, created_at',
-          )
-          .eq('booking_id', id)
-          .order('created_at', { ascending: true }),
-      ]);
+    const [detailBundle, cde_context] = await Promise.all([
+      loadStaffBookingDetailBundle(staff.db, id, scopeVenueId, { includeTimeline: false }),
+      resolveCdeBookingContext(
+        staff.db,
+        booking as Parameters<typeof resolveCdeBookingContext>[1],
+      ),
+    ]);
 
-    const area_name = (areaResult.data as { name?: string } | null)?.name ?? null;
-
-    let service_variant_name: string | null = null;
-    let service_variant_price_pence: number | null = null;
-    const sv = variantResult.data;
-    if (sv) {
-      service_variant_name = (sv as { name?: string }).name ?? null;
-      service_variant_price_pence = (sv as { price_pence?: number | null }).price_pence ?? null;
+    if (!detailBundle) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    const guest = guestResult.data;
-    const tableAssignments = tableAssignmentsResult.data;
-
-    const assignedTables = (tableAssignments ?? []).map((a: { table_id: string; table: unknown }) => {
-      const tbl = a.table as { id: string; name: string } | null;
-      return { id: tbl?.id ?? a.table_id, name: tbl?.name ?? 'Unknown' };
-    });
+    const area_name = detailBundle.area_name;
+    const service_variant_name = detailBundle.service_variant_name;
+    const service_variant_price_pence = detailBundle.service_variant_price_pence;
+    const guest = detailBundle.guest;
+    const assignedTables = detailBundle.table_assignments;
 
     const inferred_booking_model = inferBookingRowModel(
       booking as {
@@ -108,7 +65,7 @@ export async function GET(
       },
     );
 
-    const addons = (addonsResult.data ?? []) as Array<Record<string, unknown>>;
+    const addons = detailBundle.addons;
 
     return NextResponse.json({
       ...booking,

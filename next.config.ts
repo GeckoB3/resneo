@@ -34,8 +34,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // All routes except /embed/* (negative lookahead). Next.js cannot unset a header once set by a broader rule.
-        source: '/((?!embed/).*)',
+        // Public booking page — allow same-origin framing (settings live preview iframe fallback).
+        source: '/book/:path*',
+        headers: [
+          ...sharedSecurity,
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+        ],
+      },
+      {
+        // All routes except /embed/* and /book/* (negative lookahead). Next.js cannot unset a header once set by a broader rule.
+        source: '/((?!embed/|book/).*)',
         headers: [
           ...sharedSecurity,
           { key: 'X-Frame-Options', value: 'DENY' },

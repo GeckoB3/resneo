@@ -15,10 +15,6 @@ import { AppointmentAvailabilitySkeleton } from '@/components/ui/dashboard/Dashb
 
 export default async function CalendarAvailabilitySettingsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/calendar-availability');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {

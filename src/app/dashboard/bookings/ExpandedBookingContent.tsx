@@ -17,6 +17,7 @@ import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import {
+  bookingStatusDisplayLabel,
   inferBookingRowModel,
 } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
@@ -27,6 +28,7 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -82,10 +84,19 @@ import {
   resolveExpandedBookingServiceLine,
 } from '@/lib/booking/booking-detail-from-row';
 import {
+  applyStatusToAllGroupVisitRows,
+  applyVisitAttendanceConfirmToGroupVisitRows,
   fetchGroupVisitBookings,
   formatDurationMinutesLabel,
   formatGroupVisitSegmentDurationLabel,
+  invalidateGroupVisitBookings,
+  groupVisitSegmentPillStatus,
+  mergeGroupVisitRowsWithSeeds,
+  mergePreferLaterGroupVisitRows,
+  multiServiceVisitDatePhrase,
   peekGroupVisitBookings,
+  primeGroupVisitBookings,
+  resolveVisitPillAnchorStatus,
   type GroupVisitBookingRow,
 } from '@/lib/booking/group-visit-bookings';
 
@@ -296,7 +307,7 @@ export function ExpandedBookingContent({
   sendingMessage: boolean;
   onMessageDraftChange: (value: string) => void;
   onSendMessage: (channel: GuestMessageChannel) => GuestMessageSendResult | Promise<GuestMessageSendResult>;
-  onStatusAction: (status: BookingStatus) => void;
+  onStatusAction: (status: BookingStatus) => void | Promise<void>;
   onDetailUpdated: () => void;
   onRequestChangeTable?: () => void;
   /** Venue primary + enabled models for staff “New booking” default tab (falls back to this row’s inferred model). */
@@ -432,6 +443,24 @@ export function ExpandedBookingContent({
     };
   }, [resolvedGroupBookingId, initialGroupVisitBookings]);
 
+  const effectiveBooking = useMemo(
+    () => ({ ...booking, ...rowOverlay }),
+    [booking, rowOverlay],
+  );
+
+  useEffect(() => {
+    if (!resolvedGroupBookingId || !initialGroupVisitBookings?.length) return;
+    if (initialGroupVisitBookings.some((row) => Boolean(row.person_label?.trim()))) return;
+    setGroupVisitBookings((prev) => {
+      const base = prev.length > 0 ? prev : initialGroupVisitBookings;
+      const merged = mergeGroupVisitRowsWithSeeds(base, initialGroupVisitBookings);
+      if (merged.length > 1) {
+        primeGroupVisitBookings(resolvedGroupBookingId, merged);
+      }
+      return merged;
+    });
+  }, [resolvedGroupBookingId, initialGroupVisitBookings]);
+
   useEffect(() => {
     setGuestMessageFeedback(null);
   }, [guestMessageChannel]);
@@ -481,11 +510,39 @@ export function ExpandedBookingContent({
     }
     return groupVisitBookings;
   }, [resolvedGroupBookingId, groupVisitBookings, isGroupPeopleVisit]);
+
+  const visitAttendanceConfirmed = isAttendanceConfirmed(effectiveBooking);
+
+  const multiServiceVisitSegmentsForDisplay = useMemo(() => {
+    if (multiServiceVisitSegments.length === 0) return [];
+    const merged = mergeGroupVisitRowsWithSeeds(
+      multiServiceVisitSegments,
+      initialGroupVisitBookings ?? [],
+    );
+    const visitAnchorStatus = resolveVisitPillAnchorStatus(
+      String(effectiveBooking.status),
+      merged,
+      visitAttendanceConfirmed,
+    );
+    return merged.map((seg) => ({
+      ...seg,
+      status: groupVisitSegmentPillStatus(seg, visitAnchorStatus, visitAttendanceConfirmed),
+    }));
+  }, [
+    multiServiceVisitSegments,
+    initialGroupVisitBookings,
+    effectiveBooking.status,
+    visitAttendanceConfirmed,
+  ]);
+
   const groupVisitFetchPending =
     Boolean(resolvedGroupBookingId) &&
     !isGroupPeopleVisit &&
     groupVisitLoading &&
     multiServiceVisitSegments.length === 0;
+
+  const visitInferredModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
+  const visitTableStyle = visitInferredModel === 'table_reservation';
 
   const multiServiceVisitCard = useMemo(() => {
     if (groupVisitFetchPending) {
@@ -506,17 +563,18 @@ export function ExpandedBookingContent({
         </SectionCard>
       );
     }
-    if (multiServiceVisitSegments.length === 0) return null;
+    if (multiServiceVisitSegmentsForDisplay.length === 0) return null;
+    const visitDatePhrase = multiServiceVisitDatePhrase(booking.booking_date);
     return (
       <SectionCard className="border-brand-200 bg-brand-50/20">
         <SectionCard.Body className="p-4">
           <p className="text-xs font-semibold text-brand-900">Services in this visit</p>
           <p className="mt-0.5 text-[11px] text-slate-600">
-            {multiServiceVisitSegments.length} consecutive{' '}
-            {multiServiceVisitSegments.length === 1 ? 'service' : 'services'} on{' '}
-            {formatDateNice(booking.booking_date)}
+            {multiServiceVisitSegmentsForDisplay.length} consecutive{' '}
+            {multiServiceVisitSegmentsForDisplay.length === 1 ? 'service' : 'services'}{' '}
+            {visitDatePhrase}
             {(() => {
-              const visitTotal = multiServiceVisitSegments.reduce(
+              const visitTotal = multiServiceVisitSegmentsForDisplay.reduce(
                 (sum, seg) => sum + (seg.duration_minutes ?? 0),
                 0,
               );
@@ -525,7 +583,7 @@ export function ExpandedBookingContent({
             .
           </p>
           <ul className="mt-3 space-y-2">
-            {multiServiceVisitSegments.map((seg) => {
+            {multiServiceVisitSegmentsForDisplay.map((seg) => {
               const offeringLine = expandedBookingOfferingLine({
                 serviceName: seg.booking_item_name,
                 variantName: seg.service_variant_name,
@@ -553,22 +611,9 @@ export function ExpandedBookingContent({
                     <div className="shrink-0 text-right">
                       <span className="text-xs font-medium tabular-nums text-slate-600">{timeRange}</span>
                       <div className="mt-1 flex justify-end">
-                        <Pill
-                          variant={
-                            seg.status === 'Confirmed'
-                              ? 'success'
-                              : seg.status === 'Booked'
-                                ? 'info'
-                                : seg.status === 'Pending'
-                                  ? 'warning'
-                                  : seg.status === 'Cancelled'
-                                    ? 'danger'
-                                    : 'neutral'
-                          }
-                          size="sm"
-                        >
-                          {seg.status}
-                        </Pill>
+                        <BookingStatusPill statusKey={seg.status}>
+                          {bookingStatusDisplayLabel(seg.status, visitTableStyle)}
+                        </BookingStatusPill>
                       </div>
                     </div>
                   </div>
@@ -579,7 +624,13 @@ export function ExpandedBookingContent({
         </SectionCard.Body>
       </SectionCard>
     );
-  }, [booking.booking_date, booking.id, groupVisitFetchPending, multiServiceVisitSegments]);
+  }, [
+    booking.booking_date,
+    booking.id,
+    groupVisitFetchPending,
+    multiServiceVisitSegmentsForDisplay,
+    visitTableStyle,
+  ]);
   const displayLinkedBookings = isGroupPeopleVisit
     ? groupVisitBookings.filter((b) => b.id !== booking.id && b.person_label?.trim())
     : [];
@@ -604,11 +655,6 @@ export function ExpandedBookingContent({
   const inferredBookingModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
   const tableStyle = inferredBookingModel === 'table_reservation';
   const notesVariant: BookingNotesVariant = tableStyle ? 'table' : 'cde';
-
-  const effectiveBooking = useMemo(
-    () => ({ ...booking, ...rowOverlay }),
-    [booking, rowOverlay],
-  );
 
   const linkedViewOnly = linkedAct === 'none';
   const linkedLimitedEdit = linkedAct === 'edit_existing';
@@ -728,11 +774,33 @@ export function ExpandedBookingContent({
     [activeDetail?.events],
   );
 
+  const refreshGroupVisitSegments = useCallback(async () => {
+    if (!resolvedGroupBookingId) return;
+    invalidateGroupVisitBookings(resolvedGroupBookingId);
+    const rows = await fetchGroupVisitBookings(resolvedGroupBookingId);
+    setGroupVisitBookings((prev) => {
+      const merged = mergePreferLaterGroupVisitRows(prev, rows);
+      if (merged.length > 0) {
+        primeGroupVisitBookings(resolvedGroupBookingId, merged);
+      }
+      return merged;
+    });
+  }, [resolvedGroupBookingId]);
+
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
     setInlineActionError(null);
     if (body.staff_attendance_confirmed === false) {
       setSuppressPatchCancelAfterUndoConfirm(true);
+    }
+    if (resolvedGroupBookingId && !isGroupPeopleVisit && body.staff_attendance_confirmed !== undefined) {
+      const on = Boolean(body.staff_attendance_confirmed);
+      setGroupVisitBookings((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = applyVisitAttendanceConfirmToGroupVisitRows(prev, on);
+        primeGroupVisitBookings(resolvedGroupBookingId, next);
+        return next;
+      });
     }
     setRowOverlay((prev) =>
       mergeBookingRowOverlay(prev, overlayFromPatchBody(body, { ...booking, ...prev })),
@@ -748,6 +816,7 @@ export function ExpandedBookingContent({
         setInlineActionError(payload.error ?? 'Update failed');
         setRowOverlay({});
         setSuppressPatchCancelAfterUndoConfirm(false);
+        void refreshGroupVisitSegments();
         return;
       }
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -757,11 +826,13 @@ export function ExpandedBookingContent({
         );
       }
       setInlineActionError(null);
+      await refreshGroupVisitSegments();
       onDetailUpdated();
     } catch {
       setInlineActionError('Update failed');
       setRowOverlay({});
       setSuppressPatchCancelAfterUndoConfirm(false);
+      void refreshGroupVisitSegments();
     } finally {
       setInlineActionLoading(null);
     }
@@ -887,6 +958,37 @@ export function ExpandedBookingContent({
     }
   }, [booking.id]);
 
+  const runStatusAction = useCallback(
+    async (status: BookingStatus) => {
+      setStatusActionPending(true);
+      setInlineActionError(null);
+      if (resolvedGroupBookingId && !isGroupPeopleVisit) {
+        setGroupVisitBookings((prev) => {
+          if (prev.length <= 1) return prev;
+          const next = applyStatusToAllGroupVisitRows(prev, status);
+          primeGroupVisitBookings(resolvedGroupBookingId, next);
+          return next;
+        });
+      }
+      try {
+        await Promise.resolve(onStatusAction(status));
+        await refreshGroupVisitSegments();
+      } catch {
+        setRowOverlay((prev) => pruneBookingRowOverlay(prev, booking));
+        setStatusActionPending(false);
+        setInlineActionError('Could not update booking status');
+        void refreshGroupVisitSegments();
+      }
+    },
+    [
+      booking,
+      isGroupPeopleVisit,
+      onStatusAction,
+      refreshGroupVisitSegments,
+      resolvedGroupBookingId,
+    ],
+  );
+
   const handleStatusClick = (status: BookingStatus, label: string) => {
     if (toolbarBusy) return;
     const fromStatus = effectiveBooking.status as BookingStatus;
@@ -901,8 +1003,7 @@ export function ExpandedBookingContent({
       setRowOverlay((prev) =>
         mergeBookingRowOverlay(prev, overlayFromStatusTransition(fromStatus, status, tableStyle)),
       );
-      setStatusActionPending(true);
-      onStatusAction(status);
+      void runStatusAction(status);
       return;
     }
     if (isDestructiveBookingStatus(status) || isRevertTransition(fromStatus, status)) {
@@ -911,8 +1012,7 @@ export function ExpandedBookingContent({
       setRowOverlay((prev) =>
         mergeBookingRowOverlay(prev, overlayFromStatusTransition(fromStatus, status, tableStyle)),
       );
-      setStatusActionPending(true);
-      onStatusAction(status);
+      void runStatusAction(status);
     }
   };
 
@@ -1870,14 +1970,15 @@ export function ExpandedBookingContent({
         onConfirm={() => {
           if (!confirmAction) return;
           const fromStatus = effectiveBooking.status as BookingStatus;
+          const nextStatus = confirmAction.status;
+          setConfirmAction(null);
           setRowOverlay((prev) =>
             mergeBookingRowOverlay(
               prev,
-              overlayFromStatusTransition(fromStatus, confirmAction.status, tableStyle),
+              overlayFromStatusTransition(fromStatus, nextStatus, tableStyle),
             ),
           );
-          setStatusActionPending(true);
-          onStatusAction(confirmAction.status);
+          void runStatusAction(nextStatus);
         }}
         destructive={confirmAction ? isDestructiveBookingStatus(confirmAction.status) : false}
       />

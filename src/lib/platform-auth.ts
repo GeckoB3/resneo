@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js';
+import type { AuthIdentity } from '@/lib/auth/resolve-auth-identity';
 
 export const PLATFORM_ROLE_KEY = 'platform_role';
 export const PLATFORM_ROLE_VALUE = 'superuser';
@@ -41,16 +42,22 @@ export function hasPlatformSuperuserJwtRole(user: User | null | undefined): bool
 
 export function isPlatformSuperuser(user: User | null | undefined): boolean {
   if (!user) return false;
+  return isPlatformSuperuserFromIdentity({
+    id: user.id,
+    email: user.email ?? null,
+    appMetadata: (user.app_metadata ?? {}) as Record<string, unknown>,
+    userMetadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+  });
+}
 
-  const meta = user.app_metadata ?? {};
-  if (meta[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
+/** Server-side superuser check without `auth.getUser()` when JWT claims are available. */
+export function isPlatformSuperuserFromIdentity(identity: AuthIdentity | null | undefined): boolean {
+  if (!identity) return false;
+  if (identity.appMetadata[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
 
-  const email = (user.email ?? '').toLowerCase().trim();
-  const allowed = getAllowedEmails();
-  if (allowed.has(email)) return true;
-  if (hasRegisteredSuperuserFlag(meta as Record<string, unknown>)) return true;
-
-  return false;
+  const email = (identity.email ?? '').toLowerCase().trim();
+  if (getAllowedEmails().has(email)) return true;
+  return hasRegisteredSuperuserFlag(identity.appMetadata);
 }
 
 /**

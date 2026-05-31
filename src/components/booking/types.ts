@@ -1,4 +1,5 @@
 import type { BookingModel } from '@/types/booking-models';
+import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 
 export type OpeningHourDay =
   | { closed: true }
@@ -17,6 +18,8 @@ export interface VenuePublic {
   phone: string | null;
   /** Business website; shown in booking header when set. */
   website_url?: string | null;
+  /** Booking Site Studio branding/content (brand colours, about, announcement, socials). */
+  booking_page_config?: BookingPageConfig | null;
   deposit_config: DepositConfigPublic | null;
   booking_rules: BookingRulesPublic | null;
   opening_hours: OpeningHours | null;

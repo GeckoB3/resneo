@@ -56,11 +56,6 @@ export default async function SettingsPage({
   }>;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    redirect('/login?redirectTo=/dashboard/settings');
-  }
-
   const staff = await getDashboardStaff(supabase);
 
   const venueId = staff.venue_id;
@@ -98,7 +93,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, terminology, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings, feature_flags, embed_accent_colour')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, billing_access_source, free_access_granted_at, free_access_granted_by, free_access_reason, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, terminology, sms_monthly_allowance, stripe_subscription_id, created_at, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
     .eq('id', venueId)
     .single();
 
@@ -164,7 +159,7 @@ export default async function SettingsPage({
       staff.db,
       venueId,
       (venue as { email?: string | null }).email,
-      user.email,
+      staff.email,
     );
     if (nextEmail) {
       venue = { ...(venue as object), email: nextEmail } as typeof venue;

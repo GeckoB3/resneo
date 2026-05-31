@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
 import { AppointmentBookingsDashboard } from './AppointmentBookingsDashboard';
 import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
@@ -13,8 +12,6 @@ import { BookingsDashboardSkeleton } from '@/components/ui/dashboard/DashboardSk
 
 export default async function BookingsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/bookings');
 
   const staff = await getDashboardStaff(supabase);
   const venueId = staff.venue_id;

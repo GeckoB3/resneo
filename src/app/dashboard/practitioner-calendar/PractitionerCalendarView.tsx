@@ -4001,7 +4001,7 @@ export function PractitionerCalendarView({
     bookingId: string,
     body: Record<string, unknown>,
     opts?: { skipRefetch?: boolean },
-  ) {
+  ): Promise<boolean> {
     setQuickActionId(bookingId);
     const gridBooking = allGridBookings.find((b) => b.id === bookingId) ?? null;
     const linkedOwnerVenueId = gridBooking?._linkedOwnerVenueId ?? null;
@@ -4074,7 +4074,7 @@ export function PractitionerCalendarView({
           delete next[bookingId];
           return next;
         });
-        return;
+        return false;
       }
       if (payload && typeof payload === 'object' && !('error' in payload)) {
         mergeCalendarBookingOverlay(bookingId, overlayFromPatchPayload(payload));
@@ -4104,6 +4104,7 @@ export function PractitionerCalendarView({
       } else if (linkedOwnerVenueId) {
         void requestLinkedCalendarSync();
       }
+      return true;
     } catch {
       addToast('Update failed', 'error');
       if (linkedSnapshot) {
@@ -4121,20 +4122,19 @@ export function PractitionerCalendarView({
         delete next[bookingId];
         return next;
       });
+      return false;
     } finally {
       setQuickActionId(null);
     }
   }
 
   /**
-   * Apply a status / arrived patch to every booking in a multi-service group so the
-   * whole bar (background, stripe, badge and per-segment pills) transitions together.
-   * The server PATCH does not cascade non-cancel status across a group, so each
-   * sibling is patched; the list refetch runs once at the end.
+   * Status / arrived changes for a multi-service visit: optimistic overlay on every
+   * segment, one PATCH (server syncs siblings via `group_booking_id`), then refetch.
    */
-  async function quickPatchBookingCluster(items: Booking[], body: Record<string, unknown>) {
-    // Skip siblings that already match the target so the server is not asked to make a
-    // no-op transition (e.g. Booked -> Booked) that it would reject.
+  async function quickPatchBookingCluster(items: Booking[], body: Record<string, unknown>): Promise<boolean> {
+    if (items.length === 0) return true;
+
     const targets = items.filter((item) => {
       if (typeof body.status === 'string') return item.status !== body.status;
       if (body.client_arrived !== undefined) {
@@ -4142,18 +4142,8 @@ export function PractitionerCalendarView({
       }
       return true;
     });
-    if (targets.length === 0) return;
-    if (targets.length === 1) {
-      await quickPatchBooking(targets[0]!.id, body);
-      return;
-    }
+    if (targets.length === 0) return true;
 
-    /**
-     * Recolour the whole multi-service bar immediately and atomically. The bar's colour
-     * derives from its first segment, so every sibling's overlay is applied in a single
-     * state update here — using each item's own current status as the transition source —
-     * rather than relying on each `quickPatchBooking` to resolve the row independently.
-     */
     setCalendarBookingOverlays((prev) => {
       const next = { ...prev };
       for (const item of targets) {
@@ -4174,8 +4164,25 @@ export function PractitionerCalendarView({
       return next;
     });
 
-    await Promise.all(targets.map((item) => quickPatchBooking(item.id, body, { skipRefetch: true })));
-    void refetchBookingsList();
+    const lead = targets[0]!;
+    const ok = await quickPatchBooking(lead.id, body, { skipRefetch: true });
+    if (ok) {
+      setBookings((rows) =>
+        rows.map((row) => {
+          const inCluster = items.some((item) => item.id === row.id);
+          if (!inCluster) return row;
+          if (typeof body.status === 'string' && row.status !== body.status) {
+            return applyCalendarBookingQuickPatch(row, body);
+          }
+          if (body.client_arrived !== undefined) {
+            return applyCalendarBookingQuickPatch(row, body);
+          }
+          return row;
+        }),
+      );
+      void refetchBookingsList();
+    }
+    return ok;
   }
 
   function clearCalendarDragUi() {
@@ -6317,7 +6324,7 @@ export function PractitionerCalendarView({
                         );
                         return (
                           <DraggableBookingShell
-                            key={`${first.id}-${first.status}-${first.client_arrived_at ?? ''}`}
+                            key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
                             booking={first}
                             top={top}
                             height={height}
@@ -6738,16 +6745,38 @@ export function PractitionerCalendarView({
             setDetailBookingLinkedAct(null);
             setDetailBookingAnchor(null);
           }}
+          onStatusChange={async (bookingId, _previous, newStatus) => {
+            const gridBooking =
+              bookings.find((x) => x.id === bookingId) ??
+              linkedNativeBookings.find((x) => x.id === bookingId);
+            if (gridBooking?.group_booking_id) {
+              const items = allGridBookings.filter(
+                (x) => x.group_booking_id === gridBooking.group_booking_id,
+              );
+              const ok = await quickPatchBookingCluster(items, { status: newStatus });
+              if (!ok) throw new Error('Update failed');
+              return;
+            }
+            const ok = await quickPatchBooking(bookingId, { status: newStatus });
+            if (!ok) throw new Error('Update failed');
+          }}
           onUpdated={() => {
             if (detailBookingId) {
+              const anchor =
+                allGridBookings.find((x) => x.id === detailBookingId) ?? null;
+              const groupIds = anchor?.group_booking_id
+                ? allGridBookings
+                    .filter((x) => x.group_booking_id === anchor.group_booking_id)
+                    .map((x) => x.id)
+                : [detailBookingId];
               void fetch(`/api/venue/bookings/${detailBookingId}`)
                 .then((r) => (r.ok ? r.json() : null))
                 .then((payload) => {
                   if (payload && typeof payload === 'object' && !('error' in payload)) {
-                    mergeCalendarBookingOverlay(
-                      detailBookingId,
-                      overlayFromPatchPayload(payload as Record<string, unknown>),
-                    );
+                    const overlay = overlayFromPatchPayload(payload as Record<string, unknown>);
+                    for (const id of groupIds) {
+                      mergeCalendarBookingOverlay(id, overlay);
+                    }
                   }
                 })
                 .catch(() => undefined);

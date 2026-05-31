@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -9,10 +8,6 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 export default async function ResourceTimelinePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/resource-timeline');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {

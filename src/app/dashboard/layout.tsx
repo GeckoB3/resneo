@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { requireDashboardIdentity } from '@/lib/auth/dashboard-session';
+import { isPlatformSuperuserFromIdentity } from '@/lib/platform-auth';
 import { getDashboardStaff, type ActiveSupportSessionContext } from '@/lib/venue-auth';
 import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { DashboardShell } from './DashboardShell';
@@ -36,19 +37,16 @@ import type { ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    redirect('/login?redirectTo=/dashboard');
-  }
+  const identity = await requireDashboardIdentity(supabase, '/dashboard');
 
-  if (isPlatformSuperuser(user)) {
+  if (isPlatformSuperuserFromIdentity(identity)) {
     const allowVenueShell = await hasActiveVenueSupportSession(supabase);
     if (!allowVenueShell) {
       redirect('/super');
     }
   }
 
-  let email = user.email ?? '';
+  let email = identity.email ?? '';
   let supportSession: ActiveSupportSessionContext | undefined;
   let venueName: string | undefined;
   let venueSlug: string | undefined;
@@ -80,7 +78,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }
 
     if (!staff.venue_id) {
-      if (isPlatformSuperuser(user)) {
+      if (isPlatformSuperuserFromIdentity(identity)) {
         redirect('/super');
       }
       redirect('/signup/business-type');

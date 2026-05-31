@@ -47,8 +47,13 @@ import {
 } from '@/lib/booking/booking-staff-indicators';
 import {
   applyBookingRowOverlayFields,
+  applyOptimisticStatusToBookingRows,
   overlayFromPatchPayload,
 } from '@/lib/booking/booking-row-overlay';
+import {
+  canTransitionBookingStatus,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
 import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
@@ -925,19 +930,20 @@ export function AppointmentBookingsDashboard({
   async function updateRowStatus(bookingId: string, nextStatus: string, linked = false) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev && !linked) return;
+    if (
+      prev &&
+      (!canTransitionBookingStatus(prev.status, nextStatus) || prev.status === nextStatus)
+    ) {
+      return;
+    }
     if (prev) {
       setBookings((rows) =>
-        rows.map((r) => {
-          if (r.id !== bookingId) return r;
-          const updated: RegistryAppointment = { ...r, status: nextStatus };
-          if (prev.status === 'Confirmed' && nextStatus === 'Booked') {
-            updated.staff_attendance_confirmed_at = null;
-            updated.guest_attendance_confirmed_at = null;
-          } else if (nextStatus === 'Confirmed' && prev.status !== 'Confirmed') {
-            updated.staff_attendance_confirmed_at = new Date().toISOString();
-          }
-          return updated;
-        }),
+        applyOptimisticStatusToBookingRows(
+          rows,
+          bookingId,
+          nextStatus as BookingStatus,
+          isTableReservationBooking,
+        ),
       );
     }
     try {
@@ -956,12 +962,14 @@ export function AppointmentBookingsDashboard({
       }
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (prev && payload && typeof payload === 'object' && !('error' in payload)) {
+        const groupId = prev.group_booking_id;
+        const patchOverlay = overlayFromPatchPayload(payload);
         setBookings((rows) =>
-          rows.map((r) =>
-            r.id === bookingId
-              ? applyBookingRowOverlayFields(r, overlayFromPatchPayload(payload))
-              : r,
-          ),
+          rows.map((r) => {
+            const inGroup = Boolean(groupId && r.group_booking_id === groupId);
+            if (r.id !== bookingId && !inGroup) return r;
+            return applyBookingRowOverlayFields(r, patchOverlay);
+          }),
         );
       }
       if (linked) {
@@ -973,9 +981,7 @@ export function AppointmentBookingsDashboard({
       }
     } catch {
       addToast('Could not update status', 'error');
-      if (prev) {
-        setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
-      }
+      void fetchBookings({ silent: true });
     }
   }
 

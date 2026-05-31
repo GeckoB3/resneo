@@ -16,10 +16,6 @@ import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/calendar');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {

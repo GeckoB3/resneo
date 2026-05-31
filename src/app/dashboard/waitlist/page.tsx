@@ -9,10 +9,6 @@ import { WaitlistPageClient } from './WaitlistPageClient';
 
 export default async function WaitlistPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/waitlist');
 
   const staff = await getDashboardStaff(supabase);
   const venueId = staff.venue_id;

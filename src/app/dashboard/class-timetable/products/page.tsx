@@ -8,10 +8,6 @@ import { ClassCommerceProductsClient } from './ClassCommerceProductsClient';
 
 export default async function ClassCommerceProductsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/class-timetable/products');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {

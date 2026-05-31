@@ -10,13 +10,6 @@ import { LinkedCalendarView } from '@/components/linked-accounts/LinkedCalendarV
 
 export default async function LinkedCalendarPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    redirect('/login?redirectTo=/dashboard/linked-calendar');
-  }
-
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) {
     redirect('/dashboard');

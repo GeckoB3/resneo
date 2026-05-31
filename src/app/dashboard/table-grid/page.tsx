@@ -9,8 +9,6 @@ import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 export default async function TableGridPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login?redirectTo=/dashboard/table-grid');
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) redirect('/dashboard');

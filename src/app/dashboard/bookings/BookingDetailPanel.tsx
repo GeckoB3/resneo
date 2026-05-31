@@ -351,16 +351,6 @@ export function BookingDetailPanel({
       : [],
   });
 
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshOpenBookingDetail();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [refreshOpenBookingDetail]);
-
   const loadAssignmentSuggestions = useCallback(async () => {
     if (!detail) return;
     setSuggestionsLoading(true);
@@ -543,11 +533,12 @@ export function BookingDetailPanel({
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          setError(j.error ?? 'Failed');
+          const message = (j as { error?: string }).error ?? 'Failed';
+          setError(message);
           if (detail) {
             setDetail((prev) => (prev ? { ...prev, status: previous } : prev));
           }
-          return;
+          throw new Error(message);
         }
         if (newStatus === 'Cancelled') {
           scheduleWaitlistAlertsRefresh();
@@ -558,10 +549,11 @@ export function BookingDetailPanel({
       onUpdated();
     } catch (err) {
       console.error('Booking detail status update failed:', err);
-      setError('Failed to update booking status');
+      setError(err instanceof Error ? err.message : 'Failed to update booking status');
       if (detail) {
         setDetail((prev) => (prev ? { ...prev, status: previous } : prev));
       }
+      throw err;
     } finally {
       setActionLoading(false);
     }

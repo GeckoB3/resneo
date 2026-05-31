@@ -86,7 +86,7 @@ function accountBookingsLinkParts(booking: BookingEmailData): { html: string; te
   if (!url) return { html: '', textLine: null };
   const safe = escapeHtml(url);
   return {
-    html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:#4E6B78;font-weight:600">View or sign in to your account</a>.</p>`,
+    html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:#003B6F;font-weight:600">View or sign in to your account</a>.</p>`,
     textLine: `View or sign in to your account: ${url}`,
   };
 }
@@ -354,7 +354,6 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
                   : `Please complete your payment within ${opts.paymentDeadlineHours} hours to secure your booking.`,
               )
             : '',
-          acctDep.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -370,10 +369,11 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.paymentDeadlineHours != null
             ? `Please complete payment within ${opts.paymentDeadlineHours} hours to secure it.`
             : null,
-          acctDep.textLine,
         ],
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
+        postCtaHtml: acctDep.html || null,
+        postCtaTextLine: acctDep.textLine,
       };
     }
     case 'deposit_confirmation': {
@@ -385,17 +385,17 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           htmlParagraph(`Hi ${guestName},`),
           htmlParagraph('Your deposit has been received and your booking is secured.'),
           depositAmount ? htmlRaw(`<strong>Deposit paid:</strong> ${escapeHtml(depositAmount)}`) : '',
-          acctPaid.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
           '',
           'Your deposit has been received and your booking is secured.',
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
-          acctPaid.textLine,
         ],
         ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
+        postCtaHtml: acctPaid.html || null,
+        postCtaTextLine: acctPaid.textLine,
       };
     }
     case 'confirm_or_cancel_prompt': {
@@ -499,7 +499,6 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
           depositAmount ? htmlRaw(`<strong>Deposit paid:</strong> ${escapeHtml(depositAmount)}`) : '',
-          acctPre.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -518,10 +517,11 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
             : null,
           depositAmount ? `Deposit paid: ${depositAmount}` : null,
-          acctPre.textLine,
         ],
         ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
+        postCtaHtml: acctPre.html || null,
+        postCtaTextLine: acctPre.textLine,
       };
     }
     case 'booking_modification': {
@@ -535,7 +535,6 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           htmlParagraph(`Hi ${guestName},`),
           htmlParagraph('Your booking has been updated. Here are the new details:'),
           opts.changeSummary ? htmlRaw(`<strong>What changed:</strong> ${escapeHtml(opts.changeSummary)}`) : '',
-          acctMod.html,
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -546,10 +545,11 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
           opts.changeSummary ? `What changed: ${opts.changeSummary}` : null,
-          acctMod.textLine,
         ],
         ctaLabel: manageCtaLabel,
         ctaUrl: opts.booking.manage_booking_link ?? null,
+        postCtaHtml: acctMod.html || null,
+        postCtaTextLine: acctMod.textLine,
       };
     }
     case 'cancellation_confirmation':

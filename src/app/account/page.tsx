@@ -162,7 +162,7 @@ export default async function AccountHomePage() {
                 · {user.email}
               </span>
             ) : null}
-            . Use the shortcuts below or the navigation bar to manage your ReserveNI activity.
+            . Use the shortcuts below or the navigation bar to manage your Resneo activity.
           </>
         }
       />

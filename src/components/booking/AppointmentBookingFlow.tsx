@@ -352,7 +352,7 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
 
 type Step =
   | 'mode_choice'
-  | 'service' | 'variant' | 'addons' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
+  | 'service' | 'variant' | 'addons' | 'append_variant' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
   | 'group_person_label' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
@@ -579,7 +579,7 @@ export function AppointmentBookingFlow({
    */
   const [addonFlowContext, setAddonFlowContext] = useState<
     | { kind: 'primary' }
-    | { kind: 'append'; serviceId: string }
+    | { kind: 'append'; serviceId: string; variantId?: string | null }
     | { kind: 'edit'; segmentIndex: number; serviceId: string }
   >({ kind: 'primary' });
 
@@ -613,6 +613,12 @@ export function AppointmentBookingFlow({
   });
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [loadingCalendar, setLoadingCalendar] = useState(false);
+  /** Service id currently being appended (spinner on its "add another service" button). */
+  const [appendingServiceId, setAppendingServiceId] = useState<string | null>(null);
+  /** Variant id currently being appended (spinner on its option button in the append-variant step). */
+  const [appendingVariantId, setAppendingVariantId] = useState<string | null>(null);
+  /** Segment index currently being removed (spinner on its Remove button). */
+  const [removingSegmentIndex, setRemovingSegmentIndex] = useState<number | null>(null);
   const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
   /** One-shot bootstrap from guest-history Rebook — applied after catalog load. */
   const staffRebookApplyRef = useRef(false);
@@ -1704,14 +1710,20 @@ export function AppointmentBookingFlow({
   );
 
   const handlePickAdditionalService = useCallback(
-    async (serviceId: string, addonIds: string[] = []): Promise<string | null> => {
+    async (
+      serviceId: string,
+      addonIds: string[] = [],
+      variantId: string | null = null,
+    ): Promise<string | null> => {
       if (!visitPractitioner || !multiServiceSegments?.length) return 'Unable to add this service.';
-      const offer = visitPractitioner.services.find((s) => s.id === serviceId);
-      if (!offer) return 'Service not found.';
+      const baseOffer = visitPractitioner.services.find((s) => s.id === serviceId);
+      if (!baseOffer) return 'Service not found.';
       if (multiServiceSegments.length >= 4) {
         setError('You can book up to four services in one visit.');
         return 'You can book up to four services in one visit.';
       }
+      // Variant overrides win for duration / buffer / price / deposit, like the primary service.
+      const offer = catalogOfferWithVariant(baseOffer, variantId) ?? baseOffer;
       const firstStart = multiServiceSegments[0]!.startTime;
       const nextOnline = onlineChargeFromCatalogOffer(offer);
       const addonInfo = addonSelectionDetails(catalogStaff, serviceId, addonIds);
@@ -1720,8 +1732,9 @@ export function AppointmentBookingFlow({
         (nextOnline?.amountPence ?? 0) +
         (nextOnline?.chargeLabel === 'full_payment' ? addonInfo.totalPence : 0);
       const nextSeg: MultiServiceSegment = {
-        serviceId: offer.id,
-        serviceName: offer.name,
+        serviceId: baseOffer.id,
+        serviceVariantId: variantId,
+        serviceName: baseOffer.name,
         practitionerId: visitPractitioner.id,
         practitionerName: visitPractitioner.name,
         startTime: '00:00',
@@ -1735,15 +1748,20 @@ export function AppointmentBookingFlow({
         addonTotalMinutes: addonInfo.totalMinutes,
       };
       const chain = recomputeMultiServiceChain([...multiServiceSegments, nextSeg], firstStart);
-      const err = await validateMultiServiceChain(chain);
-      if (err) {
-        setError(err);
-        return err;
+      setAppendingServiceId(serviceId);
+      try {
+        const err = await validateMultiServiceChain(chain);
+        if (err) {
+          setError(err);
+          return err;
+        }
+        setMultiServiceSegments(chain);
+        setError(null);
+        setAddingExtraService(false);
+        return null;
+      } finally {
+        setAppendingServiceId(null);
       }
-      setMultiServiceSegments(chain);
-      setError(null);
-      setAddingExtraService(false);
-      return null;
     },
     [visitPractitioner, multiServiceSegments, validateMultiServiceChain, catalogStaff],
   );
@@ -1789,13 +1807,18 @@ export function AppointmentBookingFlow({
       const firstStart = multiServiceSegments[0]!.startTime;
       const next = multiServiceSegments.filter((_, i) => i !== index);
       const chain = recomputeMultiServiceChain(next, firstStart);
-      const err = await validateMultiServiceChain(chain);
-      if (err) {
-        setError(err);
-        return;
+      setRemovingSegmentIndex(index);
+      try {
+        const err = await validateMultiServiceChain(chain);
+        if (err) {
+          setError(err);
+          return;
+        }
+        setMultiServiceSegments(chain);
+        setError(null);
+      } finally {
+        setRemovingSegmentIndex(null);
       }
-      setMultiServiceSegments(chain);
-      setError(null);
     },
     [multiServiceSegments, validateMultiServiceChain],
   );
@@ -2859,7 +2882,11 @@ export function AppointmentBookingFlow({
         async function goNext() {
           if (continueDisabled) return;
           if (addonFlowContext.kind === 'append') {
-            await handlePickAdditionalService(addonFlowContext.serviceId, selectedAddonIds);
+            await handlePickAdditionalService(
+              addonFlowContext.serviceId,
+              selectedAddonIds,
+              addonFlowContext.variantId ?? null,
+            );
             setAddonFlowContext({ kind: 'primary' });
             // Restore the buffer to mirror segment 0 (append leaves segment 0 unchanged).
             setSelectedAddonIds(multiServiceSegments?.[0]?.addonIds ?? []);
@@ -3358,6 +3385,9 @@ export function AppointmentBookingFlow({
           <MultiServiceSummaryCard
             lines={multiServiceSegments.map((s) => ({
               serviceName: s.serviceName,
+              variantName: s.serviceVariantId
+                ? catalogVariantsForServiceId(catalogStaff, s.serviceId).find((v) => v.id === s.serviceVariantId)?.name ?? null
+                : null,
               practitionerName: s.practitionerName,
               startTime: s.startTime,
               durationMinutes: s.durationMinutes,
@@ -3375,6 +3405,7 @@ export function AppointmentBookingFlow({
             currencySymbol={sym}
             formatPrice={formatPrice}
             onRemove={multiServiceSegments.length > 1 ? (idx) => void handleRemoveMultiSegment(idx) : undefined}
+            removingSegmentIndex={removingSegmentIndex}
             onEditAddons={(idx) => {
               const seg = multiServiceSegments[idx];
               if (!seg) return;
@@ -3402,11 +3433,24 @@ export function AppointmentBookingFlow({
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                     <p className="mb-2 text-xs font-medium text-slate-500">Choose a service - next start time is calculated automatically.</p>
                     <div className="flex flex-wrap gap-2">
-                      {visitPractitioner.services.map((svc) => (
+                      {visitPractitioner.services.map((svc) => {
+                        const appending = appendingServiceId === svc.id;
+                        return (
                         <button
                           key={svc.id}
                           type="button"
+                          disabled={appendingServiceId != null}
+                          aria-busy={appending}
                           onClick={() => {
+                            if (appendingServiceId != null) return;
+                            // Offer variants first (if any), then add-ons, mirroring the primary service flow.
+                            if (catalogVariantsForServiceId(catalogStaff, svc.id).length > 0) {
+                              setAddonFlowContext({ kind: 'append', serviceId: svc.id });
+                              setSelectedAddonIds([]);
+                              setError(null);
+                              setStep('append_variant');
+                              return;
+                            }
                             if (catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0) {
                               setAddonFlowContext({ kind: 'append', serviceId: svc.id });
                               setSelectedAddonIds([]);
@@ -3417,12 +3461,19 @@ export function AppointmentBookingFlow({
                             }
                             void handlePickAdditionalService(svc.id);
                           }}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-brand-300"
+                          className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-60"
                         >
+                          {appending ? (
+                            <span
+                              className="mr-2 h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-400 border-t-transparent"
+                              aria-hidden
+                            />
+                          ) : null}
                           <span className="font-medium text-slate-900">{svc.name}</span>
                           <span className="ml-2 text-xs text-slate-500">{svc.duration_minutes} min</span>
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -3438,6 +3489,93 @@ export function AppointmentBookingFlow({
           </div>
         </div>
       )}
+
+      {step === 'append_variant' && addonFlowContext.kind === 'append' && (() => {
+        const svcId = addonFlowContext.serviceId;
+        const baseOffer = visitPractitioner?.services.find((s) => s.id === svcId) ?? null;
+        const variants = catalogVariantsForServiceId(catalogStaff, svcId);
+        const hasAddons = catalogAddonGroupsForServiceId(catalogStaff, svcId).length > 0;
+        const backToMulti = () => {
+          setAddonFlowContext({ kind: 'primary' });
+          setError(null);
+          setStep('multi_service');
+        };
+        const pickVariant = async (variantId: string) => {
+          if (appendingVariantId != null) return;
+          if (hasAddons) {
+            setAddonFlowContext({ kind: 'append', serviceId: svcId, variantId });
+            setSelectedAddonIds([]);
+            setError(null);
+            setAddingExtraService(false);
+            setStep('addons');
+            return;
+          }
+          // No add-ons: add the service+variant directly, with a spinner while the slot validates.
+          setAddingExtraService(false);
+          setAppendingVariantId(variantId);
+          try {
+            const err = await handlePickAdditionalService(svcId, [], variantId);
+            if (!err) {
+              setAddonFlowContext({ kind: 'primary' });
+              setStep('multi_service');
+            }
+          } finally {
+            setAppendingVariantId(null);
+          }
+        };
+        return (
+          <div>
+            <button
+              type="button"
+              onClick={backToMulti}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose your option</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              {baseOffer?.name ? `${baseOffer.name} has a few options.` : 'This service has a few options.'} Pick one to add it to your visit.
+            </p>
+            <div className="space-y-2">
+              {variants.map((variant) => {
+                const variantBusy = appendingVariantId === variant.id;
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    disabled={appendingVariantId != null}
+                    aria-busy={variantBusy}
+                    onClick={() => void pickVariant(variant.id)}
+                    className={`${choiceCardClass} disabled:cursor-not-allowed disabled:opacity-60`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{variant.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {variant.duration_minutes} min
+                          {variant.price_pence != null ? ` · ${formatPrice(variant.price_pence)}` : ''}
+                        </div>
+                        <ServiceCatalogDescription description={variant.description} />
+                      </div>
+                      {variantBusy ? (
+                        <span
+                          className="h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-brand-400 border-t-transparent"
+                          aria-hidden
+                        />
+                      ) : (
+                        <svg className={`${APPOINTMENT_PUBLIC_CHEVRON_SM} flex-shrink-0`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {step === 'details' && selectedTime && (
         <div>
@@ -3459,6 +3597,9 @@ export function AppointmentBookingFlow({
               <MultiServiceSummaryCard
                 lines={multiServiceSegments.map((s) => ({
                   serviceName: s.serviceName,
+                  variantName: s.serviceVariantId
+                    ? catalogVariantsForServiceId(catalogStaff, s.serviceId).find((v) => v.id === s.serviceVariantId)?.name ?? null
+                    : null,
                   practitionerName: s.practitionerName,
                   startTime: s.startTime,
                   durationMinutes: s.durationMinutes,
@@ -3618,18 +3759,18 @@ export function AppointmentBookingFlow({
       )}
 
       {isEdit && step === 'confirmation' && (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <div className="rounded-2xl border border-brand-200 bg-brand-50 p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-100">
+            <svg className="h-8 w-8 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-green-900">{terms.booking} Updated</h2>
-          <p className="mt-2 text-sm text-green-700">
+          <h2 className="text-xl font-bold text-brand-900">{terms.booking} Updated</h2>
+          <p className="mt-2 text-sm text-brand-700">
             {selectedService?.name} with {assignedStaffDisplayName || selectedPrac?.name}
           </p>
-          <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
-          <p className="mt-3 text-xs text-green-700">Your changes have been saved.</p>
+          <p className="mt-1 text-sm text-brand-600">{formatDateHuman(date)} at {selectedTime}</p>
+          <p className="mt-3 text-xs text-brand-700">Your changes have been saved.</p>
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
@@ -3658,20 +3799,20 @@ export function AppointmentBookingFlow({
       )}
 
       {!isEdit && step === 'confirmation' && (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100"><svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
-          <h2 className="text-xl font-bold text-green-900">{isEdit ? `${terms.booking} Updated` : `${terms.booking} Confirmed`}</h2>
+        <div className="rounded-2xl border border-brand-200 bg-brand-50 p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-100"><svg className="h-8 w-8 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
+          <h2 className="text-xl font-bold text-brand-900">{isEdit ? `${terms.booking} Updated` : `${terms.booking} Confirmed`}</h2>
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
-            <div className="mt-3 space-y-2 text-left text-sm text-green-800">
-              <p className="text-center text-green-700">
+            <div className="mt-3 space-y-2 text-left text-sm text-brand-800">
+              <p className="text-center text-brand-700">
                 {formatDateHuman(date)}
                 {assignedStaffDisplayName ? ` with ${assignedStaffDisplayName}` : selectedPrac?.name ? ` with ${selectedPrac.name}` : ''}
               </p>
-              <ul className="mx-auto max-w-sm list-none space-y-1.5 rounded-lg border border-green-200/80 bg-white/60 px-3 py-2">
+              <ul className="mx-auto max-w-sm list-none space-y-1.5 rounded-lg border border-brand-200/80 bg-white/60 px-3 py-2">
                 {multiServiceSegments.map((s) => (
                   <li key={`${s.serviceId}-${s.startTime}`} className="flex justify-between gap-2 text-xs">
-                    <span className="font-medium text-green-900">{s.serviceName}</span>
-                    <span className="text-right text-green-700">
+                    <span className="font-medium text-brand-900">{s.serviceName}</span>
+                    <span className="text-right text-brand-700">
                       {s.startTime}
                       {s.practitionerName ? ` · ${s.practitionerName}` : ''}
                     </span>
@@ -3681,29 +3822,29 @@ export function AppointmentBookingFlow({
             </div>
           ) : (
             <>
-              <p className="mt-2 text-sm text-green-700">
+              <p className="mt-2 text-sm text-brand-700">
                 {selectedService?.name} with {assignedStaffDisplayName || selectedPrac?.name}
               </p>
-              <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
+              <p className="mt-1 text-sm text-brand-600">{formatDateHuman(date)} at {selectedTime}</p>
             </>
           )}
           {!isEdit && (guestDetails?.email || guestDetails?.phone) ? (
-            <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>
+            <p className="mt-3 text-xs text-brand-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>
           ) : null}
           {isEdit ? (
-            <p className="mt-3 text-xs text-green-700">Your changes have been saved.</p>
+            <p className="mt-3 text-xs text-brand-700">Your changes have been saved.</p>
           ) : null}
           {!isEdit && isStaff && createResult?.payment_url ? (
-            <p className="mt-3 text-xs text-green-800">A deposit payment link was sent to the guest.</p>
+            <p className="mt-3 text-xs text-brand-800">A deposit payment link was sent to the guest.</p>
           ) : null}
           {!isEdit && (createResult?.deposit_amount_pence ?? 0) > 0 ? (
-            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
+            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
               {singleConfirmationDepositCopy ??
                 `Full refund if you cancel ≥${createResult?.cancellation_notice_hours ?? refundNoticeHours}h before start (see venue terms).`}
             </p>
           ) : !isEdit && isPublicGuest ? (
-            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
+            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
           ) : null}
@@ -4303,32 +4444,32 @@ export function AppointmentBookingFlow({
 
       {/* Group: confirmation */}
       {step === 'group_confirmation' && (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+        <div className="rounded-2xl border border-brand-200 bg-brand-50 p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-100">
+            <svg className="h-8 w-8 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
           </div>
-          <h2 className="text-xl font-bold text-green-900">Group Booking Confirmed</h2>
+          <h2 className="text-xl font-bold text-brand-900">Group Booking Confirmed</h2>
           <div className="mt-3 space-y-2">
             {groupPeople.map((person, idx) => (
-              <div key={idx} className="text-sm text-green-700">
+              <div key={idx} className="text-sm text-brand-700">
                 <span className="font-medium">{person.label}</span> &mdash; {person.serviceName} with {person.practitionerName} at {person.time}
               </div>
             ))}
           </div>
-          <p className="mt-3 text-sm text-green-600">{formatDateHuman(groupPeople[0]?.date ?? date)}</p>
+          <p className="mt-3 text-sm text-brand-600">{formatDateHuman(groupPeople[0]?.date ?? date)}</p>
           {(guestDetails?.email || guestDetails?.phone) ? (
-            <p className="mt-3 text-xs text-green-600">
+            <p className="mt-3 text-xs text-brand-600">
               A confirmation will be sent to {guestDetails.email || guestDetails.phone}.
             </p>
           ) : null}
           {(groupCreateResult?.total_deposit_pence ?? 0) > 0 ? (
-            <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
+            <p className="mt-4 max-w-md mx-auto text-left text-xs text-brand-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
               {groupConfirmationDepositCopy ??
                 `Full refund per appointment if you cancel ≥${groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours}h before each start (see venue terms).`}
             </p>
           ) : isPublicGuest ? (
-            <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
+            <p className="mt-4 max-w-md mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change these appointments at any time before they start (subject to the venue&apos;s terms).
             </p>
           ) : null}

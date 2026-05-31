@@ -1,6 +1,6 @@
 # Reserve NI - Booking models reference
 
-This document is the **single place** we align on what each `BookingModel` means in product and code. It reflects the **current** setup (see `src/types/booking-models.ts` and `src/lib/business-config.ts`). It does not prescribe implementation tasks; for delivery plans see `Docs/ReserveNI_Unified_Booking_Functionality.md` and related specs.
+This document is the **single place** we align on what each `BookingModel` means in product and code. It reflects the **current** setup (see `src/types/booking-models.ts` and `src/lib/business-config.ts`). It does not prescribe implementation tasks; for delivery plans see `Docs/Resneo_Unified_Booking_Functionality.md` and related specs.
 
 ---
 
@@ -126,6 +126,6 @@ Default labels per model live in `DEFAULT_TERMINOLOGY` in `src/types/booking-mod
 
 ## Related documents
 
-- `Docs/ReserveNI_Unified_Booking_Functionality.md` - multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
+- `Docs/Resneo_Unified_Booking_Functionality.md` - multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
 - `Docs/archive/ReserveNI_Unified_Scheduling_Engine_Plan.md` - Unified Scheduling Engine (USE) build guide (archived — engine shipped; retained for architecture rationale).
-- `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md` - broader services landscape.
+- `Docs/Resneo_Bookable_Services_Landscape_Plan.md` - broader services landscape.

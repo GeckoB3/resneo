@@ -149,6 +149,85 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     expect(out?.html).toMatch(/Total: £20\.00/i);
   });
 
+  it('includes add-on extras and a total covering service + variant + add-ons', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Cut and Blow Dry - Long hair',
+        practitioner_name: 'Jo',
+        // Service + variant line price
+        appointment_price_display: '£40.00',
+        // One paid add-on
+        addon_lines: ['Finishing touches: Olaplex treatment (+£8.00, +15 min)'],
+        addons_total_price_pence: 800,
+        // Service (£40) + add-on (£8)
+        booking_total_price_pence: 4800,
+        deposit_status: 'Not Required',
+      }),
+      venue,
+    });
+    // Service + variant line price is shown
+    expect(out?.html).toContain('Cut and Blow Dry - Long hair');
+    expect(out?.html).toContain('£40.00');
+    // The add-on appears as an extra
+    expect(out?.html).toContain('Olaplex treatment');
+    // Total reflects service + variant + add-ons, not just the service line price
+    expect(out?.html).toContain('£48.00');
+    expect(out?.text).toContain('£48.00');
+  });
+
+  it('itemises each person, service, variant, add-on and subtotal for group bookings', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Group booking',
+        group_appointments: [
+          {
+            person_label: 'Alex',
+            booking_date: '2026-06-01',
+            booking_time: '10:00',
+            practitioner_name: 'Jo',
+            service_name: 'Cut and Blow Dry - Long hair',
+            price_display: '£40.00',
+            addon_lines: ['Finishing touches: Olaplex treatment (+£8.00, +15 min)'],
+            subtotal_display: '£48.00',
+          },
+          {
+            person_label: 'Sam',
+            booking_date: '2026-06-01',
+            booking_time: '10:30',
+            practitioner_name: 'Kim',
+            service_name: 'Colour - Full head',
+            price_display: '£60.00',
+          },
+        ],
+        // £48 (Alex incl add-on) + £60 (Sam) = £108
+        booking_total_price_pence: 10800,
+        deposit_status: 'Not Required',
+      }),
+      venue,
+    });
+    const html = out!.html;
+    // Each person and their service + variant
+    expect(html).toContain('Alex');
+    expect(html).toContain('Sam');
+    expect(html).toContain('Cut and Blow Dry - Long hair');
+    expect(html).toContain('Colour - Full head');
+    // Per-person line prices
+    expect(html).toContain('£40.00');
+    expect(html).toContain('£60.00');
+    // Add-on itemised under the person, with a per-person subtotal
+    expect(html).toContain('Olaplex treatment');
+    expect(html).toContain('Subtotal');
+    expect(html).toContain('£48.00');
+    // Group total covers everyone's service + variant + add-ons
+    expect(html).toContain('£108.00');
+  });
+
   it('shows deposit + balance when partially paid online', () => {
     const out = renderCommunicationEmail({
       lane: 'appointments_other',

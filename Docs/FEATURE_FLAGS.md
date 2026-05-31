@@ -1,6 +1,6 @@
 # Appointments feature flags (P0.3)
 
-Controlled rollout for Phase 1a work in [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md).
+Controlled rollout for Phase 1a work in [Resneo-Appointments-Review-And-Roadmap.md](./Resneo-Appointments-Review-And-Roadmap.md).
 
 ## Flags
 

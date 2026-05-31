@@ -199,7 +199,7 @@ export function LinkedAccountsSection({ venueName }: { venueName: string }) {
           ) : null}
           {activeLinks.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No active links yet. Send a request to link with another ReserveNI venue.
+              No active links yet. Send a request to link with another Resneo venue.
             </p>
           ) : (
             activeLinks.map((link) => (

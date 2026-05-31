@@ -272,7 +272,7 @@ export async function POST(request: NextRequest) {
     try {
       const messageId = await sendEmail({
         to: normalisedEmail,
-        subject: `Your ${venueName} dashboard login - ReserveNI`,
+        subject: `Your ${venueName} dashboard login - Resneo`,
         html,
         text,
       });

@@ -20,7 +20,7 @@ export function StaffBookingSurfaceTabsBar({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
+      className="mb-6 flex justify-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
     >
       {tabs.map((tab) => (
         <button

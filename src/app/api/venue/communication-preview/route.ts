@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (messageKey === 'appointment_waitlist_offer') {
-      const bookingPageUrl = venueData.booking_page_url ?? 'https://www.reserveni.com/book/preview';
+      const bookingPageUrl = venueData.booking_page_url ?? 'https://www.resneo.com/book/preview';
       if (channel === 'email') {
         const email = renderAppointmentWaitlistOfferEmail({
           venueName: venueData.name,
@@ -134,9 +134,9 @@ export async function POST(request: NextRequest) {
             venue: venueData,
             emailCustomMessage,
             smsCustomMessage,
-            paymentLink: 'https://www.reserveni.com/pay?t=preview',
-            confirmLink: 'https://www.reserveni.com/confirm/preview',
-            cancelLink: 'https://www.reserveni.com/cancel/preview',
+            paymentLink: 'https://www.resneo.com/pay?t=preview',
+            confirmLink: 'https://www.resneo.com/confirm/preview',
+            cancelLink: 'https://www.resneo.com/cancel/preview',
             refundMessage: '£20 deposit refunded',
             rebookLink: venueData.booking_page_url ?? null,
             paymentDeadline: '20 March at 17:00',
@@ -160,9 +160,9 @@ export async function POST(request: NextRequest) {
             venue: venueData,
             emailCustomMessage,
             smsCustomMessage,
-            paymentLink: 'https://www.reserveni.com/pay?t=preview',
-            confirmLink: 'https://www.reserveni.com/confirm/preview',
-            cancelLink: 'https://www.reserveni.com/cancel/preview',
+            paymentLink: 'https://www.resneo.com/pay?t=preview',
+            confirmLink: 'https://www.resneo.com/confirm/preview',
+            cancelLink: 'https://www.resneo.com/cancel/preview',
             refundMessage: '£20 deposit refunded.',
             rebookLink: venueData.booking_page_url ?? null,
             paymentDeadline: '20 March at 17:00',

@@ -11,7 +11,7 @@ import { buildSearchDocs } from '@/lib/help/navigation';
 export const metadata: Metadata = {
   title: 'Help',
   description:
-    'ReserveNI help: restaurant and appointment booking, settings, Stripe, communications, reports, and troubleshooting.',
+    'Resneo help: restaurant and appointment booking, settings, Stripe, communications, reports, and troubleshooting.',
 };
 
 /** Session-aware: personalised nav/search when signed in with a venue. */

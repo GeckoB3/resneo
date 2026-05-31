@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 
-const SYSTEM = `You are matching external booking export strings to ReserveNI catalogue entities.
+const SYSTEM = `You are matching external booking export strings to Resneo catalogue entities.
 Return ONLY valid JSON, no markdown.`;
 
 export type AiRefSuggestion = {

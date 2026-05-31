@@ -2,8 +2,8 @@
 
 **Version:** 1.0 (consolidated)
 **Date:** 21 May 2026
-**Supersedes:** `ReserveNI-Appointments-Functionality-Review-And-Plan-May-2026.md` (v1.0) and
-`ReserveNI-Appointments-Functionality-Review-And-Plan-May2026.md` (v3.0) — both removed.
+**Supersedes:** `Resneo-Appointments-Functionality-Review-And-Plan-May-2026.md` (v1.0) and
+`Resneo-Appointments-Functionality-Review-And-Plan-May2026.md` (v3.0) — both removed.
 **Scope:** Appointment-style businesses using **appointments**, **classes**, **ticketed events**, and
 **bookable resources**, plus shared capabilities (CRM, payments, comms, online booking, staff tools).
 Restaurant-only surfaces (floor plan, table grid, dining waitlist, covers mode) are out of scope
@@ -601,7 +601,7 @@ Impact ↑
 |----------|-----------|
 | `Docs/PRD.md` | MVP scope, roadmap, architecture rules |
 | `Docs/UI_EXCELLENCE_REVIEW_AND_PLAN.md` | UX/design system — parallel track |
-| `Docs/ReserveNI_Unified_Booking_Functionality.md` | Multi-model parity, refund rules, staff booking |
+| `Docs/Resneo_Unified_Booking_Functionality.md` | Multi-model parity, refund rules, staff booking |
 | `Docs/CLASS_COMMERCE_PRODUCT_RULES.md` | Class packages — template for appointment packages |
 | `Docs/reserveni-linked-accounts-spec.md` | Linked venue feature spec |
 | `Docs/Appointments_Light_Plan_Information.md` | Light tier GTM |

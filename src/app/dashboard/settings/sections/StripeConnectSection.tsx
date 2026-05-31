@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
+import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { readResponseJson } from '@/lib/http/read-response-json';
 
 interface StripeConnectSectionProps {
@@ -182,7 +182,7 @@ export function StripeConnectSection({
         <div>
           {!hideSectionTitle ? (
             <p className="mb-4 text-sm text-neutral-600">
-              Connect your Stripe account. {RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD} The setup is a two-step process:
+              Connect your Stripe account. {RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} The setup is a two-step process:
             </p>
           ) : (
             <p className="mb-4 text-sm text-neutral-600">Two steps with Stripe: business and bank details, then identity verification.</p>

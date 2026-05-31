@@ -8,7 +8,7 @@ export function renderPostVisitEmail(
 ): RenderedEmail {
   const bookAgainUrl =
     venue.booking_page_url ??
-    `${process.env.NEXT_PUBLIC_BASE_URL || "https://www.reserveni.com"}/book/${venue.name.toLowerCase().replace(/\s+/g, "-")}`;
+    `${process.env.NEXT_PUBLIC_BASE_URL || "https://www.resneo.com"}/book/${venue.name.toLowerCase().replace(/\s+/g, "-")}`;
 
   const mainContent =
     `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +

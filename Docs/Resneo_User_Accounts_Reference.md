@@ -1,9 +1,9 @@
-# ReserveNI — User Accounts: Implementation Reference
+# Resneo — User Accounts: Implementation Reference
 
 **Status:** Living reference — aligned with current MVP implementation where noted
 **Owner:** Andrew
 **Last updated:** 29 April 2026
-**Purpose:** This is the canonical reference document for how user accounts work in ReserveNI. It is intended for use in Cursor as a long-running context document. When implementing any feature that touches users, customers, authentication, or booking identity, this document is the source of truth.
+**Purpose:** This is the canonical reference document for how user accounts work in Resneo. It is intended for use in Cursor as a long-running context document. When implementing any feature that touches users, customers, authentication, or booking identity, this document is the source of truth.
 
 ---
 
@@ -30,13 +30,13 @@ Online account-linked bookings require an email address. Legacy imports, walk-in
 Customers never see a "create an account" form. They see a booking form. The account is a silent consequence of booking. The first time they actively log in (via magic link from a booking confirmation email), the account becomes "claimed" — email verified, fully usable.
 
 **1.3 Customer identity is unified across the platform; customer relationships are scoped to each venue.**
-There is one ReserveNI user per real person, identified by email. That user has separate `guests` records at each venue they've booked with. In earlier planning these were called `customer_records`; in the current codebase the existing `guests` table is the venue-scoped customer record and should be evolved rather than duplicated. A user's notes at their hairdresser are never visible to their yoga studio. But their identity, login, saved cards, and unified booking history are platform-wide.
+There is one Resneo user per real person, identified by email. That user has separate `guests` records at each venue they've booked with. In earlier planning these were called `customer_records`; in the current codebase the existing `guests` table is the venue-scoped customer record and should be evolved rather than duplicated. A user's notes at their hairdresser are never visible to their yoga studio. But their identity, login, saved cards, and unified booking history are platform-wide.
 
 **1.4 Authentication uses Supabase JWTs as the auth primitive.**
 The same underlying authentication mechanism must work on the web today and on iOS/Android tomorrow. Supabase-issued JWT access tokens are the primitive. On the web, the current Next.js/Supabase SSR integration may store and refresh the session via secure httpOnly cookies; on mobile, tokens will live in platform secure storage. API routes that need explicit mobile compatibility should accept `Authorization: Bearer <access_token>` as well as the existing web session cookie.
 
 **1.5 The consumer-facing nudge is the booking confirmation email, not in-app prompts.**
-Every booking confirmation email contains a "Manage all your bookings on ReserveNI" magic link. This is the *only* nudge to claim the account. No in-app banners, no progressive prompts, no "hey, want to set a password?" modals. The user discovers the benefit of having an account through repeated use; the email is what makes that path frictionless.
+Every booking confirmation email contains a "Manage all your bookings on Resneo" magic link. This is the *only* nudge to claim the account. No in-app banners, no progressive prompts, no "hey, want to set a password?" modals. The user discovers the benefit of having an account through repeated use; the email is what makes that path frictionless.
 
 **1.6 Login is via email magic link only.**
 No SMS-based login. No social logins for now (may add later). No password is required to use the account, ever — but users may optionally set one for faster future logins.
@@ -157,7 +157,7 @@ public.staff
 
 **Important migration note:** The current production schema already has `public.guests`, `bookings.guest_id`, communications linked to `guest_id`, imports linked to `guest_id`, and dashboard/customer-profile features built around `guests`. Implement this plan by adding the missing account fields to `guests` and refactoring the existing matching service. Do **not** introduce a parallel `customer_records` table unless the whole booking/reporting/import/dashboard surface is deliberately migrated.
 
-**Staff role migration note:** The current production schema already has `public.staff` and dashboard auth helpers that resolve venue access from staff email. Implement staff/customer overlap by adding `staff.user_id`, soft-revocation fields, and optional permission metadata to `staff`. Do **not** introduce a separate `business_roles` table unless the dashboard auth surface is deliberately migrated to a new role table. If a future abstraction is needed, name it `venue_roles`, not `business_roles`, to match ReserveNI's schema language.
+**Staff role migration note:** The current production schema already has `public.staff` and dashboard auth helpers that resolve venue access from staff email. Implement staff/customer overlap by adding `staff.user_id`, soft-revocation fields, and optional permission metadata to `staff`. Do **not** introduce a separate `business_roles` table unless the dashboard auth surface is deliberately migrated to a new role table. If a future abstraction is needed, name it `venue_roles`, not `business_roles`, to match Resneo's schema language.
 
 ### 2.2 Key design decisions
 
@@ -309,7 +309,7 @@ The admin enters name, email, phone in the venue dashboard. Same algorithm runs 
 
 ### 4.1 The "first booking" flow (no login required)
 
-This is the most common entry point. The user has never used ReserveNI before.
+This is the most common entry point. The user has never used Resneo before.
 
 1. Customer visits a venue's booking page (e.g. yoga studio's class schedule).
 2. Selects a class, clicks "Book".
@@ -394,7 +394,7 @@ Every confirmation email must contain:
 
 1. **Booking details** — what, when, where, how much.
 2. **The "Manage this booking" link** — tokenised, scoped to this one booking, no login required. Used for cancel/reschedule/view.
-3. **The "Manage all your bookings on ReserveNI" link** — magic link login, grants access to the user's full account across all venues.
+3. **The "Manage all your bookings on Resneo" link** — magic link login, grants access to the user's full account across all venues.
 4. **Venue contact details.**
 5. **Cancellation policy in plain text.**
 
@@ -426,7 +426,7 @@ If the user wants to do anything beyond what the token allows (see other booking
 
 **Stable API alias:** `POST /api/v1/manage-booking/verify` accepts the raw path segment (the part after `/m/`) as `token` and returns `{ booking_id }` for mobile/clients that prefer JSON over redirects — see Section 11.5.
 
-### 5.3 The "Manage all your bookings on ReserveNI" link
+### 5.3 The "Manage all your bookings on Resneo" link
 
 Format:
 
@@ -448,11 +448,11 @@ The "Manage all your bookings" CTA should not be aggressive. It's a soft offer, 
 
 **Good:**
 
-> Want to see all your bookings in one place? [Sign in to ReserveNI →]
+> Want to see all your bookings in one place? [Sign in to Resneo →]
 
 **Avoid:**
 
-> Create your free ReserveNI account now to unlock features!
+> Create your free Resneo account now to unlock features!
 
 The user is already a customer. They already have an account. The phrasing must reflect this.
 
@@ -465,7 +465,7 @@ When a user clicks the tokenised "Manage this booking" link, they land on a page
 1. Verifies the token.
 2. Shows the booking details.
 3. Offers actions allowed by the token (typically: view, cancel, reschedule).
-4. Has a footer link: "See all your bookings? [Sign in to ReserveNI]".
+4. Has a footer link: "See all your bookings? [Sign in to Resneo]".
 
 The sign-in link starts a magic link flow. After login, they're returned to this same booking but now with the full account context (can see other bookings, buy credits, etc.).
 
@@ -517,7 +517,7 @@ When an unauthenticated user attempts one of these, they see a magic link login 
 Each venue has a setting in their dashboard:
 
 > **Require account login for all bookings**
-> When enabled, customers must be logged in to ReserveNI to book any class, appointment, or service. New customers will be prompted to sign in via magic link before booking.
+> When enabled, customers must be logged in to Resneo to book any class, appointment, or service. New customers will be prompted to sign in via magic link before booking.
 
 Default: **off**. Most venues get the lower-friction Section 7.2 flow. Studios with strict customer tracking needs (waiver compliance, no-show enforcement) can opt in.
 
@@ -529,7 +529,7 @@ When enabled, the booking flow becomes:
 
 ### 7.5 Staff and customer role overlap
 
-A single `auth.users` row may simultaneously be a customer and hold staff/admin roles at one or more venues. This is expected. Venue owners, practitioners, and staff will often book with other ReserveNI venues. Do not create separate staff and customer accounts for the same real person.
+A single `auth.users` row may simultaneously be a customer and hold staff/admin roles at one or more venues. This is expected. Venue owners, practitioners, and staff will often book with other Resneo venues. Do not create separate staff and customer accounts for the same real person.
 
 The architecture is:
 
@@ -554,7 +554,7 @@ Both surfaces need a context switcher:
 
 Permissions are enforced at the API layer, not by URL alone. A user may navigate to `/dashboard`, but every dashboard API route must verify an active staff row for the requested venue. If access is missing, return 403 or redirect to `/account` with a clear message.
 
-Privacy rule: staff context at one venue must never be exposed to another venue where the person is only a customer. A dentist viewing a guest must not see that the guest owns a salon elsewhere on ReserveNI.
+Privacy rule: staff context at one venue must never be exposed to another venue where the person is only a customer. A dentist viewing a guest must not see that the guest owns a salon elsewhere on Resneo.
 
 Redirect safety rule: `redirect`, `redirectTo`, and equivalent magic-link destination parameters must be same-origin, path-only, and allowlisted with the existing safe redirect helpers. Never let account or dashboard login links become open redirects.
 
@@ -600,8 +600,8 @@ If ticked, `guests.marketing_consent = true` and `marketing_consent_at = now()` 
 ### 9.2 What this consent grants
 
 - Marketing emails from this specific venue only.
-- Does NOT grant consent to ReserveNI platform marketing.
-- Does NOT grant consent to other venues on ReserveNI.
+- Does NOT grant consent to Resneo platform marketing.
+- Does NOT grant consent to other venues on Resneo.
 
 ### 9.3 What does not require consent (operational)
 
@@ -772,7 +772,7 @@ Operational emails (booking confirmations, reminders) are sent regardless of con
 
 **Magic link login:** Email-based passwordless authentication. Supabase Auth handles delivery.
 
-**Booking model:** One of the five booking types ReserveNI supports — Restaurants (A), Appointments (B), Events (C), Classes (D), Facilities (E).
+**Booking model:** One of the five booking types Resneo supports — Restaurants (A), Appointments (B), Events (C), Classes (D), Facilities (E).
 
 ---
 

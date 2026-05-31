@@ -25,7 +25,7 @@ export const SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE =
 
 export const SIGNUP_TRIAL_FOOTER_NOTICE = `${SIGNUP_TRIAL_SHORT_LABEL} on all paid plans for new customers. ${SIGNUP_TRIAL_CARD_NOTICE} ${signupTrialSmsDuringTrialNotice()} ${SIGNUP_TRIAL_NO_REPEAT_NOTICE}`;
 
-/** Homepage pricing section — trial, SMS, fees, and cancellation in one concise block. */
+/** Homepage pricing section - trial, SMS, fees, and cancellation in one concise block. */
 export function publicPricingFooterDisclaimer(): string {
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
   return (
@@ -33,6 +33,6 @@ export function publicPricingFooterDisclaimer(): string {
     `Included SMS applies during the trial; extra messages ${overagePence}p each. ` +
     `Not for upgrades or resubscribes. No per-booking fees or commission. ` +
     `Standard payment provider fees may apply. ` +
-    `Cancel with 30 days\u2019 notice\u2014subscription stays active until the notice period ends.`
+    `Cancel with 30 days\u2019 notice. Your subscription stays active until the notice period ends.`
   );
 }

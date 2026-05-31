@@ -2,14 +2,14 @@ import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import HomeFaq from "@/components/home/HomeFaq";
 import { PricingSection } from "@/components/home/PricingSection";
-import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
+import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 
-/** Feature blurbs aligned with ReserveNI Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
+/** Feature blurbs aligned with Resneo Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
 const features = [
   {
     title: "Deposit Collection",
-    description: `Per-head deposits via Stripe Connect. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}`,
+    description: `Per-head deposits via Stripe Connect. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}`,
     icon: CreditCardIcon,
   },
   {
@@ -21,7 +21,7 @@ const features = [
   {
     title: "Real-time Dashboard",
     description:
-      "Bookings, calendars, guest records, and reporting. Restaurants also get visual timeline and live floor plan for seating.",
+      "Bookings, calendars, client records, and reporting, all in one place and updated live as bookings come in.",
     icon: DashboardIcon,
   },
   {
@@ -31,21 +31,21 @@ const features = [
   },
   {
     title: "Any Bookable Business",
-    description: "Restaurants, barbers, beauty salons, yoga studios, tennis courts, escape rooms. If it's bookable, ReserveNI handles it.",
+    description: "Barbers, beauty salons, yoga studios, clinics, courts, escape rooms, and restaurants. If it's bookable, Resneo handles it.",
     icon: GridIcon,
   },
   {
-    title: "Built for Northern Ireland",
-    description: `Local support and tailored to the NI business community. No commissions, no hidden fees. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
+    title: "Honest, human support",
+    description: `Real people who know the product, plus no commissions and no hidden fees. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
     icon: MapPinIcon,
   },
 ];
 
 
 const businessTypes = [
-  "Restaurants", "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
+  "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
   "Yoga Studios", "Gyms", "Tennis Courts", "Escape Rooms", "Dog Groomers",
-  "Photography Studios", "Meeting Rooms", "Golf Tee Times", "Driving Instructors",
+  "Photography Studios", "Meeting Rooms", "Golf Tee Times", "Driving Instructors", "Restaurants",
 ];
 
 const steps = [
@@ -66,7 +66,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex-shrink-0">
-            <img src="/Logo.png" alt="ReserveNI" className="h-9 w-auto" />
+            <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
           </Link>
           <div className="flex items-center gap-4">
             <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
@@ -79,16 +79,16 @@ export default function Home() {
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-brand-50/40" />
-        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(78,107,120,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(78,107,120,0.08) 0%, transparent 50%)' }} />
+        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(0,59,111,0.10) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(0,59,111,0.08) 0%, transparent 50%)' }} />
         <div className="relative mx-auto max-w-4xl px-6 py-20 text-center sm:py-28 lg:py-32">
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Reserve<span className="text-brand-600">NI</span>
+          <h1 className="text-4xl font-extrabold tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
+            Resneo
           </h1>
           <p className="mt-4 text-lg font-medium text-brand-700 sm:text-xl">
-            Booking management for every business in Northern Ireland
+            Spend less time managing bookings, and more time growing your business
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-500 sm:text-lg">
-            Restaurants, salons, studios, courts, and more: manage bookings, reduce no-shows, and automate client communications from one platform.
+            Salons, studios, clinics, courts, and more: manage bookings, reduce no-shows, and automate client communications from one platform.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link href="#pricing" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
@@ -116,7 +116,7 @@ export default function Home() {
             Everything you need to manage bookings
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-slate-500">
-            Purpose-built for Northern Ireland. No enterprise bloat, no commission on bookings.{' '}
+            Purpose-built for busy business owners. No enterprise bloat, no commission on bookings.{' '}
             {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}
           </p>
           <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -152,32 +152,32 @@ export default function Home() {
 
       <PricingSection />
 
-      {/* About teaser — sits just above the FAQ */}
+      {/* About teaser - sits just above the FAQ */}
       <section className="border-t border-slate-100 bg-white py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">
-          <div className="relative overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-emerald-50 p-8 shadow-sm sm:p-12">
+          <div className="relative overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-brand-50 p-8 shadow-sm sm:p-12">
             <div
               className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-200/40 blur-3xl"
               aria-hidden
             />
             <div
-              className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-emerald-100/40 blur-3xl"
+              className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-brand-100/40 blur-3xl"
               aria-hidden
             />
             <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="max-w-xl">
                 <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                  Built locally, for Northern Ireland businesses
+                  Three founders on a mission to help your business thrive
                 </h2>
                 <p className="mt-3 text-sm leading-relaxed text-slate-600 sm:text-base">
-                  Meet the team, see why we built ReserveNI, and learn what we stand for.
+                  Meet the team, see why we built Resneo, and learn what we stand for.
                 </p>
               </div>
               <Link
                 href="/about"
                 className="inline-flex h-12 flex-shrink-0 items-center rounded-xl bg-brand-600 px-7 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:text-base"
               >
-                About ReserveNI
+                About Resneo
                 <svg
                   className="ml-2 h-4 w-4"
                   fill="none"
@@ -222,19 +222,19 @@ export default function Home() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 ReserveNI · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+            &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/about" className="transition-colors hover:text-slate-900">
               About
             </Link>
-            <Link href="/signup" className="transition-colors hover:text-slate-900">
+            <Link href="#pricing" className="transition-colors hover:text-slate-900">
               Sign up
             </Link>
             <Link href="/login" className="transition-colors hover:text-slate-900">
               Login
             </Link>
-            <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">
+            <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
               Contact
             </a>
             <Link href="/terms" className="transition-colors hover:text-slate-900">

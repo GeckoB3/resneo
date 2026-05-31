@@ -53,8 +53,8 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
     <div className="space-y-6">
       {/* Success animation */}
       <div className="flex flex-col items-center py-4">
-        <div className={`flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 transition-all duration-500 ${showCheck ? 'scale-100 opacity-100' : 'scale-50 opacity-0'}`}>
-          <svg className={`h-8 w-8 text-emerald-600 transition-all duration-500 delay-200 ${showCheck ? 'scale-100 opacity-100' : 'scale-0 opacity-0'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+        <div className={`flex h-16 w-16 items-center justify-center rounded-full bg-brand-100 transition-all duration-500 ${showCheck ? 'scale-100 opacity-100' : 'scale-50 opacity-0'}`}>
+          <svg className={`h-8 w-8 text-brand-600 transition-all duration-500 delay-200 ${showCheck ? 'scale-100 opacity-100' : 'scale-0 opacity-0'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
           </svg>
         </div>

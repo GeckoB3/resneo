@@ -24,8 +24,18 @@ Defined in `src/app/globals.css`.
 
 ### Brand & surfaces
 
-- `--brand` / `--color-brand-600`: primary actions (`#4E6B78`)
+- `--brand` / `--color-brand-600`: ResNeo Night — primary actions, links, headings (`#003B6F`)
+- `--accent` / `--color-accent-500`: Neo Teal — accent labels, highlights, the wordmark (`#00C2C7`)
+- `--surface-secondary` / `--surface-sunken`: Slate Gray app surfaces (`#F4F6F9`)
 - `--surface-raised`, `--ds-shadow-card`, `--ds-radius-card`: dashboard cards
+
+### Typography
+
+- **Primary font:** Inter (loaded in `src/app/layout.tsx`, exposed as `--font-geist-sans` / Tailwind `font-sans`).
+- **Body copy:** 16px baseline, regular (400) weight, dark slate (`--foreground`).
+- **H1 / H2:** extra-bold (800) in ResNeo Night.
+- **H3:** medium (500) in ResNeo Night (Neo Teal reserved for accent labels).
+- Heading colour/weight is enforced via unlayered rules in `globals.css`; white/gradient headings on dark sections are preserved with `text-white` / `text-transparent`.
 
 ### Z-index
 
@@ -130,5 +140,5 @@ Stories live in `src/components/ui/primitives/*.stories.tsx`.
 ## Related documents
 
 - [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./UI_EXCELLENCE_REVIEW_AND_PLAN.md)
-- [ReserveNI-Appointments-Review-And-Roadmap.md](./ReserveNI-Appointments-Review-And-Roadmap.md) — P0.1, P0.2
+- [Resneo-Appointments-Review-And-Roadmap.md](./Resneo-Appointments-Review-And-Roadmap.md) — P0.1, P0.2
 - `.cursor/rules/frontend.mdc` — mobile, accessibility, loading states

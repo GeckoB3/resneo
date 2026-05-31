@@ -1,4 +1,4 @@
-/** ReserveNI import: target field definitions (aligned with Docs design). */
+/** Resneo import: target field definitions (aligned with Docs design). */
 
 export type FieldType =
   | 'text'
@@ -212,7 +212,7 @@ export const PLATFORM_SIGNATURES: Record<
   },
 };
 
-/** Direct column → ReserveNI field templates when a platform is detected. */
+/** Direct column → Resneo field templates when a platform is detected. */
 export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
   fresha_clients: {
     'Client First Name': 'first_name',

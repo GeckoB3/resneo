@@ -249,7 +249,7 @@ export default function SignupPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Create your account</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Get started with ReserveNI in minutes.
+          Get started with Resneo in minutes.
         </p>
       </div>
       {referralValid && (

@@ -3,9 +3,9 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Data Processing Agreement - ReserveNI',
+  title: 'Data Processing Agreement - Resneo',
   description:
-    'Data Processing Agreement governing how JAR 26 LTD trading as ReserveNI processes personal data on behalf of business customers under UK GDPR.',
+    'Data Processing Agreement governing how JAR 26 LTD trading as Resneo processes personal data on behalf of business customers under UK GDPR.',
 };
 
 const LAST_UPDATED = '03 May 2026';
@@ -16,7 +16,7 @@ export default function DataProcessingPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
           <Link href="/">
-            <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="h-8 w-auto" />
+            <Image src="/Logo.png" alt="Resneo" width={120} height={36} className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -30,8 +30,8 @@ export default function DataProcessingPage() {
             <Link href="/terms/customer" className="text-brand-600 hover:underline">
               Customer Terms
             </Link>{' '}
-            and governs the processing of personal data by JAR 26 LTD trading as ReserveNI on behalf of business
-            customers. It is entered into by ReserveNI and the Customer automatically on acceptance of the Customer
+            and governs the processing of personal data by JAR 26 LTD trading as Resneo on behalf of business
+            customers. It is entered into by Resneo and the Customer automatically on acceptance of the Customer
             Terms.
           </p>
 
@@ -48,7 +48,7 @@ export default function DataProcessingPage() {
                   and means of processing personal data relating to your guests, clients, and staff.
                 </li>
                 <li className="mt-2">
-                  <strong>&ldquo;Processor&rdquo;</strong> means JAR 26 LTD trading as ReserveNI, who processes
+                  <strong>&ldquo;Processor&rdquo;</strong> means JAR 26 LTD trading as Resneo, who processes
                   personal data on behalf of the Controller.
                 </li>
                 <li className="mt-2">
@@ -66,8 +66,8 @@ export default function DataProcessingPage() {
                   includes storing, organising, retrieving, using, disclosing, and deleting personal data.
                 </li>
                 <li className="mt-2">
-                  <strong>&ldquo;Sub-processor&rdquo;</strong> means any third-party processor engaged by ReserveNI
-                  to process Personal Data in connection with the ReserveNI platform.
+                  <strong>&ldquo;Sub-processor&rdquo;</strong> means any third-party processor engaged by Resneo
+                  to process Personal Data in connection with the Resneo platform.
                 </li>
                 <li className="mt-2">
                   <strong>&ldquo;Data Subject&rdquo;</strong> means an identified or identifiable individual whose
@@ -81,7 +81,7 @@ export default function DataProcessingPage() {
                 2. Roles: controller and processor
               </h2>
               <p>
-                The parties acknowledge that, in relation to personal data processed through the ReserveNI platform
+                The parties acknowledge that, in relation to personal data processed through the Resneo platform
                 on the Customer&rsquo;s behalf:
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -90,7 +90,7 @@ export default function DataProcessingPage() {
                   collecting and using personal data about your guests, clients, and staff through the platform;
                 </li>
                 <li>
-                  <strong>ReserveNI is the data processor</strong> — we process that personal data only on your
+                  <strong>Resneo is the data processor</strong> — we process that personal data only on your
                   behalf, in accordance with your instructions and this DPA.
                 </li>
               </ul>
@@ -104,7 +104,7 @@ export default function DataProcessingPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">
                 3. Subject matter, nature, and purpose of processing
               </h2>
-              <p>ReserveNI processes Personal Data as part of providing the ReserveNI platform to you. The nature
+              <p>Resneo processes Personal Data as part of providing the Resneo platform to you. The nature
               and purpose of processing is:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>storing, managing, and retrieving booking and reservation records;</li>
@@ -141,7 +141,7 @@ export default function DataProcessingPage() {
                 </li>
               </ul>
               <p className="mt-3">
-                ReserveNI does not intentionally process special category personal data (such as health data,
+                Resneo does not intentionally process special category personal data (such as health data,
                 biometric data, or criminal offence data). You must not upload special category data to the
                 platform unless you have a lawful basis to do so and have first discussed this with us.
               </p>
@@ -150,7 +150,7 @@ export default function DataProcessingPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">5. Duration of processing</h2>
               <p>
-                ReserveNI will process Personal Data for the duration of your subscription, and for up to 30 days
+                Resneo will process Personal Data for the duration of your subscription, and for up to 30 days
                 after termination to allow for data export. After this period, we will delete or anonymise Personal
                 Data within a reasonable timeframe in accordance with our data retention practices, unless we are
                 required to retain it longer by law.
@@ -159,9 +159,9 @@ export default function DataProcessingPage() {
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">
-                6. ReserveNI&rsquo;s obligations as processor
+                6. Resneo&rsquo;s obligations as processor
               </h2>
-              <p>ReserveNI will:</p>
+              <p>Resneo will:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
                   process Personal Data only on your documented instructions, including as set out in this DPA,
@@ -227,8 +227,8 @@ export default function DataProcessingPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">8. Sub-processors</h2>
               <p>
-                You provide general authorisation for ReserveNI to engage sub-processors to help deliver the
-                platform. ReserveNI will ensure that sub-processors are bound by data protection obligations
+                You provide general authorisation for Resneo to engage sub-processors to help deliver the
+                platform. Resneo will ensure that sub-processors are bound by data protection obligations
                 equivalent to those in this DPA.
               </p>
               <p className="mt-3">
@@ -291,7 +291,7 @@ export default function DataProcessingPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">9. Security measures</h2>
               <p>
-                ReserveNI implements and maintains appropriate technical and organisational measures to protect
+                Resneo implements and maintains appropriate technical and organisational measures to protect
                 Personal Data. These include:
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -318,7 +318,7 @@ export default function DataProcessingPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">10. Personal data breaches</h2>
               <p>
-                If ReserveNI becomes aware of a personal data breach affecting Personal Data processed on your
+                If Resneo becomes aware of a personal data breach affecting Personal Data processed on your
                 behalf, we will notify you without undue delay and, where feasible, within 72 hours of becoming
                 aware. Notification will include:
               </p>
@@ -360,8 +360,8 @@ export default function DataProcessingPage() {
               </h2>
               <p>
                 You may, with reasonable prior written notice (at least 30 days) and no more than once per year,
-                request information from ReserveNI to verify compliance with this DPA. ReserveNI will provide
-                relevant documentation and answer reasonable written questions. Physical audits of ReserveNI
+                request information from Resneo to verify compliance with this DPA. Resneo will provide
+                relevant documentation and answer reasonable written questions. Physical audits of Resneo
                 infrastructure are conducted through our sub-processors&rsquo; existing audit and certification
                 programmes (such as SOC 2 reports from Supabase or Vercel), which we will make available on
                 request in lieu of a separate on-site audit.
@@ -383,8 +383,8 @@ export default function DataProcessingPage() {
               <p>
                 For data protection queries, data subject rights requests relating to our processing, or to raise
                 a concern about data protection practices, please contact us at:{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:hello@resneo.com" className="text-brand-600 hover:underline">
+                  hello@resneo.com
                 </a>
                 .
               </p>
@@ -421,7 +421,7 @@ export default function DataProcessingPage() {
           </Link>
           {' · '}
           <Link href="/" className="hover:text-brand-600">
-            Back to ReserveNI
+            Back to Resneo
           </Link>
         </div>
       </main>

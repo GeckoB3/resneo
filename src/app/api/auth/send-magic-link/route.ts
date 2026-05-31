@@ -17,7 +17,7 @@ const schema = z.object({
 /**
  * POST /api/auth/send-magic-link — public endpoint.
  *
- * Sends a branded sign-in email from bookings@reserveni.com (via SendGrid) instead of
+ * Sends a branded sign-in email from bookings@resneo.com (via SendGrid) instead of
  * Supabase's default noreply@mail.app.supabase.io. Uses `generateLink` + `/auth/confirm`
  * (server-side OTP verification) — the same flow as staff invites.
  *
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       `&next=${encodeURIComponent(nextPath)}`;
 
     const text = [
-      'Here is your sign-in link for ReserveNI.',
+      'Here is your sign-in link for Resneo.',
       '',
       'Open this link to sign in:',
       confirmUrl,
@@ -84,15 +84,15 @@ export async function POST(request: NextRequest) {
     ].join('\n');
 
     const html = `
-      <p>Here is your sign-in link for <strong>ReserveNI</strong>.</p>
-      <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to ReserveNI</a></p>
+      <p>Here is your sign-in link for <strong>Resneo</strong>.</p>
+      <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to Resneo</a></p>
       <p style="font-size:12px;color:#64748b;">This link expires in 1 hour. If you did not request this, you can ignore it.</p>
     `;
 
     try {
       await sendEmail({
         to: normalisedEmail,
-        subject: 'Sign in to ReserveNI',
+        subject: 'Sign in to Resneo',
         html,
         text,
         disableTracking: true,

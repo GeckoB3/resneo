@@ -1,10 +1,10 @@
 /**
  * Dev: four accounts — paid Stripe test subscriptions, onboarding not started (step 0, incomplete).
  *
- *   light1@reserveni.com   — Appointments Light
- *   plus1@reserveni.com    — Appointments Plus
- *   pro1@reserveni.com     — Appointments Pro (pricing_tier `appointments`)
- *   restaurant1@reserveni.com — Restaurant
+ *   light1@resneo.com   — Appointments Light
+ *   plus1@resneo.com    — Appointments Plus
+ *   pro1@resneo.com     — Appointments Pro (pricing_tier `appointments`)
+ *   restaurant1@resneo.com — Restaurant
  *
  * Password for each: Password123
  *
@@ -38,7 +38,7 @@ const PASSWORD = 'Password123';
 /** @type {const} */
 const ACCOUNTS = [
   {
-    email: 'light1@reserveni.com',
+    email: 'light1@resneo.com',
     pricingTier: 'light',
     venueName: 'Light1 (dev staging)',
     slugPrefix: 'light1-dev-staging',
@@ -51,7 +51,7 @@ const ACCOUNTS = [
     appointmentsUnifiedFlow: true,
   },
   {
-    email: 'plus1@reserveni.com',
+    email: 'plus1@resneo.com',
     pricingTier: 'plus',
     venueName: 'Plus1 (dev staging)',
     slugPrefix: 'plus1-dev-staging',
@@ -64,7 +64,7 @@ const ACCOUNTS = [
     appointmentsUnifiedFlow: true,
   },
   {
-    email: 'pro1@reserveni.com',
+    email: 'pro1@resneo.com',
     pricingTier: 'appointments',
     venueName: 'Pro1 (dev staging)',
     slugPrefix: 'pro1-dev-staging',
@@ -77,7 +77,7 @@ const ACCOUNTS = [
     appointmentsUnifiedFlow: true,
   },
   {
-    email: 'restaurant1@reserveni.com',
+    email: 'restaurant1@resneo.com',
     pricingTier: 'restaurant',
     venueName: 'Restaurant1 (dev staging)',
     slugPrefix: 'restaurant1-dev-staging',

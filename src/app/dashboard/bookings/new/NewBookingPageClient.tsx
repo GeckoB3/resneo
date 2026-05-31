@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { onNavReselect } from '@/lib/ui/nav-reselect';
 import { ToastProvider } from '@/components/ui/Toast';
 import {
   StaffSurfaceBookingStack,
@@ -60,7 +61,12 @@ export function NewBookingPageClient({
   /** When `?tab=` is absent, remember last choice so we do not fight controlled URL sync. */
   const [persistedTab, setPersistedTab] = useState<StaffBookingSurfaceTabId | null>(null);
 
-  const staffRebookFromSession = useMemo(() => hydrateStaffRebookBootstrapOnce(), []);
+  /** Bumped to force a fresh mount of the booking stack (full form reset). */
+  const [resetKey, setResetKey] = useState(0);
+
+  const [staffRebookFromSession, setStaffRebookFromSession] = useState(() =>
+    hydrateStaffRebookBootstrapOnce(),
+  );
 
   useLayoutEffect(() => {
     routerRef.current = router;
@@ -108,6 +114,28 @@ export function NewBookingPageClient({
     void router.push('/dashboard/bookings');
   }, [router]);
 
+  /**
+   * Reset the form to the start when "New Booking" is re-selected in the sidebar
+   * while already on this page. Clears any rebook pre-fill, the remembered tab, the
+   * `?tab=` query, and remounts the booking stack so every step starts blank.
+   */
+  const resetToStart = useCallback(() => {
+    discardStaffRebookBootstrapCaches();
+    setStaffRebookFromSession(null);
+    setPersistedTab(null);
+    setResetKey((key) => key + 1);
+    routerRef.current.replace('/dashboard/bookings/new', { scroll: false });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
+  }, []);
+
+  useEffect(
+    () =>
+      onNavReselect((href) => {
+        if (href === '/dashboard/bookings/new') resetToStart();
+      }),
+    [resetToStart],
+  );
+
   const handleTabChange = useCallback(
     (id: StaffBookingSurfaceTabId) => {
       if (id === activeTab) return;
@@ -127,6 +155,7 @@ export function NewBookingPageClient({
         <div className={`mx-auto ${outerMaxClass}`}>
           <h1 className="mb-6 text-2xl font-semibold text-slate-900">New Booking</h1>
           <StaffSurfaceBookingStack
+            key={resetKey}
             bookingModel={bookingModel}
             enabledModels={enabledModels}
             venueId={venueId}

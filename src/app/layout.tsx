@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Sora, Geist_Mono } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const sora = Sora({
+const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 const geistMono = Geist_Mono({
@@ -14,9 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ReserveNI - Booking Management for Every Business in Northern Ireland",
+  metadataBase: new URL("https://www.resneo.com"),
+  title: "Resneo - Booking Management Software for Every Business",
   description:
-    "Manage bookings, reduce no-shows, collect deposits, and automate client communications. Built for restaurants, salons, studios, and every bookable business in Northern Ireland.",
+    "Manage bookings, reduce no-shows, collect deposits, and automate client communications. Booking software for salons, studios, clinics, and every business that takes bookings.",
 };
 
 export const viewport: Viewport = {
@@ -35,7 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="light" suppressHydrationWarning>
       <body
-        className={`${sora.variable} ${geistMono.variable} font-sans antialiased bg-white text-slate-900`}
+        className={`${inter.variable} ${geistMono.variable} font-sans antialiased bg-white text-slate-900`}
         suppressHydrationWarning
       >
         {children}

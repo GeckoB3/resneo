@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.local') });
 config();
 
-const EMAIL = 'restaurant1@reserveni.com';
+const EMAIL = 'restaurant1@resneo.com';
 const PASSWORD = 'Password123';
 
 const PRICING_TIER = 'restaurant';

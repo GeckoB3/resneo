@@ -1,4 +1,4 @@
--- ReserveNI: Linked Accounts cross-venue RLS test suite
+-- Resneo: Linked Accounts cross-venue RLS test suite
 -- Spec: Docs/reserveni-linked-accounts-spec.md §4.4, §11 (Phase 1, step 2).
 --
 -- Proves the security boundary of the feature:

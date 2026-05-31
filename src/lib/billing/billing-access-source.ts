@@ -1,7 +1,7 @@
 /** Normal venues: Stripe Billing subscription on file. */
 export const BILLING_ACCESS_SOURCE_STRIPE = 'stripe';
 
-/** Comped by platform superuser; no ReserveNI subscription charges. */
+/** Comped by platform superuser; no Resneo subscription charges. */
 export const BILLING_ACCESS_SOURCE_SUPERUSER_FREE = 'superuser_free';
 
 export type BillingAccessSource = typeof BILLING_ACCESS_SOURCE_STRIPE | typeof BILLING_ACCESS_SOURCE_SUPERUSER_FREE;

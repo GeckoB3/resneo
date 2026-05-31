@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
+import { BookPublicBookingFlowSuspense } from '@/components/booking/BookPublicBookingFlowSuspense';
 import type { VenuePublic } from '@/components/booking/types';
 import { EMBED_IFRAME_MIN_REPORTED_HEIGHT_PX } from '@/lib/embed/widget-frame';
 
@@ -86,7 +86,7 @@ export function EmbedBookingClient({
       className="w-full min-w-0 bg-white px-2 pb-3 pt-2 sm:px-3"
       style={accentStyle}
     >
-      <BookPublicBookingFlow
+      <BookPublicBookingFlowSuspense
         venue={venue}
         embed
         onHeightChange={bumpEmbedHeight}
@@ -95,12 +95,12 @@ export function EmbedBookingClient({
       <p className="mt-4 text-center text-[10px] font-medium tracking-wide text-slate-400">
         Powered by{' '}
         <a
-          href="https://www.reserveni.com"
+          href="https://www.resneo.com"
           target="_blank"
           rel="noopener noreferrer"
           className="text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
         >
-          ReserveNI
+          Resneo
         </a>
       </p>
     </main>

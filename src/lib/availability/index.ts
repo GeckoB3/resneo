@@ -1,5 +1,5 @@
 /**
- * ReserveNI availability: service engine (computeAvailability, fetchEngineInput)
+ * Resneo availability: service engine (computeAvailability, fetchEngineInput)
  * plus legacy JSON helpers (getAvailableSlots) retained for tests and tooling.
  */
 

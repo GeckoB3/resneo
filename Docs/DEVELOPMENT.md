@@ -1,6 +1,6 @@
 # Development notes
 
-Important conventions and context for building ReserveNI. Extend this file as needed.
+Important conventions and context for building Resneo. Extend this file as needed.
 
 ## User-facing copy
 

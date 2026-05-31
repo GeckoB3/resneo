@@ -1,4 +1,4 @@
--- ReserveNI: booking import staging — session flags, import_booking_references, import_booking_rows
+-- Resneo: booking import staging — session flags, import_booking_references, import_booking_rows
 
 -- -----------------------------------------------------------------------------
 -- import_sessions: booking file + Step 3b completion

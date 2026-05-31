@@ -2,11 +2,11 @@
 -- Matches app defaults in src/lib/notifications/notification-settings.ts and parity with
 -- restaurant "Appointments & other bookings" when both channels are available in UI.
 --
--- Manual verification for a test account (e.g. test1@reserveni.com):
+-- Manual verification for a test account (e.g. test1@resneo.com):
 --   SELECT v.id, v.pricing_tier, v.notification_settings->'reminder_2_channels' AS r2
 --   FROM venues v
 --   JOIN staff s ON s.venue_id = v.id
---   WHERE lower(s.email) = lower('test1@reserveni.com');
+--   WHERE lower(s.email) = lower('test1@resneo.com');
 
 UPDATE venues
 SET notification_settings = jsonb_set(

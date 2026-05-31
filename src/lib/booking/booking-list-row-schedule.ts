@@ -32,6 +32,51 @@ export function isMultiServiceVisitGroup(
 }
 
 /**
+ * Collapse multi-service visits to a single representative row so one booking shows as one
+ * bar. A multi-service visit is several rows sharing a `group_booking_id` with no per-person
+ * `person_label` (one guest, consecutive services + add-ons). Group bookings — distinct people,
+ * each with a `person_label` — are left untouched so they still render as separate bars, as do
+ * standalone bookings. The earliest-start segment is kept as the representative.
+ */
+export function collapseMultiServiceVisits<
+  T extends {
+    id: string;
+    booking_time: string;
+    group_booking_id?: string | null;
+    person_label?: string | null;
+  },
+>(rows: T[]): T[] {
+  const byGroup = new Map<string, T[]>();
+  for (const row of rows) {
+    const gid = row.group_booking_id?.trim();
+    if (!gid) continue;
+    const list = byGroup.get(gid) ?? [];
+    list.push(row);
+    byGroup.set(gid, list);
+  }
+
+  /** group_booking_id -> the single representative row id kept for multi-service visits. */
+  const representativeId = new Map<string, string>();
+  for (const [gid, group] of byGroup) {
+    if (!isMultiServiceVisitGroup(group)) continue;
+    const earliest = [...group].sort((a, b) => a.booking_time.localeCompare(b.booking_time))[0]!;
+    representativeId.set(gid, earliest.id);
+  }
+
+  if (representativeId.size === 0) return rows;
+
+  return rows.filter((row) => {
+    const gid = row.group_booking_id?.trim();
+    if (!gid) return true;
+    const repId = representativeId.get(gid);
+    // Not a multi-service visit (group booking / single) → keep every row.
+    if (!repId) return true;
+    // Multi-service visit → keep only the representative.
+    return row.id === repId;
+  });
+}
+
+/**
  * Wall-clock span for an entire multi-service visit: first segment start → last segment end.
  */
 export function multiServiceVisitWallClockSchedule(

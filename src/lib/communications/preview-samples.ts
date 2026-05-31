@@ -21,9 +21,9 @@ const BASE_TABLE_BOOKING: BookingEmailData = {
   deposit_amount_pence: 2000,
   deposit_status: 'Paid',
   manage_booking_link:
-    'https://www.reserveni.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
+    'https://www.resneo.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
   confirm_cancel_link:
-    'https://www.reserveni.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
+    'https://www.resneo.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
 };
 
 const APPOINTMENT_BOOKING: BookingEmailData = {
@@ -70,7 +70,7 @@ export function getPreviewVenueSample(name?: string, address?: string): VenueEma
     name: name ?? 'Your venue',
     address: address ?? '123 Main Street, Belfast BT1 1AA',
     phone: '028 9000 0000',
-    booking_page_url: 'https://www.reserveni.com/book/your-venue',
+    booking_page_url: 'https://www.resneo.com/book/your-venue',
   };
 }
 

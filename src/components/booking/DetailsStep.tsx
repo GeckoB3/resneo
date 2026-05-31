@@ -115,7 +115,7 @@ interface DetailsStepProps {
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
   audience?: 'public' | 'staff' | 'staff_walk_in';
   initialDetails?: Partial<GuestDetails>;
-  /** Lock email when booking under a signed-in ReserveNI account. */
+  /** Lock email when booking under a signed-in Resneo account. */
   emailReadOnly?: boolean;
   /** Staff bootstrap from guest-history “Rebook” (session). */
   initialAppointmentComments?: string;
@@ -440,7 +440,7 @@ export function DetailsStep({
                 placeholder="you@example.com"
               />
               {emailReadOnly ? (
-                <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ReserveNI email.</p>
+                <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in Resneo email.</p>
               ) : null}
             </FormField>
 

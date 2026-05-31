@@ -17,6 +17,41 @@ function priceDisplayFromPence(pricePence: number | null | undefined): string | 
   return `£${formatDepositAmount(pricePence)}`;
 }
 
+type AddonSnapshotRow = {
+  addon_name_snapshot: string;
+  addon_group_name_snapshot: string | null;
+  price_pence_at_booking: number;
+  duration_minutes_at_booking: number;
+};
+
+/** One human-readable add-on line, e.g. "Finishing touches: Olaplex treatment (+£10.00, +15 min)". */
+function formatAddonLine(row: AddonSnapshotRow): string {
+  const namePart = row.addon_group_name_snapshot
+    ? `${row.addon_group_name_snapshot}: ${row.addon_name_snapshot}`
+    : row.addon_name_snapshot;
+  const parts: string[] = [];
+  if (row.price_pence_at_booking > 0) parts.push(`+£${formatDepositAmount(row.price_pence_at_booking)}`);
+  if (row.duration_minutes_at_booking > 0) parts.push(`+${row.duration_minutes_at_booking} min`);
+  return parts.length > 0 ? `${namePart} (${parts.join(', ')})` : namePart;
+}
+
+/** Summarise a set of add-on rows into display lines plus price/duration totals. */
+function summariseAddonRows(rows: AddonSnapshotRow[]): {
+  lines: string[];
+  totalPrice: number;
+  totalDuration: number;
+} {
+  const lines: string[] = [];
+  let totalPrice = 0;
+  let totalDuration = 0;
+  for (const row of rows) {
+    lines.push(formatAddonLine(row));
+    totalPrice += row.price_pence_at_booking;
+    totalDuration += row.duration_minutes_at_booking;
+  }
+  return { lines, totalPrice, totalDuration };
+}
+
 type BookingAnchorRow = {
   booking_model: string | null;
   practitioner_id: string | null;
@@ -155,19 +190,40 @@ export async function enrichBookingEmailForAppointment(
       .order('booking_time');
 
     if (siblings && siblings.length > 1) {
+      const siblingIds = siblings.map((s) => s.id as string).filter(Boolean);
       const prIds = [...new Set(siblings.map((s) => s.practitioner_id).filter(Boolean))] as string[];
       const svcIds = [...new Set(siblings.map((s) => s.appointment_service_id).filter(Boolean))] as string[];
       const calIds = [...new Set(siblings.map((s) => s.calendar_id).filter(Boolean))] as string[];
       const itemIds = [...new Set(siblings.map((s) => s.service_item_id).filter(Boolean))] as string[];
       const variantIds = [...new Set(siblings.map((s) => s.service_variant_id).filter(Boolean))] as string[];
 
-      const [{ data: pracs }, { data: svcs }, { data: cals }, { data: items }, { data: variants }] = await Promise.all([
+      const [{ data: pracs }, { data: svcs }, { data: cals }, { data: items }, { data: variants }, { data: addonRows }] = await Promise.all([
         prIds.length ? supabase.from('practitioners').select('id, name').in('id', prIds) : { data: [] },
         svcIds.length ? supabase.from('appointment_services').select('id, name, price_pence').in('id', svcIds) : { data: [] },
         calIds.length ? supabase.from('unified_calendars').select('id, name').in('id', calIds) : { data: [] },
         itemIds.length ? supabase.from('service_items').select('id, name, price_pence').in('id', itemIds) : { data: [] },
         variantIds.length ? supabase.from('service_variants').select('id, name, price_pence').in('id', variantIds) : { data: [] },
+        siblingIds.length
+          ? supabase
+              .from('booking_addons')
+              .select('booking_id, addon_name_snapshot, addon_group_name_snapshot, price_pence_at_booking, duration_minutes_at_booking')
+              .in('booking_id', siblingIds)
+              .order('created_at', { ascending: true })
+          : { data: [] },
       ]);
+
+      // Group each person's add-on snapshots by their booking row.
+      const addonsByBooking = new Map<string, AddonSnapshotRow[]>();
+      for (const a of (addonRows ?? []) as Array<AddonSnapshotRow & { booking_id: string }>) {
+        const list = addonsByBooking.get(a.booking_id) ?? [];
+        list.push({
+          addon_name_snapshot: a.addon_name_snapshot,
+          addon_group_name_snapshot: a.addon_group_name_snapshot,
+          price_pence_at_booking: a.price_pence_at_booking,
+          duration_minutes_at_booking: a.duration_minutes_at_booking,
+        });
+        addonsByBooking.set(a.booking_id, list);
+      }
 
       const prMap = new Map((pracs ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
       const calMap = new Map((cals ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
@@ -202,9 +258,15 @@ export async function enrichBookingEmailForAppointment(
         const vid = s.service_variant_id as string | null;
         const variant = vid ? variantMap.get(vid) ?? null : null;
 
+        // Per-person add-ons (service + variant + add-ons make this person's subtotal).
+        const addonSummary = summariseAddonRows(addonsByBooking.get(s.id as string) ?? []);
+        const addonLines = addonSummary.lines.length > 0 ? addonSummary.lines : undefined;
+        const addonPence = addonSummary.totalPrice;
+
         let practitionerNameLine = 'Staff';
         let serviceNameLine = 'Treatment';
         let priceDisplay: string | null = null;
+        let servicePence: number | null = null;
 
         if (pid && sid) {
           practitionerNameLine = prMap.get(pid) ?? 'Staff';
@@ -212,20 +274,24 @@ export async function enrichBookingEmailForAppointment(
           const merged = applyVariantOverrides(sv?.name ?? null, sv?.price_pence ?? null, variant);
           serviceNameLine = merged.name ?? 'Treatment';
           priceDisplay = priceDisplayFromPence(merged.price);
-          if (merged.price != null) {
-            sumPence += merged.price;
-            anyPrice = true;
-          }
+          servicePence = merged.price;
         } else if (cid && iid) {
           practitionerNameLine = calMap.get(cid) ?? 'Staff';
           const it = itemMap.get(iid);
           const merged = applyVariantOverrides(it?.name ?? null, it?.price_pence ?? null, variant);
           serviceNameLine = merged.name ?? 'Treatment';
           priceDisplay = priceDisplayFromPence(merged.price);
-          if (merged.price != null) {
-            sumPence += merged.price;
-            anyPrice = true;
-          }
+          servicePence = merged.price;
+        }
+
+        // Person subtotal = service + variant + their add-ons. Shown only when add-ons
+        // make it differ from the service line price.
+        let subtotalDisplay: string | null = null;
+        if (servicePence != null) {
+          const personSubtotal = servicePence + addonPence;
+          sumPence += personSubtotal;
+          anyPrice = true;
+          if (addonPence > 0) subtotalDisplay = priceDisplayFromPence(personSubtotal);
         }
 
         return {
@@ -235,6 +301,8 @@ export async function enrichBookingEmailForAppointment(
           practitioner_name: practitionerNameLine,
           service_name: serviceNameLine,
           price_display: priceDisplay,
+          ...(addonLines ? { addon_lines: addonLines } : {}),
+          ...(subtotalDisplay ? { subtotal_display: subtotalDisplay } : {}),
         };
       });
       if (anyPrice) {
@@ -419,6 +487,11 @@ async function enrichBookingEmailWithAddons(
   bookingId: string,
   base: BookingEmailData,
 ): Promise<BookingEmailData> {
+  // Group bookings itemise add-ons per person in `enrichBookingEmailForAppointment`
+  // (and already roll every sibling's add-ons into the group total), so skip the
+  // flat single-booking handling here to avoid double-counting.
+  if (base.group_appointments && base.group_appointments.length > 0) return base;
+
   const { data: rows, error } = await supabase
     .from('booking_addons')
     .select(
@@ -429,29 +502,7 @@ async function enrichBookingEmailWithAddons(
 
   if (error || !rows || rows.length === 0) return base;
 
-  const lines: string[] = [];
-  let totalPrice = 0;
-  let totalDuration = 0;
-  for (const row of rows as Array<{
-    addon_name_snapshot: string;
-    addon_group_name_snapshot: string | null;
-    price_pence_at_booking: number;
-    duration_minutes_at_booking: number;
-  }>) {
-    const namePart = row.addon_group_name_snapshot
-      ? `${row.addon_group_name_snapshot}: ${row.addon_name_snapshot}`
-      : row.addon_name_snapshot;
-    const parts: string[] = [];
-    if (row.price_pence_at_booking > 0) {
-      parts.push(`+£${formatDepositAmount(row.price_pence_at_booking)}`);
-    }
-    if (row.duration_minutes_at_booking > 0) {
-      parts.push(`+${row.duration_minutes_at_booking} min`);
-    }
-    lines.push(parts.length > 0 ? `${namePart} (${parts.join(', ')})` : namePart);
-    totalPrice += row.price_pence_at_booking;
-    totalDuration += row.duration_minutes_at_booking;
-  }
+  const { lines, totalPrice, totalDuration } = summariseAddonRows(rows as AddonSnapshotRow[]);
 
   // Roll add-ons into the headline total when the venue uses full-payment-style pricing.
   const newTotal =

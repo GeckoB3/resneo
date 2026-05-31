@@ -79,7 +79,7 @@ export async function validateReferralCode(
     value: {
       code: codeRow.code,
       referrer_venue_id: venue.id,
-      referrer_venue_name: (venue.name ?? '').trim() || 'A ReserveNI venue',
+      referrer_venue_name: (venue.name ?? '').trim() || 'A Resneo venue',
     },
   };
 }

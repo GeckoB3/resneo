@@ -16,7 +16,7 @@ import {
   resolveInitialGroupVisitBookings,
   warmGroupVisitBookings,
 } from '@/lib/booking/group-visit-bookings';
-import { resolveBookingListBarSchedule } from '@/lib/booking/booking-list-row-schedule';
+import { collapseMultiServiceVisits, resolveBookingListBarSchedule } from '@/lib/booking/booking-list-row-schedule';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
@@ -818,9 +818,15 @@ export function AppointmentBookingsDashboard({
   ]);
 
   const scopeBookings = useMemo((): DashboardRegistryRow[] => {
-    if (sourceScope === 'own') return filteredBookings;
-    if (sourceScope === 'linked') return filteredLinkedBookings;
-    return [...filteredBookings, ...filteredLinkedBookings];
+    const combined =
+      sourceScope === 'own'
+        ? filteredBookings
+        : sourceScope === 'linked'
+          ? filteredLinkedBookings
+          : [...filteredBookings, ...filteredLinkedBookings];
+    // One bar per booking: collapse multi-service visits (shared group_booking_id, no
+    // per-person label) to a single representative. Group bookings stay as separate bars.
+    return collapseMultiServiceVisits(combined);
   }, [sourceScope, filteredBookings, filteredLinkedBookings]);
 
   const statsBookings = useMemo(() => {

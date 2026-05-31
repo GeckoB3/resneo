@@ -1817,12 +1817,12 @@ export function ResourceTimelineView({
                 value={formatDuration(selected.slot_interval_minutes)}
                 color="brand"
               />
-              <StatTile label="Shortest booking" value={formatDuration(selected.min_booking_minutes)} color="violet" />
-              <StatTile label="Longest booking" value={formatDuration(selected.max_booking_minutes)} color="emerald" />
+              <StatTile label="Shortest booking" value={formatDuration(selected.min_booking_minutes)} color="brand" />
+              <StatTile label="Longest booking" value={formatDuration(selected.max_booking_minutes)} color="brand" />
               <StatTile
                 label={`Price / ${selected.slot_interval_minutes} min`}
                 value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'}
-                color="amber"
+                color="brand"
               />
               <StatTile
                 label="Guest payment"

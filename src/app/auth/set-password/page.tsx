@@ -203,7 +203,7 @@ function SetPasswordContent() {
         <div className="relative w-full max-w-sm">
           <div className="mb-8 flex flex-col items-center">
             <Link href="/">
-              <img src="/Logo.png" alt="ReserveNI" className="h-12 w-auto" />
+              <img src="/Logo.png" alt="Resneo" className="h-12 w-auto" />
             </Link>
             <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Password link unavailable</h1>
             <p className="mt-2 text-center text-sm text-slate-500">
@@ -238,7 +238,7 @@ function SetPasswordContent() {
       <div className="relative w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
           <Link href="/">
-            <img src="/Logo.png" alt="ReserveNI" className="h-12 w-auto" />
+            <img src="/Logo.png" alt="Resneo" className="h-12 w-auto" />
           </Link>
           <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Create your password</h1>
           <p className="mt-2 text-center text-sm text-slate-500">

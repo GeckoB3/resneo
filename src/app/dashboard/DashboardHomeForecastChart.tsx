@@ -66,7 +66,7 @@ export function DashboardHomeForecastChart({
           />
           <Bar
             dataKey={useBookings ? 'bookings' : 'covers'}
-            fill="#4E6B78"
+            fill="#003B6F"
             radius={[8, 8, 0, 0]}
             maxBarSize={44}
           />

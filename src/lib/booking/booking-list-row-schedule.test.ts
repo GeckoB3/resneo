@@ -4,6 +4,7 @@ import {
   bookingListRowDurationDetailLabel,
   bookingListRowDurationMinutes,
   bookingListRowTimeRangeLabel,
+  collapseMultiServiceVisits,
   multiServiceVisitWallClockSchedule,
   resolveBookingListBarSchedule,
 } from '@/lib/booking/booking-list-row-schedule';
@@ -55,5 +56,37 @@ describe('bookingListRowSchedule', () => {
     expect(bar.timeRangeLabel).toBe('10:00–11:15');
     expect(bar.durationBarLabel).toBe('1 hr 15 min');
     expect(bar.durationDetailLabel).toBe('1 hr 15 min (1 hr service + 15 min extras)');
+  });
+});
+
+describe('collapseMultiServiceVisits', () => {
+  it('collapses a multi-service visit (shared group, no person labels) to one earliest row', () => {
+    const rows = [
+      { id: 'a', booking_time: '10:30', group_booking_id: 'g1', person_label: null },
+      { id: 'b', booking_time: '10:00', group_booking_id: 'g1', person_label: null },
+    ];
+    const out = collapseMultiServiceVisits(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe('b'); // earliest start kept
+  });
+
+  it('keeps group bookings (distinct person labels) as separate rows', () => {
+    const rows = [
+      { id: 'a', booking_time: '10:00', group_booking_id: 'g1', person_label: 'Alex' },
+      { id: 'b', booking_time: '10:00', group_booking_id: 'g1', person_label: 'Sam' },
+    ];
+    const out = collapseMultiServiceVisits(rows);
+    expect(out.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+
+  it('leaves standalone bookings untouched and preserves order', () => {
+    const rows = [
+      { id: 'solo1', booking_time: '09:00', group_booking_id: null, person_label: null },
+      { id: 'a', booking_time: '10:00', group_booking_id: 'g1', person_label: null },
+      { id: 'b', booking_time: '10:30', group_booking_id: 'g1', person_label: null },
+      { id: 'solo2', booking_time: '11:00', group_booking_id: null, person_label: null },
+    ];
+    const out = collapseMultiServiceVisits(rows);
+    expect(out.map((r) => r.id)).toEqual(['solo1', 'a', 'solo2']);
   });
 });

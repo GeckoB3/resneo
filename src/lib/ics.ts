@@ -21,13 +21,13 @@ export function buildIcsContent(params: {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//ReserveNI//Booking//EN',
+    'PRODID:-//Resneo//Booking//EN',
     'BEGIN:VEVENT',
     `DTSTART:${formatUtc(start)}`,
     `DTEND:${formatUtc(end)}`,
     `SUMMARY:Reservation at ${escapeIcs(venueName)}`,
     ...(venueAddress ? [`LOCATION:${escapeIcs(venueAddress)}`] : []),
-    `DESCRIPTION:Party of ${partySize}. Booked via ReserveNI.`,
+    `DESCRIPTION:Party of ${partySize}. Booked via Resneo.`,
     'END:VEVENT',
     'END:VCALENDAR',
   ];

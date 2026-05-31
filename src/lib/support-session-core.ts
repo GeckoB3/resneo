@@ -30,7 +30,7 @@ export function superuserDisplayNameFromUser(user: {
   if (full) return full;
   const email = (user.email ?? '').trim();
   if (email) return email.split('@')[0] ?? email;
-  return 'ReserveNI support';
+  return 'Resneo support';
 }
 
 export async function fetchActiveSupportSession(

@@ -1,4 +1,4 @@
-# ReserveNI: Class Products — Production Readiness Plan
+# Resneo: Class Products — Production Readiness Plan
 
 **Status:** Draft for development
 **Author:** Andrew (with Claude)
@@ -20,7 +20,7 @@ This plan is the punch list to fix that. It is grouped by severity:
 | **Phase 2 — Significant** | Missing primary flows (cancellation, attendance, comms, gating) | 6 | ~12 working days |
 | **Phase 3 — Polish** | UI quality, discoverability, defensible UX | 6 | ~5 working days |
 
-Each item below specifies what to change, where, and how to verify, using the conventions already established in the ReserveNI codebase. The reviewer should reject any diff that introduces patterns inconsistent with this plan.
+Each item below specifies what to change, where, and how to verify, using the conventions already established in the Resneo codebase. The reviewer should reject any diff that introduces patterns inconsistent with this plan.
 
 ---
 
@@ -935,7 +935,7 @@ Documented at the end of this plan (§15).
 ### 14.1 Sequencing
 
 1. **Phase 1** behind `class_commerce_enabled` flag, default off.
-2. **Internal QA**: enable flag for the ReserveNI test/sandbox venue. Run all manual flows.
+2. **Internal QA**: enable flag for the Resneo test/sandbox venue. Run all manual flows.
 3. **Pilot 1 venue**: one yoga / Pilates studio. Two weeks of observation.
    - Watch: ledger consistency (credits added = credits redeemed + refunded + remaining), subscription sync correctness, recurring rule materialisation logs.
 4. **Pilot 2-3 venues**: a dog-grooming class operator + a barre studio. Two weeks.

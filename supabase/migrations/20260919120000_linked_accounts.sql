@@ -1,4 +1,4 @@
--- ReserveNI: Linked Accounts feature (see Docs/reserveni-linked-accounts-spec.md)
+-- Resneo: Linked Accounts feature (see Docs/reserveni-linked-accounts-spec.md)
 -- Phase 1: pairwise venue links + cross-venue audit log.
 -- Phase 2: venue collectives (combined public booking page).
 -- Idempotent: Supabase Preview / branched DBs may already have parts of this.
@@ -92,7 +92,7 @@ CREATE INDEX IF NOT EXISTS account_links_low_status ON account_links (venue_low_
 CREATE INDEX IF NOT EXISTS account_links_high_status ON account_links (venue_high_id, status);
 
 COMMENT ON TABLE account_links IS
-  'Pairwise link between two ReserveNI venues. venue_low_id < venue_high_id. Permissions are per-direction.';
+  'Pairwise link between two Resneo venues. venue_low_id < venue_high_id. Permissions are per-direction.';
 
 CREATE OR REPLACE FUNCTION account_links_set_updated_at()
 RETURNS trigger

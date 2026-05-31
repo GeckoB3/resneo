@@ -1,21 +1,21 @@
-# ReserveNI: Compliance Records Feature Specification
+# Resneo: Compliance Records Feature Specification
 
 **Status:** Draft for development
 **Author:** Andrew (with Claude)
 **Plan scope:** Available on every Appointments tier (`light`, `plus`, `appointments`). Hidden on `restaurant` / `founding` table-only SKUs in v1.
 **Estimated effort:** 6–8 weeks for a single competent full-stack developer working with Cursor
-**Document version:** 2.0 (rewritten against the live ReserveNI codebase)
+**Document version:** 2.0 (rewritten against the live Resneo codebase)
 
 ---
 
 ## 0. Terminology mapping — read this first
 
-The earlier draft of this document was written against a generic data model. ReserveNI's actual schema uses different names, and this rewrite is bound to the real tables. Whenever this spec says "contact" it means a ReserveNI **guest** ([public.guests](supabase/migrations/20260301000004_create_guests.sql)), and so on. The mapping is:
+The earlier draft of this document was written against a generic data model. Resneo's actual schema uses different names, and this rewrite is bound to the real tables. Whenever this spec says "contact" it means a Resneo **guest** ([public.guests](supabase/migrations/20260301000004_create_guests.sql)), and so on. The mapping is:
 
-| This spec / UI term | ReserveNI schema reality |
+| This spec / UI term | Resneo schema reality |
 |---|---|
 | **Contact / Client** | `public.guests` row, unique on `(venue_id, email)`. Public UI calls these "Contacts"; the table is `guests`. |
-| **Venue / Account** | `public.venues` row. One venue = one ReserveNI subscription. |
+| **Venue / Account** | `public.venues` row. One venue = one Resneo subscription. |
 | **Service** | One of two tables depending on the venue's `booking_model`. For `practitioner_appointment` (legacy Model B): `public.appointment_services`. For `unified_scheduling` (modern Model B, the primary tier for new venues): `public.service_items`. The `/api/venue/appointment-services` endpoint transparently proxies to the right table via `venueUsesUnifiedAppointmentServiceData()`. Compliance requirements must do the same — see §4.5. |
 | **Booking** | `public.bookings` row. Time is stored as `booking_date date` + `booking_time time`, not a single timestamp. The FK to the booked service also differs by model: `appointment_service_id` for `practitioner_appointment` venues; `service_item_id` for `unified_scheduling` venues (`appointment_service_id` is explicitly `NULL` for unified bookings). See §5.0 and §5.1. |
 | **Staff** | `public.staff` row. RLS identifies the caller via `auth.jwt() ->> 'email'` joined to `staff.email`. |
@@ -24,10 +24,10 @@ The earlier draft of this document was written against a generic data model. Res
 | **Tab in a booking detail surface** | The unified booking detail surface ([ExpandedBookingContent.tsx](src/app/dashboard/bookings/ExpandedBookingContent.tsx) and [BookingDetailSurface.tsx](src/components/booking/BookingDetailSurface.tsx)) is **accordion-based** (`<details>` blocks with `bookingExpandAccordionDetailsClass`), not Radix `<Tabs>`. "Compliance tab" in the original spec means "Compliance accordion section" in this codebase. |
 | **Settings sub-page** | `/dashboard/settings` is a **single Next route** with a [`TabBar`](src/components/ui/dashboard/TabBar.tsx)-driven [SettingsView.tsx](src/app/dashboard/settings/SettingsView.tsx). New settings areas are **new tab keys + a `sections/*Section.tsx` component**, not new route folders. The "Compliance" settings live under `/dashboard/settings?tab=compliance` plus a dedicated `/dashboard/compliance-types` builder page (see §3.3 and §7) — the same pattern Services already uses with [`/dashboard/appointment-services`](src/app/dashboard/appointment-services/page.tsx). |
 | **Feature flag** | `venues.feature_flags` JSONB column ([20260520120000_venue_feature_flags.sql](supabase/migrations/20260520120000_venue_feature_flags.sql)), resolved through [src/lib/feature-flags/](src/lib/feature-flags/resolve.ts) with an env-var override. See §14.2. |
-| **Public form URL** | ReserveNI already uses short-code public URLs at `/b/{code}` (table `booking_short_links`, 6–12 char codes). v1 compliance form links live at `/p/forms/{code}` and follow the same short-code pattern — see §3.4 and §4.6. There is no precedent for 32-char base32 tokens in this codebase. |
+| **Public form URL** | Resneo already uses short-code public URLs at `/b/{code}` (table `booking_short_links`, 6–12 char codes). v1 compliance form links live at `/p/forms/{code}` and follow the same short-code pattern — see §3.4 and §4.6. There is no precedent for 32-char base32 tokens in this codebase. |
 | **Communications send** | The existing communications subsystem ([src/lib/communications/](src/lib/communications/policies.ts)) uses **per-key message policies** (`booking_confirmation`, `pre_visit_reminder`, …) rather than free-text venue-editable templates. New compliance message keys plug into the same policy framework — see §12. |
 
-There is **no `contacts` table, no `service_categories` table, no generic `tokens` table, and no `tier` column on `compliance_*` tables** in ReserveNI. Plan availability is enforced in the API layer using `isAppointmentPlanTier()` from [`src/lib/tier-enforcement.ts`](src/lib/tier-enforcement.ts).
+There is **no `contacts` table, no `service_categories` table, no generic `tokens` table, and no `tier` column on `compliance_*` tables** in Resneo. Plan availability is enforced in the API layer using `isAppointmentPlanTier()` from [`src/lib/tier-enforcement.ts`](src/lib/tier-enforcement.ts).
 
 Every SQL fragment, file path, and route in this document uses the real names from the codebase as of migration `20261024120000` (174 migrations applied). When new code is added it must follow the same conventions; reviewer should reject diffs that introduce table or column names absent from this map.
 
@@ -35,9 +35,9 @@ Every SQL fragment, file path, and route in this document uses the real names fr
 
 ## 1. Purpose and scope
 
-The Compliance Records feature gives ReserveNI venues a single, unified system for capturing, storing, and managing client compliance documentation. It covers patch tests, consultation forms, consent forms, declarations, vaccination records, intake questionnaires, and any future record type the platform needs to support.
+The Compliance Records feature gives Resneo venues a single, unified system for capturing, storing, and managing client compliance documentation. It covers patch tests, consultation forms, consent forms, declarations, vaccination records, intake questionnaires, and any future record type the platform needs to support.
 
-The feature is deliberately industry-agnostic. It targets ReserveNI's first-wave segments — hair salons, barbers, beauticians, massage therapists, dog groomers — but the same primitives extend to medical aesthetics, tattoo studios, personal training, physiotherapy, and pet care segments as the customer base grows.
+The feature is deliberately industry-agnostic. It targets Resneo's first-wave segments — hair salons, barbers, beauticians, massage therapists, dog groomers — but the same primitives extend to medical aesthetics, tattoo studios, personal training, physiotherapy, and pet care segments as the customer base grows.
 
 ### 1.1 Goals
 
@@ -62,7 +62,7 @@ These are deliberate omissions to keep v1 shippable. The data model accommodates
 
 ### 1.3 Out of scope permanently
 
-- Becoming a clinical records system. ReserveNI captures compliance for the booking; it does not replace a clinician's EHR.
+- Becoming a clinical records system. Resneo captures compliance for the booking; it does not replace a clinician's EHR.
 - Storing payment card or financial data in compliance records. That stays in Stripe.
 
 ---
@@ -236,7 +236,7 @@ The **service-first** entry point. When a staff member opens an existing `appoin
 
 ### 4.1 Entity overview
 
-Six new tables. All include the standard ReserveNI columns: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `venue_id uuid NOT NULL REFERENCES venues(id) ON DELETE CASCADE` (indexed for RLS), `created_at timestamptz NOT NULL DEFAULT now()`, and `updated_at timestamptz NOT NULL DEFAULT now()` where the row is mutable.
+Six new tables. All include the standard Resneo columns: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `venue_id uuid NOT NULL REFERENCES venues(id) ON DELETE CASCADE` (indexed for RLS), `created_at timestamptz NOT NULL DEFAULT now()`, and `updated_at timestamptz NOT NULL DEFAULT now()` where the row is mutable.
 
 | Table | Purpose |
 |---|---|
@@ -274,7 +274,7 @@ compliance_types
 
 **Slug generation:** `slug` is auto-derived server-side from `name` using a standard slugify transform (lowercase, spaces → hyphens, non-alphanumeric characters stripped). On collision within the same venue the server appends `-2`, `-3`, etc. until unique. Staff do not set the slug directly; it is computed on creation and does not change when `name` is subsequently renamed (stable identifier for any future external references).
 
-**On enums vs text+CHECK:** ReserveNI's policy is to use `text` + `CHECK` constraints for new finite-value columns rather than Postgres `ENUM` types, because `ALTER TYPE … ADD VALUE` cannot run inside a transaction and so blocks zero-downtime migrations. The few existing enums (`booking_status`, `booking_model`, `deposit_status`) predate this policy. Follow `text` + `CHECK` for all new compliance columns; the inventory comment in [Docs/schema.sql](Docs/schema.sql) reflects this.
+**On enums vs text+CHECK:** Resneo's policy is to use `text` + `CHECK` constraints for new finite-value columns rather than Postgres `ENUM` types, because `ALTER TYPE … ADD VALUE` cannot run inside a transaction and so blocks zero-downtime migrations. The few existing enums (`booking_status`, `booking_model`, `deposit_status`) predate this policy. Follow `text` + `CHECK` for all new compliance columns; the inventory comment in [Docs/schema.sql](Docs/schema.sql) reflects this.
 
 ### 4.3 `compliance_type_versions`
 
@@ -607,7 +607,7 @@ Implemented in `src/lib/compliance/resolve-requirements.ts`. Called from the exi
 - Staff booking: [`/api/venue/bookings`](src/app/api/venue/bookings/) `POST` handler.
 - Staff edit that changes the service: `/api/venue/bookings/[id]` `PATCH` handler.
 
-Blocked requests return the standard ReserveNI error envelope with `error: 'COMPLIANCE_REQUIREMENT_UNMET'` and a `details` array listing which types are missing/expired.
+Blocked requests return the standard Resneo error envelope with `error: 'COMPLIANCE_REQUIREMENT_UNMET'` and a `details` array listing which types are missing/expired.
 
 #### 5.1.1 `warn_client` UX on the public booking page
 
@@ -845,7 +845,7 @@ The data model and API do not need to enforce plan-based limits for this feature
 
 ## 9. API surface
 
-ReserveNI's API namespace convention is `/api/venue/*` for staff-authenticated routes (see [Docs/MOBILE_API.md](Docs/MOBILE_API.md) — these routes also accept Bearer tokens for the React Native app), `/api/booking/*` for public guest booking, and a small `/api/v1/*` namespace for documented external surfaces (`auth`, `manage-booking`, `me`). The original spec's `/api/v1/compliance/*` namespace does not match the codebase and is replaced here.
+Resneo's API namespace convention is `/api/venue/*` for staff-authenticated routes (see [Docs/MOBILE_API.md](Docs/MOBILE_API.md) — these routes also accept Bearer tokens for the React Native app), `/api/booking/*` for public guest booking, and a small `/api/v1/*` namespace for documented external surfaces (`auth`, `manage-booking`, `me`). The original spec's `/api/v1/compliance/*` namespace does not match the codebase and is replaced here.
 
 All staff routes use `getVenueStaff()` from [`src/lib/venue-auth.ts`](src/lib/venue-auth.ts), which resolves the staff row and returns an admin Supabase client (bypasses RLS — safe because the staff has been authenticated). Body validation uses `zod`. Response envelope follows existing routes (no `{data, meta, error}` wrapper unless the route is paginated — match existing patterns per-route).
 

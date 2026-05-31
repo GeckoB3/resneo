@@ -179,7 +179,7 @@ export function PaymentStep({
         </span>
       </div>
 
-      <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } } }}>
+      <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#003B6F', borderRadius: '12px' } } }}>
         <PaymentForm
           clientSecret={clientSecret}
           onComplete={onComplete}

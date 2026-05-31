@@ -17,6 +17,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS platform_superusers_one_active_email
   WHERE revoked_at IS NULL;
 
 COMMENT ON TABLE public.platform_superusers IS
-  'ReserveNI platform dashboard operators. Access requires app_metadata.platform_role=superuser plus either PLATFORM_SUPERUSER_EMAILS env match or app_metadata.platform_superuser_registered=true.';
+  'Resneo platform dashboard operators. Access requires app_metadata.platform_role=superuser plus either PLATFORM_SUPERUSER_EMAILS env match or app_metadata.platform_superuser_registered=true.';
 
 ALTER TABLE public.platform_superusers ENABLE ROW LEVEL SECURITY;

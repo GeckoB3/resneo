@@ -74,7 +74,7 @@ export async function notifyAppointmentWaitlistOfferForEntry(
 
   const desiredTimeHm = timeWindowLabelForOffer(entry);
   const venueSlug = typeof venueRow.slug === 'string' ? venueRow.slug : null;
-  const bookingBase = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.reserveni.com').replace(/\/$/, '');
+  const bookingBase = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://www.resneo.com').replace(/\/$/, '');
   const bookingPageUrl = venueSlug
     ? `${bookingBase}/book/${encodeURIComponent(venueSlug)}`
     : null;

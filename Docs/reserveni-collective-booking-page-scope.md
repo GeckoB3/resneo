@@ -1,4 +1,4 @@
-# ReserveNI: Collective Combined Booking Page — Scope
+# Resneo: Collective Combined Booking Page — Scope
 
 **Status:** Scoped, not started
 **Parent spec:** `Docs/reserveni-linked-accounts-spec.md` §7.1, §7.6, §7.7, §8.5, §8.6

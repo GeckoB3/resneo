@@ -33,7 +33,7 @@
 --                                'event_ticket','class_session','resource_booking')
 --                               NB: 6 enum values; conceptually 5 booking models —
 --                               Model B has both 'practitioner_appointment' and 'unified_scheduling'.
---                               See Docs/ReserveNI_Booking_Models_Reference.md (canonical).
+--                               See Docs/Resneo_Booking_Models_Reference.md (canonical).
 -- waitlist_status               ('waiting','offered','confirmed','expired','cancelled')
 -- class_payment_requirement     ('none','deposit','full_payment')
 -- block_type                    calendar/availability block kinds (incl. 'amended_hours')
@@ -59,7 +59,7 @@
 -- staff_calendar_assignments      Staff scoped to specific bookable calendars
 -- user_profiles                  App profile 1:1 with auth.users (customer + staff)
 -- user_devices                   Push device rows (future mobile)
--- platform_superusers            ReserveNI platform-side admin access
+-- platform_superusers            Resneo platform-side admin access
 
 -- --- Guests & CRM ------------------------------------------------------------
 -- guests                          One row per guest per venue (unique venue_id+email)

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
+import { dispatchNavReselect } from '@/lib/ui/nav-reselect';
 import { FullscreenToggleButton } from '@/components/ui/FullscreenToggleButton';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
@@ -111,6 +112,7 @@ function NavLinkItem({
   external?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const className = `group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
     active
       ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
@@ -141,7 +143,14 @@ function NavLinkItem({
   return (
     <Link
       href={href}
-      onClick={onNavigate}
+      onClick={() => {
+        onNavigate();
+        // Clicking the link for the page you are already on does not remount the
+        // route, so signal the page to reset itself (e.g. the New Booking form).
+        if (href === pathname) {
+          dispatchNavReselect(href);
+        }
+      }}
       onPointerEnter={() => {
         void router.prefetch(href);
       }}
@@ -388,7 +397,7 @@ export function DashboardSidebar({
             >
               {mobileOpen ? <XIcon /> : <MenuIcon />}
             </button>
-            <img src="/Logo.png" alt="ReserveNI" className="h-7 w-auto shrink-0" />
+            <img src="/Logo.png" alt="Resneo" className="h-7 w-auto shrink-0" />
             {venueName ? (
               <span
                 className="min-w-0 truncate pl-1 text-sm font-semibold text-slate-800"

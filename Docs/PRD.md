@@ -47,13 +47,13 @@ Read this document with that in mind:
 
 **Authoritative current documents:**
 
-- `Docs/ReserveNI-Appointments-Review-And-Roadmap.md` — current state,
+- `Docs/Resneo-Appointments-Review-And-Roadmap.md` — current state,
   competitive position, and the appointments-first development roadmap.
-- `Docs/ReserveNI-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
+- `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
   — classes, events and resources review.
-- `Docs/ReserveNI_Booking_Models_Reference.md` — canonical definitions of
+- `Docs/Resneo_Booking_Models_Reference.md` — canonical definitions of
   the booking models.
-- `Docs/ReserveNI_Unified_Booking_Functionality.md` — multi-model parity
+- `Docs/Resneo_Unified_Booking_Functionality.md` — multi-model parity
   and delivery status.
 
 A full rewrite of Sections 1–2 and 6–12 to a multi-model framing is
@@ -940,7 +940,7 @@ this list is what makes the four-month build timeline achievable.
                          Reserve NI handles booking deposits and
                          pre-payments via Stripe Connect; retail at the
                          chair is kept on existing hardware. See
-                         `Docs/ReserveNI-Appointments-Review-And-Roadmap.md`
+                         `Docs/Resneo-Appointments-Review-And-Roadmap.md`
                          section 6.2.
 
   **Advanced analytics   Phase 2. MVP reporting covers the metrics needed

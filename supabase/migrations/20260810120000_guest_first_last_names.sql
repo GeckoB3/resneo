@@ -1,4 +1,4 @@
--- ReserveNI: guests + bookings + waitlist + import staging use first_name/last_name instead of single name fields.
+-- Resneo: guests + bookings + waitlist + import staging use first_name/last_name instead of single name fields.
 
 -- =============================================================================
 -- BOOKINGS: guest phone snapshot (used by pay flow / comms); ensure column exists

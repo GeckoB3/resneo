@@ -1,6 +1,12 @@
 import { createElement, type CSSProperties, type ReactElement } from 'react';
-import { isAttendanceConfirmed, type BookingStaffIndicatorInput } from '@/lib/booking/booking-staff-indicators';
-import { bookingStatusVisualForKey } from '@/lib/table-management/booking-status-visual';
+import type { BookingStaffIndicatorInput } from '@/lib/booking/booking-staff-indicators';
+import {
+  bookingDisplayVisualKey,
+  bookingStatusVisualForKey,
+  isArrivedWaitingDisplay,
+} from '@/lib/table-management/booking-status-visual';
+
+export { isArrivedWaitingDisplay };
 
 /** Inline-style palette for staff calendar booking bars (`accent` = left stripe). */
 export interface BookingBlockPalette {
@@ -15,32 +21,12 @@ export type BookingCalendarBlockInput = BookingStaffIndicatorInput & {
   client_arrived_at?: string | null;
 };
 
-/** Guest marked arrived while still pending / booked / confirmed (waiting to start). */
-export function isArrivedWaitingDisplay(
-  b: Pick<BookingCalendarBlockInput, 'client_arrived_at' | 'status'>,
-): boolean {
-  if (!b.client_arrived_at) return false;
-  return b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed';
-}
-
 /**
  * Visual status key for calendar stripes — aligns with {@link bookingStatusVisualForKey}
  * (Booked, Confirmed, Arrived, Seated/Started, Completed, No-Show, Cancelled).
  */
 export function calendarBookingVisualKey(b: BookingCalendarBlockInput): string {
-  const status = b.status;
-  if (status === 'Cancelled') return 'Cancelled';
-  if (status === 'No-Show') return 'No-Show';
-  if (status === 'Completed') return 'Completed';
-  if (status === 'Seated') return 'Seated';
-  if (isArrivedWaitingDisplay(b)) return 'Arrived';
-  if (status === 'Confirmed') return 'Confirmed';
-  if (status === 'Pending' || status === 'Booked') {
-    if (isAttendanceConfirmed(b)) return 'Confirmed';
-    if (status === 'Pending') return 'Pending';
-    return 'Booked';
-  }
-  return 'Booked';
+  return bookingDisplayVisualKey(calendarBookingStripeInput(b));
 }
 
 /** Normalise row fields used for calendar bar stripes (status + arrived + attendance). */

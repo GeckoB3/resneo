@@ -1,4 +1,4 @@
-import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
+import { BookPublicBookingFlowSuspense } from '@/components/booking/BookPublicBookingFlowSuspense';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
@@ -183,7 +183,7 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
           id="booking-form-start"
           className={`mx-auto w-full flex-1 scroll-mt-4 px-4 pb-6 ${isAppointment ? 'py-6 sm:py-8' : 'max-w-lg py-8'}`}
         >
-          <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
+          <BookPublicBookingFlowSuspense venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
         </div>
 
         <footer className="mt-auto shrink-0 border-t border-slate-200 bg-white/95 px-4 py-3 pb-safe text-center text-xs leading-relaxed text-slate-400 backdrop-blur">
@@ -196,8 +196,8 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
               Website Terms of Use
             </a>
             {' · '}
-            <a href="https://www.reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-              Powered by ReserveNI
+            <a href="https://www.resneo.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+              Powered by Resneo
             </a>
           </p>
         </footer>

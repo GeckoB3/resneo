@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 function accentColour(collective: PublicCollective): string {
   const c = collective.branding.primary_colour;
-  return c && /^#[0-9A-Fa-f]{6}$/.test(c) ? c : '#4E6B78';
+  return c && /^#[0-9A-Fa-f]{6}$/.test(c) ? c : '#003B6F';
 }
 
 export async function generateMetadata({
@@ -84,7 +84,7 @@ export default async function CollectiveBookingPage({
           accent={accent}
         />
         <p className="pt-2 text-center text-xs text-slate-400">
-          Each venue manages its own bookings and client data. Powered by ReserveNI.
+          Each venue manages its own bookings and client data. Powered by Resneo.
         </p>
       </main>
     </div>

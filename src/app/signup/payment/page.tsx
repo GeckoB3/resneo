@@ -307,7 +307,7 @@ export default function PaymentPage() {
           ) : (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">
-                ReserveNI {planLabel}: {SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{totalPrice}/month
+                Resneo {planLabel}: {SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{totalPrice}/month
               </p>
               <p className="mt-1 leading-relaxed">
                 {isRestaurant

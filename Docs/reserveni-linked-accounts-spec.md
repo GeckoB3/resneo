@@ -1,4 +1,4 @@
-# ReserveNI: Linked Accounts Feature Specification
+# Resneo: Linked Accounts Feature Specification
 
 **Status:** Living specification — **Phase 1 shipped**; **Phase 2 partially implemented** (see §15)
 **Plan scope:** Appointments-family venues only (`light`, `plus`, `appointments` pricing tiers)
@@ -10,13 +10,13 @@
 
 ## 0. Terminology mapping — read this first
 
-The earlier draft of this document was written against a generic data model. ReserveNI's
+The earlier draft of this document was written against a generic data model. Resneo's
 actual schema uses different names, and this rewrite is bound to the real tables. Whenever this
-spec says "account" it means a ReserveNI **venue** (`public.venues` row). The mapping is:
+spec says "account" it means a Resneo **venue** (`public.venues` row). The mapping is:
 
-| This spec / UI term | ReserveNI schema reality |
+| This spec / UI term | Resneo schema reality |
 |---|---|
-| **Account** | A `public.venues` row. One venue = one ReserveNI subscription = one "account". |
+| **Account** | A `public.venues` row. One venue = one Resneo subscription = one "account". |
 | **Linked account** | Another `venues` row connected via an `account_links` row. |
 | **Calendar** | A bookable calendar entity. For Appointments venues this is a `public.practitioners` row. (Class types, events, and resources are the calendar entity for other booking models.) |
 | **Client** | A `public.guests` row — the venue-scoped customer record. `UNIQUE (venue_id, email)`. |
@@ -26,7 +26,7 @@ spec says "account" it means a ReserveNI **venue** (`public.venues` row). The ma
 | **Audit log** | New `account_link_audit_log` table (the existing append-only `public.events` table remains the per-venue booking audit log and is reused — see §10). |
 
 There is **no `accounts` table, no `account_id` column, no `calendar_id` column, and no
-`current_account_id()` function** in ReserveNI. Bookings carry `venue_id`, not `account_id`.
+`current_account_id()` function** in Resneo. Bookings carry `venue_id`, not `account_id`.
 Times are stored as `booking_date date` + `booking_time time` + `booking_end_time time`, not
 `start_time`/`end_time` timestamps. RLS identifies the caller via
 `auth.jwt() ->> 'email'` and/or `staff.user_id = auth.uid()`. Every SQL fragment in this
@@ -36,14 +36,14 @@ document uses the real column names.
 
 ## 1. Purpose and use cases
 
-The Linked Accounts feature lets two or more independent ReserveNI venues share calendar
+The Linked Accounts feature lets two or more independent Resneo venues share calendar
 visibility, booking access, and (Phase 2) a combined public booking page, while keeping all
 client and booking data fully separate at rest in each venue.
 
 Primary use cases:
 
 - A salon owner who rents chairs to independent stylists, where each stylist runs their own
-  ReserveNI venue and `guests` list but they want to coordinate scheduling and present a
+  Resneo venue and `guests` list but they want to coordinate scheduling and present a
   unified booking experience to walk-in customers.
 - Co-located independent practitioners (physiotherapists, chiropractors, beauty therapists)
   who want to see each other's availability to manage shared rooms or refer overflow clients.
@@ -121,7 +121,7 @@ reuses the existing `staff` table as-is.
 ## 4. Data model
 
 Two new tables for Phase 1 (`account_links`, `account_link_audit_log`) and two more for
-Phase 2 (`venue_collectives`, `venue_collective_members`). All follow ReserveNI conventions:
+Phase 2 (`venue_collectives`, `venue_collective_members`). All follow Resneo conventions:
 `uuid` PKs via `gen_random_uuid()`, `timestamptz` columns, snake_case, RLS enabled, created
 through a dated migration in `supabase/migrations/`.
 
@@ -230,7 +230,7 @@ account_link_audit_log
   by application code — this mirrors how the existing `booking_events_trigger` already writes
   `events` rows and prevents any code path from skipping the audit.
 - The log is **never deleted**. It survives link termination and survives either venue
-  cancelling its ReserveNI subscription — it is each venue's own record of access to its own
+  cancelling its Resneo subscription — it is each venue's own record of access to its own
   data. (`ON DELETE CASCADE` on `link_id` is acceptable only because `account_links` rows are
   themselves never hard-deleted; if that ever changes, switch to `ON DELETE SET NULL` plus a
   denormalised link descriptor.)
@@ -239,7 +239,7 @@ account_link_audit_log
 
 A *venue collective* is a combined public booking page joining two or more linked venues
 under shared branding. "Collective" is used deliberately instead of "venue group" because in
-ReserveNI each account already **is** a venue — a group of venues needs a distinct word.
+Resneo each account already **is** a venue — a group of venues needs a distinct word.
 
 Collectives are independent of pairwise links: a venue can be linked without joining any
 collective, but joining a collective requires accepted pairwise links with full mutual
@@ -288,7 +288,7 @@ be written and tested before any UI code. They extend — never replace — the 
 venue-scoped staff policies (e.g. `staff_manage_bookings`, `staff_manage_guests` in
 `20260301000007_rls_policies.sql`).
 
-ReserveNI has no `current_account_id()`. A staff user may work at multiple venues, so "the
+Resneo has no `current_account_id()`. A staff user may work at multiple venues, so "the
 current venue" is not a single value — it is the set of venues where the caller is active
 staff. Cross-venue access is therefore expressed through `SECURITY DEFINER` helper functions
 that, for a given *owning* venue, report what the current user is permitted to do via any
@@ -362,7 +362,7 @@ WITH CHECK (
 ```
 
 **Bookings — INSERT / DELETE.** Same shape, but require `act = 'create_edit_cancel'`
-specifically. (Cancellation in ReserveNI is normally a status change to `'Cancelled'`, i.e. an
+specifically. (Cancellation in Resneo is normally a status change to `'Cancelled'`, i.e. an
 UPDATE — but creating a brand-new booking in a linked venue, or hard-deleting, needs the full
 level.)
 
@@ -581,7 +581,7 @@ On termination:
 
 ### 6.7 Subscription lapse handling
 
-ReserveNI venues carry `plan_status` and (for Light) `light_plan_free_period_ends_at`. When a
+Resneo venues carry `plan_status` and (for Light) `light_plan_free_period_ends_at`. When a
 linked venue's subscription is heading for lapse:
 
 - **Foreseeable lapse** (Light free period ending without a payment method, or a scheduled
@@ -807,7 +807,7 @@ Dashboard banners and in-app notices are shown only to Admins.
 | Removed from venue collective | Email + dashboard notice | Removed member |
 | Venue collective dissolved | Email | All members |
 
-**SMS is out of scope for this feature.** ReserveNI's SMS path is metered per-venue (Twilio,
+**SMS is out of scope for this feature.** Resneo's SMS path is metered per-venue (Twilio,
 `increment_sms_usage`, billed to Stripe) and SMS is customer-facing operational/marketing
 messaging — link administration is internal and email-only.
 
@@ -842,7 +842,7 @@ termination (severance is intrinsic — nothing is ever copied).
 
 This should be reflected in:
 
-- ReserveNI's customer Terms of Service, updated to describe linked accounts. **✅ Done** —
+- Resneo's customer Terms of Service, updated to describe linked accounts. **✅ Done** —
   subsection under §7 in `src/app/terms/customer/page.tsx` (May 2026). Website Terms of Use
   unchanged (public-site scope only).
 - A short data-sharing notice shown in the link-acceptance modal. **✅ Done** — copy in
@@ -851,7 +851,7 @@ This should be reflected in:
 - Guidance to venues to update their own privacy policy when they link. **⬜ Not done** — no
   in-product onboarding doc / checklist item yet.
 
-These legal/product copy updates should be reviewed by ReserveNI's Northern Ireland commercial
+These legal/product copy updates should be reviewed by Resneo's Northern Ireland commercial
 solicitor before treating the feature as production-ready for all founding venues.
 
 ### 10.3 Customer-facing disclosure
@@ -859,7 +859,7 @@ solicitor before treating the feature as production-ready for all founding venue
 There is no per-booking customer-facing disclosure when a booking is made with a venue that
 holds linked-account relationships. To the customer a booking appears as a normal booking
 with the practitioner they chose. The linked relationship is operational and disclosed at the
-venue's privacy-policy level, not per booking. ReserveNI onboarding documentation should
+venue's privacy-policy level, not per booking. Resneo onboarding documentation should
 advise venues to update their privacy policy when they link.
 
 ---
@@ -961,14 +961,14 @@ venue-deletion parsing, banner dismiss, cron finalize.
 §10.2, and §11 to reflect shipped Phase 1, partial Phase 2, and known gaps (month view, day-sheet,
 any-practitioner routing, cross-suggestion, ToS, venue-deleted email).
 
-**2026-05-17:** Rewritten against the live ReserveNI schema. Replaced the generic
+**2026-05-17:** Rewritten against the live Resneo schema. Replaced the generic
 account/calendar/client/booking model with `venues` / `practitioners` / `guests` /
 `bookings`. Replaced `current_account_id()` with `current_staff_venue_ids()` and the
 `link_*_grant()` helper functions, reflecting that a staff user may work at multiple venues.
 Adopted the ordered-pair `account_links` shape (`venue_low_id` / `venue_high_id`). Reused the
 existing `events` table + `booking_events_trigger` pattern for the owning-venue audit and
 added `account_link_audit_log` for the cross-venue record. Renamed "venue groups" to "venue
-collectives" to avoid colliding with ReserveNI's existing "venue" = account terminology, and
+collectives" to avoid colliding with Resneo's existing "venue" = account terminology, and
 gave them a dedicated `/book/c/{slug}` route namespace. Confirmed eligibility is the
 Appointments family (`light` / `plus` / `appointments` tiers) and that restaurant
 table-reservation venues are excluded. Resolved the identifier question in favour of

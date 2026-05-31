@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.local') });
 config();
 
-const EMAIL = 'test1@reserveni.com';
+const EMAIL = 'test1@resneo.com';
 const PASSWORD = 'Password123';
 
 /** Appointments plan (see 20260501130000_pricing_restructure.sql) */

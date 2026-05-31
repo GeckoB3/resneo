@@ -1,5 +1,5 @@
 import type { HelpCategory } from '../types';
-import { RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
+import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 
 export const gettingStartedCategory: HelpCategory = {
   slug: 'getting-started',
@@ -11,14 +11,14 @@ export const gettingStartedCategory: HelpCategory = {
     {
       slug: 'welcome',
       helpSection: 'gs-start-here',
-      title: 'Welcome to ReserveNI',
+      title: 'Welcome to Resneo',
       description:
-        'What ReserveNI does, how the dashboard differs from your public booking page, and where to read next after you pick a topic on the help home.',
+        'What Resneo does, how the dashboard differs from your public booking page, and where to read next after you pick a topic on the help home.',
       tags: ['overview', 'basics', 'onboarding', 'plans'],
       content: `
-# Welcome to ReserveNI
+# Welcome to Resneo
 
-You are in the right place. ReserveNI helps **independent venues in Northern Ireland** take bookings, stay in touch with guests, and, if you choose, collect **card payments** through **Stripe Connect**. You run day to day work from the **dashboard**. Guests use your **public booking page** at \`/book/...\`, and you can optionally embed the flow on your own site.
+You are in the right place. Resneo helps **independent businesses** take bookings, stay in touch with guests, and, if you choose, collect **card payments** through **Stripe Connect**. You run day to day work from the **dashboard**. Guests use your **public booking page** at \`/book/...\`, and you can optionally embed the flow on your own site.
 
 > **Quick mental model:** the dashboard is for you and your team. The \`/book/...\` page is for guests. They never see your staff tools.
 
@@ -28,7 +28,7 @@ You are in the right place. ReserveNI helps **independent venues in Northern Ire
 | --- | --- |
 | **Bookings** | Table reservations, appointments, classes, events, or resources, depending on your **plan** and which **booking models** you turned on. |
 | **Guest experience** | Branded public page, optional iframe embed, automated **email** and **SMS** (templates under **Settings → Communications**). |
-| **Payments** | Deposits and full payments online via **Stripe Connect**. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD} |
+| **Payments** | Deposits and full payments online via **Stripe Connect**. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
 | **Insight** | **Reports** (admins) and **Contacts** for guest history, plus **Data import** (admins) when you move data in from a spreadsheet. |
 
 ## Plans (high level)
@@ -48,12 +48,12 @@ Your **product plan** (Restaurant / Founding Partner versus Appointments Light, 
 ## When something does not look right
 
 - [Troubleshooting](/help/troubleshooting) for common fixes on access, Stripe, imports, and availability.
-- **Support** in the dashboard sidebar footer to message the ReserveNI team from inside the app.
+- **Support** in the dashboard sidebar footer to message the Resneo team from inside the app.
 
 ## Common questions
 
 **Do I need Stripe on day one?**  
-Only if you want guests to pay **online** (deposit or full payment) before confirmation. You can still take **phone** bookings and handle payment outside ReserveNI. Connect Stripe before you turn on online payment rules in your catalogue.
+Only if you want guests to pay **online** (deposit or full payment) before confirmation. You can still take **phone** bookings and handle payment outside Resneo. Connect Stripe before you turn on online payment rules in your catalogue.
 
 **Who can change venue-wide settings?**  
 **Admins** see full **Settings** (Profile, Business hours, Plan, Payments, Communications, Staff, Data import). **Staff** see **Account** at the same URL for their own name, email, phone, and password, not the whole venue.
@@ -62,9 +62,9 @@ Only if you want guests to pay **online** (deposit or full payment) before confi
 Embeds and QR now live on **Settings → Booking Page** (old \`/dashboard/settings/widget\` URLs redirect there).
 `.trim(),
       markdownRestaurant: `
-# Welcome to ReserveNI
+# Welcome to Resneo
 
-You are on a **Restaurant** or **Founding Partner** plan. ReserveNI helps you run **table reservations**, guest messaging, and optional **card payments** through **Stripe Connect**, from the **dashboard** through to your public \`/book/...\` page and optional **website embed**.
+You are on a **Restaurant** or **Founding Partner** plan. Resneo helps you run **table reservations**, guest messaging, and optional **card payments** through **Stripe Connect**, from the **dashboard** through to your public \`/book/...\` page and optional **website embed**.
 
 > **Quick mental model:** the dashboard is for your team. Guests never log into it.
 
@@ -75,12 +75,12 @@ You are on a **Restaurant** or **Founding Partner** plan. ReserveNI helps you ru
 | **Dining and tables** | **Dining Availability** (admins), **Day Sheet**, **Bookings**, **Waitlist** when you use table reservations, and optional **Table Grid** and **Floor Plan** when **table management** is enabled. |
 | **Schedule add-ons** | If you enable **classes**, **events**, **resources**, or **unified scheduling**, you also get **Calendar Availability**, **Appointment Calendar**, and catalogue links such as **Services**, **Events**, **Classes**, and **Resources** after **Contacts**. The sidebar matches what the product turned on for your venue. |
 | **Guest experience** | Public page, embed, **email** and **SMS** templates under **Settings → Communications**. |
-| **Payments** | Guest charges through **Stripe Connect**. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD} |
+| **Payments** | Guest charges through **Stripe Connect**. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
 | **Insight** | **Reports** (admins), **Contacts**, **Data import** (admins). |
 
 ## Billing you need to know
 
-**Settings → Plan** is your **ReserveNI subscription** (the software). **Settings → Payments** is **Stripe Connect** for guest cards. They bill and renew on different rails. Fix Plan issues first if banners say subscription or public booking paused.
+**Settings → Plan** is your **Resneo subscription** (the software). **Settings → Payments** is **Stripe Connect** for guest cards. They bill and renew on different rails. Fix Plan issues first if banners say subscription or public booking paused.
 
 ## First working session
 
@@ -99,9 +99,9 @@ You are on a **Restaurant** or **Founding Partner** plan. ReserveNI helps you ru
 [Troubleshooting](/help/troubleshooting) and **Support** in the sidebar footer.
 `.trim(),
       markdownAppointments: `
-# Welcome to ReserveNI
+# Welcome to Resneo
 
-You are on an **Appointments** plan (**Light**, **Plus**, or **Pro**). ReserveNI is built around **bookable calendars**, **services** (and related catalogues), **availability**, and guest messaging, with optional **Stripe Connect** for deposits and online payment. You work in the **dashboard**; guests book on your **public booking page** and, if you use it, an **embed** on your website.
+You are on an **Appointments** plan (**Light**, **Plus**, or **Pro**). Resneo is built around **bookable calendars**, **services** (and related catalogues), **availability**, and guest messaging, with optional **Stripe Connect** for deposits and online payment. You work in the **dashboard**; guests book on your **public booking page** and, if you use it, an **embed** on your website.
 
 > **Quick mental model:** staff tools live under \`/dashboard\`. Guest booking lives at \`/book/your-slug\` (and \`/embed/your-slug\` inside an iframe).
 
@@ -113,7 +113,7 @@ You are on an **Appointments** plan (**Light**, **Plus**, or **Pro**). ReserveNI
 | **Catalogue** | **Services** for appointment lines, plus **Classes**, **Events**, or **Resources** when those **booking models** are enabled under **Settings → Profile**. |
 | **Operations** | **Bookings** or **Appointments** list (the label changes when you mix models), **New Booking** or **New Appointment**, and **Contacts**. |
 | **Guest comms** | **Settings → Communications** for email and SMS templates and policies. |
-| **Payments** | **Stripe Connect** under **Settings → Payments** for guest cards. ${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD} |
+| **Payments** | **Stripe Connect** under **Settings → Payments** for guest cards. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
 | **Insight** | **Reports** (admins), **Contacts**, **Data import** (admins). |
 
 ## Tiers in one place
@@ -436,11 +436,11 @@ Two different Stripe relationships exist. Treat them separately:
 
 | | **Settings → Plan** | **Settings → Payments** |
 | --- | --- | --- |
-| **What it pays for** | Your **ReserveNI subscription** (the software). | **Nothing to ReserveNI** for guest cards. Guest charges use **Stripe Connect**. |
-| **Money goes to** | ReserveNI as the SaaS vendor. | **Your** connected Stripe account, then bank payouts per Stripe rules. |
+| **What it pays for** | Your **Resneo subscription** (the software). | **Nothing to Resneo** for guest cards. Guest charges use **Stripe Connect**. |
+| **Money goes to** | Resneo as the SaaS vendor. | **Your** connected Stripe account, then bank payouts per Stripe rules. |
 | **Who sets it up** | Venue **admin**. | Venue **admin** (staff are prompted to ask an admin). |
 
-${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
+${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
 
 ## Stripe Connect (guest payments)
 
@@ -456,9 +456,9 @@ The app marks Connect **ready** when Stripe reports **charges enabled** and **de
 - If Stripe shows **restricted** or **pending** tasks, open the **Stripe Dashboard** from in app links and finish them.
 - After Connect works, set **payment requirements** on each catalogue line you use (services, classes, events, resources, or dining rules on Restaurant plans).
 
-## ReserveNI subscription (**Plan** tab)
+## Resneo subscription (**Plan** tab)
 
-**Settings → Plan** (\`?tab=plan\`) covers upgrades, SMS allowances on appointment tiers, cancellation state, and the card on file for **ReserveNI itself**. If software billing fails, banners on **Home** or **Settings** explain what paused. Fix **Plan** issues separately from Connect.
+**Settings → Plan** (\`?tab=plan\`) covers upgrades, SMS allowances on appointment tiers, cancellation state, and the card on file for **Resneo itself**. If software billing fails, banners on **Home** or **Settings** explain what paused. Fix **Plan** issues separately from Connect.
 
 ## Setup checklist
 
@@ -476,11 +476,11 @@ The app marks Connect **ready** when Stripe reports **charges enabled** and **de
 
 | | **Settings → Plan** | **Settings → Payments** |
 | --- | --- | --- |
-| **Purpose** | **ReserveNI** software subscription. | **Stripe Connect** for guest card charges. |
-| **Payout** | SaaS billing to ReserveNI. | Guest money to **your** connected account. |
+| **Purpose** | **Resneo** software subscription. | **Stripe Connect** for guest card charges. |
+| **Payout** | SaaS billing to Resneo. | Guest money to **your** connected account. |
 | **Who** | **Admin**. | **Admin**. |
 
-${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
+${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
 
 ## Connect for guest cards
 
@@ -493,7 +493,7 @@ Tips: use the correct legal entity, resolve **restricted** states in the Stripe 
 
 ## Software subscription
 
-**Settings → Plan** manages your **ReserveNI** invoice, plan tier, and payment method. Public booking pauses from subscription state are explained in product banners, not by Connect alone.
+**Settings → Plan** manages your **Resneo** invoice, plan tier, and payment method. Public booking pauses from subscription state are explained in product banners, not by Connect alone.
 
 ## Checklist shortcut
 
@@ -511,11 +511,11 @@ Tips: use the correct legal entity, resolve **restricted** states in the Stripe 
 
 | | **Settings → Plan** | **Settings → Payments** |
 | --- | --- | --- |
-| **Purpose** | **ReserveNI** subscription (Light, Plus, or Pro software). | **Stripe Connect** for guest card charges. |
+| **Purpose** | **Resneo** subscription (Light, Plus, or Pro software). | **Stripe Connect** for guest card charges. |
 | **Money** | Software invoice. | Guest payments to **your** connected account. |
 | **Who** | **Admin**. | **Admin**. |
 
-${RESERVENI_MARKETING_PAYMENTS_AND_NO_HOLD}
+${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
 
 ## Stripe Connect
 
@@ -565,7 +565,7 @@ Guests never use the dashboard. They book through:
 
 ## What guests see
 
-Branding from **Settings → Profile**, **tabs** when multiple booking models are on, and **Stripe hosted** card fields when your rules require payment. ReserveNI never asks you to build custom card fields.
+Branding from **Settings → Profile**, **tabs** when multiple booking models are on, and **Stripe hosted** card fields when your rules require payment. Resneo never asks you to build custom card fields.
 
 ### When booking is paused
 

@@ -1,11 +1,11 @@
-# ReserveNI Add-Ons — End-to-End Implementation Plan
+# Resneo Add-Ons — End-to-End Implementation Plan
 
 **Status:** Proposed (no code written yet)
 **Date:** 2026-05-27
 **Owner:** TBD
 **Related plans / references:**
-- `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md`
-- `Docs/ReserveNI_Unified_Booking_Functionality.md`
+- `Docs/Resneo_Bookable_Services_Landscape_Plan.md`
+- `Docs/Resneo_Unified_Booking_Functionality.md`
 - `Docs/reserveni-linked-accounts-spec.md`
 - Service variants migration: `supabase/migrations/20260730120000_service_variants.sql`
 - Variant override library: `src/lib/appointments/service-variant.ts`
@@ -14,7 +14,7 @@
 
 ## 0. Reading guide
 
-This is the full, granular plan for adding **Add-Ons** to ReserveNI end-to-end. It is structured so that an engineer can work top-to-bottom in order, ship in phases (see §17 Rollout), and never have to invent shape or naming on the fly. Every section either:
+This is the full, granular plan for adding **Add-Ons** to Resneo end-to-end. It is structured so that an engineer can work top-to-bottom in order, ship in phases (see §17 Rollout), and never have to invent shape or naming on the fly. Every section either:
 
 - Names the file or table that already exists, or
 - Specifies the **new** file/table to create, with exact name and columns/props.
@@ -64,7 +64,7 @@ Before any new code, note these existing files. The plan slots into them rather 
 
 ### 2.1 Schema duality (critical)
 
-ReserveNI has **two parallel appointment service tables**:
+Resneo has **two parallel appointment service tables**:
 
 - **Unified scheduling venues** use `service_items` (created by `20260430120000_unified_scheduling_engine.sql`).
 - **Legacy appointments venues** use `appointment_services` (created by `20260327000001_multi_model_foundation.sql`).
@@ -1291,7 +1291,7 @@ Plan-tier gating later: appointments-light excluded; plus/pro/restaurant include
 ### 17.3 Documentation
 
 - Update `Docs/PRD.md` with a short section on Add-Ons.
-- Update `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md` to cross-reference this plan.
+- Update `Docs/Resneo_Bookable_Services_Landscape_Plan.md` to cross-reference this plan.
 - Add a help-centre article (or queue one in the help-content backlog): "How to create Add-Ons" with a quick walkthrough.
 
 ### 17.4 Migration risk
@@ -1421,7 +1421,7 @@ When implementing, work through this list top to bottom. Tick as you go.
 
 - [ ] Register `addons_enabled` in `src/lib/feature-flags`.
 - [ ] Update `Docs/FEATURE_FLAGS.md`.
-- [ ] Cross-link this doc from `Docs/PRD.md` and `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md`.
+- [ ] Cross-link this doc from `Docs/PRD.md` and `Docs/Resneo_Bookable_Services_Landscape_Plan.md`.
 - [ ] Help-centre article.
 
 ### Tests

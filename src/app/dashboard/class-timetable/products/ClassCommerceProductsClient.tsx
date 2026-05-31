@@ -1565,7 +1565,7 @@ function MembershipPanel({
     <div className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.4fr)]">
       <div className="space-y-4">
         <SectionIntro title="Create a membership">
-          Set recurring billing (ReserveNI creates Stripe prices on your connected account) or paste an existing Stripe
+          Set recurring billing (Resneo creates Stripe prices on your connected account) or paste an existing Stripe
           Price ID. Configure access rules, eligible classes, rollover, and discounts.
         </SectionIntro>
         <form onSubmit={(ev) => void onCreate(ev)} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

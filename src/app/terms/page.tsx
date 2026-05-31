@@ -3,9 +3,9 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Website Terms of Use - ReserveNI',
+  title: 'Website Terms of Use - Resneo',
   description:
-    'Rules for using the ReserveNI public website and general pages at reserveni.com, operated by JAR 26 LTD trading as ReserveNI.',
+    'Rules for using the Resneo public website and general pages at www.resneo.com, operated by JAR 26 LTD trading as Resneo.',
 };
 
 const LAST_UPDATED = '01 May 2026';
@@ -16,7 +16,7 @@ export default function TermsPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
           <Link href="/">
-            <Image src="/Logo.png" alt="ReserveNI" width={120} height={36} className="h-8 w-auto" />
+            <Image src="/Logo.png" alt="Resneo" width={120} height={36} className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -29,8 +29,8 @@ export default function TermsPage() {
           <div className="space-y-8 text-sm leading-relaxed text-slate-700">
             <section>
               <p>
-                These Website Terms of Use explain the rules for using the ReserveNI website and general public pages,
-                including www.reserveni.com and any related public pages we operate.
+                These Website Terms of Use explain the rules for using the Resneo website and general public pages,
+                including www.resneo.com and any related public pages we operate.
               </p>
               <p className="mt-3">
                 By using this website, you agree to these terms. If you do not agree to them, you should not use the
@@ -42,7 +42,7 @@ export default function TermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">1. Who we are</h2>
               <p>
                 This website is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
-                NI740269, trading as ReserveNI.
+                NI740269, trading as Resneo.
               </p>
               <p className="mt-3">
                 Our registered office is 100a Main Street, Bangor, Northern Ireland, BT20 4AG.
@@ -52,8 +52,8 @@ export default function TermsPage() {
               </p>
               <p className="mt-3">
                 You can contact us by email:{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:hello@resneo.com" className="text-brand-600 hover:underline">
+                  hello@resneo.com
                 </a>
                 .
               </p>
@@ -66,14 +66,14 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">2. What ReserveNI does</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">2. What Resneo does</h2>
               <p>
-                ReserveNI provides booking and business-management software for venues and service-based businesses. Our
+                Resneo provides booking and business-management software for venues and service-based businesses. Our
                 platform may include booking pages, booking widgets, staff/resource management, client records,
                 reminders, deposit collection functionality, reporting and related tools.
               </p>
               <p className="mt-3">
-                The public website provides general information about ReserveNI, our features, pricing, and how
+                The public website provides general information about Resneo, our features, pricing, and how
                 prospective business customers can contact us or sign up.
               </p>
             </section>
@@ -84,14 +84,14 @@ export default function TermsPage() {
               </h2>
               <p>These Website Terms of Use apply to visitors using the public website.</p>
               <p className="mt-3">
-                If you sign up for, subscribe to, or onboard onto the ReserveNI platform as a business customer, your
+                If you sign up for, subscribe to, or onboard onto the Resneo platform as a business customer, your
                 use of the platform may also be governed by separate customer terms, an order form, subscription terms,
                 payment terms, data processing terms and any onboarding documents agreed with you.
               </p>
               <p className="mt-3">
                 If there is any conflict between these Website Terms of Use and the specific customer terms agreed with
                 you during sign-up or onboarding, the customer terms will take priority for your use of the paid
-                ReserveNI platform.
+                Resneo platform.
               </p>
             </section>
 
@@ -115,11 +115,11 @@ export default function TermsPage() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold text-slate-900">5. Guest bookings made through ReserveNI</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">5. Guest bookings made through Resneo</h2>
               <p>
-                ReserveNI provides booking technology to venues and businesses. Where a guest, client or customer makes a
-                booking with a venue using a ReserveNI booking page, widget, link or related booking tool, the booking
-                or service contract is between the guest and the relevant venue, not ReserveNI.
+                Resneo provides booking technology to venues and businesses. Where a guest, client or customer makes a
+                booking with a venue using a Resneo booking page, widget, link or related booking tool, the booking
+                or service contract is between the guest and the relevant venue, not Resneo.
               </p>
               <p className="mt-3">
                 The venue is responsible for its own services, staff, premises, prices, availability, booking rules,
@@ -127,7 +127,7 @@ export default function TermsPage() {
                 consumer-law compliance and customer complaints.
               </p>
               <p className="mt-3">
-                ReserveNI is not responsible for the performance of services provided by venues, the accuracy of venue
+                Resneo is not responsible for the performance of services provided by venues, the accuracy of venue
                 information, venue availability, venue cancellation decisions, venue refund decisions, or any failure by
                 a venue to provide a booked service.
               </p>
@@ -140,12 +140,12 @@ export default function TermsPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">6. Deposits and payments</h2>
               <p>
-                Where deposits, booking payments or related payments are made through a ReserveNI booking page or
+                Where deposits, booking payments or related payments are made through a Resneo booking page or
                 platform feature, those payments are processed and managed through the relevant venue and/or a
                 third-party payment provider such as Stripe.
               </p>
               <p className="mt-3">
-                ReserveNI does not hold booking money. We do not operate as a bank, escrow
+                Resneo does not hold booking money. We do not operate as a bank, escrow
                 provider, payment institution or client-money account for booking payments.
               </p>
               <p className="mt-3">
@@ -154,7 +154,7 @@ export default function TermsPage() {
                 provider.
               </p>
               <p className="mt-3">
-                ReserveNI does not hold booking money and is not responsible for refunding booking payments, deposit
+                Resneo does not hold booking money and is not responsible for refunding booking payments, deposit
                 payments or venue service payments. Guests should contact the venue directly for booking-payment
                 disputes, service complaints or refund requests.
               </p>
@@ -184,7 +184,7 @@ export default function TermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">8. Intellectual property</h2>
               <p>
                 The website, platform, software, branding, trade names, logos, designs, text, graphics, layout,
-                databases and other materials are owned by or licensed to JAR 26 LTD trading as ReserveNI, unless
+                databases and other materials are owned by or licensed to JAR 26 LTD trading as Resneo, unless
                 otherwise stated.
               </p>
               <p className="mt-3">
@@ -199,7 +199,7 @@ export default function TermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">9. Third-party links and services</h2>
               <p>
                 The website may refer or link to third-party websites, payment providers, integrations, platforms or
-                services. These third-party services are not controlled by ReserveNI.
+                services. These third-party services are not controlled by Resneo.
               </p>
               <p className="mt-3">
                 We are not responsible for the content, availability, accuracy, security, privacy practices, terms,
@@ -279,8 +279,8 @@ export default function TermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">15. Contact</h2>
               <p>
                 Questions about these Website Terms of Use should be sent by email:{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:hello@resneo.com" className="text-brand-600 hover:underline">
+                  hello@resneo.com
                 </a>
               </p>
             </section>
@@ -301,7 +301,7 @@ export default function TermsPage() {
           </Link>
           {' · '}
           <Link href="/" className="hover:text-brand-600">
-            Back to ReserveNI
+            Back to Resneo
           </Link>
         </div>
       </main>

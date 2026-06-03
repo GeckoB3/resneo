@@ -57,7 +57,9 @@ describe('bookingCalendarBlockPalette', () => {
     // The accent now lives on a dedicated stripe column (not the card box-shadow)
     // so drag handles/content can't cover it; the card keeps a neutral glassy shell.
     const stripe = CalendarBookingStatusStripe({ palette: p });
-    expect(stripe.props.style.backgroundColor).toBe('#D97706');
+    // React 19 types `ReactElement.props` as `unknown`; narrow to read the inline style.
+    const stripeProps = stripe.props as { style: { backgroundColor?: string } };
+    expect(stripeProps.style.backgroundColor).toBe('#D97706');
     expect(bookingCalendarBlockCardStyle(p).backgroundColor).toBe(p.bg);
   });
 

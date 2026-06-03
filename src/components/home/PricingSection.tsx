@@ -74,8 +74,14 @@ export function PricingSection() {
               </Link>
             </div>
 
-            {/* Appointments Plus */}
-            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            {/* Appointments Plus — most popular */}
+            <div className="relative flex flex-col rounded-2xl border-2 border-brand-300 bg-white p-8 shadow-xl shadow-brand-900/10 ring-1 ring-brand-600/10 lg:-translate-y-3">
+              <span className="absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-600 to-brand-500 px-3.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white shadow-md shadow-brand-900/20">
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M11.48 3.5a.6.6 0 0 1 1.04 0l2.34 4.07 4.6.98a.6.6 0 0 1 .32.99l-3.14 3.47.5 4.66a.6.6 0 0 1-.85.62L12 16.9l-4.29 1.86a.6.6 0 0 1-.84-.62l.5-4.66-3.15-3.47a.6.6 0 0 1 .32-.99l4.6-.98 2.34-4.07Z" />
+                </svg>
+                Most popular
+              </span>
               <h3 className="text-lg font-bold text-slate-900">Appointments Plus</h3>
               <div className="mt-3 flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PLUS_PRICE}</span>

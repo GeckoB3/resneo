@@ -289,6 +289,63 @@ button, a, input, select, textarea {
   }
 }
 
+/* ── Marketing homepage motion ──────────────────────────────────────────
+   Gentle float for floating product cards, an infinite logo/marquee strip,
+   and a scroll-reveal primitive driven by HomeReveal (IntersectionObserver). */
+@keyframes home-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes home-float-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-18px); }
+}
+@keyframes home-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@utility animate-home-float {
+  animation: home-float 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@utility animate-home-float-slow {
+  animation: home-float-slow 8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.home-marquee-track {
+  animation: home-marquee 38s linear infinite;
+}
+.home-marquee:hover .home-marquee-track {
+  animation-play-state: paused;
+}
+
+/* Scroll reveal: hidden until HomeReveal adds .is-visible. Stagger via inline
+   --reveal-delay. Falls back to fully visible when JS/IO is unavailable. */
+.home-reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+.home-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-home-float,
+  .animate-home-float-slow,
+  .home-marquee-track {
+    animation: none;
+  }
+  .home-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
 /* Help centre article typography (no @tailwindcss/typography plugin) */
 .help-prose {
   max-width: 65ch;

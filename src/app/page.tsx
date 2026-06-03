@@ -128,7 +128,7 @@ export default function Home() {
             <HomeReveal delay={80}>
               <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
                 Take bookings your way.
-                <span className="mt-1 block bg-gradient-to-r from-brand-600 via-brand-500 to-accent-dark bg-clip-text text-transparent">
+                <span className="mt-1 block bg-gradient-to-r from-brand-600 via-brand-500 to-accent-dark bg-clip-text pb-[0.12em] text-transparent">
                   Cut no-shows for good.
                 </span>
               </h1>

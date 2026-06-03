@@ -135,7 +135,7 @@ export default function Home() {
             </HomeReveal>
             <HomeReveal delay={150}>
               <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
-                Resneo is the simple, all-in-one booking platform for busy businesses. Fill your diary, automate every reminder, and take deposits or payments only if you choose, all without the admin.
+                Resneo is the simple, all-in-one booking platform for busy businesses. Fill your diary, automate every reminder, and take deposits or payments if needed, all without the admin.
               </p>
             </HomeReveal>
             <HomeReveal delay={220}>

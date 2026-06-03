@@ -193,6 +193,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           enabledModels,
           isAdmin,
           venueTerminology,
+          complianceRecordsEnabled: appointmentsFeatureFlags.compliance_records_enabled,
         }}
       >
       <main className="dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">

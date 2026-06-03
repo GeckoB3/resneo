@@ -58,3 +58,9 @@ scripts/output/
 # eslint output captures (not source)
 eslint-output.txt
 eslint2.txt
+
+# editor / merge backups
+*.orig
+
+# local log exports (may contain PII — never commit)
+Docs/supabase-*-logs-*.csv*

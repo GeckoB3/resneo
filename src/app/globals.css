@@ -766,3 +766,63 @@ button, a, input, select, textarea {
 .appointment-public .focus-visible\:ring-brand-500:focus-visible {
   --tw-ring-color: color-mix(in srgb, var(--ap-accent) 35%, transparent);
 }
+
+/* ── Expanded booking detail: Apple-style polish ──────────────────────────────
+   Smooth accordion height animation via ::details-content + interpolate-size.
+   The @supports guard means non-supporting browsers keep the native instant
+   toggle (never broken) — progressive enhancement only. */
+@supports (interpolate-size: allow-keywords) {
+  details.booking-accordion {
+    interpolate-size: allow-keywords;
+  }
+  details.booking-accordion::details-content {
+    block-size: 0;
+    overflow: clip;
+    opacity: 0;
+    transition:
+      block-size 320ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 200ms ease,
+      content-visibility 320ms allow-discrete;
+  }
+  details.booking-accordion[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
+}
+
+/* Gentle entrance for the floating booking detail panel. */
+@keyframes booking-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.982); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.booking-panel-animate-in {
+  animation: booking-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .booking-panel-animate-in { animation: none; }
+  details.booking-accordion::details-content { transition: none; }
+}
+
+/* ── Operations workspace toolbar — unified, Apple-grade interaction polish ──
+   One source of truth for motion, press feedback, and focus across every
+   control in the shared toolbar (calendar, bookings, etc.). */
+.ops-toolbar :is(button, a[href], [role='button']) {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease,
+    transform 130ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ops-toolbar :is(button, a[href], [role='button']):not(:disabled):active {
+  transform: scale(0.96);
+}
+.ops-toolbar :is(button, a[href], [role='button']):focus-visible {
+  outline: 2px solid rgba(61, 114, 160, 0.6); /* brand-400 */
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ops-toolbar :is(button, a[href], [role='button']):active { transform: none; }
+}

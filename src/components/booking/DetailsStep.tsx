@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useForm, Controller, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -123,6 +123,8 @@ interface DetailsStepProps {
   hideAppointmentRequestField?: boolean;
   submitClassName?: string;
   fieldClassName?: string;
+  /** Notified as the guest types their email (debounced upstream) — drives the compliance pre-check. */
+  onEmailChange?: (email: string) => void;
 }
 
 export function DetailsStep({
@@ -150,6 +152,7 @@ export function DetailsStep({
   hideAppointmentRequestField = false,
   submitClassName,
   fieldClassName,
+  onEmailChange,
 }: DetailsStepProps) {
   const isStaff = audience === 'staff';
   const isStaffWalkIn = audience === 'staff_walk_in';
@@ -191,6 +194,11 @@ export function DetailsStep({
   });
   const [wFirstName, wLastName, wEmail, wPhone] = watchedGuestFields ?? ['', '', '', ''];
   const useStaffContactAutocomplete = isStaff || isStaffWalkIn;
+
+  // Surface the typed email upward (compliance pre-check) without re-rendering the parent on every keystroke.
+  useEffect(() => {
+    onEmailChange?.((wEmail ?? '').trim());
+  }, [wEmail, onEmailChange]);
 
   const dateStr = formatDate(date);
   const isAppointment = variant === 'appointment';

@@ -39,6 +39,11 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import {
+  checkBookingCompliance,
+  complianceUnmetMessage,
+  COMPLIANCE_REQUIREMENT_UNMET,
+} from '@/lib/compliance/enforce-booking';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -401,6 +406,51 @@ export async function POST(request: NextRequest) {
       },
       guestLinkOptions,
     );
+
+    // Compliance gate per attendee (improvement plan Phase 4 / G6) — mirrors the
+    // single-booking enforcement. All siblings share one guest, so a single record
+    // satisfies the requirement for every attendee whose service needs it. Runs
+    // before any insert so a blocked group creates nothing; fail-open inside the
+    // helper means compliance issues never break booking.
+    const complianceContext = isOnlineLikeSource ? 'online' : 'staff';
+    const blockedDetails: Array<{
+      person_label: string;
+      compliance_type_id: string;
+      compliance_type_name: string;
+      enforcement: string;
+      state: string;
+    }> = [];
+    const blockedUnmet: Array<{
+      compliance_type_id: string;
+      compliance_type_name: string;
+      enforcement: string;
+      state: string;
+    }> = [];
+    for (const person of validatedPeople) {
+      const check = await checkBookingCompliance(supabase, {
+        venueId: venue_id,
+        guestId: guest.id,
+        appointmentServiceId: useUnifiedBookingRows ? null : person.appointment_service_id,
+        serviceItemId: useUnifiedBookingRows ? person.appointment_service_id : null,
+        bookingDate: person.booking_date,
+        bookingTime: person.booking_time + ':00',
+        context: complianceContext,
+      });
+      for (const d of check.details) {
+        blockedDetails.push({ person_label: person.person_label, ...d });
+        blockedUnmet.push(d);
+      }
+    }
+    if (blockedDetails.length > 0) {
+      return NextResponse.json(
+        {
+          error: COMPLIANCE_REQUIREMENT_UNMET,
+          message: complianceUnmetMessage(blockedUnmet, complianceContext),
+          details: blockedDetails,
+        },
+        { status: 409 },
+      );
+    }
 
     const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];

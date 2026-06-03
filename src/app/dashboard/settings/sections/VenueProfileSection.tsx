@@ -93,6 +93,7 @@ export function VenueProfileSection({
   const { report } = useSettingsSave();
   const lastSavedFingerprint = useRef<string | null>(null);
   const venueIdRef = useRef<string | null>(null);
+  const saveInFlight = useRef(false);
 
   const parsedAddr = parseAddress(venue.address);
 
@@ -100,7 +101,6 @@ export function VenueProfileSection({
     register,
     control,
     formState: { errors },
-    setValue,
     watch,
     getValues,
     reset,
@@ -158,20 +158,13 @@ export function VenueProfileSection({
         throw new Error('Unexpected response from server. Please refresh and try again.');
       }
       const { name: savedName, ...savedFields } = body;
-      setValue('website_url', savedFields.website_url ?? '');
-      setValue('name', savedName);
-      setValue('email', savedFields.email ?? '');
-      setValue('phone', savedFields.phone ?? '');
-      setValue('cuisine_type', savedFields.cuisine_type ?? '');
-      setValue('price_band', savedFields.price_band ?? '');
-      setValue('no_show_grace_minutes', savedFields.no_show_grace_minutes ?? 15);
-      setValue('kitchen_email', savedFields.kitchen_email ?? '');
-      setValue('timezone', savedFields.timezone ?? data.timezone);
-      const addr = parseAddress(savedFields.address ?? null);
-      setValue('address_name', addr.name);
-      setValue('address_street', addr.street);
-      setValue('address_town', addr.town);
-      setValue('address_postcode', addr.postcode);
+      // IMPORTANT: never write the server response back into the form fields.
+      // The form is the single source of truth for what the user typed. Writing
+      // the server's normalized echo back (phone → E.164, website → https URL,
+      // address re-formatting) would clobber whatever the user has typed or
+      // deleted in the meantime — that's the "reverts / skips characters" bug.
+      // We only sync the parent venue state (for display elsewhere) and record
+      // a fingerprint of what we just sent so we don't re-save unchanged data.
       onUpdate({
         name: savedName,
         address: savedFields.address ?? null,
@@ -185,12 +178,13 @@ export function VenueProfileSection({
         kitchen_email: savedFields.kitchen_email ?? null,
         timezone: savedFields.timezone ?? venue.timezone,
       });
-      const synced = profileSchema.safeParse(getValues());
-      if (synced.success) {
-        lastSavedFingerprint.current = payloadFingerprint(synced.data);
-      }
+      // Fingerprint exactly what we sent. An unchanged form will produce the
+      // same fingerprint next tick (so we don't re-save), while any edit the
+      // user made during this request yields a different fingerprint and gets
+      // saved on the next debounce — nothing is lost or overwritten.
+      lastSavedFingerprint.current = payloadFingerprint(data);
     },
-    [onUpdate, setValue, venue.timezone, getValues],
+    [onUpdate, venue.timezone],
   );
 
   useEffect(() => {
@@ -230,28 +224,49 @@ export function VenueProfileSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time fingerprint from initial defaults
   }, []);
 
+  // Serialized autosave. Only one PATCH is ever in flight at a time, so out-of-
+  // order responses can't persist stale data. When a save finishes we re-check
+  // the live form against what we just sent; if the user typed more during the
+  // request, we save again — so the final typed/deleted state always wins.
+  const trySave = useCallback(async () => {
+    if (!isAdmin) return;
+    if (saveInFlight.current) return; // in-flight save will re-check on completion
+    const parsed = profileSchema.safeParse(getValues());
+    if (!parsed.success) return;
+    if (payloadFingerprint(parsed.data) === lastSavedFingerprint.current) return;
+    saveInFlight.current = true;
+    report({ status: 'saving', message: null });
+    let saved = false;
+    try {
+      await persistProfile(parsed.data);
+      saved = true;
+      report({ status: 'saved', message: 'Venue profile saved.' });
+    } catch (err) {
+      report({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to save profile',
+      });
+    } finally {
+      saveInFlight.current = false;
+    }
+    // Only re-check after a successful save (lastSavedFingerprint advanced).
+    // The form may have changed while the request was in flight — save the
+    // latest state too. On error we stop so we don't hot-loop a failing request;
+    // the next keystroke (or debounce tick) will retry.
+    if (!saved) return;
+    const after = profileSchema.safeParse(getValues());
+    if (after.success && payloadFingerprint(after.data) !== lastSavedFingerprint.current) {
+      void trySave();
+    }
+  }, [isAdmin, getValues, persistProfile, report]);
+
   useEffect(() => {
     if (!isAdmin) return;
     const timer = window.setTimeout(() => {
-      const parsed = profileSchema.safeParse(getValues());
-      if (!parsed.success) return;
-      const next = payloadFingerprint(parsed.data);
-      if (next === lastSavedFingerprint.current) return;
-      void (async () => {
-        report({ status: 'saving', message: null });
-        try {
-          await persistProfile(parsed.data);
-          report({ status: 'saved', message: 'Venue profile saved.' });
-        } catch (err) {
-          report({
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Failed to save profile',
-          });
-        }
-      })();
+      void trySave();
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [watched, isAdmin, persistProfile, report, getValues]);
+  }, [watched, isAdmin, trySave]);
 
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50';

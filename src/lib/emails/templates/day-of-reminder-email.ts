@@ -45,6 +45,7 @@ export function renderDayOfReminderEmail(
     serviceName: booking.appointment_service_name ?? null,
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
+    addonLines: appt ? booking.addon_lines ?? null : null,
     ctaLabel: booking.manage_booking_link ? "Manage booking" : undefined,
     ctaUrl: booking.manage_booking_link,
   });

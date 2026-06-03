@@ -144,19 +144,30 @@ function KpiChips({
 
 /** Matched New / Walk-in sizing in compact mode: icons only & square below `sm`; equal width with label from `sm` up; max width capped below legacy 8rem. */
 const COMPACT_BOOKING_ACTION_LAYOUT =
-  'inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1 rounded-lg text-[11px] font-semibold text-white shadow-sm transition-colors sm:w-[5.15rem] sm:min-w-[5.15rem] sm:max-w-[5.15rem] sm:gap-1 sm:px-1.5';
+  'inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1 rounded-[10px] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.2)] sm:w-[5.15rem] sm:min-w-[5.15rem] sm:max-w-[5.15rem] sm:gap-1 sm:px-1.5';
 
 function LiveStateIndicator({ state }: { state: 'live' | 'reconnecting' }) {
   const isLive = state === 'live';
   return (
     <span
-      className={`inline-flex h-3 w-3 shrink-0 rounded-full ring-2 ring-white ${
-        isLive ? 'bg-emerald-500' : 'bg-yellow-400'
-      }`}
+      className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center"
       role="status"
       aria-label={isLive ? 'Live updates' : 'Updates may be delayed'}
       title={isLive ? 'Live updates' : 'Updates may be delayed. Reconnecting…'}
-    />
+    >
+      {isLive ? (
+        <span
+          className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/60 motion-safe:animate-ping"
+          style={{ animationDuration: '2s' }}
+          aria-hidden
+        />
+      ) : null}
+      <span
+        className={`relative inline-flex h-2.5 w-2.5 rounded-full ring-2 ring-white ${
+          isLive ? 'bg-emerald-500' : 'bg-yellow-400'
+        }`}
+      />
+    </span>
   );
 }
 
@@ -213,6 +224,11 @@ export interface OperationsWorkspaceToolbarProps {
   onNextChipClick?: () => void;
   /** Extra content shown below KPI chips in the Info panel. */
   infoPanelExtra?: ReactNode;
+  /**
+   * Show the Info button (compact) / inline KPI summary (default). Off for surfaces
+   * with no meaningful covers/tables metrics (e.g. the appointments calendar).
+   */
+  showSummaryInfo?: boolean;
   /** Extra actions after Walk-in (e.g. Edit layout link). */
   trailingActions?: ReactNode;
 }
@@ -254,6 +270,7 @@ export function OperationsWorkspaceToolbar({
   onUnassignedChipClick,
   onNextChipClick,
   infoPanelExtra,
+  showSummaryInfo = true,
   trailingActions,
 }: OperationsWorkspaceToolbarProps) {
   const baseId = useId();
@@ -403,8 +420,8 @@ export function OperationsWorkspaceToolbar({
                 type="button"
                 onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
                 className={compact
-                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
+                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
                 aria-label="Previous day"
               >
                 <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -418,8 +435,8 @@ export function OperationsWorkspaceToolbar({
                   onClick={() => setOpen((p) => (p === 'date' ? 'none' : 'date'))}
                   title={typeof dateLabel === 'string' ? dateLabel : formatDateHeading(date)}
                   className={compact
-                    ? 'inline-flex min-h-8 w-full min-w-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-[11px] font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
-                    : 'inline-flex min-h-10 w-full min-w-0 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 sm:px-2.5 sm:text-sm'}
+                    ? 'inline-flex min-h-8 w-full min-w-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white px-2 py-1 text-center text-[11px] font-semibold leading-tight text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:text-xs'
+                    : 'inline-flex min-h-10 w-full min-w-0 flex-col items-center justify-center rounded-lg border border-slate-200/80 bg-white px-2 py-1.5 text-center text-xs font-semibold text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:px-2.5 sm:text-sm'}
                   aria-expanded={open === 'date'}
                   aria-controls={datePanelId}
                 >
@@ -449,7 +466,7 @@ export function OperationsWorkspaceToolbar({
                     target instanceof Element && Boolean(target.closest(CALENDAR_PICKER_SUBPOPOVER_SELECTOR))
                   }
                   aria-label="Date and calendar"
-                  className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
+                  className="animate-fade-in z-50 rounded-xl border border-slate-200/80 bg-white p-2 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100 sm:p-3"
                 >
                   {datePickerPanelContent}
                 </ClampedFixedDropdown>
@@ -458,8 +475,8 @@ export function OperationsWorkspaceToolbar({
                 type="button"
                 onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
                 className={compact
-                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+                  ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
+                  : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
                 aria-label="Next day"
               >
                 <svg className={compact ? 'h-4 w-4' : 'h-5 w-5'} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -472,8 +489,8 @@ export function OperationsWorkspaceToolbar({
             type="button"
             onClick={() => onDateChange(todayIso)}
             className={compact
-              ? 'min-h-8 w-[3.25rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
-              : 'min-h-10 shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-sm'}
+              ? 'min-h-8 w-[3.25rem] shrink-0 rounded-lg border border-slate-200/80 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:text-xs'
+              : 'min-h-10 shrink-0 rounded-lg border border-slate-200/80 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:text-sm'}
           >
             Today
           </button>
@@ -492,8 +509,8 @@ export function OperationsWorkspaceToolbar({
             type="button"
             onClick={() => setOpen((p) => (p === 'timeline' ? 'none' : 'timeline'))}
             className={compact
-              ? 'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
-              : 'inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm'}
+              ? 'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200/80 bg-white px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+              : 'inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200/80 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:px-3 sm:text-sm'}
             aria-label={timelineLabel ? `Timeline controls, currently set to ${timelineLabel}` : 'Timeline controls'}
             aria-expanded={open === 'timeline'}
             aria-controls={timelinePanelId}
@@ -514,7 +531,7 @@ export function OperationsWorkspaceToolbar({
             id={timelinePanelId}
             onDismiss={close}
             aria-label="Timeline controls"
-            className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+            className="animate-fade-in z-50 rounded-xl border border-slate-200/80 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >
             {timelinePanel}
           </ClampedFixedDropdown>
@@ -527,8 +544,8 @@ export function OperationsWorkspaceToolbar({
             type="button"
             onClick={() => setOpen((p) => (p === 'controls' ? 'none' : 'controls'))}
             className={compact
-              ? 'min-h-8 w-[4.25rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:text-xs'
-              : 'min-h-10 shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm'}
+              ? 'min-h-8 w-[4.25rem] shrink-0 rounded-lg border border-slate-200/80 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:text-xs'
+              : 'min-h-10 shrink-0 rounded-lg border border-slate-200/80 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 sm:px-3 sm:text-sm'}
             aria-expanded={open === 'controls'}
             aria-controls={controlsPanelId}
           >
@@ -545,7 +562,7 @@ export function OperationsWorkspaceToolbar({
             id={controlsPanelId}
             onDismiss={close}
             aria-label={controlsLabel}
-            className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+            className="animate-fade-in z-50 rounded-xl border border-slate-200/80 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >
             {controlsPanel}
           </ClampedFixedDropdown>
@@ -565,7 +582,7 @@ export function OperationsWorkspaceToolbar({
             ref={searchTriggerRef}
             type="button"
             onClick={() => setOpen((p) => (p === 'search' ? 'none' : 'search'))}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 ${
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 ${
               searchActive
                 ? 'border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200'
                 : 'border-slate-200 bg-white'
@@ -590,7 +607,7 @@ export function OperationsWorkspaceToolbar({
             onDismiss={close}
             ignoreDismissIf={(target) => isBookingDetailPopoverDismissExempt(target, null)}
             aria-label={searchAriaLabel}
-            className="animate-fade-in z-50 w-[min(100vw-2rem,24rem)] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+            className="animate-fade-in z-50 w-[min(100vw-2rem,24rem)] rounded-xl border border-slate-200/80 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
           >
             {searchPanel}
           </ClampedFixedDropdown>
@@ -600,8 +617,8 @@ export function OperationsWorkspaceToolbar({
         type="button"
         onClick={onRefresh}
         className={compact
-          ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800'
-          : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
+          ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
+          : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
         aria-label="Refresh"
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -618,6 +635,11 @@ export function OperationsWorkspaceToolbar({
         </span>
       ) : null}
       {showBookingActions ? (
+        <>
+          <span
+            className="mx-0.5 hidden h-5 w-px shrink-0 self-center rounded-full bg-slate-200/80 sm:block"
+            aria-hidden
+          />
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
@@ -625,7 +647,7 @@ export function OperationsWorkspaceToolbar({
             className={
               compact
                 ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-brand-600 hover:bg-brand-700`
-                : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
+                : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-xl bg-brand-600 px-2.5 text-xs font-semibold text-white shadow-[0_1px_2px_rgba(0,59,111,0.25),inset_0_1px_0_rgba(255,255,255,0.2)] hover:bg-brand-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
             }
             aria-label="New Booking"
           >
@@ -640,7 +662,7 @@ export function OperationsWorkspaceToolbar({
             className={
               compact
                 ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-emerald-600 hover:bg-emerald-700`
-                : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
+                : 'inline-flex h-10 min-w-[6.75rem] max-w-[7.25rem] items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-[0_1px_2px_rgba(5,84,55,0.25),inset_0_1px_0_rgba(255,255,255,0.2)] hover:bg-emerald-700 sm:min-w-[7rem] sm:px-3 sm:text-sm'
             }
             aria-label="Walk-in"
           >
@@ -654,6 +676,7 @@ export function OperationsWorkspaceToolbar({
             <span className={compact ? 'hidden min-w-0 truncate sm:inline' : 'min-w-0 truncate'}>Walk-in</span>
           </button>
         </div>
+        </>
       ) : null}
       {trailingActions}
     </>
@@ -664,8 +687,8 @@ export function OperationsWorkspaceToolbar({
       <div
         className={
           compact
-              ? 'rounded-xl border border-slate-200/90 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-2.5 sm:py-2'
-            : 'rounded-xl border border-slate-200/90 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 sm:py-2'
+              ? 'ops-toolbar rounded-2xl border border-slate-200/70 bg-white/80 px-2 py-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-18px_rgba(15,23,42,0.18)] backdrop-blur-xl sm:px-2.5 sm:py-2'
+            : 'ops-toolbar rounded-2xl border border-slate-200/70 bg-white/80 px-2 py-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-18px_rgba(15,23,42,0.18)] backdrop-blur-xl sm:px-3 sm:py-2'
         }
       >
         <div
@@ -683,41 +706,43 @@ export function OperationsWorkspaceToolbar({
                   <h1 className="min-w-0 max-w-full shrink truncate text-sm font-bold tracking-tight text-slate-900 sm:max-w-[16rem] md:max-w-[20rem] lg:max-w-xl lg:shrink-0 sm:text-base">
                     {title}
                   </h1>
-                  <div ref={infoPopoverRef} className="relative shrink-0">
-                    <button
-                      ref={infoTriggerRef}
-                      type="button"
-                      onClick={() => setOpen((p) => (p === 'info' ? 'none' : 'info'))}
-                      className={`inline-flex h-7 items-center justify-center rounded-lg border px-2 text-[11px] font-semibold shadow-sm hover:bg-slate-50 ${
-                        open === 'info'
-                          ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
-                          : 'border-slate-200 bg-white text-slate-700'
-                      }`}
-                      aria-expanded={open === 'info'}
-                      aria-controls={infoPanelId}
-                    >
-                      Info
-                    </button>
-                    <ClampedFixedDropdown
-                      open={inlineInfoOpen}
-                      triggerRef={infoTriggerRef}
-                      verticalAnchorRef={panelSurfaceRef}
-                      horizontalCenter
-                      gapPx={4}
-                      align="start"
-                      maxWidthPx={360}
-                      id={infoPanelId}
-                      onDismiss={close}
-                      aria-label="View summary information"
-                      className="animate-fade-in z-50 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
-                    >
-                      <div className="space-y-3">
-                        {summaryNode}
-                        {infoPanelExtra}
-                      </div>
-                    </ClampedFixedDropdown>
-                  </div>
-                  <span className="inline-flex h-7 shrink-0 items-center px-1">
+                  {showSummaryInfo ? (
+                    <div ref={infoPopoverRef} className="relative shrink-0">
+                      <button
+                        ref={infoTriggerRef}
+                        type="button"
+                        onClick={() => setOpen((p) => (p === 'info' ? 'none' : 'info'))}
+                        className={`inline-flex h-7 items-center justify-center rounded-lg border px-2 text-[11px] font-semibold shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 ${
+                          open === 'info'
+                            ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                        aria-expanded={open === 'info'}
+                        aria-controls={infoPanelId}
+                      >
+                        Info
+                      </button>
+                      <ClampedFixedDropdown
+                        open={inlineInfoOpen}
+                        triggerRef={infoTriggerRef}
+                        verticalAnchorRef={panelSurfaceRef}
+                        horizontalCenter
+                        gapPx={4}
+                        align="start"
+                        maxWidthPx={360}
+                        id={infoPanelId}
+                        onDismiss={close}
+                        aria-label="View summary information"
+                        className="animate-fade-in z-50 rounded-xl border border-slate-200/80 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
+                      >
+                        <div className="space-y-3">
+                          {summaryNode}
+                          {infoPanelExtra}
+                        </div>
+                      </ClampedFixedDropdown>
+                    </div>
+                  ) : null}
+                  <span className="inline-flex h-7 shrink-0 items-center gap-1.5 px-0.5">
                     <LiveStateIndicator state={liveState} />
                   </span>
                   {summaryTools ? <div className="flex shrink-0 items-center gap-1">{summaryTools}</div> : null}
@@ -732,7 +757,7 @@ export function OperationsWorkspaceToolbar({
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Operations</p>
                 <h1 className="truncate text-sm font-bold tracking-tight text-slate-900 sm:text-base">{title}</h1>
-                <div className="mt-1">{summaryNode}</div>
+                {showSummaryInfo ? <div className="mt-1">{summaryNode}</div> : null}
                 {summaryTools ? <div className="mt-1">{summaryTools}</div> : null}
               </div>
               <div className={defaultActionsShellClass}>{toolbarActionControls}</div>
@@ -757,7 +782,7 @@ export function OperationsWorkspaceToolbar({
             role="dialog"
             aria-modal="true"
             aria-label={open === 'info' ? 'View summary information' : open === 'date' ? 'Date and calendar' : open === 'timeline' ? 'Timeline controls' : open === 'search' ? searchAriaLabel : controlsLabel}
-            className="relative z-[71] flex max-h-[min(92dvh,920px)] w-full max-w-lg flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:rounded-l-2xl sm:border-y sm:border-l sm:border-r-0 sm:border-slate-200 sm:shadow-xl"
+            className="relative z-[71] flex max-h-[min(92dvh,920px)] w-full max-w-lg flex-col rounded-t-2xl border border-slate-200/80 bg-white shadow-2xl sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:rounded-l-2xl sm:border-y sm:border-l sm:border-r-0 sm:border-slate-200 sm:shadow-xl"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-2 sm:px-4">
               <h2 className="text-sm font-semibold text-slate-900">

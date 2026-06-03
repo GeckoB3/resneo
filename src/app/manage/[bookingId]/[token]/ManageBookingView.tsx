@@ -30,6 +30,8 @@ interface BookingDetails {
   class_summary?: string | null;
   resource_name?: string | null;
   booking_end_time?: string | null;
+  /** Outstanding compliance forms the guest should complete before their visit. */
+  compliance_forms?: Array<{ name: string; url: string }>;
   refund_notice_hours?: number;
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
@@ -244,6 +246,24 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
               <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
               <DetailTile label="Guests" value={`${details.party_size}`} />
               <DetailTile label="Status" value={details.status} />
+            </div>
+          )}
+
+          {details.compliance_forms && details.compliance_forms.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+              <p className="font-semibold text-amber-900">Forms to complete before your visit</p>
+              <ul className="mt-2 space-y-1.5">
+                {details.compliance_forms.map((f) => (
+                  <li key={f.url}>
+                    <a
+                      href={f.url}
+                      className="font-medium text-brand-700 underline hover:text-brand-800"
+                    >
+                      {f.name} →
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

@@ -4,6 +4,7 @@ import {
   bookingCalendarBlockPalette,
   bookingCalendarBlockPaletteWithOverlay,
   calendarBookingVisualKey,
+  CalendarBookingStatusStripe,
   isArrivedWaitingDisplay,
 } from './booking-calendar-block-style';
 
@@ -48,12 +49,16 @@ describe('bookingCalendarBlockPalette', () => {
     ).toBe('#D97706');
   });
 
-  it('card shell style includes inset left accent matching stripe', () => {
+  it('status stripe element carries the accent colour', () => {
     const p = bookingCalendarBlockPalette({
       status: 'Confirmed',
       client_arrived_at: '2026-06-01T18:00:00.000Z',
     });
-    expect(bookingCalendarBlockCardStyle(p).boxShadow).toContain('#D97706');
+    // The accent now lives on a dedicated stripe column (not the card box-shadow)
+    // so drag handles/content can't cover it; the card keeps a neutral glassy shell.
+    const stripe = CalendarBookingStatusStripe({ palette: p });
+    expect(stripe.props.style.backgroundColor).toBe('#D97706');
+    expect(bookingCalendarBlockCardStyle(p).backgroundColor).toBe(p.bg);
   });
 
   it('treats attendance-confirmed Booked as Confirmed stripe', () => {

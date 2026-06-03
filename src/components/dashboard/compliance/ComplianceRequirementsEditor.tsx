@@ -1,0 +1,286 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import useSWR from 'swr';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import {
+  CATEGORY_LABELS,
+  ENFORCEMENT_OPTIONS,
+  complianceJsonFetcher,
+  type ComplianceTypeSummary,
+  type RequirementRowData,
+} from '@/components/dashboard/compliance/shared';
+
+/**
+ * Inline service-compliance-requirements editor (spec §3.6 / §11.5). Shared by
+ * the service editor and the Settings → Compliance per-service drill-in. Hidden
+ * entirely when the compliance feature is off for the venue.
+ */
+export function ComplianceRequirementsEditor({
+  appointmentServiceId,
+  complianceEnabled,
+}: {
+  appointmentServiceId: string;
+  complianceEnabled: boolean;
+}) {
+  const reqUrl = `/api/venue/compliance/requirements?appointment_service_id=${encodeURIComponent(appointmentServiceId)}`;
+  const {
+    data: reqData,
+    mutate: mutateReqs,
+    isLoading: reqLoading,
+  } = useSWR<{ requirements: RequirementRowData[] }>(
+    complianceEnabled ? reqUrl : null,
+    complianceJsonFetcher,
+  );
+  const { data: typesData } = useSWR<{ types: ComplianceTypeSummary[] }>(
+    complianceEnabled ? '/api/venue/compliance/types' : null,
+    complianceJsonFetcher,
+  );
+
+  const [adding, setAdding] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const requirements = reqData?.requirements ?? [];
+  const allTypes = useMemo(() => (typesData?.types ?? []).filter((t) => t.is_active), [typesData]);
+  const assignedTypeIds = new Set(requirements.map((r) => r.compliance_type_id));
+  const availableTypes = allTypes.filter((t) => !assignedTypeIds.has(t.id));
+
+  if (!complianceEnabled) return null;
+
+  async function updateEnforcement(reqId: string, enforcement: string) {
+    setBusyId(reqId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/requirements/${reqId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enforcement }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not update requirement.');
+        return;
+      }
+      await mutateReqs();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function removeRequirement(reqId: string) {
+    setBusyId(reqId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/requirements/${reqId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not remove requirement.');
+        return;
+      }
+      await mutateReqs();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <SectionCard>
+      <SectionCard.Header
+        eyebrow="Compliance"
+        title="Compliance requirements"
+        description="Records this service requires before a booking. Missing or expired records warn or block at booking time."
+        right={
+          allTypes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              disabled={availableTypes.length === 0}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Add requirement
+            </button>
+          ) : undefined
+        }
+      />
+      <SectionCard.Body>
+        {error && (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+
+        {allTypes.length === 0 && !reqLoading ? (
+          <p className="text-sm text-slate-500">
+            No compliance types set up yet.{' '}
+            <a href="/dashboard/settings?tab=compliance&sub=types" className="text-brand-600 underline">
+              Create one in Settings → Compliance
+            </a>
+            .
+          </p>
+        ) : requirements.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            This service has no compliance requirements. Add one to warn or block bookings without a valid record.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {requirements.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-800">
+                    {r.compliance_type_name}
+                    {!r.compliance_type_is_active && (
+                      <span className="ml-2 text-xs font-normal text-amber-600">(archived)</span>
+                    )}
+                  </p>
+                  <Pill variant="neutral" size="sm" className="mt-1">
+                    {CATEGORY_LABELS[r.compliance_type_category] ?? r.compliance_type_category}
+                  </Pill>
+                </div>
+                <select
+                  value={r.enforcement}
+                  disabled={busyId === r.id}
+                  onChange={(e) => updateEnforcement(r.id, e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  {ENFORCEMENT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removeRequirement(r.id)}
+                  disabled={busyId === r.id}
+                  className="text-sm font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard.Body>
+
+      <AddRequirementDialog
+        open={adding}
+        onOpenChange={setAdding}
+        serviceId={appointmentServiceId}
+        availableTypes={availableTypes}
+        onAdded={() => mutateReqs()}
+      />
+    </SectionCard>
+  );
+}
+
+function AddRequirementDialog({
+  open,
+  onOpenChange,
+  serviceId,
+  availableTypes,
+  onAdded,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  serviceId: string;
+  availableTypes: ComplianceTypeSummary[];
+  onAdded: () => void;
+}) {
+  const [typeId, setTypeId] = useState('');
+  const [enforcement, setEnforcement] = useState('warn_staff');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!typeId) {
+      setError('Choose a compliance type.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/venue/compliance/requirements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: serviceId, compliance_type_id: typeId, enforcement }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not add requirement.');
+        return;
+      }
+      onAdded();
+      setTypeId('');
+      setEnforcement('warn_staff');
+      onOpenChange(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Add compliance requirement"
+      description="Require a compliance record for this service."
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={submitting}
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {submitting ? 'Adding…' : 'Add requirement'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">{error}</div>
+        )}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Compliance type</label>
+          <select
+            value={typeId}
+            onChange={(e) => setTypeId(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Select a type…</option>
+            {availableTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">When unmet</label>
+          <select
+            value={enforcement}
+            onChange={(e) => setEnforcement(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+          >
+            {ENFORCEMENT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </Dialog>
+  );
+}

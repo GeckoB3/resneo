@@ -14,6 +14,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { normaliseGuestNamePart } from '@/lib/guests/name';
 import { findOrCreateGuest } from '@/lib/guests';
 import type { GuestRecord } from '@/lib/guests';
+import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
 
 async function incrementGuestVisitAfterWalkIn(
   admin: ReturnType<typeof getSupabaseAdminClient>,
@@ -428,6 +429,8 @@ export async function POST(request: NextRequest) {
       if (apptBookErr) {
         console.error('Walk-in appointment insert failed:', apptBookErr);
         if (apptGuestCreated) {
+          // Hygiene (Phase 4 / G7): clear any compliance storage before the hard delete.
+          await eraseGuestCompliance(admin, staff.venue_id, apptGuest.id);
           await admin.from('guests').delete().eq('id', apptGuest.id).eq('venue_id', staff.venue_id);
         }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
@@ -624,6 +627,8 @@ export async function POST(request: NextRequest) {
     if (bookErr) {
       console.error('Walk-in booking insert failed:', bookErr);
       if (tableGuestCreated) {
+        // Hygiene (Phase 4 / G7): clear any compliance storage before the hard delete.
+        await eraseGuestCompliance(admin, staff.venue_id, walkInGuest.id);
         await admin.from('guests').delete().eq('id', walkInGuest.id).eq('venue_id', staff.venue_id);
       }
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
@@ -645,6 +650,8 @@ export async function POST(request: NextRequest) {
         console.error('Temporary walk-in table creation failed:', error);
         await admin.from('bookings').delete().eq('id', booking.id).eq('venue_id', staff.venue_id);
         if (tableGuestCreated) {
+          // Hygiene (Phase 4 / G7): clear any compliance storage before the hard delete.
+          await eraseGuestCompliance(admin, staff.venue_id, walkInGuest.id);
           await admin.from('guests').delete().eq('id', walkInGuest.id).eq('venue_id', staff.venue_id);
         }
         return NextResponse.json(

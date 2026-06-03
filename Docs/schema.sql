@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Reserve NI — Database schema reference (curated map)
 -- =============================================================================
--- Last regenerated: 21 May 2026, from supabase/migrations/ (171 migrations).
+-- Last regenerated: 3 Dec 2026, from supabase/migrations/ (194 migrations).
 --
 -- THIS FILE IS NOT THE SOURCE OF TRUTH.
 -- The canonical schema is the ordered migration set in `supabase/migrations/`.
@@ -186,6 +186,15 @@
 -- --- Metrics -----------------------------------------------------------------
 -- venue_baseline_metrics_snapshots  Weekly per-venue baseline metric snapshots
 
+-- --- Compliance records (appointment tiers) ----------------------------------
+-- compliance_types                  Venue definitions of a record type (patch test, consent, …)
+-- compliance_type_versions          Immutable form-schema snapshots per type
+-- compliance_records                Captured instances of a type against a guest
+-- service_compliance_requirements   Links Model B services (appointment_services
+--                                   or service_items) to required types
+-- compliance_form_links             Single-use public submission links (/p/forms/{code})
+-- compliance_audit_events           Append-only compliance audit trail
+
 
 -- =============================================================================
 -- ROW-LEVEL SECURITY
@@ -205,6 +214,7 @@
 -- booking_events_trigger     AFTER INSERT/UPDATE on `bookings` → write `events`
 --                            rows (booking_created, booking_status_changed, …).
 -- support_audit_events and account_link_audit_log are likewise append-only.
+-- compliance_audit_append_only  BEFORE UPDATE/DELETE on `compliance_audit_events`.
 
 
 -- =============================================================================

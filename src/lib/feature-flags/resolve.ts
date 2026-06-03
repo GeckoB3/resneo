@@ -11,6 +11,7 @@ const ENV_BY_FLAG: Record<AppointmentsFeatureFlagKey, string> = {
   guest_self_reschedule: 'FEATURE_FLAG_GUEST_SELF_RESCHEDULE',
   any_available_practitioner: 'FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER',
   class_commerce_enabled: 'FEATURE_FLAG_CLASS_COMMERCE_ENABLED',
+  compliance_records_enabled: 'FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED',
 };
 
 /** Per-flag defaults when venue storage omits the key (env override still wins). */
@@ -106,6 +107,11 @@ export function mergeVenueFeatureFlagsPatch(
   if (patch.waitlist_v2 === false) {
     delete next.waitlist_config;
   }
+  // Compliance general settings persist as a nested object independent of the
+  // boolean enable flag (so settings survive toggling the feature off and on).
+  if (patch.compliance !== undefined) {
+    next.compliance = patch.compliance;
+  }
   return next;
 }
 
@@ -126,6 +132,9 @@ export function venueFeatureFlagsForStorage(flags: VenueFeatureFlags): Record<st
   }
   if (flags.waitlist_config) {
     stored.waitlist_config = flags.waitlist_config;
+  }
+  if (flags.compliance) {
+    stored.compliance = flags.compliance;
   }
   return stored;
 }

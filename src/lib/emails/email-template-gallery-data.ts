@@ -95,6 +95,9 @@ function messageKeyTitle(key: CommunicationMessageKey): string {
     class_membership_renewed: 'Membership renewed',
     class_membership_cancelling: 'Membership cancellation scheduled',
     class_membership_ended: 'Membership ended',
+    compliance_form_request: 'Compliance form request',
+    compliance_form_reminder: 'Compliance form reminder',
+    compliance_record_expiring: 'Compliance record expiring',
   };
   return titles[key];
 }

@@ -97,6 +97,12 @@ export interface BookingEmailData {
    * line, e.g. "Olaplex treatment (+£10.00, +15 min)". Renders only when non-empty.
    */
   addon_lines?: string[];
+  /**
+   * Compliance forms the guest must complete before the visit (auto-send / Phase 1).
+   * Each is a form name + public `/p/forms/{code}` URL. Rendered as a "Forms to
+   * complete" block in the confirmation. Renders only when non-empty.
+   */
+  compliance_forms?: Array<{ name: string; url: string }>;
   /** Sum of add-on price (pence) for the booking; used in totals/headlines. */
   addons_total_price_pence?: number | null;
   /** Sum of add-on duration (minutes); informational. */

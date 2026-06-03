@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
 
 export async function runImportUndo(admin: SupabaseClient, sessionId: string, venueId: string): Promise<void> {
   const { data: session } = await admin
@@ -97,6 +98,13 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
       .in('entity_id', guestIdsDeleted);
     if (refGuestErr) {
       throw new Error(`Undo failed (external_record_refs guests): ${refGuestErr.message}`);
+    }
+
+    // Compliance hygiene (improvement plan Phase 4 / G7): the guests.delete() below
+    // cascade-deletes compliance_records rows but leaves their signature/file objects
+    // orphaned in the compliance-files bucket. Erase those first (best-effort).
+    for (const gid of guestIdsDeleted) {
+      await eraseGuestCompliance(admin, venueId, gid);
     }
   }
 

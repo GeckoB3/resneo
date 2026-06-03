@@ -1,12 +1,57 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { ensureComplianceFormLinksForBooking } from '@/lib/compliance/auto-send';
 import { sendPolicyMessage } from './outbound';
+
+/**
+ * Auto-issue (or reuse) compliance form links for this booking and attach them so
+ * the confirmation carries a "Forms to complete" block (Phase 1, G1+G2). No-op when
+ * compliance / auto-send is off, the booking isn't Model B, or nothing is unmet.
+ */
+async function attachComplianceForms(
+  admin: SupabaseClient,
+  booking: BookingEmailData,
+): Promise<BookingEmailData> {
+  if (!booking.id?.trim()) return booking;
+  try {
+    const { data: row } = await admin
+      .from('bookings')
+      .select('venue_id, guest_id, appointment_service_id, service_item_id, booking_date, booking_time')
+      .eq('id', booking.id)
+      .maybeSingle();
+    if (!row) return booking;
+    const r = row as {
+      venue_id: string;
+      guest_id: string | null;
+      appointment_service_id: string | null;
+      service_item_id: string | null;
+      booking_date: string;
+      booking_time: string | null;
+    };
+    const forms = await ensureComplianceFormLinksForBooking(admin, {
+      venueId: r.venue_id,
+      guestId: r.guest_id,
+      bookingId: booking.id,
+      appointmentServiceId: r.appointment_service_id,
+      serviceItemId: r.service_item_id,
+      bookingDate: r.booking_date,
+      bookingTime: r.booking_time,
+    });
+    return forms.length > 0 ? { ...booking, compliance_forms: forms } : booking;
+  } catch (err) {
+    console.error('[send-templated] attachComplianceForms failed', { bookingId: booking.id, err });
+    return booking;
+  }
+}
 
 async function enrichBookingForConfirmation(booking: BookingEmailData): Promise<BookingEmailData> {
   if (!booking.id?.trim()) return booking;
+  const admin = getSupabaseAdminClient();
   try {
-    return await enrichBookingEmailForComms(getSupabaseAdminClient(), booking.id, booking);
+    const enriched = await enrichBookingEmailForComms(admin, booking.id, booking);
+    return await attachComplianceForms(admin, enriched);
   } catch (err) {
     console.error('[send-templated] enrichBookingForConfirmation failed', {
       bookingId: booking.id,

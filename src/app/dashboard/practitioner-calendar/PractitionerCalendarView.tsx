@@ -150,6 +150,11 @@ import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCard } from './BookingCard';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
+import {
+  ComplianceBarIcon,
+  useComplianceBookingFlags,
+} from '@/components/dashboard/compliance/ComplianceBookingIndicator';
 import { formatBookingModificationNotifyToast } from '@/lib/booking/modification-notify-result';
 import { formatPhoneForDisplay } from '@/lib/phone/e164';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -591,11 +596,11 @@ function CalendarBookingStatusBadge({
   const p = palette ?? bookingCalendarBlockPalette(b);
   return (
     <span
-      className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold leading-tight shadow-sm ring-1 ring-black/5 backdrop-blur-sm"
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/85 px-2 py-[3px] text-[10px] font-bold leading-none shadow-[0_1px_3px_rgba(15,23,42,0.13)] ring-1 ring-black/[0.06] backdrop-blur-md"
       style={{ color: p.text }}
       title={calendarStatusLabel(b)}
     >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: p.accent }} aria-hidden />
+      <span className="h-1.5 w-1.5 rounded-full ring-2 ring-white/70" style={{ backgroundColor: p.accent }} aria-hidden />
       <span className="truncate">{calendarStatusLabel(b)}</span>
     </span>
   );
@@ -1859,7 +1864,7 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
 
   return (
     <div
-      className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12"
+      className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl"
       style={bookingCalendarBlockCardStyle(palette)}
     >
       <CalendarBookingStatusStripe palette={palette} />
@@ -2114,6 +2119,10 @@ export function PractitionerCalendarView({
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  // Per-booking compliance status → at-a-glance icon on each booking bar (gated on the flag).
+  const complianceRecordsEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const complianceBookingIds = useMemo(() => bookings.map((b) => b.id), [bookings]);
+  const complianceFlags = useComplianceBookingFlags(complianceBookingIds, complianceRecordsEnabled);
   /** Optimistic status / arrived overlays until list refetch catches up (calendar bars). */
   const [calendarBookingOverlays, setCalendarBookingOverlays] = useState<Record<string, BookingRowOverlay>>(
     {},
@@ -5948,11 +5957,16 @@ export function PractitionerCalendarView({
                                       aria-orientation="horizontal"
                                       aria-label="Drag to change block duration"
                                       data-no-calendar-pan="true"
-                                      className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-lg border-t border-white/50 bg-black/[0.08] hover:bg-black/[0.14] active:bg-black/20"
+                                      className="group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize touch-none items-center justify-center rounded-b-lg bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:bg-black/[0.12]"
                                       style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                       onPointerDown={beginBlockResize(bl)}
                                       onMouseDown={(e) => e.stopPropagation()}
-                                    />
+                                    >
+                                      <span
+                                        className="h-[3px] w-7 rounded-full bg-current opacity-0 transition-opacity duration-150 group-hover:opacity-25 group-hover/resize:opacity-50"
+                                        aria-hidden
+                                      />
+                                    </span>
                                   </>
                                 ) : null}
                               </div>
@@ -6116,7 +6130,7 @@ export function PractitionerCalendarView({
                             >
                               {(handle) => (
                                 <div
-                                  className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                  className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
                                   style={bookingCalendarBlockCardStyle(palette)}
@@ -6128,9 +6142,7 @@ export function PractitionerCalendarView({
                                       ref={handle.setActivatorNodeRef}
                                       type="button"
                                       data-no-calendar-pan="true"
-                                      className={`relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing ${
-                                        isOverlapLane ? 'text-[0]' : 'text-[10px]'
-                                      }`}
+                                      className="group/grip relative z-[2] flex shrink-0 cursor-grab touch-none items-center justify-center bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:cursor-grabbing"
                                       style={{
                                         width: isOverlapLane
                                           ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
@@ -6143,7 +6155,21 @@ export function PractitionerCalendarView({
                                       {...handle.listeners}
                                       {...handle.attributes}
                                     >
-                                      ⋮⋮
+                                      {!isOverlapLane && (
+                                        <svg
+                                          viewBox="0 0 10 18"
+                                          className="h-3.5 w-2 opacity-50 transition-opacity duration-150 group-hover:opacity-90 group-hover/grip:opacity-100"
+                                          fill="currentColor"
+                                          aria-hidden
+                                        >
+                                          <circle cx="3" cy="4" r="1.1" />
+                                          <circle cx="7" cy="4" r="1.1" />
+                                          <circle cx="3" cy="9" r="1.1" />
+                                          <circle cx="7" cy="9" r="1.1" />
+                                          <circle cx="3" cy="14" r="1.1" />
+                                          <circle cx="7" cy="14" r="1.1" />
+                                        </svg>
+                                      )}
                                     </button>
                                   ) : null}
                                   <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
@@ -6178,6 +6204,11 @@ export function PractitionerCalendarView({
                                             >
                                               <BookingCard
                                                 name={b.guest_name}
+                                                nameAccessory={
+                                                  complianceFlags[b.id] ? (
+                                                    <ComplianceBarIcon flag={complianceFlags[b.id]!} />
+                                                  ) : undefined
+                                                }
                                                 service={calendarBookingServiceLabel(b, svc, resName ?? null)}
                                                 phone={formatPhoneForDisplay(b.guest_phone)}
                                                 start={b.booking_time.slice(0, 5)}
@@ -6287,11 +6318,16 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className="absolute bottom-0 left-0 right-0 z-40 cursor-ns-resize touch-none rounded-b-2xl border-t border-white/50 bg-black/[0.07] hover:bg-black/[0.14] active:bg-black/20"
+                                        className="group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize touch-none items-center justify-center rounded-b-2xl bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:bg-black/[0.12]"
                                         style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
                                         onPointerDown={beginAppointmentResize(b)}
                                         onMouseDown={(e) => e.stopPropagation()}
-                                      />
+                                      >
+                                        <span
+                                          className="h-[3px] w-7 rounded-full bg-current opacity-0 transition-opacity duration-150 group-hover:opacity-25 group-hover/resize:opacity-50"
+                                          aria-hidden
+                                        />
+                                      </span>
                                     </>
                                   ) : null}
                                 </div>
@@ -6377,6 +6413,11 @@ export function PractitionerCalendarView({
                                               >
                                                 <BookingCard
                                                   name={first.guest_name}
+                                                  nameAccessory={
+                                                    complianceFlags[b.id] ? (
+                                                      <ComplianceBarIcon flag={complianceFlags[b.id]!} />
+                                                    ) : undefined
+                                                  }
                                                   hideName={segIdx > 0}
                                                   service={segServiceLabel}
                                                   phone={formatPhoneForDisplay(b.guest_phone)}

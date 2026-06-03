@@ -1,10 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
 
 /**
  * Admin-only anonymisation: clears CRM PII on guest and related rows while retaining bookings.
  */
 export async function eraseGuestVenuePii(admin: SupabaseClient, venueId: string, guestId: string): Promise<void> {
   await admin.from('communications').delete().eq('guest_id', guestId);
+
+  // Compliance records hold special-category data + signature/file objects in the
+  // compliance-files bucket; the anonymise-not-delete flow below would otherwise
+  // leave them on file (spec §13.1).
+  await eraseGuestCompliance(admin, venueId, guestId);
 
   const { data: bookingIdsRows } = await admin.from('bookings').select('id').eq('guest_id', guestId);
   const bookingIds = (bookingIdsRows ?? []).map((r: { id: string }) => r.id);

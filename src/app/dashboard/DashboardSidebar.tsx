@@ -83,6 +83,8 @@ export interface DashboardSidebarProps {
   venueTerminology?: Record<string, unknown> | null;
   /** Settings → Features → Appointment waitlist (`waitlist_v2`). */
   appointmentWaitlistEnabled?: boolean;
+  /** Settings → Compliance — shows the Compliance nav item on Appointments tiers. */
+  complianceRecordsEnabled?: boolean;
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/settings']);
@@ -174,6 +176,7 @@ export function DashboardSidebar({
   isAdmin = false,
   venueTerminology: _venueTerminology = null,
   appointmentWaitlistEnabled = false,
+  complianceRecordsEnabled = false,
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -315,6 +318,21 @@ export function DashboardSidebar({
       }
     }
 
+    // Compliance dashboard — Appointments tiers with the feature enabled, after Contacts.
+    if (isAppointmentPlanTier(pricingTier) && complianceRecordsEnabled) {
+      const complianceItem: NavItem = {
+        href: '/dashboard/compliance',
+        label: 'Compliance',
+        icon: ClipboardIcon,
+      };
+      const contactsIdx = items.findIndex((i) => i.href === '/dashboard/contacts');
+      if (contactsIdx >= 0) {
+        items = [...items.slice(0, contactsIdx + 1), complianceItem, ...items.slice(contactsIdx + 1)];
+      } else {
+        items = [...items, complianceItem];
+      }
+    }
+
     /**
      * Restaurant plan + table primary + schedule calendar: Appointment Calendar sits after Bookings / table
      * views and before New Booking (and merged model links), not down by Waitlist.
@@ -339,6 +357,7 @@ export function DashboardSidebar({
     isAppointment,
     navPrimaryBookingModel,
     appointmentWaitlistEnabled,
+    complianceRecordsEnabled,
   ]);
 
   async function handleSignOut() {

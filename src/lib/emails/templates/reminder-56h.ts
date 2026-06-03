@@ -83,6 +83,7 @@ export function renderReminder56h(
     serviceName: booking.appointment_service_name ?? null,
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
+    addonLines: appt ? booking.addon_lines ?? null : null,
     ctaLabel: confirmCancelLink ? "Confirm my booking" : undefined,
     ctaUrl: confirmCancelLink || null,
     secondaryCtaLabel: manageLink ? "Manage or cancel" : undefined,

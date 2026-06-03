@@ -109,6 +109,30 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Promo video */}
+      <section className="bg-white pt-16 sm:pt-20">
+        <div className="mx-auto max-w-4xl px-6">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            See Resneo in action
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-center text-slate-500">
+            A quick look at how Resneo helps you take bookings, cut no-shows, and get hours back every week.
+          </p>
+          <div className="mt-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-xl shadow-brand-600/10">
+            <div className="aspect-video">
+              <iframe
+                className="h-full w-full"
+                src="https://www.youtube-nocookie.com/embed/o6QeXkH0q-0?rel=0"
+                title="Resneo promo video"
+                loading="lazy"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Features */}
       <section id="features" className="scroll-mt-16 bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">

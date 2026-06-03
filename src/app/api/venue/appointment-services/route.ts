@@ -65,7 +65,7 @@ const STAFF_SERVICE_FIELD_PERMISSIONS = {
 const serviceSchema = z
   .object({
     name: z.string().min(1).max(200),
-    description: z.string().max(1000).optional(),
+    description: z.string().max(1000).nullable().optional(),
     duration_minutes: z.number().int().min(5).max(480),
     buffer_minutes: z.number().int().min(0).max(120).optional(),
     price_pence: z.number().int().min(0).optional(),
@@ -130,7 +130,7 @@ const serviceSchema = z
 const servicePatchSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    description: z.string().max(1000).optional(),
+    description: z.string().max(1000).nullable().optional(),
     duration_minutes: z.number().int().min(5).max(480).optional(),
     buffer_minutes: z.number().int().min(0).max(120).optional(),
     price_pence: z.number().int().min(0).optional(),
@@ -233,6 +233,10 @@ function buildStaffEditableServicePatch(
 
   for (const [field, permission] of Object.entries(STAFF_SERVICE_FIELD_PERMISSIONS)) {
     if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    // Clients now always send fields like `description` (so a cleared value isn't
+    // dropped). Re-sending the CURRENT value is not a change, so it must not trip the
+    // permission gate — only an actual change requires the staff_may_customize_* flag.
+    if ((patch[field] ?? null) === (service[field] ?? null)) continue;
     if (!Boolean(service[permission])) {
       return {
         ok: false,

@@ -4,18 +4,18 @@
  */
 
 export const bookingExpandAccordionDetailsClass =
-  'group overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04] transition-[box-shadow,ring-color,border-color] duration-200 open:shadow-md open:ring-2 open:ring-brand-900/[0.08]';
+  'booking-accordion group overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.045)] transition-[box-shadow,border-color] duration-300 ease-out hover:border-slate-300/70 open:border-slate-200/90 open:shadow-[0_16px_36px_-18px_rgba(15,23,42,0.24)]';
 
 export const bookingExpandAccordionSummaryClass =
-  'flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-3 text-xs font-semibold text-slate-800 outline-none marker:hidden rounded-t-xl border-b border-slate-100/95 bg-gradient-to-r from-slate-50 via-slate-50/95 to-white hover:from-slate-100/90 hover:to-slate-50/90 [&::-webkit-details-marker]:hidden transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/35 focus-visible:ring-inset sm:px-4';
+  'flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 text-[13px] font-semibold tracking-tight text-slate-800 outline-none marker:hidden bg-white transition-colors duration-200 hover:bg-slate-50/70 group-open:bg-slate-50/30 [&>:first-child]:mr-auto [&::-webkit-details-marker]:hidden focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/30 focus-visible:ring-inset';
 
-export const bookingExpandAccordionBodyClass = 'bg-slate-50/45 p-3 sm:p-3.5';
+export const bookingExpandAccordionBodyClass = 'border-t border-slate-100 bg-slate-50/40 p-3.5 sm:p-4';
 
-export const bookingExpandAccordionMessagingBodyClass = 'bg-brand-50/45 p-3 sm:p-3.5';
+export const bookingExpandAccordionMessagingBodyClass = 'border-t border-brand-100/60 bg-brand-50/35 p-3.5 sm:p-4';
 
 export const bookingExpandActionsBarClass =
-  'overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]';
+  'overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.045)]';
 
 /** Outer shell for inline expanded booking rows (bookings list, day sheet, appointments). */
 export const expandedBookingRowShellClass =
-  'border-t border-slate-200/85 bg-slate-100/35 px-2 pb-2.5 pt-2 sm:px-3';
+  'border-t border-slate-200/80 bg-slate-100/40 px-2 pb-3 pt-2.5 sm:px-3';

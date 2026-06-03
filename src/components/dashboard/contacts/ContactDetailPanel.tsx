@@ -19,6 +19,8 @@ import {
 import { ContactDocumentsSection } from '@/components/dashboard/contacts/ContactDocumentsSection';
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
+import { ContactComplianceSection } from '@/components/dashboard/contacts/ContactComplianceSection';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { ContactGdprSection } from '@/components/dashboard/contacts/ContactGdprSection';
 import { EraseGuestDataModal } from '@/components/dashboard/contacts/EraseGuestDataModal';
 import { formatGuestDisplayName } from '@/lib/guests/name';
@@ -184,6 +186,8 @@ export function ContactDetailPanel({
   venueTimezone: string;
 }) {
   const { addToast } = useToast();
+  const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const [complianceCount, setComplianceCount] = useState<number | null>(null);
   const [newBookingModal, setNewBookingModal] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
   const [newBookingModalEpoch, setNewBookingModalEpoch] = useState(0);
 
@@ -641,6 +645,25 @@ export function ContactDetailPanel({
           </SubBlock>
         </div>
       </details>
+
+      {complianceEnabled && (
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
+            <span>Compliance</span>
+            <span className="max-w-[10rem] truncate text-[11px] font-medium text-slate-400 group-open:hidden sm:max-w-[14rem]">
+              {complianceCount === null
+                ? 'Forms, tests & consent'
+                : complianceCount === 0
+                  ? 'No records yet'
+                  : `${complianceCount} record${complianceCount === 1 ? '' : 's'}`}
+            </span>
+            {accordionChevron}
+          </summary>
+          <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
+            <ContactComplianceSection guestId={g.id} onRecordCount={setComplianceCount} />
+          </div>
+        </details>
+      )}
 
       <details
         className={bookingExpandAccordionDetailsClass}

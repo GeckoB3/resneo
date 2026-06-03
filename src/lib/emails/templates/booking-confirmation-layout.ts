@@ -606,6 +606,7 @@ function buildTransactionalDetailRows(opts: {
   practitionerName?: string | null;
   priceDisplay?: string | null;
   groupAppointments?: GroupAppointmentLine[];
+  addonLines?: string[] | null;
   venueAddress?: string | null;
   specialRequests?: string | null;
 }): string {
@@ -652,6 +653,9 @@ function buildTransactionalDetailRows(opts: {
     if (opts.serviceName) items.push({ label: 'Service', value: opts.serviceName });
     if (opts.practitionerName) items.push({ label: 'With', value: opts.practitionerName });
     if (opts.priceDisplay) items.push({ label: 'Price', value: opts.priceDisplay, multiline: true });
+    // Extras always follow the service they were booked against.
+    if (opts.addonLines && opts.addonLines.length > 0)
+      items.push({ label: 'Extras', value: opts.addonLines.join('\n'), multiline: true });
     if ((opts.partySize ?? 0) > 1) items.push({ label: 'People', value: `${opts.partySize}` });
   } else {
     if ((opts.partySize ?? 0) > 0) {
@@ -713,6 +717,8 @@ export interface TransactionalEmailOptions {
   serviceName?: string | null;
   priceDisplay?: string | null;
   groupAppointments?: GroupAppointmentLine[];
+  /** Add-on / extras lines, rendered as a detail row directly after the service. */
+  addonLines?: string[] | null;
   depositInfoHtml?: string | null;
   customMessage?: string | null;
   ctaLabel?: string;
@@ -768,6 +774,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
     practitionerName: opts.practitionerName,
     priceDisplay: opts.priceDisplay,
     groupAppointments: opts.groupAppointments,
+    addonLines: opts.addonLines,
     venueAddress: opts.venueAddress,
     specialRequests: opts.specialRequests,
   });

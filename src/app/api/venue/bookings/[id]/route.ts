@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import { stripe } from '@/lib/stripe';
 import type { EngineInput } from '@/types/availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
@@ -1672,6 +1673,42 @@ export async function PATCH(
           } catch (stripeErr) {
             console.error('Additional deposit PI failed:', stripeErr);
           }
+        }
+      }
+
+      // Compliance gate on the edited service/time (§5.1). Staff context blocks
+      // only on `block_all`; an admin may acknowledge via override_compliance.
+      // No-ops when the feature is off or the booking is not Model B.
+      if (isAppointment) {
+        const effApptSvc =
+          (bookingUpdate.appointment_service_id as string | undefined) ??
+          (booking.appointment_service_id as string | null) ??
+          null;
+        const effServiceItem =
+          (bookingUpdate.service_item_id as string | undefined) ??
+          (booking.service_item_id as string | null) ??
+          null;
+        const patchCompliance = await checkBookingCompliance(admin, {
+          venueId: scopeVenueId,
+          guestId: (booking.guest_id as string | null) ?? null,
+          appointmentServiceId: effApptSvc,
+          serviceItemId: effServiceItem,
+          bookingDate: newDate,
+          bookingTime: timeStr,
+          context: 'staff',
+        });
+        if (
+          patchCompliance.blocked &&
+          !(staff.role === 'admin' && (body as { override_compliance?: unknown }).override_compliance === true)
+        ) {
+          return NextResponse.json(
+            {
+              error: COMPLIANCE_REQUIREMENT_UNMET,
+              message: complianceUnmetMessage(patchCompliance.details, 'staff'),
+              details: patchCompliance.details,
+            },
+            { status: 409 },
+          );
         }
       }
 

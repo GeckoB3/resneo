@@ -59,6 +59,10 @@
     {
       "path": "/api/cron/class-membership-period-reset",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/compliance-expiry",
+      "schedule": "0 2 * * *"
     }
   ]
 }

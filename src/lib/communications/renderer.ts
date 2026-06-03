@@ -47,6 +47,10 @@ export interface CommunicationRenderOptions {
   message?: string | null;
   /** When false for appointment lanes, manage links use cancel-only copy. */
   guestSelfRescheduleEnabled?: boolean;
+  /** Compliance messages (§12): the public form URL, form name, and link expiry in days. */
+  complianceFormLink?: string | null;
+  complianceFormName?: string | null;
+  complianceExpiryDays?: number | null;
 }
 
 function isAppointmentCancelOnly(opts: CommunicationRenderOptions): boolean {
@@ -89,6 +93,26 @@ function accountBookingsLinkParts(booking: BookingEmailData): { html: string; te
     html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:#003B6F;font-weight:600">View or sign in to your account</a>.</p>`,
     textLine: `View or sign in to your account: ${url}`,
   };
+}
+
+/** "Forms to complete before your visit" block (compliance auto-send, Phase 1). */
+function complianceFormsHtml(forms?: Array<{ name: string; url: string }>): string {
+  if (!forms || forms.length === 0) return '';
+  const items = forms
+    .map(
+      (f) =>
+        `<li style="margin:2px 0"><a href="${escapeHtml(f.url)}" style="color:#003B6F;font-weight:600">${escapeHtml(f.name)}</a></li>`,
+    )
+    .join('');
+  return (
+    `<p style="margin:0 0 6px 0"><strong>Forms to complete before your visit:</strong></p>` +
+    `<ul style="margin:0 0 14px 18px;padding:0">${items}</ul>`
+  );
+}
+
+function complianceFormsTextLines(forms?: Array<{ name: string; url: string }>): Array<string | null> {
+  if (!forms || forms.length === 0) return [];
+  return ['', 'Forms to complete before your visit:', ...forms.map((f) => `  - ${f.name}: ${f.url}`)];
 }
 
 function htmlRaw(text: string): string {
@@ -253,6 +277,17 @@ export function renderCommunicationSms(
         const msg = clipSmsText(opts.message ?? '', 130);
         return clipSmsText(`${vn}: ${msg}`, SMS_CHAR_BUDGET);
       }
+      case 'compliance_form_request':
+      case 'compliance_form_reminder': {
+        const formName = clipSmsText(opts.complianceFormName ?? 'form', 40);
+        const core = `${leadPart}${vn}: please complete your ${formName} before your ${smsDate} visit.`;
+        return joinSmsPrefixAndUrl(core, opts.complianceFormLink?.trim() || null);
+      }
+      case 'compliance_record_expiring': {
+        const formName = clipSmsText(opts.complianceFormName ?? 'record', 40);
+        const core = `${leadPart}${vn}: your ${formName} is expiring soon. Please renew it.`;
+        return joinSmsPrefixAndUrl(core, opts.complianceFormLink?.trim() || null);
+      }
       default:
         return null;
     }
@@ -305,6 +340,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'Your booking is confirmed. Here are the details:'
               : 'Your table is booked. Here are the details:',
           ),
+          complianceFormsHtml(opts.booking.compliance_forms),
           opts.cancellationPolicy ? htmlRaw(`<strong>Cancellation policy:</strong> ${escapeHtml(opts.cancellationPolicy)}`) : '',
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
@@ -321,6 +357,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
           ...structuredTextLines,
+          ...complianceFormsTextLines(opts.booking.compliance_forms),
           opts.cancellationPolicy ? `Cancellation policy: ${opts.cancellationPolicy}` : null,
           opts.preAppointmentInstructions && appointment
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
@@ -412,13 +449,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? "We're getting ready for your appointment and want to make sure everything is in order."
               : "We're getting ready for your visit and want to make sure everything is in order.",
           ),
-          appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
-            ? htmlRaw(
-                `<strong>Extras:</strong><br/>${opts.booking.addon_lines
-                  .map((l) => escapeHtml(l))
-                  .join('<br/>')}`,
-              )
-            : '',
+          // Extras render as a detail row after the service (see renderTransactionalEmailHtml).
           policyText ? htmlRaw(escapeHtml(policyText)) : '',
         ].join(''),
         textLines: [
@@ -488,13 +519,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'This is a friendly reminder about your upcoming appointment:'
               : 'This is a friendly reminder about your upcoming booking:',
           ),
-          appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
-            ? htmlRaw(
-                `<strong>Extras:</strong><br/>${opts.booking.addon_lines
-                  .map((l) => escapeHtml(l))
-                  .join('<br/>')}`,
-              )
-            : '',
+          // Extras render as a detail row after the service (see renderTransactionalEmailHtml).
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
             : '',
@@ -674,6 +699,58 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
+    case 'compliance_form_request':
+    case 'compliance_form_reminder': {
+      const formName = opts.complianceFormName ?? 'form';
+      const formLink = opts.complianceFormLink?.trim() ?? '';
+      const expiryDays = opts.complianceExpiryDays ?? 14;
+      const isReminder = opts.messageKey === 'compliance_form_reminder';
+      return {
+        subject: `Please complete your ${formName} before your appointment`,
+        heading: isReminder ? 'A quick reminder' : `Please complete your ${formName}`,
+        mainContent: [
+          htmlParagraph(`Hi ${guestName},`),
+          htmlParagraph(
+            isReminder
+              ? `Just a reminder to complete your ${escapeHtml(formName)} before your upcoming appointment at ${escapeHtml(opts.venue.name)}.`
+              : `Before your upcoming appointment at ${escapeHtml(opts.venue.name)}, please take a moment to complete your ${escapeHtml(formName)}.`,
+          ),
+          htmlParagraph(`This link is unique to you and will expire in ${expiryDays} days.`),
+        ].join(''),
+        textLines: [
+          `Hi ${guestName},`,
+          '',
+          isReminder
+            ? `Just a reminder to complete your ${formName} before your upcoming appointment at ${opts.venue.name}.`
+            : `Before your upcoming appointment at ${opts.venue.name}, please complete your ${formName}.`,
+          '',
+          `This link is unique to you and will expire in ${expiryDays} days.`,
+        ],
+        ctaLabel: 'Complete the form',
+        ctaUrl: formLink || null,
+      };
+    }
+    case 'compliance_record_expiring': {
+      const formName = opts.complianceFormName ?? 'record';
+      const formLink = opts.complianceFormLink?.trim() ?? '';
+      return {
+        subject: `Your ${formName} is expiring soon`,
+        heading: `Your ${formName} is expiring soon`,
+        mainContent: [
+          htmlParagraph(`Hi ${guestName},`),
+          htmlParagraph(
+            `Your ${escapeHtml(formName)} on file with ${escapeHtml(opts.venue.name)} is due to expire soon. Please complete it again so you're ready for your next appointment.`,
+          ),
+        ].join(''),
+        textLines: [
+          `Hi ${guestName},`,
+          '',
+          `Your ${formName} on file with ${opts.venue.name} is due to expire soon. Please complete it again so you're ready for your next appointment.`,
+        ],
+        ctaLabel: formLink ? 'Complete the form' : undefined,
+        ctaUrl: formLink || null,
+      };
+    }
     case 'appointment_waitlist_offer':
       throw new Error(
         'appointment_waitlist_offer is rendered via renderAppointmentWaitlistOfferEmail, not buildMainContentEmail',
@@ -717,7 +794,7 @@ export function renderCommunicationEmail(
       priceDisplay: structuredPrice?.trim() ? structuredPrice : null,
       manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
-        preambleHtml: '',
+        preambleHtml: complianceFormsHtml(opts.booking.compliance_forms),
         depositHtml: null,
         customMessage: opts.emailCustomMessage ?? null,
         postCtaAccountHtml: config.postCtaHtml ?? null,
@@ -751,6 +828,7 @@ export function renderCommunicationEmail(
       serviceName: appointmentLane ? bookingLabel(opts.booking) : null,
       priceDisplay: null,
       groupAppointments: opts.booking.group_appointments,
+      addonLines: appointmentLane ? (opts.booking.addon_lines ?? null) : null,
     });
   }
 

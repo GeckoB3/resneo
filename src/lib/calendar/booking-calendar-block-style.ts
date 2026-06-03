@@ -65,23 +65,40 @@ export function bookingCalendarBlockPaletteForDisplayRow(
 
 export function bookingCalendarBlockCardStyle(p: BookingBlockPalette): CSSProperties {
   return {
-    backgroundColor: p.bg,
     color: p.text,
+    // Frosted-glass surface: a white sheen over the status hue, easing to a faint
+    // shadow at the base for depth. `backgroundColor` stays as a robust fallback.
+    backgroundColor: p.bg,
+    backgroundImage:
+      'linear-gradient(177deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.14) 32%, rgba(255,255,255,0) 58%, rgba(15,23,42,0.04) 100%)',
     borderStyle: 'solid',
     borderWidth: 1,
     borderColor: p.border,
-    boxShadow: `inset 4px 0 0 ${p.accent}, 0 10px 26px rgba(15, 23, 42, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.42)`,
+    boxShadow: [
+      'inset 0 1px 0 rgba(255,255,255,0.85)', // crisp top edge
+      'inset 0 -1px 0 rgba(15,23,42,0.05)', // grounded bottom edge
+      '0 1px 2px rgba(15,23,42,0.06)', // tight contact shadow
+      '0 14px 28px -12px rgba(2,32,71,0.26)', // soft brand-tinted lift
+    ].join(', '),
   };
 }
 
 /**
  * Status stripe for calendar booking bars. Rendered as the first column so drag handles
- * and inner content cannot cover a CSS border-left on the card shell.
+ * and inner content cannot cover a CSS border-left on the card shell. A glossy gradient
+ * (top-light → base-shade) gives it a polished, dimensional accent rather than a flat bar.
  */
 export function CalendarBookingStatusStripe({ palette }: { palette: BookingBlockPalette }): ReactElement {
   return createElement('div', {
     className: 'pointer-events-none z-[3] shrink-0 self-stretch rounded-l-[15px]',
-    style: { width: 4, minWidth: 4, backgroundColor: palette.accent },
+    style: {
+      width: 5,
+      minWidth: 5,
+      backgroundColor: palette.accent,
+      backgroundImage:
+        'linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.12) 42%, rgba(0,0,0,0.18) 100%)',
+      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.35), 1px 0 4px rgba(2,32,71,0.10)',
+    },
     'aria-hidden': true,
   });
 }

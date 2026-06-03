@@ -262,9 +262,10 @@ export function AddonGroupsSection({
                     <button
                       type="button"
                       onClick={() => unlink(idx)}
-                      className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                      className="rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50"
+                      title="Remove this add-on from the service"
                     >
-                      Unlink
+                      Remove
                     </button>
                   </div>
                 </div>

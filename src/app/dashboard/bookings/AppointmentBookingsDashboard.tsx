@@ -27,6 +27,11 @@ import { REALTIME_BOOKINGS_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-con
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { OperationsWorkspaceToolbar } from '@/components/dashboard/OperationsWorkspaceToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
+import {
+  ComplianceRowPill,
+  useComplianceBookingFlags,
+} from '@/components/dashboard/compliance/ComplianceBookingIndicator';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
@@ -395,6 +400,19 @@ export function AppointmentBookingsDashboard({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [bookings, setBookings] = useState<RegistryAppointment[]>([]);
+  // Per-booking compliance status for the at-a-glance row indicator (gated on the flag).
+  const complianceRecordsEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const complianceBookingIds = useMemo(() => bookings.map((b) => b.id), [bookings]);
+  const complianceFlags = useComplianceBookingFlags(complianceBookingIds, complianceRecordsEnabled);
+  // "Needs compliance" filter — let reception pull up only appointments with an outstanding record.
+  const [complianceFilter, setComplianceFilter] = useState<'all' | 'outstanding'>('all');
+  const outstandingComplianceCount = useMemo(
+    () =>
+      complianceRecordsEnabled
+        ? bookings.filter((b) => complianceFlags[b.id]?.state === 'unmet').length
+        : 0,
+    [bookings, complianceFlags, complianceRecordsEnabled],
+  );
   /** All statuses in range - used for summary tiles (list may be status-filtered). */
   const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
@@ -831,8 +849,12 @@ export function AppointmentBookingsDashboard({
           : [...filteredBookings, ...filteredLinkedBookings];
     // One bar per booking: collapse multi-service visits (shared group_booking_id, no
     // per-person label) to a single representative. Group bookings stay as separate bars.
-    return collapseMultiServiceVisits(combined);
-  }, [sourceScope, filteredBookings, filteredLinkedBookings]);
+    let rows = collapseMultiServiceVisits(combined);
+    if (complianceRecordsEnabled && complianceFilter === 'outstanding') {
+      rows = rows.filter((b) => complianceFlags[b.id]?.state === 'unmet');
+    }
+    return rows;
+  }, [sourceScope, filteredBookings, filteredLinkedBookings, complianceRecordsEnabled, complianceFilter, complianceFlags]);
 
   const statsBookings = useMemo(() => {
     let reg = filterRegistryAppointments(
@@ -1478,6 +1500,7 @@ export function AppointmentBookingsDashboard({
                   </Pill>
                 </span>
               )}
+              {complianceFlags[b.id] && <ComplianceRowPill flag={complianceFlags[b.id]!} />}
             </div>
           </div>
           <svg
@@ -1918,6 +1941,38 @@ export function AppointmentBookingsDashboard({
               {scope === 'all' ? 'All' : scope === 'own' ? 'My venue' : 'Linked'}
             </button>
           ))}
+        </div>
+      ) : null}
+
+      {complianceRecordsEnabled && (complianceFilter === 'outstanding' || outstandingComplianceCount > 0) ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setComplianceFilter((f) => (f === 'outstanding' ? 'all' : 'outstanding'))}
+            aria-pressed={complianceFilter === 'outstanding'}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 ${
+              complianceFilter === 'outstanding'
+                ? 'border-rose-300 bg-rose-50 text-rose-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" aria-hidden />
+            Needs compliance
+            {outstandingComplianceCount > 0 ? (
+              <span className="rounded-full bg-rose-100 px-1.5 text-[10px] font-bold tabular-nums text-rose-700">
+                {outstandingComplianceCount}
+              </span>
+            ) : null}
+          </button>
+          {complianceFilter === 'outstanding' ? (
+            <button
+              type="button"
+              onClick={() => setComplianceFilter('all')}
+              className="text-xs font-medium text-slate-500 underline hover:text-slate-700"
+            >
+              Clear
+            </button>
+          ) : null}
         </div>
       ) : null}
 

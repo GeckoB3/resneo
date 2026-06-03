@@ -39,6 +39,8 @@ import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessag
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -153,6 +155,7 @@ export function AppointmentServicesView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
+  const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const [error, setError] = useState<string | null>(null);
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
@@ -594,7 +597,9 @@ export function AppointmentServicesView({
       const payload: Record<string, unknown> = {
         ...(editingId ? { id: editingId } : {}),
         name: form.name.trim(),
-        description: form.description.trim() || undefined,
+        // Send null (not undefined) so a cleared description actually reaches the
+        // server — JSON.stringify drops undefined, which silently kept the old value.
+        description: form.description.trim() || null,
         duration_minutes: durationMinutesPayload,
         buffer_minutes: bufferMinutesPayload,
         price_pence: poundsToPence(priceStrPayload) ?? undefined,
@@ -1117,6 +1122,14 @@ export function AppointmentServicesView({
               }
             />
 
+            {editingId && complianceEnabled && (
+              <div className="mt-6">
+                <ComplianceRequirementsEditor
+                  appointmentServiceId={editingId}
+                  complianceEnabled={complianceEnabled}
+                />
+              </div>
+            )}
 
       </Dialog>
 

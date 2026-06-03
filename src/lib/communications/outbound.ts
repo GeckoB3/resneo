@@ -35,6 +35,10 @@ export interface SendPolicyMessageOptions {
   cancellationPolicy?: string | null;
   changeSummary?: string | null;
   message?: string | null;
+  /** Compliance messages (§12): public form URL, form name, link expiry in days. */
+  complianceFormLink?: string | null;
+  complianceFormName?: string | null;
+  complianceExpiryDays?: number | null;
   /** When set, log with guest_id and null booking (contacts CRM / no booking anchor). */
   guestIdForLog?: string;
 }
@@ -124,6 +128,9 @@ export async function sendPolicyMessage(
       cancellationPolicy: opts.cancellationPolicy ?? null,
       changeSummary: opts.changeSummary ?? null,
       message: opts.message ?? null,
+      complianceFormLink: opts.complianceFormLink ?? null,
+      complianceFormName: opts.complianceFormName ?? null,
+      complianceExpiryDays: opts.complianceExpiryDays ?? null,
       guestSelfRescheduleEnabled,
     });
     if (!rendered) return { sent: false, reason: 'disabled' };
@@ -149,6 +156,9 @@ export async function sendPolicyMessage(
     cancellationPolicy: opts.cancellationPolicy ?? null,
     changeSummary: opts.changeSummary ?? null,
     message: opts.message ?? null,
+    complianceFormLink: opts.complianceFormLink ?? null,
+    complianceFormName: opts.complianceFormName ?? null,
+    complianceExpiryDays: opts.complianceExpiryDays ?? null,
     guestSelfRescheduleEnabled,
   });
   if (!rendered) return { sent: false, reason: 'disabled' };

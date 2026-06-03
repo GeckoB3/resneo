@@ -1,6 +1,30 @@
 import type { CSSProperties } from 'react';
 import { viewportMarginPx } from '@/lib/ui/viewport-margin';
 
+/** Below Tailwind `md` — calendar booking popovers use a centered, full-height layout. */
+export const MOBILE_POPOVER_MAX_VIEWPORT_WIDTH_PX = 768;
+
+function computeMobilePopoverPanelStyle(params: {
+  viewportWidth: number;
+  viewportHeight: number;
+}): CSSProperties {
+  const margin = viewportMarginPx(params.viewportWidth);
+  const vw = params.viewportWidth;
+  const vh = params.viewportHeight;
+  const panelWidth = vw - 2 * margin;
+  const maxHeight = vh - 2 * margin;
+
+  return {
+    width: panelWidth,
+    maxWidth: panelWidth,
+    boxSizing: 'border-box',
+    left: margin,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    maxHeight,
+    overflow: 'hidden',
+  };
+}
 
 export function computePopoverPanelStyle(params: {
   anchorX: number;
@@ -12,6 +36,14 @@ export function computePopoverPanelStyle(params: {
   const margin = viewportMarginPx(params.viewportWidth);
   const vw = params.viewportWidth;
   const vh = params.viewportHeight;
+
+  if (vw < MOBILE_POPOVER_MAX_VIEWPORT_WIDTH_PX) {
+    return computeMobilePopoverPanelStyle({
+      viewportWidth: vw,
+      viewportHeight: vh,
+    });
+  }
+
   const panelWidth = Math.min(params.maxPanelWidth ?? 640, vw - 2 * margin);
 
   const { anchorX, anchorY } = params;

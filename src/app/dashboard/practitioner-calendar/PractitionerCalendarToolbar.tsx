@@ -221,6 +221,7 @@ export function PractitionerCalendarToolbar({
       title="Calendar"
       summary={toolbarSummary}
       summaryContent={summaryContent}
+      showSummaryInfo={false}
       date={date}
       todayIso={todayIso}
       dateLabel={periodLabel}

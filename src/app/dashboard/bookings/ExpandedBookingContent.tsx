@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -29,6 +29,8 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
+import { ComplianceSection } from '@/components/dashboard/compliance/ComplianceSection';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import {
   bookingExpandAccordionBodyClass,
   bookingExpandAccordionDetailsClass,
@@ -333,6 +335,7 @@ export function ExpandedBookingContent({
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [statusActionPending, setStatusActionPending] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
+  const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
   const [groupVisitBookings, setGroupVisitBookings] = useState<GroupVisitBookingRow[]>(
     () => initialGroupVisitBookings ?? [],
@@ -1158,18 +1161,18 @@ export function ExpandedBookingContent({
         </p>
       ) : null}
       <SectionCard
-        className={`rounded-xl ring-1 ring-slate-900/[0.04] ${detailHydrating ? 'opacity-[0.98]' : ''}`}
+        className={`rounded-2xl ring-1 ring-slate-900/[0.04] ${detailHydrating ? 'opacity-[0.98]' : ''}`}
         aria-busy={detailHydrating}
       >
         <SectionCard.Body className="p-2.5 sm:p-3">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[13px] bg-gradient-to-br from-brand-400 to-brand-700 text-[15px] font-bold text-white shadow-[0_2px_8px_-2px_rgba(0,59,111,0.45)] ring-1 ring-white/40">
                 {guestName.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                  <p className="max-w-[12rem] truncate text-sm font-bold text-slate-900 sm:max-w-[18rem]">{guestName}</p>
+                  <p className="max-w-[12rem] truncate text-[15px] font-semibold tracking-tight text-slate-900 sm:max-w-[18rem]">{guestName}</p>
                   {contactsHref ? (
                     <Link
                       href={contactsHref}
@@ -1244,8 +1247,11 @@ export function ExpandedBookingContent({
                 <a
                   href={guestTelHref}
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97]"
                 >
+                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.125A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+                  </svg>
                   Call
                 </a>
               ) : null}
@@ -1257,26 +1263,28 @@ export function ExpandedBookingContent({
                     if (!linkedViewOnly) openGuestMessageComposer('email');
                   }}
                   disabled={linkedViewOnly}
-                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-default disabled:opacity-50"
+                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] disabled:cursor-default disabled:opacity-50 disabled:active:scale-100"
                 >
+                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                  </svg>
                   Email
                 </button>
               ) : null}
             </div>
           </div>
           <div
-            className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-700"
+            className="mt-2.5 flex min-w-0 flex-wrap gap-1.5 border-t border-slate-100 pt-2.5 text-[11px] text-slate-700"
             role="list"
           >
-            {bookingMetaSegments.map((segment, index) => (
-              <Fragment key={segment.key}>
-                {index > 0 ? (
-                  <span className="shrink-0 text-slate-300" aria-hidden>
-                    ·
-                  </span>
-                ) : null}
-                <span role="listitem">{segment.node}</span>
-              </Fragment>
+            {bookingMetaSegments.map((segment) => (
+              <span
+                key={segment.key}
+                role="listitem"
+                className="inline-flex items-baseline gap-1.5 rounded-lg border border-slate-200/70 bg-slate-50/70 px-2.5 py-1 leading-none transition-colors hover:border-slate-300/70 hover:bg-slate-50"
+              >
+                {segment.node}
+              </span>
             ))}
           </div>
           {showGlobalExtras ? (
@@ -1313,7 +1321,7 @@ export function ExpandedBookingContent({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <div className="rounded-b-xl bg-gradient-to-b from-white to-slate-50/40 px-2 py-2 sm:px-3 sm:py-2.5">
+        <div className="rounded-b-2xl bg-gradient-to-b from-white to-slate-50/40 px-2.5 py-2.5 sm:px-3 sm:py-3">
           <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
             {forwardActions.map((action) => (
               <button
@@ -1757,6 +1765,28 @@ export function ExpandedBookingContent({
           </div>
         </div>
       </details>
+
+      {complianceEnabled &&
+      (activeDetail?.guest?.id ?? booking.guest_id) &&
+      (booking.appointment_service_id || booking.service_item_id) ? (
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
+            <span>Compliance</span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </summary>
+          <div className={bookingExpandAccordionBodyClass}>
+            <ComplianceSection
+              guestId={(activeDetail?.guest?.id ?? booking.guest_id)!}
+              bookingId={booking.id}
+              appointmentServiceId={booking.appointment_service_id ?? null}
+              serviceItemId={booking.service_item_id ?? null}
+              complianceEnabled={complianceEnabled}
+            />
+          </div>
+        </details>
+      ) : null}
 
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>

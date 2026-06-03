@@ -45,7 +45,7 @@ import { planCalendarLimit } from '@/lib/plan-limits';
 import type { VenueBillingQuotePayload } from '@/lib/stripe/billing-quote';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
-import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -56,6 +56,7 @@ import { SettingsProfileGroup } from './SettingsProfileGroup';
 import { WidgetSection } from './widget/WidgetSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FeatureFlagsSection } from './sections/FeatureFlagsSection';
+import { ComplianceSettingsSection } from './sections/ComplianceSettingsSection';
 import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS } from '@/lib/feature-flags';
 import { ReportsView } from '../reports/ReportsView';
@@ -128,6 +129,11 @@ const TABS = [
     key: 'comms',
     label: 'Communications',
     description: 'Email and SMS templates, timing, and guest notification policies.',
+  },
+  {
+    key: 'compliance',
+    label: 'Compliance',
+    description: 'Patch tests, consent and intake forms, service requirements, and defaults.',
   },
   {
     key: 'staff',
@@ -1147,9 +1153,11 @@ function SettingsViewInner({
         if (x.key === 'linked-accounts' && !linkedAccountsAvailable) return false;
         if (x.key === 'reports' && !isAdmin) return false;
         if (x.key === 'refer-earn' && (!isAdmin || !referralsProgrammeAvailable)) return false;
+        // Compliance: admins on an Appointments plan (the enable toggle lives in its General panel).
+        if (x.key === 'compliance' && !(isAdmin && isAppointmentPlanTier(venue?.pricing_tier ?? null))) return false;
         return true;
       }),
-    [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable],
+    [isAdmin, linkedAccountsAvailable, referralsProgrammeAvailable, venue?.pricing_tier],
   );
   const tabBarTabs = useMemo(
     (): { id: TabKey; label: string; description?: string }[] =>
@@ -1619,6 +1627,10 @@ function SettingsViewInner({
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
             waitlistV2Enabled={initialFeatureFlagsResolved.waitlist_v2}
           />
+        ) : null}
+
+        {isAdmin && isAppointmentPlanTier(venue.pricing_tier) && visitedTabs.has('compliance') && selectedTab === 'compliance' ? (
+          <ComplianceSettingsSection isAdmin={isAdmin} />
         ) : null}
 
         {isAdmin && visitedTabs.has('staff') && selectedTab === 'staff' ? (

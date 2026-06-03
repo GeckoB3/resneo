@@ -10,6 +10,19 @@ Controlled rollout for Phase 1a work in [Resneo-Appointments-Review-And-Roadmap.
 | `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify). Cancellation notice applies to refunds on cancel, not to whether reschedule is allowed. **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
 | `class_commerce_enabled` | Gates the entire class-commerce surface area: credit packs, courses, memberships, recurring reservations, and the dashboard products UI. See [reserveni-class-products-plan.md](./reserveni-class-products-plan.md) §10. Off-state hides the dashboard `/dashboard/class-timetable/products` page and returns 403 from all `/api/venue/class-{credit,course,membership}-products/*` routes. Existing class instances and guest bookings continue to work — the flag strictly gates **prepaid commerce** surfaces. | Class products §10 |
+| `compliance_records_enabled` | Gates the Compliance Records feature (patch tests, consent/intake forms, service requirements, public form submission). See [reserveni-compliance-spec.md](./reserveni-compliance-spec.md). Off-state hides the `/dashboard/compliance` nav item, the Settings → Compliance tab, the booking/contact compliance sections, and the service-editor requirements section; all `/api/venue/compliance/*` routes return 403. Also requires `isAppointmentPlanTier(pricing_tier)` (not available on restaurant/founding SKUs). | Compliance v1 |
+
+When `compliance_records_enabled` is on, venues can set a `compliance` config object in the same JSONB (Settings → Compliance → General settings):
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `default_capture_method` | `staff_in_venue` \| `client_online` \| `both` (default `both`) | Pre-selected capture method for new types |
+| `default_form_link_channel` | `email` \| `sms` \| `both` (default `email`) | Default channel for sending form links |
+| `reminder_cadence_days` | int 0–90 (default 7) | Days before expiry to remind the client (0 = off) |
+| `lock_period_hours` | int 0–720 (default 0) | Default lead-time a record must pre-date a booking |
+| `form_link_expiry_days` | int 1–90 (default 14) | Venue-level link expiry (per-type override still wins) |
+| `auto_send_on_booking` | boolean (default `false`) | Auto-send a form link on booking with unmet online requirement |
+| `incomplete_behaviour` | `warn_only` (v1) | Behaviour when a client arrives with an incomplete form |
 
 When `any_available_practitioner` is on, venues can set `any_available_practitioner_config` in the same JSONB:
 
@@ -34,6 +47,7 @@ All flags default to **off** until enabled per venue or via environment override
 | `guest_self_reschedule` | `FEATURE_FLAG_GUEST_SELF_RESCHEDULE` |
 | `any_available_practitioner` | `FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER` |
 | `class_commerce_enabled` | `FEATURE_FLAG_CLASS_COMMERCE_ENABLED` |
+| `compliance_records_enabled` | `FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED` |
 
 Example (enable all in staging):
 

@@ -5,6 +5,7 @@ import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
+import CompliancePreCheckNotice from './CompliancePreCheckNotice';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
@@ -480,11 +481,13 @@ export function AppointmentBookingFlow({
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const publicCreateErrorMessage = useCallback(
-    (res: Response, data: { error?: string }) => {
+    (res: Response, data: { error?: string; message?: string }) => {
       if (isPublicGuest && accountGate.handleCreateResponseError(res.status, data.error)) {
         return 'Sign in is required to book this venue.';
       }
-      return data.error ?? 'Booking failed';
+      // Prefer a server-supplied human-readable message (e.g. compliance 409s carry a
+      // friendly `message` alongside the machine `error` code) so guests never see a raw code.
+      return data.message ?? data.error ?? 'Booking failed';
     },
     [accountGate, isPublicGuest],
   );
@@ -501,6 +504,11 @@ export function AppointmentBookingFlow({
   );
   const appointmentWaitlistEnabled = Boolean(venue.feature_flags?.resolved?.waitlist_v2);
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
+  // Public compliance pre-check (Phase 2 / G4): the guest's email, seeded from a
+  // signed-in account and updated as they type, drives the pre-check resolve.
+  const [precheckEmail, setPrecheckEmail] = useState<string>(
+    () => (isPublicGuest ? accountGate.guestDetailsPrefill?.email?.trim() ?? '' : ''),
+  );
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -1951,7 +1959,7 @@ export function AppointmentBookingFlow({
             }),
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          if (!res.ok) throw new Error(data.message ?? data.error ?? 'Booking failed');
           setCreateResult({
             booking_id: data.booking_id,
             requires_deposit: Boolean(data.payment_url),
@@ -2076,7 +2084,8 @@ export function AppointmentBookingFlow({
           });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error((data as { error?: string }).error ?? 'Could not update appointment');
+        const d = data as { error?: string; message?: string };
+        throw new Error(d.message ?? d.error ?? 'Could not update appointment');
       }
       setCreateResult({
         booking_id: editBooking.id,
@@ -2213,7 +2222,7 @@ export function AppointmentBookingFlow({
         setError(
           isPublicGuest
             ? publicCreateErrorMessage(res, data)
-            : (data.error ?? 'Group booking failed'),
+            : (data.message ?? data.error ?? 'Group booking failed'),
         );
         return;
       }
@@ -3705,11 +3714,26 @@ export function AppointmentBookingFlow({
           ) : submitting ? (
             <BookingSubmittingPanel variant="appointment" />
           ) : (
+            <>
+              {isPublicGuest && (
+                <CompliancePreCheckNotice
+                  venueId={venue.id}
+                  serviceIds={
+                    multiServiceSegments && multiServiceSegments.length > 0
+                      ? multiServiceSegments.map((s) => s.serviceId)
+                      : selectedServiceId
+                        ? [selectedServiceId]
+                        : []
+                  }
+                  email={precheckEmail}
+                />
+              )}
             <DetailsStep
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
               date={date}
               partySize={1}
               onSubmit={handleDetailsSubmit}
+              onEmailChange={isPublicGuest ? setPrecheckEmail : undefined}
               onBack={() => {
                 setStep('multi_service');
               }}
@@ -3754,6 +3778,7 @@ export function AppointmentBookingFlow({
               submitLabel={isEdit ? 'Save changes' : undefined}
               {...publicDetailsFieldProps}
             />
+            </>
           )}
         </div>
       )}

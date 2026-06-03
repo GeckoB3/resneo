@@ -42,7 +42,13 @@ export type CommunicationLogMessageType =
   | 'class_membership_started_email'
   | 'class_membership_renewed_email'
   | 'class_membership_cancelling_email'
-  | 'class_membership_ended_email';
+  | 'class_membership_ended_email'
+  | 'compliance_form_request_email'
+  | 'compliance_form_request_sms'
+  | 'compliance_form_reminder_email'
+  | 'compliance_form_reminder_sms'
+  | 'compliance_record_expiring_email'
+  | 'compliance_record_expiring_sms';
 
 const LOG_MESSAGE_TYPE_MAP: Record<
   CommunicationMessageKey,
@@ -106,6 +112,18 @@ const LOG_MESSAGE_TYPE_MAP: Record<
   class_membership_renewed: { email: 'class_membership_renewed_email' },
   class_membership_cancelling: { email: 'class_membership_cancelling_email' },
   class_membership_ended: { email: 'class_membership_ended_email' },
+  compliance_form_request: {
+    email: 'compliance_form_request_email',
+    sms: 'compliance_form_request_sms',
+  },
+  compliance_form_reminder: {
+    email: 'compliance_form_reminder_email',
+    sms: 'compliance_form_reminder_sms',
+  },
+  compliance_record_expiring: {
+    email: 'compliance_record_expiring_email',
+    sms: 'compliance_record_expiring_sms',
+  },
 };
 
 export interface ResolveCommPolicyInput {

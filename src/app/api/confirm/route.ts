@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase";
+import { loadOutstandingBookingFormLinks } from "@/lib/compliance/form-links-service";
 import { stripe } from "@/lib/stripe";
 import { sendCancellationNotification } from "@/lib/communications/send-templated";
 import type { BookingEmailData } from "@/lib/emails/types";
@@ -279,6 +280,7 @@ export async function GET(request: NextRequest) {
         bookingId: booking.id,
         purpose: "manage",
       }),
+      compliance_forms: await loadOutstandingBookingFormLinks(supabase, booking.venue_id, booking.id),
       feature_flags: { resolved: featureFlagsResolved },
     });
   } catch (err) {

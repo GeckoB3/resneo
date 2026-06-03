@@ -46,6 +46,7 @@ import {
   isResourceBookingStartInPast,
 } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isGuestBookingDateAllowed, entityBookingWindowFromRow, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -1297,6 +1298,28 @@ async function handleNonTableBooking(
       .eq('status', 'active')
       .maybeSingle();
     if (membership) bookingInsert.collective_id = collective_id;
+  }
+
+  // Compliance requirements gate (§5.1). Online context blocks on `block_online`
+  // and `block_all`. No-ops when the feature is off or the booking is not Model B.
+  const onlineCompliance = await checkBookingCompliance(supabase, {
+    venueId: venue_id,
+    guestId: guest.id,
+    appointmentServiceId: (bookingInsert.appointment_service_id as string | null) ?? null,
+    serviceItemId: (bookingInsert.service_item_id as string | null) ?? null,
+    bookingDate: booking_date,
+    bookingTime: timeForDb,
+    context: 'online',
+  });
+  if (onlineCompliance.blocked) {
+    return NextResponse.json(
+      {
+        error: COMPLIANCE_REQUIREMENT_UNMET,
+        message: complianceUnmetMessage(onlineCompliance.details, 'online'),
+        details: onlineCompliance.details,
+      },
+      { status: 409 },
+    );
   }
 
   const { data: booking, error: bookErr } = await supabase

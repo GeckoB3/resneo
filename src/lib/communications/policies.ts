@@ -30,7 +30,18 @@ export type CommunicationMessageKey =
   | 'class_membership_started'
   | 'class_membership_renewed'
   | 'class_membership_cancelling'
-  | 'class_membership_ended';
+  | 'class_membership_ended'
+  // Compliance records (§12) — appointments_other lane only.
+  | 'compliance_form_request'
+  | 'compliance_form_reminder'
+  | 'compliance_record_expiring';
+
+/** Read-only set of the compliance message keys for dispatch helpers. */
+export const COMPLIANCE_MESSAGE_KEYS: readonly CommunicationMessageKey[] = [
+  'compliance_form_request',
+  'compliance_form_reminder',
+  'compliance_record_expiring',
+] as const;
 
 /** Read-only set of the class-commerce keys for use in dispatch helpers. */
 export const CLASS_COMMERCE_MESSAGE_KEYS: readonly CommunicationMessageKey[] = [
@@ -250,6 +261,31 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
       hoursBefore: null,
       hoursAfter: null,
     },
+    // Compliance — email-on by default; SMS allowed and venue-toggleable.
+    compliance_form_request: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    compliance_form_reminder: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    compliance_record_expiring: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
   };
 }
 
@@ -350,6 +386,9 @@ const ALLOWED_CHANNELS_BY_MESSAGE: Record<
   class_membership_renewed: EMAIL_ONLY,
   class_membership_cancelling: EMAIL_ONLY,
   class_membership_ended: EMAIL_ONLY,
+  compliance_form_request: EMAIL_AND_SMS,
+  compliance_form_reminder: EMAIL_AND_SMS,
+  compliance_record_expiring: EMAIL_AND_SMS,
 };
 
 function sanitizeChannels(
@@ -532,6 +571,21 @@ function sanitizeLanePolicies(
       'class_membership_ended',
       row.class_membership_ended,
       fallback.class_membership_ended,
+    ),
+    compliance_form_request: sanitizeMessagePolicy(
+      'compliance_form_request',
+      row.compliance_form_request,
+      fallback.compliance_form_request,
+    ),
+    compliance_form_reminder: sanitizeMessagePolicy(
+      'compliance_form_reminder',
+      row.compliance_form_reminder,
+      fallback.compliance_form_reminder,
+    ),
+    compliance_record_expiring: sanitizeMessagePolicy(
+      'compliance_record_expiring',
+      row.compliance_record_expiring,
+      fallback.compliance_record_expiring,
     ),
   };
 }

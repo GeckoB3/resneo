@@ -28,6 +28,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { applyStaffBookingPaymentAndComms } from '@/lib/booking/staff-booking-payment-comms';
+import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
@@ -110,6 +111,8 @@ const phoneBookingSchema = z.object({
     )
     .max(50)
     .optional(),
+  /** Admin acknowledgement to proceed past an unmet `block_all` compliance requirement (§5.2). */
+  override_compliance: z.boolean().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -1090,6 +1093,28 @@ export async function POST(request: NextRequest) {
 
       if (linkedCreate) {
         apptInsert.created_by_linked_venue_id = linkedCreate.actingVenueId;
+      }
+
+      // Compliance requirements gate (§5.1). Staff context blocks only on `block_all`;
+      // an admin may acknowledge and proceed (§5.2). No-ops when the feature is off.
+      const apptCompliance = await checkBookingCompliance(admin, {
+        venueId,
+        guestId: guest.id,
+        appointmentServiceId: useUnifiedAppointmentStorage ? null : appointment_service_id,
+        serviceItemId: useUnifiedAppointmentStorage ? appointment_service_id : null,
+        bookingDate: booking_date,
+        bookingTime: timeForDb,
+        context: 'staff',
+      });
+      if (apptCompliance.blocked && !(staff.role === 'admin' && parsed.data.override_compliance === true)) {
+        return NextResponse.json(
+          {
+            error: COMPLIANCE_REQUIREMENT_UNMET,
+            message: complianceUnmetMessage(apptCompliance.details, 'staff'),
+            details: apptCompliance.details,
+          },
+          { status: 409 },
+        );
       }
 
       const { data: apptBooking, error: apptErr } = await admin

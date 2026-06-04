@@ -69,6 +69,8 @@ export interface ValidateAppointmentModificationIntervalParams {
   bookingProcessingSnapshot?: unknown;
   processingTimeBlocksOverride?: unknown;
   allowManualOverlap?: boolean;
+  /** Staff move/resize past opening hours — skips the working/opening-hours gates. */
+  allowOutsideHours?: boolean;
 }
 
 /**
@@ -92,6 +94,7 @@ export async function validateAppointmentModificationInterval(
     bookingProcessingSnapshot,
     processingTimeBlocksOverride,
     allowManualOverlap,
+    allowOutsideHours,
   } = params;
 
   const idLc = bookingId.toLowerCase();
@@ -162,9 +165,11 @@ export async function validateAppointmentModificationInterval(
 
   const intervalOpts: {
     allowBookingOverlap?: boolean;
+    allowOutsideHours?: boolean;
     processingTimeBlocks?: ReturnType<typeof parseProcessingTimeBlocksFromDb>;
   } = {
     allowBookingOverlap: allowManualOverlap === true,
+    allowOutsideHours: allowOutsideHours === true,
   };
   if (processingTimeBlocksOverride !== undefined) {
     intervalOpts.processingTimeBlocks = parseProcessingTimeBlocksFromDb(processingTimeBlocksOverride);

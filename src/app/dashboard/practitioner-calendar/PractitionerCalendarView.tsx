@@ -107,6 +107,7 @@ import {
 } from '@/lib/calendar/schedule-blocks-grouping';
 import { buildPractitionerBreakBlocks } from '@/lib/calendar/practitioner-break-blocks';
 import {
+  buildLinkedColumnClosureBlocks,
   buildPractitionerScheduleClosureBlocks,
   buildVenueScheduleClosureBlocks,
   isScheduleClosureBlockType,
@@ -1611,7 +1612,7 @@ function DragBookingPreview({
 }: {
   booking: Booking;
   /** Target time / column while dragging; shown on the preview card (not a global banner). */
-  movePreview?: { label: string; invalid: boolean } | null;
+  movePreview?: { label: string; invalid: boolean; outsideHours?: boolean } | null;
 }) {
   const p = bookingCalendarBlockPalette(booking);
   return (
@@ -1622,7 +1623,11 @@ function DragBookingPreview({
       {movePreview ? (
         <div
           className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
-            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+            movePreview.invalid
+              ? 'bg-red-600 text-white'
+              : movePreview.outsideHours
+                ? 'bg-amber-500 text-white'
+                : 'bg-slate-900 text-white'
           }`}
           aria-live="polite"
         >
@@ -1686,7 +1691,7 @@ function DragBlockPreview({
   movePreview,
 }: {
   block: CalendarBlock;
-  movePreview?: { label: string; invalid: boolean } | null;
+  movePreview?: { label: string; invalid: boolean; outsideHours?: boolean } | null;
 }) {
   const heading = calendarBlockHeading(block);
   const label = block.reason?.trim() ? `${heading}: ${block.reason.trim()}` : heading;
@@ -1702,7 +1707,11 @@ function DragBlockPreview({
       {movePreview ? (
         <div
           className={`border-b border-black/10 px-2 py-1 text-center text-[10px] font-bold leading-snug ${
-            movePreview.invalid ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'
+            movePreview.invalid
+              ? 'bg-red-600 text-white'
+              : movePreview.outsideHours
+                ? 'bg-amber-500 text-white'
+                : 'bg-slate-900 text-white'
           }`}
           aria-live="polite"
         >
@@ -1842,10 +1851,14 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   const statusPill = content.showStatus ? (
     <CalendarBookingStatusBadge b={statusBooking} palette={palette} />
   ) : null;
+  // Read-only when the link is time-only or this venue wasn't granted edit rights.
+  const readOnly = visibility === 'time_only' || !booking.editable || booking.status === 'Cancelled';
 
   if (variant === 'week-grid') {
     return (
       <div className="flex min-w-0 flex-col gap-1">
+        {/* §19.1 — week columns are days, so each card carries its source-venue chip. */}
+        <LinkedVenueChip venueName={venueName} readOnly={readOnly} />
         <div className="min-w-0">
           <div className="truncate font-bold">{content.name}</div>
           {content.service ? (
@@ -1865,7 +1878,7 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   return (
     <div
       className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl"
-      style={bookingCalendarBlockCardStyle(palette)}
+      style={bookingCalendarBlockCardStyle(palette, { linked: true })}
     >
       <CalendarBookingStatusStripe palette={palette} />
       <div
@@ -1884,9 +1897,72 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
           density={cardDensity}
         />
       </div>
+      {readOnly ? (
+        <span
+          className="pointer-events-none absolute right-1.5 top-1.5 z-[4] inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/75 text-slate-500 shadow-sm ring-1 ring-slate-900/5"
+          title={`View-only — ${venueName} hasn't granted edit rights for this booking.`}
+          aria-label={`Read-only linked booking from ${venueName}`}
+        >
+          <LinkedReadOnlyLockIcon />
+        </span>
+      ) : null}
     </div>
   );
 });
+
+/** Padlock glyph for read-only linked cards (§19.1 — a real icon, not an emoji). */
+function LinkedReadOnlyLockIcon({ className = 'h-2.5 w-2.5' }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+/**
+ * Source-venue chip for a linked booking card (§19.1): a link glyph + the venue
+ * name, with a padlock appended when the booking is read-only. Conveys "linked,
+ * and from whom" without relying on colour alone.
+ */
+function LinkedVenueChip({ venueName, readOnly }: { venueName: string; readOnly: boolean }) {
+  return (
+    <span
+      className="linked-chip inline-flex max-w-full items-center gap-1 self-start rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+      title={
+        readOnly
+          ? `Linked from ${venueName} · view-only`
+          : `Linked from ${venueName}`
+      }
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-2.5 w-2.5 shrink-0"
+      >
+        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+        <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+        <path d="M8 12h8" />
+      </svg>
+      <span className="truncate">{venueName}</span>
+      {readOnly ? <LinkedReadOnlyLockIcon className="h-2.5 w-2.5 shrink-0" /> : null}
+    </span>
+  );
+}
 
 /**
  * One read-only day-grid column for a linked venue's practitioner (§8.2).
@@ -2153,6 +2229,10 @@ export function PractitionerCalendarView({
   );
   /** Linked-venue calendars (§8.2). Adjacent to the native pipeline, never merged. */
   const [linkedVenues, setLinkedVenues] = useState<LinkedVenueCalendar[]>([]);
+  /** §19.3 — true when the linked-calendar fetch failed, so we show a retry notice rather than a silent empty state. */
+  const [linkedLoadError, setLinkedLoadError] = useState(false);
+  /** True once the first linked-calendar fetch has resolved (so zero links shows "none" not a perpetual "Loading…"). */
+  const [linkedLoaded, setLinkedLoaded] = useState(false);
   /** Linked columns to show. `null` = all linked columns (default). */
   const [visibleLinkedColumnIds, setVisibleLinkedColumnIds] = useState<string[] | null>(null);
   const [linkedViewing, setLinkedViewing] = useState<
@@ -2202,12 +2282,18 @@ export function PractitionerCalendarView({
   const [dragExcludeBookingId, setDragExcludeBookingId] = useState<string | null>(null);
   const [dragBlock, setDragBlock] = useState<CalendarBlock | null>(null);
   const [dragExcludeBlockId, setDragExcludeBlockId] = useState<string | null>(null);
-  const [calendarDragPreview, setCalendarDragPreview] = useState<{ label: string; invalid: boolean } | null>(null);
+  const [calendarDragPreview, setCalendarDragPreview] = useState<{
+    label: string;
+    invalid: boolean;
+    /** Allowed, but lands outside opening hours — shown as an amber warning, not blocked. */
+    outsideHours?: boolean;
+  } | null>(null);
   const [calendarDragTarget, setCalendarDragTarget] = useState<{
     pracId: string;
     startMin: number;
     endMin: number;
     invalid: boolean;
+    outsideHours?: boolean;
   } | null>(null);
   const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
@@ -2861,6 +2947,7 @@ export function PractitionerCalendarView({
   const loadLinkedData = useCallback(async () => {
     if (!linkFeature) {
       setLinkedVenues([]);
+      setLinkedLoadError(false);
       return;
     }
     try {
@@ -2868,13 +2955,22 @@ export function PractitionerCalendarView({
       const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
       const res = await fetch(`/api/venue/linked-calendar?${params}`);
       if (!res.ok) {
+        // §19.3 — a load failure must be distinguishable from "no linked columns",
+        // not silently collapse to an empty calendar.
         setLinkedVenues([]);
+        setLinkedLoadError(true);
         return;
       }
       const json = (await res.json()) as { venues?: LinkedVenueCalendar[] };
       setLinkedVenues(json.venues ?? []);
+      setLinkedLoadError(false);
     } catch {
       setLinkedVenues([]);
+      setLinkedLoadError(true);
+    } finally {
+      // Mark the first load complete so a venue with zero links shows an explicit
+      // "no linked venues" state instead of a perpetual "Loading…" (§19.3).
+      setLinkedLoaded(true);
     }
   }, [linkFeature, listFromTo]);
 
@@ -3631,7 +3727,13 @@ export function PractitionerCalendarView({
     }
   }
 
-  async function patchBookingMove(booking: Booking, newDate: string, newTime: string, newPracId: string) {
+  async function patchBookingMove(
+    booking: Booking,
+    newDate: string,
+    newTime: string,
+    newPracId: string,
+    opts?: { allowOutsideHours?: boolean },
+  ) {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
     const linkedOwnerVenueId = booking._linkedOwnerVenueId;
@@ -3692,6 +3794,7 @@ export function PractitionerCalendarView({
             practitioner_id: realPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
+            allow_outside_hours: opts?.allowOutsideHours === true,
             defer_modification_guest_notification: true,
           }),
         });
@@ -3751,7 +3854,7 @@ export function PractitionerCalendarView({
   }
 
   const patchBookingResize = useCallback(
-    async (booking: Booking, newEndHm: string) => {
+    async (booking: Booking, newEndHm: string, opts?: { allowOutsideHours?: boolean }) => {
       const prev = { ...booking };
       const linkedOwnerVenueId = booking._linkedOwnerVenueId;
       const startHm = booking.booking_time.slice(0, 5);
@@ -3804,6 +3907,7 @@ export function PractitionerCalendarView({
             body: JSON.stringify({
               booking_end_time: bookingEndForStore,
               allow_manual_overlap: true,
+              allow_outside_hours: opts?.allowOutsideHours === true,
               defer_modification_guest_notification: true,
             }),
           });
@@ -4321,23 +4425,25 @@ export function PractitionerCalendarView({
       targetStartMins,
       serviceMapForBooking(b),
     );
-    const invalid =
-      targetStartMins < dayStartMin ||
-      endMin > dayEndMin ||
-      appointmentWindowCollides(
-        targetStartMins,
-        endMin,
-        pracId,
-        dateStr,
-        b.id,
-        allGridBookings,
-        displayBlocks,
-        serviceMapForBooking,
-        pracClassBlocks,
-        pracEventBlocks,
-        resourceParentById,
-        { ignoreBookings: true, candidatePractitionerBusy: candBusy },
-      );
+    // Landing before open / after close is allowed (staff can book past opening
+    // hours) — surfaced as an amber warning, not blocked. Only a genuine
+    // conflict (a block/class/event/busy overlap) blocks the move.
+    const outsideHours = targetStartMins < dayStartMin || endMin > dayEndMin;
+    const conflict = appointmentWindowCollides(
+      targetStartMins,
+      endMin,
+      pracId,
+      dateStr,
+      b.id,
+      allGridBookings,
+      displayBlocks,
+      serviceMapForBooking,
+      pracClassBlocks,
+      pracEventBlocks,
+      resourceParentById,
+      { ignoreBookings: true, candidatePractitionerBusy: candBusy },
+    );
+    const invalid = conflict;
     const pracName =
       linkedNativeGridColumnByKey.get(pracId)?.practitionerName ??
       filteredPractitioners.find((p) => p.id === pracId)?.name ??
@@ -4345,8 +4451,8 @@ export function PractitionerCalendarView({
     const timeLabel = minutesToTime(targetStartMins);
     const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
     const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
-    setCalendarDragPreview({ label, invalid });
-    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid });
+    setCalendarDragPreview({ label, invalid, outsideHours });
+    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid, outsideHours });
   }
 
   function handleDragCancel(_e: DragCancelEvent) {
@@ -4392,7 +4498,22 @@ export function PractitionerCalendarView({
     }
     if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status)) return;
     if (b.resource_id) return;
-    void patchBookingMove(b, dateStr, newTime, pracId);
+    // A booking can only be moved within its OWN venue: a linked (other-venue)
+    // booking must stay in that venue's columns, and an own booking must not land
+    // on a linked column. Otherwise the move would PATCH a foreign practitioner /
+    // calendar id onto the booking. (The drop column's owning venue is the linked
+    // column's `venueId`, or this venue for a native column.)
+    const draggedOwnerVenueId = b._linkedOwnerVenueId ?? venueId;
+    const targetOwnerVenueId = linkedNativeGridColumnByKey.get(pracId)?.venueId ?? venueId;
+    if (draggedOwnerVenueId !== targetOwnerVenueId) {
+      addToast('A booking can only be moved within the same venue.', 'error');
+      return;
+    }
+    const movedOutsideHours = target?.outsideHours === true;
+    if (movedOutsideHours) {
+      addToast('Moved outside opening hours.', 'info');
+    }
+    void patchBookingMove(b, dateStr, newTime, pracId, { allowOutsideHours: movedOutsideHours });
   }
 
   const beginAppointmentResize = useCallback(
@@ -4408,7 +4529,11 @@ export function PractitionerCalendarView({
       const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
       const endM0 = startM + dur0;
       const minEnd = startM + SLOT_MINUTES;
-      const gridEndMax = endHour * 60;
+      // The booking may be extended past the grid's close (staff can run past
+      // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
+      // beyond `gridCloseMin` counts as outside opening hours.
+      const gridCloseMin = endHour * 60;
+      const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
       const target = downEvent.currentTarget;
 
       setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
@@ -4467,18 +4592,22 @@ export function PractitionerCalendarView({
         setResizeVisual(null);
         setResizePreviewEnd(null);
         if (committedEndMin === endM0) return;
+        const extendedOutsideHours = committedEndMin > gridCloseMin;
+        if (extendedOutsideHours) {
+          addToast('Extended outside opening hours.', 'info');
+        }
         justResizedBookingIdRef.current = booking.id;
         window.setTimeout(() => {
           if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
         }, 220);
-        void patchBookingResize(booking, endStr);
+        void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
       };
 
       window.addEventListener('pointermove', onMove, { passive: false });
       window.addEventListener('pointerup', finish);
       window.addEventListener('pointercancel', finish);
     },
-    [endHour, patchBookingResize, serviceMapForBooking],
+    [addToast, endHour, patchBookingResize, serviceMapForBooking],
   );
 
   const beginBlockResize = useCallback(
@@ -4667,7 +4796,19 @@ export function PractitionerCalendarView({
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Linked venues
           </p>
-          {linkedColumns.length === 0 &&
+          {linkedLoadError ? (
+            // §19.3 — a load failure is visually distinct from "no linked columns".
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5">
+              <span className="text-xs text-amber-800">Couldn’t load linked calendars.</span>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-amber-900 underline hover:no-underline"
+                onClick={() => void loadLinkedData()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : linkedColumns.length === 0 &&
           visibleLinkedColumnIds !== null &&
           visibleLinkedColumnIds.length === 0 ? (
             <button
@@ -4678,7 +4819,11 @@ export function PractitionerCalendarView({
               Show linked calendars
             </button>
           ) : linkedColumns.length === 0 ? (
-            <p className="text-xs text-slate-500">Loading linked calendars…</p>
+            linkedLoaded ? (
+              <p className="text-xs text-slate-500">No linked venues yet.</p>
+            ) : (
+              <p className="text-xs text-slate-500">Loading linked calendars…</p>
+            )
           ) : (
           <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
             <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
@@ -5491,10 +5636,15 @@ export function PractitionerCalendarView({
                                       linkedBookingStatusBooking(b, bookingRowOverlayForId(b.id)),
                                       bookingRowOverlayForId(b.id),
                                     ),
+                                    { linked: true },
                                   )}
                                   title={
                                     clickable
-                                      ? `Edit in ${col.venueName}`
+                                      ? linkedBookingUsesExpandedDetail(col)
+                                        ? b.editable
+                                          ? `Edit in ${col.venueName}`
+                                          : `View booking · ${col.venueName}`
+                                        : `View booking · ${col.venueName}`
                                       : `View detail · ${col.venueName}`
                                   }
                                 >
@@ -5756,7 +5906,19 @@ export function PractitionerCalendarView({
                       (b) => b.calendar_id === pracId && b.date === date,
                     );
                 const pracBlocks = isLinkedCol
-                  ? []
+                  ? // §8.2 — a linked column reflects the LINKED venue's own opening
+                    // hours: shade the hours it is closed (e.g. if it opens later than
+                    // this venue) from its working-hours template in its own timezone.
+                    (linkedCol
+                      ? (buildLinkedColumnClosureBlocks({
+                          columnId: pracId,
+                          workingHours: linkedCol.workingHours,
+                          dateYmd: date,
+                          timeZone: linkedCol.venueTimezone || venueTimezone,
+                          gridStartHour: startHour,
+                          gridEndHour: endHour,
+                        }) as unknown as CalendarBlock[])
+                      : [])
                   : displayBlocks.filter(
                       (bl) =>
                         columnIdForBlock(bl) === pracId &&
@@ -5805,16 +5967,26 @@ export function PractitionerCalendarView({
                             disabled={occ}
                             onEmptyClick={(ev, pid, dstr, t) => {
                               const linkedCol = linkedNativeGridColumnByKey.get(pid);
-                              if (linkedCol?.action === 'create_edit_cancel') {
-                                const v = linkedVenueById.get(linkedCol.venueId);
-                                if (v) {
-                                  setLinkedCreating({
-                                    venue: v,
-                                    practitionerId: linkedCol.practitionerId,
-                                    time: t,
-                                  });
-                                  return;
+                              if (linkedCol) {
+                                // A linked column must never fall through to the own-venue
+                                // slot menu (it would create a booking on the wrong venue).
+                                // Only a create grant may start a booking here.
+                                if (linkedCol.action === 'create_edit_cancel') {
+                                  const v = linkedVenueById.get(linkedCol.venueId);
+                                  if (v) {
+                                    setLinkedCreating({
+                                      venue: v,
+                                      practitionerId: linkedCol.practitionerId,
+                                      time: t,
+                                    });
+                                  }
+                                } else {
+                                  addToast(
+                                    `${linkedCol.venueName} hasn’t granted permission to create bookings on this calendar.`,
+                                    'info',
+                                  );
                                 }
+                                return;
                               }
                               setSlotMenu({
                                 pracId: pid,
@@ -5832,8 +6004,10 @@ export function PractitionerCalendarView({
                         <div
                           className={`pointer-events-none absolute left-0 right-0 z-[8] rounded-lg border-x-2 border-b-2 border-t-2 ${
                             calendarDragTarget.invalid
-                              ? 'border-amber-500 bg-amber-200/35 ring-1 ring-inset ring-amber-400/50'
-                              : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
+                              ? 'border-red-500 bg-red-200/35 ring-1 ring-inset ring-red-400/50'
+                              : calendarDragTarget.outsideHours
+                                ? 'border-amber-500 bg-amber-200/35 ring-1 ring-inset ring-amber-400/50'
+                                : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
                           }`}
                           style={{
                             top: ((calendarDragTarget.startMin - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT,
@@ -6133,9 +6307,14 @@ export function PractitionerCalendarView({
                                   className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
-                                  style={bookingCalendarBlockCardStyle(palette)}
+                                  style={bookingCalendarBlockCardStyle(palette, {
+                                    linked: Boolean(b._linkedColumnKey),
+                                  })}
                                 >
                                   <CalendarBookingStatusStripe palette={palette} />
+                                  {/* The source venue is shown in the column header ("Linked · {venue}"),
+                                      so no per-card venue chip here — it overlapped the action buttons
+                                      on short bars. The dashed/hatch treatment still marks it as linked. */}
                                   <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
@@ -6373,7 +6552,9 @@ export function PractitionerCalendarView({
                                 className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
-                                style={bookingCalendarBlockCardStyle(clusterPalette)}
+                                style={bookingCalendarBlockCardStyle(clusterPalette, {
+                                  linked: Boolean(first._linkedColumnKey),
+                                })}
                                 title={serviceTitle || undefined}
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >

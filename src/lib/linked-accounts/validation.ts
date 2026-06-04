@@ -6,6 +6,8 @@ export const grantSchema = z.object({
   calendar: z.enum(['none', 'time_only', 'full_details']),
   pii: z.boolean(),
   act: z.enum(['none', 'edit_existing', 'create_edit_cancel']),
+  /** §18 calendar scope: practitioner/calendar ids this direction is limited to. null/omitted = all. */
+  calendarIds: z.array(z.string().uuid()).max(200).nullable().optional(),
 });
 
 export const grantPairSchema = z.object({

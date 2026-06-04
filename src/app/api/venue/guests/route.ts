@@ -13,6 +13,7 @@ import {
   addDaysCalendarDate,
   resolveContactsSegmentDates,
   fetchGuestIdsForSpendSort,
+  applyGuestSearch,
   type GuestRowBase,
 } from '@/lib/guests/guest-contacts-list';
 
@@ -157,8 +158,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (search) {
-        const p = `%${search}%`;
-        query = query.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+        query = applyGuestSearch(query, search);
       }
 
       return query;
@@ -292,8 +292,7 @@ export async function GET(request: NextRequest) {
         q = q.contains('tags', tags);
       }
       if (search) {
-        const p = `%${search}%`;
-        q = q.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+        q = applyGuestSearch(q, search);
       }
 
       const { data: matchRows, error: mErr } = await q;

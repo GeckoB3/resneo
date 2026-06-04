@@ -27,6 +27,13 @@ export interface LinkGrant {
   calendar: LinkCalendarVisibility;
   pii: boolean;
   act: LinkActionLevel;
+  /**
+   * Calendar-scoped sharing (§18): the granting venue's practitioner/calendar ids
+   * this direction is limited to. `null`/`undefined`/empty = ALL of the granting
+   * venue's calendars (backward-compatible). Only meaningful when calendar is
+   * not `none`; cleared otherwise.
+   */
+  calendarIds?: string[] | null;
 }
 
 /** A negotiated mid-link permission change awaiting acceptance (§6.5). */
@@ -36,9 +43,11 @@ export interface PendingChange {
   low_grants_calendar: LinkCalendarVisibility;
   low_grants_pii: boolean;
   low_grants_act: LinkActionLevel;
+  low_grants_calendar_ids: string[] | null;
   high_grants_calendar: LinkCalendarVisibility;
   high_grants_pii: boolean;
   high_grants_act: LinkActionLevel;
+  high_grants_calendar_ids: string[] | null;
 }
 
 /** Raw account_links row as stored. */
@@ -51,9 +60,11 @@ export interface AccountLinkRow {
   low_grants_calendar: LinkCalendarVisibility;
   low_grants_pii: boolean;
   low_grants_act: LinkActionLevel;
+  low_grants_calendar_ids: string[] | null;
   high_grants_calendar: LinkCalendarVisibility;
   high_grants_pii: boolean;
   high_grants_act: LinkActionLevel;
+  high_grants_calendar_ids: string[] | null;
   request_message: string | null;
   pending_change: PendingChange | null;
   created_by_user_id: string | null;

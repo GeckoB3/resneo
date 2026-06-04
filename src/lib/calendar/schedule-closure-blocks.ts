@@ -6,13 +6,14 @@
 import { addCalendarDays } from '@/lib/calendar/schedule-blocks-grouping';
 import { getWorkingRanges } from '@/lib/availability/appointment-engine';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import {
   blocksForDate,
   resolveVenueWideAllowedMinuteRanges,
 } from '@/lib/availability/venue-wide-business-hours';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
-import type { Practitioner } from '@/types/booking-models';
+import type { Practitioner, TimeRange, WorkingHours } from '@/types/booking-models';
 
 export interface ScheduleClosureCalendarBlock {
   id: string;
@@ -60,6 +61,55 @@ function mergeAdjacentRanges(ranges: MinuteRange[]): MinuteRange[] {
     }
   }
   return merged;
+}
+
+const LINKED_DAY_NAME_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/** Resolve a weekly working-hours template to the open periods for one calendar weekday. */
+function workingPeriodsForDay(wh: WorkingHours, dow: number): TimeRange[] {
+  const numeric = wh[String(dow)];
+  if (Array.isArray(numeric) && numeric.length > 0) return numeric;
+  const legacy = wh[LINKED_DAY_NAME_KEYS[dow] as string];
+  return Array.isArray(legacy) ? legacy : [];
+}
+
+/**
+ * §8.2 — closure ("closed") blocks for a single LINKED venue's calendar column,
+ * derived from that venue's own `working_hours` template for the date (in the
+ * linked venue's timezone), over the [gridStartHour, gridEndHour) window. This is
+ * what makes a linked column reflect the *linked* venue's opening hours — e.g. if
+ * it opens an hour later than the viewing venue, that earlier hour shows greyed
+ * on the linked column. Keyed on the linked column id so it matches that column.
+ */
+export function buildLinkedColumnClosureBlocks(params: {
+  columnId: string;
+  workingHours: WorkingHours | null | undefined;
+  dateYmd: string;
+  timeZone: string;
+  gridStartHour: number;
+  gridEndHour: number;
+}): ScheduleClosureCalendarBlock[] {
+  const { columnId, workingHours, dateYmd, timeZone, gridStartHour, gridEndHour } = params;
+  const boundsStart = gridStartHour * 60;
+  const boundsEnd = gridEndHour * 60;
+  if (boundsEnd <= boundsStart) return [];
+  const dow = getDayOfWeekForYmdInTimezone(dateYmd, timeZone);
+  const open: MinuteRange[] = workingPeriodsForDay(workingHours ?? {}, dow)
+    .map((p) => ({
+      start: timeToMinutes((p.start ?? '').slice(0, 5)),
+      end: timeToMinutes((p.end ?? '').slice(0, 5)),
+    }))
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
+  return closedRangesFromOpenWindows(open, boundsStart, boundsEnd).map((r, i) => ({
+    id: `linked-closed:${columnId}:${dateYmd}:${i}`,
+    practitioner_id: null,
+    calendar_id: columnId,
+    block_date: dateYmd,
+    start_time: minutesToTime(r.start),
+    end_time: minutesToTime(r.end),
+    reason: null,
+    block_type: 'practitioner_closed' as const,
+  }));
 }
 
 /** Minutes outside `open` within [boundsStart, boundsEnd). */

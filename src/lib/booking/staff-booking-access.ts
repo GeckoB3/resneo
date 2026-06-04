@@ -90,6 +90,15 @@ export async function loadStaffAccessibleBooking(
     return { ok: false, status: 403, error: 'You do not have access to this booking.' };
   }
 
+  // §18 — if the link is scoped to specific calendars, the booking must sit on
+  // one of them. This is the central write-side gate (every cross-venue booking
+  // route loads the booking through here or resolves the grant directly).
+  const bookingCalendarId =
+    (booking.calendar_id as string | null) ?? (booking.practitioner_id as string | null) ?? null;
+  if (!linkedGrantAllowsCalendar(access.grant, false, bookingCalendarId)) {
+    return { ok: false, status: 403, error: 'This link does not include that calendar.' };
+  }
+
   return {
     ok: true,
     ctx: {
@@ -100,6 +109,21 @@ export async function loadStaffAccessibleBooking(
       linkId: access.linkId,
     },
   };
+}
+
+/**
+ * §18 — whether a link grant permits acting on a specific calendar/practitioner.
+ * `null`/empty scope = all calendars. Own-venue access is always allowed.
+ */
+export function linkedGrantAllowsCalendar(
+  grant: LinkGrant | null,
+  isOwnVenue: boolean,
+  calendarId: string | null,
+): boolean {
+  if (isOwnVenue) return true;
+  const ids = grant?.calendarIds;
+  if (!ids || ids.length === 0) return true; // all calendars
+  return calendarId != null && ids.includes(calendarId);
 }
 
 

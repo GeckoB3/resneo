@@ -4,9 +4,11 @@ import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import {
   notifyLinkExpired,
+  notifyLinkLapseExpired,
   notifyLinkLapseWarning,
   notifyLinkResumed,
   notifyLinkSuspended,
+  notifyLinkTerminatedIneligible,
 } from '@/lib/linked-accounts/notifications';
 import {
   PENDING_REQUEST_EXPIRY_DAYS,
@@ -40,8 +42,21 @@ export async function GET(request: NextRequest) {
     resumed: 0,
     expired_suspended: 0,
     terminated_ineligible: 0,
+    /** §16.1 #8 — count of failed email deliveries, folded into the cron health signal. */
+    email_failures: 0,
     errors: 0,
   };
+
+  /** Await notify promises, folding their send-failure counts into the health signal (§16.1 #8). */
+  async function tallyEmails(
+    promises: Array<Promise<{ emailFailures: number }>>,
+  ): Promise<void> {
+    const settled = await Promise.allSettled(promises);
+    for (const s of settled) {
+      if (s.status === 'fulfilled') results.email_failures += s.value.emailFailures;
+      else results.errors++; // a notify wrapper itself threw — count it too
+    }
+  }
 
   /** Venues whose links left `accepted` this run — their collectives need re-checking (§7.5). */
   const collectiveAffectedVenueIds = new Set<string>();
@@ -91,7 +106,7 @@ export async function GET(request: NextRequest) {
           getVenue(link.venue_low_id as string),
           getVenue(link.venue_high_id as string),
         ]);
-        await Promise.allSettled([
+        await tallyEmails([
           notifyLinkExpired(admin, link.venue_low_id as string, high?.name ?? 'the other venue'),
           notifyLinkExpired(admin, link.venue_high_id as string, low?.name ?? 'the other venue'),
         ]);
@@ -155,15 +170,23 @@ export async function GET(request: NextRequest) {
           : 'soon';
         const { data: links } = await admin
           .from('account_links')
-          .select('venue_low_id, venue_high_id')
+          .select('id, venue_low_id, venue_high_id, lapse_warning_sent_at')
           .eq('status', 'accepted')
           .or(`venue_low_id.eq.${venueId},venue_high_id.eq.${venueId}`);
         for (const link of links ?? []) {
+          // §16.1 #7 — only warn once per lapse cycle. The flag is cleared when a
+          // link resumes, so a future lapse will warn again.
+          if (link.lapse_warning_sent_at) continue;
           const otherVenueId =
             (link.venue_low_id as string) === venueId
               ? (link.venue_high_id as string)
               : (link.venue_low_id as string);
-          await notifyLinkLapseWarning(admin, otherVenueId, info.name, dateLabel);
+          const warn = await notifyLinkLapseWarning(admin, otherVenueId, info.name, dateLabel);
+          results.email_failures += warn.emailFailures;
+          await admin
+            .from('account_links')
+            .update({ lapse_warning_sent_at: new Date().toISOString() })
+            .eq('id', link.id as string);
           results.lapse_warnings++;
         }
       } catch (err) {
@@ -204,6 +227,11 @@ export async function GET(request: NextRequest) {
             .eq('id', link.id);
           collectiveAffectedVenueIds.add(link.venue_low_id as string);
           collectiveAffectedVenueIds.add(link.venue_high_id as string);
+          // §6.6 — both venues are emailed when a link ends for plan ineligibility.
+          await tallyEmails([
+            notifyLinkTerminatedIneligible(admin, link.venue_low_id as string, high.name),
+            notifyLinkTerminatedIneligible(admin, link.venue_high_id as string, low.name),
+          ]);
           results.terminated_ineligible++;
           continue;
         }
@@ -217,7 +245,7 @@ export async function GET(request: NextRequest) {
             .eq('id', link.id);
           collectiveAffectedVenueIds.add(link.venue_low_id as string);
           collectiveAffectedVenueIds.add(link.venue_high_id as string);
-          await Promise.allSettled([
+          await tallyEmails([
             notifyLinkSuspended(admin, link.venue_low_id as string, lapsed.name),
             notifyLinkSuspended(admin, link.venue_high_id as string, lapsed.name),
           ]);
@@ -251,9 +279,10 @@ export async function GET(request: NextRequest) {
         if (lowElig.canCreate && highElig.canCreate) {
           await admin
             .from('account_links')
-            .update({ status: 'accepted', suspended_at: null })
+            // Clear the lapse-warning flag (§16.1 #7) so a future lapse re-warns.
+            .update({ status: 'accepted', suspended_at: null, lapse_warning_sent_at: null })
             .eq('id', link.id);
-          await Promise.allSettled([
+          await tallyEmails([
             notifyLinkResumed(admin, link.venue_low_id as string, high.name),
             notifyLinkResumed(admin, link.venue_high_id as string, low.name),
           ]);
@@ -276,6 +305,11 @@ export async function GET(request: NextRequest) {
             .eq('id', link.id);
           collectiveAffectedVenueIds.add(link.venue_low_id as string);
           collectiveAffectedVenueIds.add(link.venue_high_id as string);
+          // §6.7 — tell both venues the suspended link has now ended (relink needs a fresh request).
+          await tallyEmails([
+            notifyLinkLapseExpired(admin, link.venue_low_id as string, high.name),
+            notifyLinkLapseExpired(admin, link.venue_high_id as string, low.name),
+          ]);
           results.expired_suspended++;
         }
       } catch (err) {
@@ -301,7 +335,9 @@ export async function GET(request: NextRequest) {
   const outcome = await finalizeCronRun({
     job: 'account-link-maintenance',
     results,
-    errors: results.errors,
+    // §16.1 #8 — failed deliveries count toward health so the run can't report
+    // ok:true while emails silently failed.
+    errors: results.errors + results.email_failures,
   });
   return NextResponse.json(outcome.body, { status: outcome.httpStatus });
 }

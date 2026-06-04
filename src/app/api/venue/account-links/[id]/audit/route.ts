@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
+import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { loadVenueLookup } from '@/lib/linked-accounts/queries';
 import { auditActionLabel } from '@/lib/linked-accounts/audit';
 import type { AccountLinkAuditRow } from '@/lib/linked-accounts/types';
@@ -47,6 +47,12 @@ export async function GET(
     }
 
     const isCsv = sp.get('format') === 'csv';
+    // §16.1 #9 — the CSV export pulls up to 10k rows; throttle it per venue so it
+    // can't be hammered. The paginated JSON view is light and left unthrottled.
+    if (isCsv) {
+      const limited = enforceLinkRateLimit(ctx.venueId, 'audit-export', 10, 5 * 60_000);
+      if (limited) return limited;
+    }
     const actionFilter = sp.get('action');
     const fromDate = sp.get('from');
     const toDate = sp.get('to');

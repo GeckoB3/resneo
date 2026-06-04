@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
+import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -18,7 +19,7 @@ export default async function LinkedCalendarPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('pricing_tier, booking_model')
+    .select('pricing_tier, booking_model, timezone')
     .eq('id', staff.venue_id)
     .maybeSingle();
 
@@ -33,6 +34,12 @@ export default async function LinkedCalendarPage() {
     redirect('/dashboard');
   }
 
+  // §16.1 #12 — venue-local "today" so the default day is correct far from UTC.
+  const venueToday = formatIsoDateInTimeZone(
+    new Date(),
+    (venue?.timezone as string | null) || 'Europe/London',
+  );
+
   return (
     <PageFrame maxWidthClass="max-w-6xl" className="space-y-6">
       <PageHeader
@@ -42,7 +49,7 @@ export default async function LinkedCalendarPage() {
       />
       <SectionCard elevated>
         <SectionCard.Body>
-          <LinkedCalendarView />
+          <LinkedCalendarView initialDate={venueToday} />
         </SectionCard.Body>
       </SectionCard>
     </PageFrame>

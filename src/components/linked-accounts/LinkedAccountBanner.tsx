@@ -125,7 +125,20 @@ export function LinkedAccountBanner() {
                   Linked accounts
                 </Pill>
                 <p className="min-w-0 text-sm text-brand-950">
-                  <span aria-hidden>🔗 </span>
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="mr-1 inline-block h-4 w-4 -translate-y-px text-brand-600"
+                  >
+                    <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+                    <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+                    <path d="M8 12h8" />
+                  </svg>
                   <span className="font-semibold">{item.otherVenueName}</span>{' '}
                   {isChange
                     ? 'proposed a permission change to your link.'

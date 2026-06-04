@@ -2,7 +2,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAcceptedLinkBetween } from './queries';
-import { notifyCollectiveDissolved, notifyCollectiveRemoval } from './notifications';
+import { evaluateLinkEligibility } from './eligibility';
+import {
+  notifyCollectiveDissolved,
+  notifyCollectiveHostTransferred,
+  notifyCollectiveRemoval,
+} from './notifications';
 
 export type CollectiveStatus = 'active' | 'dissolved';
 export type CollectiveMemberStatus = 'invited' | 'active' | 'left' | 'removed';
@@ -49,8 +54,19 @@ export interface CollectiveView {
   serviceGrouping: ServiceGrouping;
   allowAnyPractitioner: boolean;
   isHost: boolean;
+  /** The host venue's id (so the UI can identify which member is the host). */
+  hostVenueId: string;
+  /** The venue this view was loaded for. */
+  myVenueId: string;
   /** This venue's membership status, if it is a member. */
   myMembershipStatus: CollectiveMemberStatus | null;
+  /** This venue's own member configuration (visible practitioners/services, order). */
+  myConfig: {
+    visiblePractitionerIds: string[];
+    visibleServiceIds: string[];
+    allowAnyPractitionerSubstitution: boolean;
+    displayOrder: number;
+  } | null;
   members: {
     venueId: string;
     venueName: string;
@@ -114,7 +130,9 @@ export async function loadCollectiveViewsForVenue(
 
   const { data: allMembers } = await admin
     .from('venue_collective_members')
-    .select('collective_id, venue_id, status, display_order')
+    .select(
+      'collective_id, venue_id, status, display_order, visible_practitioner_ids, visible_service_ids, allow_any_practitioner_substitution',
+    )
     .in('collective_id', [...collectiveIds])
     .in('status', ['invited', 'active']);
 
@@ -141,6 +159,9 @@ export async function loadCollectiveViewsForVenue(
       }))
       .sort((a, b) => a.displayOrder - b.displayOrder);
     const mine = members.find((m) => m.venueId === venueId);
+    const myRaw = (allMembers ?? []).find(
+      (m) => m.collective_id === row.id && m.venue_id === venueId,
+    );
     return {
       id: row.id,
       slug: row.slug,
@@ -150,7 +171,18 @@ export async function loadCollectiveViewsForVenue(
       serviceGrouping: row.service_grouping,
       allowAnyPractitioner: row.allow_any_practitioner,
       isHost: row.host_venue_id === venueId,
+      hostVenueId: row.host_venue_id,
+      myVenueId: venueId,
       myMembershipStatus: mine?.status ?? null,
+      myConfig: myRaw
+        ? {
+            visiblePractitionerIds: (myRaw.visible_practitioner_ids as string[]) ?? [],
+            visibleServiceIds: (myRaw.visible_service_ids as string[]) ?? [],
+            allowAnyPractitionerSubstitution:
+              (myRaw.allow_any_practitioner_substitution as boolean) ?? false,
+            displayOrder: (myRaw.display_order as number) ?? 0,
+          }
+        : null,
       members,
       activeMemberCount: members.filter((m) => m.status === 'active').length,
     };
@@ -158,13 +190,39 @@ export async function loadCollectiveViewsForVenue(
 }
 
 /**
+ * Pick the replacement host when a collective's host is no longer an active
+ * member (§7.4): the longest-tenured surviving member (earliest `joinedAt`),
+ * with a stable `venueId` tiebreak so the choice is deterministic. A null or
+ * unparseable `joinedAt` sorts last. Returns null when there are no survivors.
+ * Pure (no I/O) so it can be unit-tested directly.
+ */
+export function selectReplacementHost(
+  survivors: { venueId: string; joinedAt: string | null }[],
+): string | null {
+  if (survivors.length === 0) return null;
+  const tenure = (j: string | null): number => {
+    if (!j) return Number.POSITIVE_INFINITY;
+    const t = Date.parse(j);
+    return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+  };
+  return [...survivors].sort((a, b) => {
+    const at = tenure(a.joinedAt);
+    const bt = tenure(b.joinedAt);
+    if (at !== bt) return at - bt; // earliest joiner = longest-tenured, wins host
+    return a.venueId < b.venueId ? -1 : a.venueId > b.venueId ? 1 : 0;
+  })[0].venueId;
+}
+
+/**
  * Re-verify a collective still satisfies its membership rules and dissolve /
- * trim it where it does not (§7.5). Returns the venues that were removed.
+ * trim it where it does not (§7.5). Returns the venues that were removed, whether
+ * the collective was dissolved, and — when the cascade removed the host — the
+ * venue hosting was transferred to (§7.4).
  */
 export async function reconcileCollective(
   admin: SupabaseClient,
   collectiveId: string,
-): Promise<{ removedVenueIds: string[]; dissolved: boolean }> {
+): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null }> {
   const removedVenueIds: string[] = [];
   const { data: collective } = await admin
     .from('venue_collectives')
@@ -172,17 +230,18 @@ export async function reconcileCollective(
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active') {
-    return { removedVenueIds, dissolved: false };
+    return { removedVenueIds, dissolved: false, hostTransferredTo: null };
   }
 
   const { data: members } = await admin
     .from('venue_collective_members')
-    .select('id, venue_id, status')
+    .select('id, venue_id, status, joined_at')
     .eq('collective_id', collectiveId)
     .eq('status', 'active');
   const active = (members ?? []).map((m) => ({
     id: m.id as string,
     venueId: m.venue_id as string,
+    joinedAt: (m.joined_at as string | null) ?? null,
   }));
 
   // Each active member must still hold full mutual links with all other actives.
@@ -198,15 +257,34 @@ export async function reconcileCollective(
     }
   }
 
-  const remaining = active.length - removedVenueIds.length;
-  if (remaining < 2) {
+  const survivors = active.filter((m) => !removedVenueIds.includes(m.venueId));
+  if (survivors.length < 2) {
     await admin
       .from('venue_collectives')
       .update({ status: 'dissolved' })
       .eq('id', collectiveId);
-    return { removedVenueIds, dissolved: true };
+    return { removedVenueIds, dissolved: true, hostTransferredTo: null };
   }
-  return { removedVenueIds, dissolved: false };
+
+  // §7.4 — the host must always be an active member. If the cascade removed the
+  // host (or it was already orphaned by an earlier reconcile), transfer hosting
+  // to the longest-tenured surviving member so the collective stays
+  // administrable instead of orphaning. Idempotent: once the host is a valid
+  // active member again, later reconciles leave it untouched.
+  let hostTransferredTo: string | null = null;
+  const hostStillActive = survivors.some((m) => m.venueId === collective.host_venue_id);
+  if (!hostStillActive) {
+    const newHostVenueId = selectReplacementHost(survivors);
+    if (newHostVenueId) {
+      await admin
+        .from('venue_collectives')
+        .update({ host_venue_id: newHostVenueId })
+        .eq('id', collectiveId);
+      hostTransferredTo = newHostVenueId;
+    }
+  }
+
+  return { removedVenueIds, dissolved: false, hostTransferredTo };
 }
 
 /**
@@ -252,8 +330,11 @@ export async function reconcileCollectivesAfterLinkChange(
       const beforeVenues = (beforeRows ?? []).map((m) => m.venue_id as string);
       const collectiveName = (collectiveRow?.name as string) ?? 'a venue collective';
 
-      const { removedVenueIds, dissolved } = await reconcileCollective(admin, collectiveId);
-      if (removedVenueIds.length === 0 && !dissolved) continue;
+      const { removedVenueIds, dissolved, hostTransferredTo } = await reconcileCollective(
+        admin,
+        collectiveId,
+      );
+      if (removedVenueIds.length === 0 && !dissolved && !hostTransferredTo) continue;
 
       await Promise.allSettled(
         removedVenueIds.map((v) => notifyCollectiveRemoval(admin, v, collectiveName)),
@@ -263,6 +344,9 @@ export async function reconcileCollectivesAfterLinkChange(
         await Promise.allSettled(
           remaining.map((v) => notifyCollectiveDissolved(admin, v, collectiveName)),
         );
+      } else if (hostTransferredTo) {
+        // §7.4 — the new host inherited hosting automatically; let them know.
+        await notifyCollectiveHostTransferred(admin, hostTransferredTo, collectiveName);
       }
     } catch (err) {
       console.error(
@@ -291,6 +375,88 @@ export interface PublicCollective {
   serviceGrouping: ServiceGrouping;
   allowAnyPractitioner: boolean;
   members: PublicCollectiveMember[];
+}
+
+/**
+ * Load a collective's display branding by slug regardless of live status, so the
+ * public page can show a branded "not available" state (§19.3) for a slug that
+ * exists but isn't currently bookable — distinct from a true 404.
+ */
+export async function loadCollectiveBrandingBySlug(
+  admin: SupabaseClient,
+  slug: string,
+): Promise<{ name: string; branding: CollectiveBranding; status: CollectiveStatus } | null> {
+  const { data } = await admin
+    .from('venue_collectives')
+    .select('name, branding, status')
+    .eq('slug', slug.toLowerCase())
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    name: (data.name as string) ?? 'Venue collective',
+    branding: (data.branding as CollectiveBranding) ?? {},
+    status: data.status as CollectiveStatus,
+  };
+}
+
+/** Read-only count of a collective's active members that are *currently eligible*
+ * (Appointments-family, active plan — §7.2/§16.1 #3). No reconcile/write. */
+async function countEligibleActiveMembers(
+  admin: SupabaseClient,
+  collectiveId: string,
+): Promise<number> {
+  const { data: memberRows } = await admin
+    .from('venue_collective_members')
+    .select('venue_id')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active');
+  const venueIds = (memberRows ?? []).map((m) => m.venue_id as string);
+  if (venueIds.length < 2) return venueIds.length;
+  const { data: venues } = await admin
+    .from('venues')
+    .select('id, pricing_tier, plan_status, booking_model')
+    .in('id', venueIds);
+  let eligible = 0;
+  for (const v of venues ?? []) {
+    if (
+      evaluateLinkEligibility({
+        pricing_tier: (v.pricing_tier as string | null) ?? null,
+        plan_status: (v.plan_status as string | null) ?? null,
+        booking_model: (v.booking_model as string | null) ?? null,
+      }).canCreate
+    ) {
+      eligible += 1;
+    }
+  }
+  return eligible;
+}
+
+/**
+ * §8.6 — the live collective a venue is an active member of, for the
+ * fully-booked cross-suggestion on its own booking page. Returns the first
+ * collective this venue actively belongs to (or hosts) that will actually render
+ * live — i.e. ≥2 *eligible* active members, matching `loadPublicCollective`'s
+ * gate — so the CTA never lands on the branded "unavailable" page. Read-only
+ * (no reconcile). Collective-scoped only; pairwise links never produce a
+ * suggestion. Returns the slug + name needed to link to `/book/c/{slug}`.
+ */
+export async function loadActiveCollectiveForVenue(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<{ slug: string; name: string } | null> {
+  const views = await loadCollectiveViewsForVenue(admin, venueId);
+  const candidates = views.filter(
+    (v) =>
+      v.status === 'active' &&
+      v.activeMemberCount >= 2 &&
+      (v.myMembershipStatus === 'active' || v.hostVenueId === venueId),
+  );
+  for (const c of candidates) {
+    if ((await countEligibleActiveMembers(admin, c.id)) >= 2) {
+      return { slug: c.slug, name: c.name };
+    }
+  }
+  return null;
 }
 
 /**
@@ -329,18 +495,35 @@ export async function loadPublicCollective(
   const venueIds = activeMembers.map((m) => m.venue_id as string);
   const { data: venues } = await admin
     .from('venues')
-    .select('id, name, slug')
+    .select('id, name, slug, pricing_tier, plan_status, booking_model')
     .in('id', venueIds);
-  const venueLookup: Record<string, { name: string; slug: string }> = {};
+  const venueLookup: Record<string, { name: string; slug: string; eligible: boolean }> = {};
   for (const v of venues ?? []) {
     venueLookup[v.id as string] = {
       name: (v.name as string) ?? 'Venue',
       slug: (v.slug as string) ?? '',
+      eligible: evaluateLinkEligibility({
+        pricing_tier: (v.pricing_tier as string | null) ?? null,
+        plan_status: (v.plan_status as string | null) ?? null,
+        booking_model: (v.booking_model as string | null) ?? null,
+      }).canCreate,
     };
   }
 
+  // §7.2 / §16.1 #3 — a member whose subscription has lapsed or which has moved
+  // to an ineligible product must not appear on the public page, even in the
+  // window before the daily cron suspends the underlying pairwise link. Exclude
+  // such members from the rendered page rather than removing them from the
+  // collective, so they reappear automatically once eligibility is restored
+  // (mirroring the link suspend/resume model). Terminal removal still happens via
+  // the §7.5 link cascade when the link itself ends.
+  const eligibleMembers = activeMembers.filter(
+    (m) => venueLookup[m.venue_id as string]?.eligible,
+  );
+  if (eligibleMembers.length < 2) return null;
+
   const members: PublicCollectiveMember[] = [];
-  for (const m of activeMembers) {
+  for (const m of eligibleMembers) {
     const venueId = m.venue_id as string;
     const venue = venueLookup[venueId];
     if (!venue) continue;

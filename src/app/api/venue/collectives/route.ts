@@ -76,15 +76,34 @@ export async function POST(request: NextRequest) {
     }
 
     // Name uniqueness among active collectives (case-insensitive).
+    const trimmedName = parsed.data.name.trim();
     const { data: nameTaken } = await ctx.admin
       .from('venue_collectives')
       .select('id')
-      .ilike('name', parsed.data.name.trim())
+      .ilike('name', trimmedName)
       .eq('status', 'active')
       .maybeSingle();
     if (nameTaken) {
       return NextResponse.json(
         { error: 'A collective with that name already exists. Choose another.' },
+        { status: 409 },
+      );
+    }
+
+    // §7.2.1 — a dissolved collective's name is held for 30 days before reuse.
+    // `updated_at` is bumped when a collective is dissolved, so it stands in for
+    // the dissolution time. The message doesn't disclose which collective held it.
+    const cooldownCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentlyDissolved } = await ctx.admin
+      .from('venue_collectives')
+      .select('id')
+      .ilike('name', trimmedName)
+      .eq('status', 'dissolved')
+      .gte('updated_at', cooldownCutoff)
+      .maybeSingle();
+    if (recentlyDissolved) {
+      return NextResponse.json(
+        { error: 'That name isn’t available yet. Please choose another.' },
         { status: 409 },
       );
     }

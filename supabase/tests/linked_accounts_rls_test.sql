@@ -16,7 +16,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(21);
+SELECT plan(22);
 
 -- =============================================================================
 -- Fixtures — seeded as the (superuser) session role, which bypasses RLS.
@@ -293,6 +293,33 @@ SELECT lives_ok(
              '00000000-0000-0000-0000-0000000000a2',
              '2026-06-03', '09:00', 1, 'phone', 'practitioner_appointment') $$,
   'Venue B staff can INSERT a venue A booking with create_edit_cancel');
+
+-- =============================================================================
+-- Test 22 — a cross-venue write audit row creates an owning-venue notification.
+--            This is the §17 notification trigger; it is what makes the §16.1 #1
+--            fix observable to the owning venue (recordBookingWriteAudit inserts
+--            the audit row, this trigger turns it into an in-app notification).
+-- =============================================================================
+
+RESET ROLE;
+INSERT INTO account_link_audit_log
+  (link_id, acting_venue_id, acting_user_id, owning_venue_id,
+   action_type, resource_type, resource_id, before_state, after_state)
+VALUES
+  ('00000000-0000-0000-0000-0000000000c1',
+   '00000000-0000-0000-0000-0000000000b1', NULL,
+   '00000000-0000-0000-0000-0000000000a1',
+   'cancelled_booking', 'booking', '00000000-0000-0000-0000-0000000000a5',
+   '{"booking_date":"2026-06-01","booking_time":"10:00:00"}'::jsonb, NULL);
+
+SELECT cmp_ok(
+  (SELECT count(*) FROM account_link_notifications
+   WHERE venue_id = '00000000-0000-0000-0000-0000000000a1'
+     AND actor_venue_id = '00000000-0000-0000-0000-0000000000b1'
+     AND type = 'cross_venue_booking_cancelled'
+     AND resource_id = '00000000-0000-0000-0000-0000000000a5')::int,
+  '>=', 1,
+  'A cross-venue write audit row creates an owning-venue notification (§17)');
 
 RESET ROLE;
 SELECT * FROM finish();

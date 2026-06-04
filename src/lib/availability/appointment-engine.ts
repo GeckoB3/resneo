@@ -702,6 +702,14 @@ export function validateAppointmentCustomInterval(
   excludeBookingId?: string,
   options?: {
     allowBookingOverlap?: boolean;
+    /**
+     * Skip the opening-hours / working-hours / "not working this day" gates.
+     * Used for staff-initiated walk-ins, moves and resizes, which are deliberately
+     * allowed to run outside the business's / calendar's opening hours (the staff
+     * accepts a warning in the UI). Breaks, blocks, overlap and duration limits
+     * still apply.
+     */
+    allowOutsideHours?: boolean;
     /** Snapshot blocks for this booking; when omitted, uses service template. */
     processingTimeBlocks?: ProcessingTimeBlock[] | null;
   },
@@ -777,29 +785,33 @@ export function validateAppointmentCustomInterval(
   const practMaxEnd = busyWall.length > 0 ? Math.max(...busyWall.map((i) => i.end)) : t;
   const busyEnd = Math.max(customerEnd, practMaxEnd);
 
-  const workingRanges = getWorkingRanges(practitioner, date);
-  if (workingRanges.length === 0) {
-    return { ok: false, reason: 'Staff not working this day' };
-  }
+  // Opening-hours / working-hours gates. Staff-initiated walk-ins, moves and
+  // resizes pass `allowOutsideHours` to deliberately book past opening hours.
+  if (!options?.allowOutsideHours) {
+    const workingRanges = getWorkingRanges(practitioner, date);
+    if (workingRanges.length === 0) {
+      return { ok: false, reason: 'Staff not working this day' };
+    }
 
-  const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
-    workingRanges,
-    venueOpeningHours,
-    date,
-    venueOpeningExceptions,
-  );
-  if (effectiveWorkingRanges.length === 0) {
-    return { ok: false, reason: 'Outside opening hours' };
-  }
+    const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
+      workingRanges,
+      venueOpeningHours,
+      date,
+      venueOpeningExceptions,
+    );
+    if (effectiveWorkingRanges.length === 0) {
+      return { ok: false, reason: 'Outside opening hours' };
+    }
 
-  const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
-  if (afterServiceCustom.length === 0) {
-    return { ok: false, reason: 'Outside service availability hours' };
-  }
+    const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
+    if (afterServiceCustom.length === 0) {
+      return { ok: false, reason: 'Outside service availability hours' };
+    }
 
-  const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
-  if (!fitsInRange) {
-    return { ok: false, reason: 'Outside working hours' };
+    const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
+    if (!fitsInRange) {
+      return { ok: false, reason: 'Outside working hours' };
+    }
   }
 
   if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {

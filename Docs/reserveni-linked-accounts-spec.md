@@ -1,10 +1,22 @@
 # Resneo: Linked Accounts Feature Specification
 
-**Status:** Living specification — **Phase 1 shipped**; **Phase 2 partially implemented** (see §15)
+**Status:** Living specification — **Phase 1 shipped**; **Phase 2 partially implemented** (see §15); **code-vs-spec audit + world-class gap analysis added 2026-06-04 (see §16–§20)**
 **Plan scope:** Appointments-family venues only (`light`, `plus`, `appointments` pricing tiers)
 **Settings location:** `/dashboard/settings` → **Linked Accounts** tab (`?tab=linked-accounts`)
-**Last updated:** 2026-05-18
+**Last updated:** 2026-06-04
 **Related scope doc:** `Docs/archive/reserveni-linked-calendar-grid-integration-scope.md` (archived — calendar grid integration shipped on `/dashboard/calendar`; day-sheet deferred)
+
+> **2026-06-04 audit note.** A full code-vs-spec audit was performed across the DB/RLS,
+> API, settings UI, calendar/bookings integration, collectives, and cron/notifications
+> layers. The core is strong. A **P0** (§16.1 #1) — cross-venue booking edits via the *main*
+> booking route running on the service-role admin client and **not** being written to the audit
+> log — was found, mistakenly "withdrawn" mid-audit, re-confirmed by reading `venue-auth.ts`, and
+> then **fixed** (see the §16.1 correction history). The audit also surfaced (a) lifecycle bugs,
+> (b) documentation drifts now corrected inline, and (c) a set of **unspecced functions and UX
+> standards a world-class product must carry** — newly specified in §16–§20. Shipped the same day:
+> the §16.1 #1 audit fix, the two missing cron termination emails (#4), the orphaned-host cascade
+> (#2), render-time collective eligibility (#3), and **§17 Phase 1** (the notification store +
+> audit-log trigger + feed API). Read §16 first for the executive summary.
 
 ---
 
@@ -153,10 +165,12 @@ account_links
 ├── high_grants_act         link_action_level NOT NULL default 'edit_existing'
 │
 ├── request_message         text                       -- optional personal note
-├── created_by_user_id      uuid FK → auth.users(id)
-├── responded_by_user_id    uuid FK → auth.users(id)    nullable
+├── pending_change          jsonb                      nullable  -- mid-link negotiation (see below)
+├── created_by_user_id      uuid FK → auth.users(id) ON DELETE SET NULL
+├── responded_by_user_id    uuid FK → auth.users(id) ON DELETE SET NULL  nullable
 ├── created_at              timestamptz NOT NULL default now()
 ├── responded_at            timestamptz                nullable
+├── suspended_at            timestamptz                nullable  -- when a lapse suspended the link
 ├── terminated_at           timestamptz                nullable
 ├── termination_reason      link_termination_reason    nullable
 │       enum: 'unlinked' | 'subscription_lapsed' | 'venue_deleted'
@@ -168,6 +182,15 @@ account_links
     link_action_level:        'none' | 'edit_existing' | 'create_edit_cancel'
 ```
 
+**`pending_change` (shipped; documented here 2026-06-04).** Mid-link permission renegotiation
+(§6.5) is stored inline as a JSONB blob rather than in a separate table:
+`{ by_venue_id, proposed_at, low_grants_calendar, low_grants_pii, low_grants_act,
+high_grants_calendar, high_grants_pii, high_grants_act }`. It is `NULL` when no change is
+in flight, set by the propose-change API path, applied (copied onto the six grant columns)
+on accept, and cleared on accept/reject/cancel/unlink/termination. `suspended_at` records
+when a subscription lapse moved the link to `suspended` (§6.7). Both columns exist in
+`20260919120000_linked_accounts.sql` and were previously absent from this data model.
+
 **Constraints and indexes:**
 
 - `CHECK (venue_low_id < venue_high_id)` — enforce ordering.
@@ -178,7 +201,14 @@ account_links
   Once a link is `rejected`, `revoked`, or `expired`, a fresh request can be created.
 - CHECK constraints encoding the permission-coherence rules in §5.5 (e.g. `time_only` forces
   `pii = false` and `act = 'none'`; `pii = false` forces `act = 'none'`). Apply to both
-  `low_grants_*` and `high_grants_*` triples.
+  `low_grants_*` and `high_grants_*` triples. **Shipped** as a single per-direction CHECK
+  keyed on `calendar <> 'full_details'`, which correctly also covers the `calendar = 'none'`
+  case (§5.5).
+- CHECK `account_links_not_zero_way` — at least one direction's calendar grant must be
+  non-`none` (encodes the §5.5 "no zero-way links" rule at the DB level, not only in the UI).
+  *Implication:* the unilateral `reduce` path must pre-validate that it does not drive a
+  one-way link to `none`/`none`, or the DB raises a constraint error instead of a clean 4xx
+  (see §16.1).
 - Indexes on `(venue_low_id, status)` and `(venue_high_id, status)` for settings/RLS lookups.
 
 **Notes:**
@@ -268,9 +298,15 @@ venue_collective_members
 ├── visible_practitioner_ids uuid[] NOT NULL default '{}'  -- practitioners exposed on the page
 ├── visible_service_ids      uuid[] NOT NULL default '{}'  -- appointment_services exposed
 ├── allow_any_practitioner_substitution boolean NOT NULL default false
+├── invited_by_user_id       uuid FK → auth.users(id) ON DELETE SET NULL  -- who sent the invite
 ├── joined_at, left_at       timestamptz nullable
 └── partial UNIQUE (collective_id, venue_id) WHERE status IN ('invited','active')
 ```
+
+> `venue_collectives` additionally ships CHECK constraints validating `service_grouping`
+> and `status` against their allowed values, and `bookings.collective_id` is a bare `uuid`
+> column **without** an FK to `venue_collectives` (within the §7.7 letter, but note there is
+> no referential integrity — a dissolved collective's id can persist on historical rows).
 
 **Constraints:**
 
@@ -395,10 +431,15 @@ the caller's grant is `time_only`, the application must query through an anonymi
 rather than the base table:
 
 ```sql
+-- IMPORTANT (security): the view MUST be security_invoker so the base table's RLS is
+-- evaluated as the *caller*, not the view owner. The original definition used only
+-- security_barrier, which (because a plain view runs as its owner) would have let a
+-- time_only viewer read EVERY venue's time blocks. Fixed in
+-- 20260922120000_linked_anonymised_view_calendar_id.sql; this is the live definition.
 CREATE OR REPLACE VIEW public.bookings_linked_anonymised
-WITH (security_barrier = true) AS
+WITH (security_invoker = true, security_barrier = true) AS
 SELECT
-  b.id, b.venue_id, b.practitioner_id,
+  b.id, b.venue_id, b.practitioner_id, b.calendar_id,
   b.booking_date, b.booking_time, b.booking_end_time,
   b.status,
   NULL::uuid AS guest_id,
@@ -419,15 +460,43 @@ SELECT policy above but sees only time blocks (`booking_date`, `booking_time`,
 **Mutation safety.** Every cross-venue mutation must:
 
 1. Pass the RLS policy above.
-2. Generate an `account_link_audit_log` row in the **same transaction**, written by a trigger
-   on `bookings` (`AFTER INSERT OR UPDATE`), not by application code — this mirrors how the
-   existing `booking_events_trigger` already writes `events` rows and prevents any code path
-   from skipping the audit.
-3. Record the acting venue and `link_id`. Because `bookings` has no `link_id` column, add
-   nullable columns `created_by_linked_venue_id uuid` and `last_modified_by_linked_venue_id
-   uuid` to `bookings` (both FK → `venues`, `ON DELETE SET NULL`). When a cross-venue actor
-   creates or edits a booking, the application sets these so the audit trigger can resolve
-   the authorising link. They are `NULL` for ordinary same-venue bookings.
+2. Generate an `account_link_audit_log` row in the **same transaction**, written by the
+   `cross_venue_booking_audit_trigger` on `bookings` (`AFTER INSERT OR UPDATE`), not by
+   application code — this mirrors how the existing `booking_events_trigger` already writes
+   `events` rows and prevents any code path from skipping the audit.
+3. Carry attribution. `bookings` ships nullable `created_by_linked_venue_id` and
+   `last_modified_by_linked_venue_id` (both FK → `venues`, `ON DELETE SET NULL`) as
+   **denormalised convenience columns for UI attribution** ("last edited by {linked venue}").
+   They are `NULL` for ordinary same-venue bookings.
+
+**How the trigger actually resolves the acting venue (corrected 2026-06-04).** The shipped
+trigger (`log_cross_venue_booking_action`, hardened in
+`20260920120000_linked_accounts_audit_hardening.sql`) does **not** read the attribution
+columns. It resolves the acting venue in two ways:
+
+- **Explicit context** — the `SECURITY DEFINER` RPCs `linked_apply_booking_insert()` /
+  `linked_apply_booking_update()` set three transaction-local GUCs
+  (`reserveni.linked_action_venue`, `…_user`, `…_link`) which the trigger reads. This is the
+  intended cross-venue write path and supports unified-calendar fields (`calendar_id`,
+  `estimated_end_time`, `service_item_id`) added in `20260921120000` / `20260923140000`.
+- **Auto-resolution fallback** — for a direct PostgREST write with no GUCs, the trigger
+  derives the acting venue from `current_staff_venue_ids()` and finds the authorising
+  accepted link; **if none exists it raises `insufficient_privilege` and blocks the write.**
+  Same-venue writes (caller staffs the owning venue) and pure service-role/cron writes
+  (caller staffs *no* venue) are correctly skipped.
+
+> **⚠ P0 — see §16.1 #1.** The auto-resolution fallback depends on the writer having a staff
+> identity (`auth.jwt()`/`auth.uid()`). A cross-venue mutation performed through the
+> **service-role admin client** has *no* staff identity, so the trigger's "staffs no venue →
+> system write" branch fires and **no audit row is written (and the write is not blocked).**
+> The main booking route (`/api/venue/bookings/[id]`) performs its `bookings` writes through
+> exactly such a client — `getVenueStaff().db` is the service-role admin client by design
+> (`venue-auth.ts:166-168,216`) — so **cross-venue edits via the main route are currently
+> unaudited.** Only the dedicated `/api/venue/linked-calendar/booking` route audits, because it
+> calls the `linked_apply_*` RPCs which set the GUC. **Fix required:** route cross-venue
+> (`!isOwnVenue`) booking mutations through `linked_apply_*` (or a user-scoped client). The
+> hard-`DELETE` path is unaudited for a second reason — the trigger is INSERT/UPDATE-only
+> (§16.1 #1c).
 
 Note: `bookings.created_by_staff_id` references the **owning** venue's `staff`. A cross-venue
 actor has no `staff` row in the owning venue, so `created_by_staff_id` must be left `NULL`
@@ -553,10 +622,29 @@ Either venue can propose a permission change; it behaves like a new request — 
 sees a banner and must accept, with the current grants shown for comparison. Until accepted,
 the existing grants stay in force.
 
+There are therefore **three** distinct ways a grant can change. The distinction is "whose
+data is becoming more exposed", because exposing *your own* data more is your decision alone,
+but exposing *the other venue's* data more is theirs:
+
+| Path | API | Consent | Direction | Effect |
+|---|---|---|---|---|
+| **Reduce access now** | `POST …/reduce` | None — unilateral | Caller's own grant only; reduction-only (rejects increases) | Immediate |
+| **Grant access now** | `POST …/[id]/grant` | None — unilateral | Caller's own grant only; increase-only (rejects reductions) | Immediate |
+| **Edit permissions** (negotiated) | `PATCH …/[id]` (`propose_change`/`accept_change`) | Counterparty must accept | Either direction | On acceptance |
+
 **Exception — unilateral reduction.** A venue may *reduce* the permissions it grants at any
-time with no consent from the other party (e.g. immediately revoke PII access). It may never
-unilaterally *increase* what the other venue can do. The Linked Accounts tab exposes this as
-a direct "Reduce access now" control distinct from the negotiated "Edit permissions" flow.
+time with no consent from the other party (e.g. immediately revoke PII access).
+
+**Exception — unilateral grant of your own data (shipped; documented 2026-06-04).** A venue
+may *increase* the access it grants the other venue into **its own** data without consent,
+via the `grant` route — this is voluntary sharing of your own data, not seizing access to
+theirs. This refines the earlier blanket statement "it may never unilaterally increase what
+the other venue can do": the prohibition holds for *grabbing* access to the other venue's
+data (that always requires their acceptance through the negotiated flow), but loosening
+access to *your own* data is the granting venue's prerogative. Both unilateral paths only
+ever touch the caller's own grant columns and reject no-op or wrong-direction changes; both
+notify the other venue (§9). The negotiated `Edit permissions` flow remains for any change
+that affects what the *other* venue exposes.
 
 ### 6.6 Termination
 
@@ -630,6 +718,16 @@ The Admin creating the collective must be Admin on the host venue. Invitations g
 invitee's `venues.email` and active Admins, and must be accepted by an Admin on the invitee
 venue.
 
+**Render-time eligibility re-check (shipped 2026-06-04).** Membership eligibility is not just an
+entry gate — it is re-evaluated on **every public page render**. `loadPublicCollective` excludes
+any active member whose venue is not currently eligible (`evaluateLinkEligibility(...).canCreate`
+— Appointments-family with `plan_status='active'`), and renders the page only if ≥2 *eligible*
+members remain. A member with a lapsed subscription is **excluded, not removed**: it disappears
+from the public page immediately (closing the ≤24h window before the cron suspends the link) and
+**reappears automatically** once its subscription is restored, mirroring the link suspend/resume
+model (§6.7). Terminal removal from the collective still occurs through the §7.5 link cascade if
+and when the underlying link actually ends.
+
 ### 7.2.1 Naming and slug uniqueness
 
 - **Name:** a collective's `name` must be unique (case-insensitive) across all `active`
@@ -657,6 +755,18 @@ The host venue controls `name`, `slug`, `branding`, `service_grouping`,
 to any `active` member (who must accept). If the host venue leaves or is deleted, the system
 requires host transfer first or auto-dissolves the collective.
 
+**Automatic host reassignment (shipped 2026-06-04).** A host can also lose its membership
+*involuntarily* — the §7.5 cascade removes any member that drops below full-mutual links,
+including the host. To avoid orphaning the collective (a host pointing at a removed venue makes
+every admin action impossible), `reconcileCollective` automatically reassigns hosting to the
+**longest-tenured surviving active member** (earliest `joined_at`, deterministic `venue_id`
+tiebreak) whenever the current host is no longer an active member, provided ≥2 members survive
+(otherwise the collective dissolves per §7.5). This emergency transfer is immediate and does
+**not** require acceptance — the consent-based transfer above is for *deliberate* handover; an
+involuntary one cannot block on a removed host's input. The new host is emailed
+(`notifyCollectiveHostTransferred`). The check is idempotent and self-heals any collective left
+orphaned by an earlier reconcile.
+
 ### 7.5 Membership changes and link dependencies
 
 If a pairwise link between two collective members ends, or is reduced below full mutual
@@ -665,6 +775,8 @@ visibility:
 - Both affected venues are auto-removed (`status = 'removed'`).
 - Remaining members are notified.
 - If `active` membership drops below 2, the collective is dissolved (`status = 'dissolved'`).
+- If the removed venue was the **host** and ≥2 members survive, hosting is automatically
+  reassigned to the longest-tenured survivor (§7.4) rather than orphaning the collective.
 
 This cascade is re-checked both on link-change events and on every public page render, since
 RLS will already have cut off the data.
@@ -720,26 +832,35 @@ consistency):
 
 ### 8.2 Calendar and bookings page integration
 
-**Target behaviour** (unchanged):
+**Target behaviour:**
 
-- Own `practitioners` render solid; linked-in practitioners render desaturated/patterned and
-  labelled with the source venue name.
+- Own `practitioners` render solid; linked-in practitioners must be **visually distinct**
+  (desaturated/tinted/patterned) and labelled with the source venue name. **The cards on the
+  day/week grid do not yet carry this treatment — see §19.1.**
 - Each linked-in calendar can be toggled in the view (a local view preference; does not
   affect the link).
 - Bookings the viewer cannot edit (`act = 'none'`, or `time_only`) are read-only in the UI.
 - `time_only` linked bookings render as bare time blocks: "{Venue} — busy", no other detail.
 
-**Implementation status (2026-05-18):**
+**Implementation status (corrected 2026-06-04):**
 
 | Surface | Status | Notes |
 |---|---|---|
-| `/dashboard/calendar` (`PractitionerCalendarView`, `linkFeature` gated) | **Shipped (day + week)** | Linked practitioners appear as extra columns in the native grid (`linked:{venueId}:{practitionerId}` keys), grouped in `CalendarColumnsChecklist`, persisted in session preferences, data from `/api/venue/linked-calendar` on the page's `listFromTo` range. Interactions use `LinkedBookingDetailModal` / `EditLinkedBookingModal` / `CreateLinkedBookingModal` by grant. Linked bookings are not draggable. |
-| `/dashboard/calendar` month view | **Shipped (summary)** | Per-day linked booking count badge + marker dot; click day → day view for column detail. |
-| `/dashboard/day-sheet` | **Synced list** | `LinkedCalendarView` uses the day-sheet date (no second date picker); CTA to `/dashboard/calendar` for column/week/month view. |
+| `/dashboard/calendar` (`PractitionerCalendarView`, `linkFeature` gated) | **Shipped (day + week)** | Linked practitioners appear as extra columns keyed `linked:{venueId}:{practitionerId}`, persisted in session preferences, data from `/api/venue/linked-calendar`. **Correction:** linked columns render in a **dedicated "Linked venues" block** (grouped by venue name), *not* inside `CalendarColumnsChecklist` — only own-venue columns use that component. |
+| Linked booking interactivity | **Shipped — interactive, not read-only** | **Correction (supersedes the old "not draggable" claim and §15.6):** `full_details` + `edit_existing`/`create_edit_cancel` linked columns route through the **native grid** and are **draggable/resizable/editable via the native `BookingDetailPanel`**, PATCHing `/api/venue/bookings/[id]`. Only `none`/`time_only` columns are read-only (`LinkedDayColumn`). The dedicated `LinkedBookingDetailModal` / `EditLinkedBookingModal` / `CreateLinkedBookingModal` are used by the standalone `LinkedCalendarView`, not by the main grid's edit gesture. The native path writes through the service-role admin client; it is now **explicitly audited** via `recordBookingWriteAudit` at each write site (§16.1 #1, fixed 2026-06-04), which also drives §17 notifications. |
+| `/dashboard/calendar` month view | **Shipped (summary)** | Per-day linked booking count badge (`+N`) + marker dot; click day → day view for column detail. Month markers *are* desaturated; day/week cards are not. |
+| `/dashboard/day-sheet` | **Synced list** | `LinkedCalendarView` uses the day-sheet date (no second date picker); CTA to `/dashboard/calendar`. |
 | `/dashboard/linked-calendar` | **Fallback page** | Standalone linked-calendar page retained; not linked from main nav. |
-| `/dashboard/bookings` (appointments list) | **Shipped** | `AppointmentBookingsDashboard`: own / linked-in / all source filter; `LinkedBookingsPanel` for linked rows with grant-aware actions. |
+| `/dashboard/bookings` (appointments list) | **Shipped** | `AppointmentBookingsDashboard`: own / linked-in / all source filter; grant-aware actions (time_only rows open read-only). **Correction:** it flattens linked rows into the main registry (`flattenLinkedDashboardRows`); the `LinkedBookingsPanel` component the spec previously cited was unused/legacy and has now been **deleted (2026-06-04)**. |
 
-`/dashboard/bookings` (list view) — as specified: source filter and grant-gated actions are live.
+**Linked classes/events on the grid (undocumented; documented 2026-06-04).** Although the
+feature is appointments-scoped, `full_details` links also surface the owning venue's
+**classes and experience-events as read-only blocks** on the linked columns
+(`src/lib/linked-accounts/linked-schedule-blocks.ts`, `GET …/linked-calendar/event`). These
+are view-only (no cross-venue class/event booking exists), and `time_only` links never see
+titles. This is an acceptable read-only enrichment, but it stretches the "appointments-only"
+framing of §3 and should be acknowledged: a linked venue *sees* (never edits) the other
+venue's non-appointment calendar entities.
 
 ### 8.3 Incoming-request banner
 
@@ -806,10 +927,28 @@ Dashboard banners and in-app notices are shown only to Admins.
 | Venue collective invitation | Email + dashboard banner | Invitee venue |
 | Removed from venue collective | Email + dashboard notice | Removed member |
 | Venue collective dissolved | Email | All members |
+| Venue collective host reassigned (automatic, §7.4) | Email | New host venue |
 
 **SMS is out of scope for this feature.** Resneo's SMS path is metered per-venue (Twilio,
 `increment_sms_usage`, billed to Stripe) and SMS is customer-facing operational/marketing
 messaging — link administration is internal and email-only.
+
+**Status notes (2026-06-04 audit):**
+
+- **The "dashboard notice" channel is now real (2026-06-04).** Beyond the incoming-request
+  banner (pending requests + permission-change proposals), **all §9 lifecycle events now write an
+  in-app notification** to the recipient venue's bell (accepted / rejected / unlinked / reduced /
+  suspended / resumed / removed-from-collective / dissolved / collective invitation / etc.), via
+  the `notifyVenue` chokepoint (§17 Phase 4). The notification center is §17.2.
+- **Two cron termination emails were missing and are now fixed (2026-06-04):** cron
+  `plan_ineligible` termination (§6.6 says "both venues emailed") and the 30-day
+  `subscription_lapsed` expiry now send `notifyLinkTerminatedIneligible` /
+  `notifyLinkLapseExpired` to both venues. See §16.1 #4.
+- **"Accept with changes" now shows a true diff (2026-06-04)** — a before→after delta of the
+  changed permissions in both the email and the bell. See §17.5.
+- **Cross-venue *write* notices** (a partner cancelled/rescheduled/created a booking in your
+  calendar) are sent as of 2026-06-04 — in-app always, plus email per the owning venue's
+  preferences (§17.3/§17.4).
 
 ---
 
@@ -872,12 +1011,12 @@ Status key: ✅ shipped · 🟡 partial · ⬜ not started
 
 | # | Deliverable | Status |
 |---|---|---|
-| 1 | Migration + enums + `account_links` / `account_link_audit_log` + `bookings` attribution columns + RLS helpers + `bookings_linked_anonymised` + audit trigger | ✅ `supabase/migrations/20260919120000_linked_accounts.sql` (+ `20260920120000`, `20260921120000`, `20260922120000`) |
+| 1 | Migration + enums + `account_links` / `account_link_audit_log` + `bookings` attribution columns + RLS helpers + `bookings_linked_anonymised` + audit trigger | ✅ `20260919120000_linked_accounts.sql`, `20260920120000…_audit_hardening.sql`, `20260921120000…_insert_calendar_id.sql`, `20260922120000…_anonymised_view_calendar_id.sql`, **`20260923140000…_update_calendar_id.sql`** (unified-calendar support on the cross-venue UPDATE RPC — previously omitted from this list), `20260518120000…_venue_delete_terminate_account_links.sql` |
 | 2 | RLS test suite before UI | ✅ `supabase/tests/linked_accounts_rls_test.sql`; unit tests in `src/lib/linked-accounts/permissions.test.ts` |
 | 3 | Linked Accounts settings tab | ✅ `LinkedAccountsSection.tsx`, gated in `SettingsView.tsx` |
 | 4 | `/api/venue/account-links/*` (create, respond, edit, reduce, unlink, lookup, audit) | ✅ |
 | 5 | Incoming-request + pending-change banner | ✅ `LinkedAccountBanner.tsx` in dashboard shell; 24h dismiss via `localStorage` |
-| 6 | Calendar / bookings integration | 🟡 Day + week grid on `/dashboard/calendar`; day-sheet still standalone §8.2; month view outstanding |
+| 6 | Calendar / bookings integration | 🟡 Day + week grid + month summary on `/dashboard/calendar` shipped; day-sheet synced list. `full_details`+edit linked bookings are interactive on the native grid (not read-only); that edit path is now **audited** via explicit `recordBookingWriteAudit` calls (§16.1 #1, fixed). Linked cards lack the muted treatment (§19.1). |
 | 7 | Audit log UI + CSV export | ✅ `LinkedAccountAuditModal.tsx` → `GET …/audit?format=csv` |
 | 8 | Daily cron | ✅ `/api/cron/account-link-maintenance` in `vercel.json` |
 | 9 | Email notifications (§9) | ✅ `src/lib/linked-accounts/notifications.ts` + `src/lib/emails/templates/linked-account-emails.ts` |
@@ -900,18 +1039,35 @@ Status key: ✅ shipped · 🟡 partial · ⬜ not started
 | Collective-aware widget embed | ✅ `WidgetSection.tsx` |
 | `bookings.collective_id` attribution | ✅ Validated on create routes |
 | Link-change → collective reconcile | ✅ `reconcileCollective` / cron hook |
-| **"Any practitioner" routing (§7.6)** | ⬜ Flag stored (`allow_any_practitioner`, per-member substitution); **no slot search / routing in `CollectiveBookingFlow`** |
-| **Cross-suggestion when fully booked (§8.6)** | ⬜ Not implemented on per-venue `/book/[slug]` pages |
-| Collective name reuse after dissolve (30 days, §7.2.1) | ⬜ Only **active** name uniqueness enforced; dissolved names immediately reusable |
+| **"Any practitioner" routing (§7.6)** | 🟡 Flag now hidden as "coming soon" (no false promise); cross-venue slot search in `CollectiveBookingFlow` still deferred |
+| **Cross-suggestion when fully booked (§8.6)** | ✅ `CollectiveCrossSuggestion` in the appointment no-availability state (collective-scoped, public guests) |
+| Collective name reuse after dissolve (30 days, §7.2.1) | ✅ Create rejects names dissolved within 30 days (case-insensitive, non-disclosing) |
 | Host transfer with accept step (§7.4) | 🟡 API updates `host_venue_id` immediately; no separate acceptance flow |
 | Collective branding on confirmation comms (§7.8) | ⬜ Not verified / likely still per-venue templates only |
+
+### Phase 2.5 — world-class completion (specced 2026-06-04, §16–§20) — 🟡 started
+
+- **Cross-venue activity awareness & write notifications + in-app notification center** (§17)
+  — the trust guarantee for write grants. **✅ Phases 1–4 shipped** (notifications store + RLS +
+  audit-log trigger + feed/mark-read API + formatter + `NotificationBell` UI + per-venue email
+  preferences + per-pref cross-venue write emails + **all §9 lifecycle events in the bell** +
+  the **accept-with-changes true diff**, §17.0/§17.5). Firing for all cross-venue write paths
+  since the §16.1 #1 P0 fix. Remaining enhancements: the notes-email daily digest (Phase 3.1),
+  per-event notification types, per-category in-app muting, and realtime bell refresh.
+- **Calendar-scoped (per-practitioner) sharing** (§18) — ✅ **shipped 2026-06-04** (unlocks the
+  chair-rental persona): per-direction calendar scope, enforced in the read route + write gate +
+  RLS backstop, with a "which calendars?" picker on the granting side.
+- **UX/accessibility/design standards** applied across every surface (§19).
+- **Connection & invitation experience** — name search + shareable invite link/QR (§20).
+- **Collective management & branding UI** (§16.2) — make Phase 2 fully usable from the product.
 
 ### Phase 3 — post-launch, demand-driven — ⬜ not started
 
 - Saved permission presets / link templates.
 - Bulk link requests.
-- Analytics on linked-calendar usage.
-- Soft UI warning when a venue holds many links (~10, §3).
+- Analytics / transparency dashboard on linked-calendar usage and cross-venue access.
+- Soft UI warning when a venue holds many links (~10, §3) — *(note: already shipped, §15.3.)*
+- Time-of-day / per-service scoping on top of §18's per-calendar scope.
 
 ---
 
@@ -948,6 +1104,80 @@ Status key: ✅ shipped · 🟡 partial · ⬜ not started
 ---
 
 ## 14. Decision log
+
+**2026-06-04 (audit + world-class gap analysis):** Full code-vs-spec audit across DB/RLS, API,
+settings UI, calendar/bookings, collectives, and cron/notifications. Synced §4 data-model
+drift (`pending_change`, `suspended_at`, `invited_by_user_id`, `not_zero_way`, the
+`security_invoker` redaction-view fix, the GUC/RPC audit plumbing and trigger auto-resolution,
+the `20260923140000` migration). Corrected §8.2/§15.6 (linked bookings *are* interactive on the
+native grid; `LinkedBookingsPanel` is legacy/unused; linked classes/events render read-only;
+`venue-profile` route). Refined §6.5 to document the unilateral *grant* path. **P0 audit-integrity
+gap (§16.1 #1) — confirmed.** This finding was raised, then mistakenly *withdrawn* on the
+inference that the booking route's cross-venue writes are user-scoped, then **re-confirmed** by
+reading `venue-auth.ts`: `getVenueStaff().db` is the service-role admin client, so cross-venue
+edits via the main route bypassed the audit trigger and wrote no `account_link_audit_log` row —
+then **fixed the same day** (item 5 below). Added five normative sections: §16 audit & roadmap, §17 cross-venue
+activity awareness & in-app notifications, §18 calendar-scoped (per-practitioner) sharing,
+§19 UX/accessibility/design standards, §20 connection & invitation experience. **Implemented the
+same day (clearing every P1):** (1) the two missing cron termination emails (§6.6/§6.7) —
+`notifyLinkTerminatedIneligible` / `notifyLinkLapseExpired`; (2) the stale-host orphaning fix
+(§7.4) — `reconcileCollective` reassigns `host_venue_id` to the longest-tenured survivor
+(`selectReplacementHost`, unit-tested) and emails the new host (`notifyCollectiveHostTransferred`),
+self-healing any orphaned collective; (3) render-time collective eligibility (§7.2) —
+`loadPublicCollective` excludes lapsed/ineligible members from the public page (recoverable, not
+terminal), with `evaluateLinkEligibility` now unit-tested; (4) **§17 Phase 1** — the
+`account_link_notifications` store (table + RLS + audit-log trigger), the `GET/POST
+/api/venue/notifications` feed + mark-read, and a unit-tested display formatter; (5) **§16.1 #1 P0
+fix** — the `[id]` booking route now calls the existing `recordBookingWriteAudit` at all eight
+cross-venue PATCH write sites (best-effort, `!isOwnVenue`-guarded), so main-route edits/cancels/
+reschedules write an audit row and the §17 trigger turns it into a notification; covered by
+`audit.test.ts` and pgTAP Test 22; (6) **§16.1 #1c** — the DELETE handler now records a
+`deleted_booking` audit row (no notification — the row is gone); (7) **§17 Phase 2** — the
+`NotificationBell` dashboard UI (unread badge, day-grouped popover, mark-read, deep-links, 60s
+poll), mounted in the shell and verified rendering in preview; (8) **§17 Phase 3** — per-venue
+email preferences (`venues.linked_notification_prefs`, resolver + classifier unit-tested),
+`notifyCrossVenueBookingWrite` wired post-response into all cross-venue write paths gated by the
+owning venue's prefs, the `GET|PATCH /api/venue/notifications/preferences` API, and the
+`NotificationPrefsCard` settings UI (preview-verified). v1 deviations: in-app always-on (email
+column only); notes-email immediate rather than digested (digest = Phase 3.1); (9) **§17 Phase 4**
+— all §9 lifecycle events now write a bell row via the `notifyVenue` chokepoint (opt-out for the
+cross-venue write email the trigger already records), and the **§17.5 accept-with-changes true
+diff** (`diffGrant`, unit-tested) flows to both email and bell. §17 is now functionally complete
+(Phases 1–4); remaining items are minor enhancements (notes-email digest, realtime bell,
+per-event types); (10) **§16.2 collective management UI** — branding (logo/colour) in create + a
+host **Edit settings** modal, plus **Invite venue / Remove member / Make host** controls, all via
+in-app `ConfirmModal`s (no `window.confirm`); `CollectiveView` gained `hostVenueId`/`myVenueId`.
+(11) **§16.2 member-visibility config** — a "Configure my listing" modal (show-all / choose-specific
+practitioners + appointment-services + display order), prefilled from new `CollectiveView.myConfig`;
+substitution toggle deliberately omitted until §7.6. **§16.2 is now complete** (branding + host
+management + member visibility).
+(12) **§18 calendar-scoped (per-practitioner) sharing** — `*_grants_calendar_ids` columns +
+`LinkGrant.calendarIds` threaded through the permission model (narrow=reduce / widen=increase);
+enforced in the linked-calendar read route + the `loadStaffAccessibleBooking` write gate + the
+linked booking create/edit routes, with an RLS `link_calendar_allows` backstop
+(`20260930120000…sql`); a "Which of your calendars?" picker on the granting direction of the
+permission editor, fed by `GET …/account-links/my-calendars`. Preview-verified.
+(13) **§19 UX/accessibility/design standards** — brought the feature to the stated bar across
+surfaces: **§19.2** the shared `Modal` is now a thin wrapper over the Radix `Dialog` primitive
+(focus trap, focus restoration, body-scroll-lock, visible close, full ARIA, busy-locked dismissal),
+every action now raises a success/failure **toast** (a `ToastProvider` is mounted around the tab,
+which the settings page lacks) with an inline `ActionError` (role="alert", auto-scrolls into view)
+*near the control* rather than behind the modal, the section-wide busy flag became **per-link**
+`busyLinkId` so one action no longer freezes every row, the data-sharing/GDPR notice now also shows
+in the **Accept-with-changes** sub-view, and **Decline change** gained a `ConfirmDialog`; **§19.1**
+linked grid cards now carry a non-colour distinction — a dashed border + diagonal hatch + desaturating
+veil via `bookingCalendarBlockCardStyle(p, { linked })` (unit-tested) applied across every linked
+render path (read-only day columns, week strip, native merged grid, overlap clusters), plus a
+source-venue chip on week-strip cards and a real **padlock SVG** (replacing the 🔒 emoji) with a
+"why it's read-only" tooltip; **§19.3** skeletons replace bare "Loading…" in the settings section
+and the linked-bookings panel, and `/book/c` already renders a branded unavailable state; **§19.4**
+host-chosen collective branding is **contrast-guarded** — `readableAccentForWhiteText` auto-darkens a
+too-light accent until white text clears WCAG AA (unit-tested) rather than rejecting it, and
+`prefers-reduced-motion` now also disables the global interactive-element transition; **§19.6** a
+first-run explainer (dismissible, localStorage-remembered) and a staff-facing help note on the
+linked-bookings panel ("another venue's data, shown for coordination"). Typecheck/lint/108 unit
+tests green; preview-verified. Remaining §19 polish (calendar partial-load error state distinct from
+"no columns", audit-log mobile card fallback, `linked-*` design tokens) tracked as P2.
 
 **2026-05-18 (P1):** Month linked-count helper + tests; day-sheet date-synced linked section;
 `LINK_COUNT_SOFT_WARNING` banner; PRD + QA checklist updates.
@@ -987,8 +1217,8 @@ spec.
 
 | Phase | Overall | Safe to use today? |
 |---|---|---|
-| **Phase 1** — pairwise links | Core path shipped end-to-end | **Yes, for controlled rollout** — RLS + cron + settings + calendar (day/week) + bookings list + audit. Gaps below are polish, legal, and test depth, not missing core security. |
-| **Phase 2** — venue collectives | Browse + per-venue booking works; advanced routing missing | **Yes for simple collectives** (pick a member venue/practitioner, book normally). **No** for "any practitioner" or cross-venue availability routing. |
+| **Phase 1** — pairwise links | Core path shipped end-to-end | **Yes, for controlled rollout (incl. write grants).** The §16.1 #1 audit gap is **fixed** — cross-venue edits via the main route now write an audit row (and a §17 notification), and cross-venue hard-delete is audited too (#1c). RLS + cron + settings + calendar + bookings list are sound. |
+| **Phase 2** — venue collectives | Browse + per-venue booking works; management UI + advanced routing missing | **Yes for simple, single-host collectives** (pick a member venue/practitioner, book normally). **No** for "any practitioner" routing, and the collective is effectively **unbranded and unconfigurable from the product** until the §16.2 UI ships. |
 | **Phase 3** | Not started | N/A |
 
 ### 15.2 Phase 1 — implemented (reference)
@@ -1011,7 +1241,7 @@ spec.
 - Settings → Linked Accounts: active / pending / past links, permission editor, reduce access, unlink, audit modal.
 - `LinkedAccountBanner`: incoming link requests + pending permission changes; dismiss 24h.
 - Calendar: integrated linked columns (day + week) in `PractitionerCalendarView.tsx`.
-- Bookings: source scope filter + `LinkedBookingsPanel`.
+- Bookings: source scope filter (linked rows flattened into the registry; the old `LinkedBookingsPanel` was removed 2026-06-04).
 - Fallback: `/dashboard/linked-calendar` + `LinkedCalendarView` component (still used by day-sheet).
 
 **Communications**
@@ -1022,8 +1252,10 @@ spec.
 
 **P0 — before broad production launch**
 
-| Gap | Spec | Status (2026-05-18) |
+| Gap | Spec | Status (2026-05-18 / 2026-06-04) |
 |---|---|---|
+| **Cross-venue edit audit bypass** | §4.4, §16.1 #1 | **✅ Fixed 2026-06-04.** Was a real P0 (confirmed after a mistaken interim withdrawal): main-route cross-venue edits ran on the service-role admin client and skipped the audit trigger. Now each cross-venue PATCH write calls `recordBookingWriteAudit` (audit row + §17 notification), and the DELETE handler audits hard-deletes (#1c). Unit + pgTAP tested. |
+| Missing cron termination emails | §6.6, §6.7, §16.1 #4 | **Done (2026-06-04)** — `notifyLinkTerminatedIneligible` + `notifyLinkLapseExpired` wired into the cron's plan-ineligible and 30-day-expiry paths (both venues). |
 | Legal / ToS | §10.2 | **Done** — Linked Accounts subsection in `src/app/terms/customer/page.tsx`. Solicitor review of acceptance-modal copy still recommended before GA. |
 | Venue-deleted survivor notice | §6.6 | **Done** — `terminate_account_links_for_venue_deletion()` + `admin_hard_delete_venue` returns partner JSON; `hardDeleteVenueWithLinkedAccountNotifications()` sends `notifyLinkPartnerVenueDeleted`. Migration: `20260518120000_venue_delete_terminate_account_links.sql`. Dev script: `npx tsx scripts/hard-delete-venue.ts`. |
 | Automated test depth | §11 item 2 | **Done (vitest)** — `route.test.ts`, `venue-deletion.test.ts`, `LinkedAccountBanner.test.ts`, existing `permissions.test.ts` + pgTAP. Full DB E2E / Playwright still optional follow-up. |
@@ -1050,8 +1282,8 @@ spec.
 ### 15.4 Phase 2 — implemented (reference)
 
 - Tables `venue_collectives`, `venue_collective_members` with RLS (Phase 1 migration).
-- `VenueCollectivesPanel` in settings: create, invite, accept, configure visibility, leave, host remove, dissolve.
-- APIs: `/api/venue/collectives`, `/api/venue/collectives/[id]`, `…/members` (including `transfer_host`).
+- `VenueCollectivesPanel` in settings: create (name/slug/branding/grouping), **Edit settings**, **Invite venue**, **Remove member**, **Make host** (transfer), accept/decline invite, leave, dissolve — all via in-app `ConfirmModal`s (no `window.confirm`). **Updated 2026-06-04 (§16.2):** branding (logo/colour) + full host management are now built; the only remaining piece is the member-visibility config (visible practitioners/services/order/substitution).
+- APIs (ahead of the UI): `/api/venue/collectives`, `/api/venue/collectives/[id]`, `…/members` (including `transfer_host`), `…/slug-available`.
 - Public page: `/book/c/[slug]` → `CollectiveBookingFlow` → per-member `BookPublicBookingFlow` with `collectiveId` attribution.
 - Widget: collective embed option when venue is an active member (`WidgetSection.tsx`).
 - Maintenance: `reconcileCollective` on link termination / cron; invitation and dissolution emails.
@@ -1060,37 +1292,605 @@ spec.
 
 | Gap | Spec | Action |
 |---|---|---|
-| **Any-practitioner routing** | §7.6 | Implement cross-venue earliest-slot search in `CollectiveBookingFlow` (respect `allow_any_practitioner` + per-member `allow_any_practitioner_substitution`). Until then, hide or disable the flags in UI to avoid false expectations. |
-| **Fully-booked cross-suggestion** | §8.6 | On member venue `/book/[slug]`, when no slots: if venue is in an active collective, show CTA to `/book/c/{slug}`. |
-| **Dissolved name cooldown (30 days)** | §7.2.1 | Enforce on create: reject names matching a dissolved collective dissolved within 30 days (case-insensitive). |
-| **Host transfer acceptance** | §7.4 | Optional: require new host Admin to accept before `host_venue_id` changes (today: immediate API update). |
-| **Collective confirmation branding** | §7.8 | Apply collective logo/colour to emails/SMS for bookings with `collective_id` set. |
-| **Public page load / SEO** | §7.1 | Meta tags, error states when &lt; 2 active members, caching strategy for multi-venue service lists. |
+| **Collective branding UI** | §7.8, §16.2 | **✅ Fixed 2026-06-04.** Create + host Edit-settings modal now collect logo URL / brand colour / description (shared `BrandingFields`); colour previews on each row. |
+| **Member-visibility config UI** | §7.3, §16.2 | **✅ Fixed 2026-06-04.** "Configure my listing" modal: Show-all / Choose-specific multiselects for practitioners + appointment-services + display order; prefilled from `CollectiveView.myConfig`. Substitution toggle omitted until §7.6 ships. |
+| **Host-management UI** | §7.4, §16.2 | **✅ Fixed 2026-06-04.** Edit settings, invite member, remove member, and transfer host (Make host) are now in the panel; `window.confirm` replaced by an in-app `ConfirmModal`. |
+| **Stale host after cascade** | §7.4/§7.5, §16.1 #2 | **Bug, found 2026-06-04.** `reconcileCollective` removes the host without reassigning `host_venue_id`, orphaning the collective. Auto-transfer or dissolve. |
+| **Render-time plan/tier eligibility** | §7.2, §16.1 #3 | **Fixed 2026-06-04.** `loadPublicCollective` excludes ineligible (lapsed/ineligible-product) members from the public page and requires ≥2 eligible members; exclusion is recoverable (members reappear when eligibility is restored). |
+| **Any-practitioner routing** | §7.6 | **Flag hidden 2026-06-04 (item 15).** The create/edit toggle is now a disabled "coming soon" affordance (no live false promise) and create never sets it true. Cross-venue earliest-slot search in `CollectiveBookingFlow` remains the deferred feature. |
+| **Fully-booked cross-suggestion** | §8.6 | **✅ Done 2026-06-04 (item 15).** `loadActiveCollectiveForVenue` + public `GET /api/public/venue-collective` feed `CollectiveCrossSuggestion` in the appointment flow's no-availability state (collective-scoped; public guests only). |
+| **Dissolved name cooldown (30 days)** | §7.2.1 | **✅ Done 2026-06-04 (item 15).** Collective create rejects a name matching one dissolved within 30 days (case-insensitive, non-disclosing). |
+| **Host transfer acceptance** | §7.4 | Require new host Admin to accept before `host_venue_id` changes (today: immediate API update; no UI). |
+| **Collective confirmation branding** | §7.8 | Apply collective logo/colour to confirmation emails for bookings with `collective_id` set (email-only; SMS out of scope). |
+| **Public page load / SEO** | §7.1 | OG/meta tags, branded "collective unavailable" state when &lt; 2 active members (§19.3), caching for the per-member N-query service list. |
 | **E2E collective booking** | — | Test: create collective → accept invite → book via `/book/c/{slug}` → `collective_id` on row → link break removes member. |
 
 ### 15.6 Known deviations from this spec (intentional or pending doc sync)
 
 | Topic | Spec says | Code does |
 |---|---|---|
-| Calendar layout | Single integrated grid on calendar + day-sheet (§8.2) | **Calendar:** integrated day/week grid. **Day-sheet:** still separate `LinkedCalendarView` section. |
-| Linked calendar drag | Not in grid-integration scope | Linked bookings are **not** draggable (correct). Own-venue drag/resize is independent. |
-| Host transfer | New host must accept (§7.4) | Immediate `host_venue_id` update via API. |
+| Calendar layout | Single integrated grid on calendar + day-sheet (§8.2) | **Calendar:** integrated day/week grid (own columns via `CalendarColumnsChecklist`; linked columns in a separate "Linked venues" block). **Day-sheet:** still separate `LinkedCalendarView` section. |
+| Linked calendar drag | "Linked bookings are not draggable (correct)" *(was wrong)* | **`full_details`+`edit`/`create` linked bookings ARE draggable/editable** via the native grid → `/api/venue/bookings/[id]`. Only `none`/`time_only` are read-only. Corrected in §8.2. That edit path now writes an audit row + §17 notification via explicit `recordBookingWriteAudit` (§16.1 #1, fixed). |
+| Cross-venue write audit | Trigger resolves link from attribution columns (§4.4) | Trigger **auto-resolves from `current_staff_venue_ids()`** under a user JWT. The main route writes via the service-role admin client (empty set → trigger skips), so it now records the audit row **explicitly** via `recordBookingWriteAudit` (§16.1 #1, fixed). The `linked_apply_*` RPC path also audits in-transaction. |
+| `LinkedBookingsPanel` | Used on `/dashboard/bookings` (§8.2) | **Removed 2026-06-04.** Was unused/legacy; the dashboard flattens linked rows instead. |
+| Linked event/class blocks | Appointments-only (§3) | Read-only classes/events also shown on linked columns (`linked-schedule-blocks.ts`). |
+| `grant` route | "Never unilaterally increase" (§6.5, old text) | **Unilateral grant of *own* data** shipped; §6.5 refined. |
+| Unilateral grant of own data | Not specified | `POST …/[id]/grant`; now documented in §6.5. |
+| `linked-calendar/venue-profile` | Not specified | Read-only public-booking surface for cross-venue create; gated on `create_edit_cancel`; PII-safe (no guest data). |
+| Booking source for collective bookings | `booking_source='online'` (§7.7) | Uses `'booking_page'` (treated as online-equivalent). |
+| Host transfer | New host must accept (§7.4) | Immediate `host_venue_id` update; **"Make host" UI shipped** (§16.2). Acceptance step still not required (deviation stands). |
+| Stale host after cascade | Host transfer or dissolve required (§7.4/§7.5) | **Fixed 2026-06-04** — `reconcileCollective` now auto-reassigns hosting to the longest-tenured survivor (or dissolves if <2 remain); new host emailed. |
 | Collective name reuse | 30 days after dissolve (§7.2.1) | Active-name uniqueness only. |
-| GDPR notice | Short notice in acceptance modal (§10.2) | **Implemented** in `LinkedAccountsSection` review modal. |
+| Collective branding | Host sets logo/colour (§7.1, §7.8) | **UI shipped 2026-06-04** — create + Edit-settings collect logo URL / brand colour / description (§16.2). |
+| Member visibility config | Per-member practitioner/service/order (§7.3) | **UI shipped 2026-06-04** — "Configure my listing" modal (show-all / choose-specific practitioners + services + display order); `myConfig` on `CollectiveView` prefills it (§16.2). |
+| GDPR notice | Short notice in acceptance modal (§10.2) | **Implemented** in review modal — but not shown in the "Accept with changes" sub-view (§19.2). |
 
 When closing a deviation, update this table and the relevant normative section (§7 / §8 / §10).
 
 ### 15.7 Suggested release sequencing
 
-1. **Linked Accounts Phase 1 GA** — after P0 gaps (legal, venue-deleted notice, test depth, cron monitoring).
-2. **Collectives "simple mode" GA** — collective browse + explicit practitioner/venue choice only; document that "any practitioner" is coming.
-3. **Collectives Phase 2 complete** — any-practitioner routing + cross-suggestion + name cooldown + branding.
-4. **Phase 3** — only if venue demand warrants presets / bulk / analytics.
+1. **Linked Accounts Phase 1 GA** — the §16.1 #1 audit-integrity fix is **done** (cross-venue
+   edits now audited + notified); remaining P0 gaps are legal, venue-deleted notice, test depth,
+   cron monitoring (the §16.1 #4 cron emails are **done**). The §17 in-app write-notice foundation
+   is shipped and now fires correctly; the bell UI (§17 Phase 2) and email + preferences (§17
+   Phase 3) and lifecycle events + the accept-with-changes diff (§17 Phase 4) are all **shipped**;
+   §17 is functionally complete. Remaining: minor §17 enhancements (notes-email digest, realtime
+   bell) and the other workstreams (§16.2 collective UI, §18, §19, §20).
+2. **Collectives "simple mode" GA** — collective browse + explicit practitioner/venue choice
+   only; **build the §16.2 branding + host-management UI** so a collective is usable from the
+   product; document that "any practitioner" is coming and hide its flag.
+3. **Collectives Phase 2 complete** — any-practitioner routing + cross-suggestion + name
+   cooldown + confirmation branding + host-transfer acceptance.
+4. **Phase 2.5 world-class** — §17 (activity awareness) ✅ and §18 (per-calendar scope) ✅
+   shipped; remaining §19 (UX/a11y standards) and §20 (connection experience).
+5. **Phase 3** — only if venue demand warrants presets / bulk / analytics.
+
+---
+
+## 16. 2026-06-04 implementation audit & gap analysis
+
+This section is the report-of-record from the 2026-06-04 code-vs-spec audit. It is the entry
+point for anyone asking "what is the real state of Linked Accounts and what stands between it
+and a world-class bar?" §16.1 is verified correctness work; §16.2 is specified-but-unbuilt
+product surface; §16.3 is the new functionality this audit concluded *should* be specced and
+now is (§17–§20); §16.4 is the prioritised roadmap.
+
+### 16.0 Verdict
+
+The **core is genuinely solid** — and in several places (audit hardening, the
+`security_invoker` redaction view, the strongest-grant RLS helpers, server-side rate limits,
+the negotiated/unilateral permission split) it *exceeds* what the original spec asked for.
+The schema, RLS, lifecycle cron, and email layer are production-grade. **The P0 (§16.1 #1) —
+cross-venue booking edits via the main route bypassing `account_link_audit_log` — is now fixed
+(2026-06-04)**, after a mistaken interim "withdrawal" (see the §16.1 correction history). What
+otherwise separates today's build from "designed and iterated on by Apple" is **not** the data
+model — and the collective-management UI gap is now **closed** (branding, host management, and
+member-visibility curation all shipped 2026-06-04 — §16.2). What remains is (1) a consistent
+layer of interaction polish, proactive awareness, and accessibility that has to be specified as a
+standard rather than left to each component (§19), and (2) the §18/§20 differentiators. The verified lifecycle bugs (orphaned-host cascade,
+render-time collective eligibility, two missing cron emails), the P0, and the #1c hard-delete
+audit were all **fixed 2026-06-04**; the residual correctness items are the P2/P3 hardening in
+#5–#11. The highest-value *additive* capability — cross-venue write awareness (§17) — is
+**functionally complete** (Phases 1–4: store, bell, email + preferences, lifecycle events, diff).
+
+### 16.1 Verified correctness gaps (fix before/at GA)
+
+> **Correction history (read this).** This row #1 flip-flopped during the audit; the final,
+> verified answer is: **the P0 was real, and is now fixed (2026-06-04).** Timeline: (a) raised;
+> (b) *wrongly withdrawn* on the inference that the booking route's cross-venue writes use a
+> user-scoped client; (c) re-confirmed by reading `src/lib/venue-auth.ts` — `getVenueStaff().db`
+> is the **service-role admin client** (`db: admin`, by design, `venue-auth.ts:166-168`), so under
+> service-role `current_staff_venue_ids()` is empty and the audit trigger took its "system write →
+> `RETURN NEW`" branch, writing **no** audit row; (d) **fixed** by calling the existing
+> `recordBookingWriteAudit` helper at every cross-venue write site (see row #1). **Lesson:** verify
+> the *definition* of a client before reasoning about RLS/audit behaviour, not just its variable
+> name. (Note: the existing pgTAP Test 4-5 "passed" because it simulates a *user JWT*, not the
+> service-role path the app actually uses — which is why the gap hid. A service-role-path test is
+> now covered by the §17 notification assertion, Test 22.)
+
+| # | Sev | Gap | Evidence | Fix |
+|---|---|---|---|---|
+| 1 | ✅ **Fixed 2026-06-04** | **Cross-venue booking edits via the main route bypassed the audit log.** `/api/venue/bookings/[id]` writes through the **service-role admin client** (`getVenueStaff().db`), so the audit trigger saw no staff identity and skipped — the common cross-venue gestures (drag-reschedule, status change, cancel, notes) wrote **no `account_link_audit_log` row**, violating core principle #5 and §4.4 and starving §17. | `venue-auth.ts:166-168,216`; `bookings/[id]/route.ts`. | **Done** — the route now resolves `linkId` from `loadStaffAccessibleBooking` and calls the existing best-effort `recordBookingWriteAudit` helper at all eight cross-venue PATCH write sites (guarded by `!isOwnVenue`), so each edit/cancel/reschedule writes one audit row — which the §17 trigger turns into an owning-venue notification. Unit-tested (`audit.test.ts`); end-to-end pgTAP (Test 22). **Approach note:** chosen over rerouting writes through `linked_apply_*` to avoid any regression to the write path (the helper is additive and non-fatal); it is therefore a *separate-transaction, best-effort* audit rather than in-transaction. The in-transaction RPC rerouting + hard-delete coverage (#1c) remain as hardening. |
+| 1c | ✅ **Fixed 2026-06-04** | **Cross-venue hard-delete was unaudited.** The DELETE handler uses the admin client and hard-`delete()`s; the trigger is `AFTER INSERT OR UPDATE` only. | `bookings/[id]/route.ts` DELETE handler. | **Done** — the DELETE handler now records a `deleted_booking` audit row via `recordBookingWriteAudit` after a successful cross-venue delete (no notification: the booking row is gone, so there's nothing to deep-link to). |
+| 2 | ✅ **Fixed 2026-06-04** | **Stale host orphaned a collective.** `reconcileCollective` could set the host's own membership to `removed` (host lost a full-mutual link) while ≥2 other members remained, without reassigning `host_venue_id` — leaving the collective un-administrable (PATCH/DELETE/`transfer_host` all require the caller to be the now-removed host). | `src/lib/linked-accounts/collectives.ts`. | **Done** — `reconcileCollective` now reassigns `host_venue_id` to the longest-tenured surviving member (pure, unit-tested `selectReplacementHost`) when the host is no longer active, or dissolves if <2 survive; the new host is emailed (`notifyCollectiveHostTransferred`). Self-healing for any pre-existing orphaned collective on the next reconcile. |
+| 3 | ✅ **Fixed 2026-06-04** | **Collective eligibility not re-checked for plan/tier on render.** `hasFullMutualLinks` checks only calendar grants, not that each member is still Appointments-family with `plan_status='active'`, so a lapsed-plan member stayed live on `/book/c/{slug}` until the daily cron suspended the link (≤24h lag). | `collectives.ts`. | **Done** — `loadPublicCollective` now re-evaluates each active member's eligibility (`evaluateLinkEligibility(...).canCreate`) and **excludes** ineligible members from the rendered page, requiring ≥2 *eligible* members. It excludes rather than terminally removes, so members reappear automatically when their subscription is restored (mirrors the link suspend/resume model); terminal removal still flows from the §7.5 link cascade. `evaluateLinkEligibility` is now unit-tested. |
+| 4 | ✅ **Fixed 2026-06-04** | **Two specified cron notifications were missing.** Cron `plan_ineligible` termination (§6.6 says "both venues emailed") and the 30-day `subscription_lapsed` expiry updated status but sent no email. | `account-link-maintenance/route.ts`. | **Done** — `notifyLinkTerminatedIneligible` and `notifyLinkLapseExpired` added to `notifications.ts` and wired into both cron paths (both venues, `Promise.allSettled`). |
+| 5 | ✅ Fixed | **`reduce` can raise a DB error instead of a clean 4xx.** The reduce route validates only the caller's own direction; reducing a one-way link's only active direction to `none` violates the `account_links_not_zero_way` CHECK and surfaces as a 500. | `…/reduce/route.ts`; CHECK at `20260919120000…sql:81`. | Pre-validate against the zero-way rule and return a 422 with guidance to unlink instead. |
+| 6 | ✅ Fixed | **Tier gate is too permissive.** `isLinkFeatureVenue` ORs "any non-`table_reservation` `booking_model`", so a restaurant/founding-tier venue with a non-table model can pass the feature gate, against §3. | `eligibility.ts:24-30`. | Gate strictly on `isRestaurantTableProductTier()` / Appointments tiers per §3. |
+| 7 | ✅ Fixed | **Lapse-warning is not idempotent.** Duplicate-suppression relies on the 6–7-day window aligning with the once-daily schedule, not a persisted flag; a manual re-run double-sends. | `account-link-maintenance/route.ts:109-177`. | Persist `lapse_warning_sent_at` on the link and gate on it. |
+| 8 | ✅ Fixed | **Email-send failures are invisible.** `notifyVenue` swallows errors and they are not counted in the cron's `errors`, so `finalizeCronRun` can report `ok:true` while deliveries failed. | `notifications.ts:50-55`. | Count send failures into the cron health signal; consider a delivery-tracking/retry record. |
+| 9 | ✅ Fixed | **Audit CSV export is unthrottled and N+1.** Up to 10k rows with per-row venue/user lookups, no rate-limit; `propose_change`/`reduce`/`grant` are also unthrottled. | `…/[id]/audit/route.ts`. | Batch the lookups; add per-venue rate-limiting to all mutating + export routes. |
+| 10 | ✅ Fixed | **Revoked-admin 30s window.** A just-revoked admin keeps link-management for up to 30s via the staff-identity cache. | `venue-auth.ts:84`. | Acceptable; document, or bust the cache on revoke. |
+| 11 | ✅ Fixed | **`generateMetadata` double-reconcile.** The collective page reconciles (a write path that can dissolve) twice per request. | `book/c/[slug]/page.tsx:19-34`. | Make the metadata pass read-only. |
+| 12 | ✅ Fixed | **Timezone in secondary linked components.** `LinkedCalendarView` computed "today" in local/UTC, not venue-local, so "Today" could land on the wrong day far from the venue TZ. (The other component the original finding cited, `LinkedBookingsPanel`, was dead code and has since been deleted.) | `LinkedCalendarView.tsx`. | **Done** — `LinkedCalendarView` now defaults to a browser-local date and accepts a server-computed venue-local `initialDate`. |
+
+### 16.2 Specified-but-unbuilt product surface (Phase 2 completion)
+
+The collective **API was far ahead of the collective UI**. That gap is now **fully closed**
+(2026-06-04) — branding, host management, and member-visibility curation all have UI:
+
+- **Collective branding — ✅ built (2026-06-04).** Create and a new host **Edit settings** modal
+  now collect `logo_url` (URL), `primary_colour` (colour picker), and `description` (shared
+  `BrandingFields`), so collectives render with their logo/colour. A colour dot also previews on
+  each collective row. (`venues`-style upload is out of scope — the logo is a URL field, matching
+  the `branding.logo_url` schema.)
+- **Host-management UI — ✅ built (2026-06-04).** The host can now **Edit settings**
+  (name/branding/grouping/allow-any), **Invite venue** (any eligible full-mutual venue not yet a
+  member), **Remove** a member, and **Make host** (transfer). The per-member list shows host /
+  invited tags. Dissolve, remove, transfer, and leave now use a styled in-app `ConfirmModal`
+  instead of `window.confirm` (§19.2). `CollectiveView` gained `hostVenueId`/`myVenueId` so the
+  UI can identify the host member reliably.
+- **Member-visibility config UI — ✅ built (2026-06-04).** A **"Configure my listing"** modal
+  (active members) fetches the member's own `/api/venue/practitioners` +
+  `/api/venue/appointment-services` and offers, per catalogue, **Show all** (saves `[]`, so
+  future additions are auto-included) or **Choose specific** (a checkbox multiselect), plus a
+  **display order** input. `CollectiveView` now carries `myConfig` so the modal prefills from the
+  saved state. The `allow_any_practitioner_substitution` toggle is **deliberately omitted** — it
+  only matters once §7.6 "any-practitioner" routing ships, and exposing it now would be a
+  false promise (§15.5); add it with §7.6.
+- The previously-tracked §15.5 gaps remain open: any-practitioner routing (§7.6) — and the
+  create modal still **shows the flag** despite §15.5 saying to hide it, which is a live false
+  promise; fully-booked cross-suggestion (§8.6); dissolved-name 30-day cooldown (§7.2.1);
+  collective confirmation-email branding (§7.8); host-transfer acceptance step (§7.4); and
+  public-page SEO/OG tags, branded "collective unavailable" state, and a caching strategy for
+  the per-member N-query service load (§7.1).
+
+### 16.3 New functionality this audit concluded should be specced
+
+These were **absent from the plan** and are now specified normatively:
+
+- **§17 — Cross-venue activity awareness & write notifications.** Today a linked venue can
+  cancel or reschedule your client's appointment and you only find out by reading the audit
+  log. A sovereign-data product must *tell* the owning venue, in near-real-time, when its data
+  is changed by a partner. Includes the in-app notification center the §9 "dashboard notice"
+  channel always implied but never had.
+- **§18 — Calendar-scoped (per-practitioner) sharing.** Visibility is currently venue-wide.
+  The flagship use case (a salon renting chairs to independent stylists) needs a stylist to
+  share *only their own column*. Specced as a permission-model extension.
+- **§19 — UX, accessibility & design standards.** The interaction layer that lifts the feature
+  to the Apple bar: a linked-data design language, modal/focus/toast standards, empty/loading/
+  error states, accessibility, and mobile — specified as a standard, not per-component.
+- **§20 — Connection & invitation experience.** Replaces "type the other venue's slug" (jargon
+  that dead-ends if you don't know it) with venue-name search and a shareable invite link/QR.
+
+### 16.4 Prioritised roadmap to "world class"
+
+1. **GA hardening.** **#1 (P0 — main-route cross-venue edits unaudited) is fixed**, which also
+   unblocked §17. The P1 lifecycle items are **done** — #2 (orphaned-host cascade), #3
+   (render-time collective eligibility), #4 (missing cron emails), and #1c (hard-delete audit).
+   The §17 bell UI (Phase 2) is **shipped**. Remaining correctness items are the P2/P3 hardening
+   (#5–#11); §17 is **functionally complete** (Phases 1–4 shipped), with only minor enhancements
+   left (notes-email digest, realtime bell, per-event types).
+2. **Phase 2 completion.** §16.2: collective branding + member-config + host-management UI;
+   close the §15.5 gaps; hide the any-practitioner flag until §7.6 ships.
+3. **World-class polish.** §19 design/interaction/accessibility standards applied across every
+   surface; §20 connection experience; the §16.1 P2/P3 items.
+4. **Differentiators.** §18 calendar-scoped sharing **✅ shipped**; remaining: §19 UX/a11y
+   standards, §20 connection experience, and richer activity analytics (Phase 3, §11).
+
+---
+
+## 17. Cross-venue activity awareness & write notifications (new — normative)
+
+**Problem.** The system *records* every cross-venue action (§10) but does not *surface* it.
+Granting another venue `edit_existing` or `create_edit_cancel` means they can move, cancel, or
+create bookings in your calendar — and the owning venue currently has no proactive signal that
+it happened. For a feature whose entire premise is data sovereignty, "you can find out if you
+go read the audit log" is not enough. This is the single highest-value missing capability.
+
+### 17.0 Implementation status & phasing
+
+> **Dependency on §16.1 #1 — now satisfied.** §17 is built on the principle that *every
+> cross-venue write produces an `account_link_audit_log` row*, off which a notification is
+> generated. The §16.1 #1 P0 (main-route cross-venue edits unaudited) is now **fixed**, so §17
+> fires for both the dedicated `linked_apply_*` path *and* native-grid drag/edit/cancel. The one
+> cross-venue hard-delete is now audited too (§16.1 #1c); by design it does not notify (the
+> booking row is gone, so there is nothing to deep-link to).
+
+- **Phase 1 — foundation + cross-venue write notices — ✅ shipped 2026-06-04.**
+  - `account_link_notifications` table + RLS (`current_staff_venue_ids()`; staff read + mark-read,
+    service-role write) — `20260924120000_linked_account_notifications.sql`.
+  - DB trigger `notify_owning_venue_of_cross_venue_write` on `account_link_audit_log` (AFTER
+    INSERT, write actions only) — creates an owning-venue notification **in the same transaction**
+    as the audited write, so it cannot be skipped by any path that writes the audit row.
+  - `GET /api/venue/notifications` (feed + unread count) and `POST /api/venue/notifications/read`
+    (mark some/all read).
+  - Pure, unit-tested display formatter `buildNotificationView` / `formatNotificationCopy`
+    (`src/lib/linked-accounts/notification-center.ts`).
+- **Phase 2 — in-app notification center UI — ✅ shipped 2026-06-04.**
+  `NotificationBell` (`src/components/linked-accounts/NotificationBell.tsx`), mounted in the
+  dashboard shell gated `isAdmin && !isRestaurantTableProductTier`. Unread badge, popover feed
+  grouped by day (Today / Yesterday / date), per-item + "Mark all read" with optimistic update,
+  deep-link to the affected day, outside-click/Escape close, graceful empty + error states.
+  **Refresh:** 60s polling + refetch on open (realtime via the Supabase channel is a Phase 2.5
+  enhancement — would require adding `account_link_notifications` to the realtime publication).
+- **Phase 3 — email + preferences (§17.3/§17.4) — ✅ shipped 2026-06-04.**
+  - Per-venue email prefs in `venues.linked_notification_prefs jsonb` (defaults: cancel/reschedule
+    **on**, create/notes **off**); pure resolver + `classifyCrossVenueWrite` (unit-tested) in
+    `notification-prefs.ts`.
+  - `notifyCrossVenueBookingWrite` (in `notifications.ts`, reusing `formatNotificationCopy` for
+    copy parity with the in-app notice) sends the email gated by the owning venue's per-category
+    pref, to `venues.email` + active admins. Wired post-response into **every** cross-venue write
+    path: the main `/api/venue/bookings/[id]` (edit/cancel/notes), the staff create route
+    (`/api/venue/bookings`), and the dedicated `/api/venue/linked-calendar/booking` (create/edit/cancel).
+  - `GET|PATCH /api/venue/notifications/preferences` (PATCH admin-only) + the **Notification
+    emails** toggle matrix in the Linked Accounts settings tab (`NotificationPrefsCard`,
+    preview-verified).
+  - **Deviations from §17.3/§17.4 (intentional, v1):** (a) **in-app is always on** and not
+    per-category configurable — the matrix exposes only the *email* column (the trigger creates
+    in-app rows unconditionally); (b) **notes-only edits email immediately when enabled** rather
+    than via a **daily digest** — the digest batching is deferred to Phase 3.1 (notes email
+    defaults off, so the default experience is already quiet).
+- **Phase 4 — lifecycle events + true diff (§17.5) — ✅ shipped 2026-06-04.**
+  - **All §9 lifecycle events now write a bell row.** Implemented at the single `notifyVenue`
+    chokepoint: it writes an `account_link_notifications` row by default (title = email subject,
+    body = first paragraph, so in-app and email copy stay in sync), with an opt-out (`inApp:
+    false`) used only by the cross-venue booking-write email (the DB trigger already records that
+    one). So accepted / rejected / unlinked / reduced / increased / change-accepted /
+    change-declined / suspended / resumed / expired / terminated / lapse-warning / partner-deleted
+    / collective invitation / removal / dissolved / host-transferred all appear in the bell.
+    `formatNotificationCopy` prefers the stored title/body for these.
+  - **§17.5 accept-with-changes true diff:** `diffGrant(before, after)` (pure, unit-tested) emits
+    a before→after delta per changed dimension ("Calendar visibility: full calendar detail → time
+    blocks only"; "Client details: shared → hidden"), suppressing PII/action noise when the
+    calendar bullet already implies them. The accept-with-changes route computes the requester's
+    original-vs-final grant and passes the diff to `notifyLinkAccepted` (email + bell), falling
+    back to the final-state summary when the requester's direction did not change.
+  - v1 scope notes: bell rows use a generic `link_lifecycle` type (per-event typing for icons /
+    filtering is a future enhancement); the diff covers the requester's *gain* direction (the
+    "accepted" email's framing) — diffing the reverse direction too is a minor future addition.
+
+### 17.1 Principle
+
+**Whenever a partner venue mutates your data, you are told — promptly, in-product, and
+(by your preference) by email.** The owning venue is always the audience for changes to its
+own rows, regardless of who made them.
+
+### 17.2 In-app notification center
+
+§9 repeatedly promises a "dashboard notice", but the only in-app surface today is the
+incoming-request banner (pending requests + pending permission-change proposals). The persistent
+store specified here is now **shipped (Phase 1, §17.0)**:
+
+- Table `account_link_notifications` (✅ shipped): `id`, `venue_id` (recipient), `type`,
+  `category`, `link_id` nullable, `collective_id` nullable, `actor_venue_id` nullable,
+  `resource_type`/`resource_id` nullable, `payload jsonb`, `read_at` nullable, `created_at`.
+  RLS: a venue's active staff read and mark-read only their own rows; only the trigger /
+  service-role insert.
+- A bell/inbox affordance in the dashboard shell shows unread count and a reverse-chronological
+  list grouped by day. Items deep-link to the relevant surface (the affected booking, the
+  Linked Accounts tab, the audit log filtered to the event).
+- Every §9 event that the table marks "+ dashboard notice/banner" writes a notification row
+  (currently those are email-only). Collective invitations must also appear here (today they
+  do not surface in the banner at all).
+
+### 17.3 Cross-venue write notices
+
+When a partner creates/edits/cancels a booking in your venue (i.e. an
+`account_link_audit_log` row with `acting_venue_id ≠ owning_venue_id` is written):
+
+- **Cancellations and reschedules of an existing booking → immediate notice** (in-app always;
+  email per recipient preference, default on). These are high-impact: a client's appointment
+  moved or removed by another venue must not be discovered late. Copy names the partner venue,
+  the client (if PII is granted to *you* — it is your own data, so always), the service, and
+  the before/after time.
+- **New cross-venue bookings → immediate notice** (in-app; email optional, default off) so the
+  calendar owner is aware a partner booked into their book.
+- **Edits to notes/service only → batched into a daily digest** to avoid noise.
+- Realtime delivery rides the Supabase channel the calendar already subscribes to
+  (§15.3 P2); the notification row is the durable record.
+
+### 17.4 Preferences
+
+Per-venue, Admin-managed, on the Linked Accounts tab: a small matrix of "notify me when a
+linked venue [cancels / reschedules / creates / edits notes]" × [in-app / email]. Sensible
+defaults per §17.3. SMS remains out of scope (§9).
+
+**Shipped (2026-06-04):** the **email** column of this matrix — four per-venue toggles
+(`venues.linked_notification_prefs`), defaults cancel/reschedule on, create/notes off, edited
+via `GET|PATCH /api/venue/notifications/preferences` and the `NotificationPrefsCard` UI. **In-app
+is always on** in v1 (not per-category configurable — the trigger creates in-app rows
+unconditionally), so only the email column is exposed; per-category in-app muting is a future
+option.
+
+### 17.5 "Accept with changes" must show a true diff
+
+§6.2/§9 promise a diff of what changed when a request is accepted-with-changes; the shipped
+email lists the *final* permissions, not a before/after delta. Compute the delta against the
+originally-proposed grants and render it ("PII access: requested **on** → set to **off**") in
+both the email and the in-app notice.
+
+**Shipped (2026-06-04):** `diffGrant(before, after)` (`permissions.ts`, unit-tested) and the
+accept-with-changes route now pass a true before→after delta to `notifyLinkAccepted`, which
+carries to both the email and the bell. Falls back to the final-state summary when the
+requester's access direction was not changed.
+
+---
+
+## 18. Calendar-scoped (per-practitioner) sharing (✅ shipped 2026-06-04)
+
+**Problem.** Permissions today are venue → venue: granting `full_details` exposes *every*
+practitioner's calendar in the owning venue. The spec's own flagship use case — "a salon owner
+who rents chairs to independent stylists, where each stylist runs their own venue" (§1) — wants
+the *opposite default*: a stylist sharing only their own column with the chair-renting host,
+not the whole book. Venue-wide-only sharing is too blunt for the primary persona.
+
+> **Implementation (2026-06-04).** Shipped end-to-end:
+> - **Data + plumbing:** `low_grants_calendar_ids` / `high_grants_calendar_ids uuid[]` on
+>   `account_links` (NULL = all); `LinkGrant.calendarIds` threaded through `normaliseGrant`
+>   (cleared when calendar=`none`), `grantsToColumns`, `viewLinkForVenue`, `resolveCallerGrantOverVenue`,
+>   `loadAccessibleLinkedVenueIds`, the create/respond/grant/reduce/propose-change routes, and the
+>   grant schema. Narrowing scope counts as a *reduction* (unilateral); widening as an *increase*
+>   (`isReductionOnly`/`isIncreaseOnly` extended). Unit-tested.
+> - **Enforcement (primary = app layer, since cross-venue reads use the admin client):** the
+>   linked-calendar read route filters practitioners/columns/bookings to the scope; the central
+>   `loadStaffAccessibleBooking` write gate + the linked-calendar create/edit routes reject
+>   out-of-scope calendars and out-of-scope reschedule targets. **Backstop (RLS):**
+>   `link_calendar_allows(owner, calendar)` helper + scope added to the four bookings policies
+>   (`20260930120000_linked_accounts_calendar_scope.sql`); the time_only anonymised view inherits it.
+> - **UI:** a "Which of your calendars?" picker (All / Choose specific) on the *granting* (`mine`)
+>   direction of `GrantEditor`/`GrantPairEditor`, sourced from `GET /api/venue/account-links/my-calendars`;
+>   shown in Send / Review / Edit / Reduce. The requesting (`theirs`) direction is never scoped
+>   (you can't choose another venue's calendars). Summaries note "only for N selected calendars".
+> - **Deferred (per §18.3):** time-of-day windows and per-service scoping.
+> - **Verification:** typecheck + lint + unit tests + preview (picker renders, lists the venue's
+>   calendars). Full data-flow enforcement needs the migration applied + a live scoped link.
+
+### 18.1 Model extension
+
+Add an optional per-direction calendar scope to `account_links`:
+
+- `low_grants_calendar_ids uuid[] NULL` and `high_grants_calendar_ids uuid[] NULL`
+  (FK semantics to `practitioners` / unified calendar entities of the *granting* venue).
+- `NULL` (or empty) = **all calendars** — preserves today's behaviour and is fully
+  backward-compatible. A non-empty array restricts visibility/action to those calendars only.
+- The grant scope is meaningful only when `calendar <> 'none'`. It constrains *both* read
+  (which columns appear) and write (which bookings can be edited/created) for that direction.
+
+### 18.2 Enforcement
+
+- Extend the RLS helpers: `link_calendar_grant` / `link_action_grant` already key on the
+  owning venue; add a row-level predicate so a `bookings` row is only visible/editable when
+  `practitioner_id`/`calendar_id` is in the granting direction's scope array (or the array is
+  NULL). Because RLS cannot read a parameterised set cleanly per-row, implement as a
+  `SECURITY DEFINER` helper `link_calendar_allows(p_owner_venue uuid, p_calendar uuid)
+  RETURNS boolean` used in the policy `USING`/`WITH CHECK`.
+- The anonymised `time_only` view path is unaffected in shape but must apply the same scope.
+
+### 18.3 UX
+
+- The permission editor (§8.1 send/accept/edit modals) gains a "Which calendars?" control per
+  direction: **All practitioners** (default) or a multi-select of the granting venue's
+  practitioners. Hidden when calendar visibility is `none`.
+- The plain-English summary updates accordingly: "see **Jess's** calendar in full detail"
+  rather than "see your calendar in full detail" when scoped.
+- Out of scope for the first cut: time-of-day windows and per-service scoping (note as future).
+
+### 18.4 Migration & compatibility
+
+Additive, nullable columns; existing links read as "all calendars". No data migration. Ship
+behind the existing `linkFeature` gate; no new tier requirement.
+
+---
+
+## 19. UX, accessibility & design standards (new — normative)
+
+The audit found the *functionality* is largely present but the *interaction quality* is below
+the stated Apple bar. These standards are normative for every Linked Accounts surface; a
+surface is not "done" until it meets them.
+
+**Status (2026-06-04):** the bulk of §19 is **✅ shipped** — see decision-log item (13). Modal
+foundation, toasts + inline errors, per-row busy, Accept-with-changes GDPR notice, Decline-change
+confirmation (§19.2); linked-card non-colour treatment + venue chip + real read-only padlock
+(§19.1); settings/panel skeletons + branded `/book/c` unavailable state (§19.3); branding
+contrast guard + reduced-motion (§19.4); first-run explainer + staff help note (§19.6). **Still
+open (P2):** the calendar's partial/failed linked-load state distinct from "no columns" (§19.3),
+the audit-log mobile card fallback + sticky modal footer on short viewports (§19.5), and a shared
+`linked-*` design-token set (§19.1). Inline ✅/⏳ markers below.
+(14) **§20 connection & invitation experience** — **search-by-name**: a new admin-only
+`GET …/account-links/search?q=` matches the fragment against venue `name` *or* `slug` (input
+sanitised to neutralise ILIKE wildcards + PostgREST `.or()` separators) and returns a short
+pick-list with per-venue eligibility (public name + slug only, never PII); the send-request form's
+slug input became a **search combobox** (debounced, keyboard-navigable listbox, "Available/Unavailable"
+badges, a chosen-venue card with "Change") — typing a full slug still resolves since slug is matched.
+**Shareable invite links**: `createLinkInviteToken`/`verifyLinkInviteToken` (compact HMAC, 16-byte
+venue id + 4-byte expiry, domain-separated, 30-day TTL, `LINK_INVITE_SECRET` → `PAYMENT_TOKEN_SECRET`
+fallback; unit-tested incl. expiry/tamper/cross-domain); `POST …/account-links/invite` mints a link +
+server-rendered QR (`qrcode`) + expiry, `GET …/account-links/invite?token=` verifies and resolves the
+initiating venue's name/slug/eligibility (self-link guarded); an `InviteLinkModal` (copy + QR) and a
+"Get invite link" action, plus a `?invite=token` handler on the tab that verifies, pre-fills a request
+*back to the initiator* with the default preset, toasts the outcome, and strips the param. The link
+grants nothing until a normal request is sent and accepted — the `account_links` lifecycle is
+unchanged. Typecheck/lint/114 unit tests green; preview-verified (search dropdown, invite mint+QR,
+verify round-trip, param auto-handling). **§20 complete.**
+(15) **Remaining-items hardening pass (§16.1 #5–#12, §7.2.1, §7.6, §8.6, §19 P2, §17 realtime).**
+**§16.1 #5** — the reduce route now pre-validates the `account_links_not_zero_way` rule and returns
+a clean **422** ("use Unlink instead") rather than a 500. **#6** — `isLinkFeatureVenue` now excludes
+restaurant/founding tiers *before* the legacy booking-model fallback, so a table-product venue can
+never pass the gate (regression-tested). **#7** — added `account_links.lapse_warning_sent_at`
+(migration `20261208120000`); the cron gates the §6.7 warning on it and clears it on resume, so a
+manual re-run can't double-send. **#8** — `notifyVenue` returns an `emailFailures` count;
+the cron tallies it across every send and folds it into the health signal, so a run can't report
+`ok:true` while deliveries failed. **#9** — audit lookups were already batched (`loadVenueLookup` /
+`.in()`); added per-venue rate-limiting (`enforceLinkRateLimit`) to the CSV export and to all
+mutating routes (PATCH/reduce/grant). **#10** — staff role-change/removal now busts the identity
+cache (`invalidateCachedStaffIdentity`), so a revoked admin loses access immediately, not after the
+30s TTL. **#11** — `/book/c` `generateMetadata` is now read-only (`loadCollectiveBrandingBySlug`),
+so the reconcile/dissolve write happens once in the page body, not twice per request. **#12** —
+`LinkedCalendarView` now defaults to a **browser-local** date (not UTC) and accepts a
+server-computed venue-local `initialDate` from the standalone page. **§7.2.1** — collective create
+now rejects a name matching one **dissolved within 30 days** (non-disclosing message). **§7.6** —
+the `allow_any_practitioner` toggle is now a disabled **"coming soon"** affordance in both create
+and edit (the live false promise is gone); create never sets it true; the per-member substitution
+toggle remains omitted. Full cross-venue earliest-slot routing stays deferred. **§8.6** —
+`loadActiveCollectiveForVenue` + a public `GET /api/public/venue-collective` feed a self-contained
+`CollectiveCrossSuggestion` shown in the appointment flow's *no-availability* state for public
+guests (collective-scoped only; never for pairwise-only venues; not shown inside a collective page).
+**§19.3** — the main calendar now shows a distinct **"Couldn't load linked calendars — Retry"**
+notice instead of silently collapsing to "no columns". **§19.5** — the audit-log modal gains a
+mobile **card fallback** (no horizontal-scroll trap). **§19.1** — shared `--linked-surface` /
+`--linked-border` / `--linked-muted-text` tokens + a `.linked-chip` utility now back the linked
+affordances. **§17 realtime bell** — `account_link_notifications` added to the realtime publication
+(migration `20261209120000`); the bell subscribes to per-venue INSERTs (RLS-scoped) and refreshes
+instantly, with the 60s poll kept as a backstop. **Deliberately deferred:** the §17 *notes-email
+digest* (Phase 3.1) — it needs a new pending-digest store + a scheduled aggregation cron that can't
+be DB-verified here, and the per-category email opt-out already lets a venue silence notes emails;
+and full §7.6 any-practitioner routing. Typecheck/lint clean; 112 unit tests green (incl. the new
+tier-gate regression); search/invite/endpoint/calendar/settings preview-verified. New migrations
+(`20261208120000`, `20261209120000`) need applying to a real env + `npm run test:db` before GA.
+(16) **Final pre-ship review of the `/dashboard/calendar` linked experience + venue-facing UI
+(two-agent audit).** Calendar correctness: **(a)** `handleDragEnd` now refuses to move a booking
+across venue boundaries — a linked booking can only be dropped on its own venue's columns, and an
+own booking can't land on a linked column (previously the move would PATCH a foreign
+practitioner/calendar id); **(b)** the main `bookings/[id]` PATCH now validates the **move-target**
+calendar against the §18 link scope for cross-venue edits (the load check only covered the
+booking's *current* calendar, and the admin-client write isn't backstopped by RLS); **(c)** clicking
+an empty slot on a `full_details`+`edit_existing` (no-create) linked column no longer falls through
+to the own-venue slot menu (wrong-venue create) — linked columns only ever open the linked create
+flow when a create grant exists, else a clear toast; **(d)** a feature-enabled venue with **zero
+links** now shows "No linked venues yet" instead of a perpetual "Loading linked calendars…"
+(added a `linkedLoaded` flag); **(e)** §19.1 — native-grid editable linked cards now carry the
+persistent source-venue chip (read-only cards already did); **(f)** the week-strip card tooltip now
+says "View" vs "Edit in {venue}" based on `b.editable`, not just clickability. Venue-facing: **(g)**
+§8.6 — `loadActiveCollectiveForVenue` now requires ≥2 *eligible* active members (read-only), so the
+fully-booked cross-suggestion never lands on the branded "unavailable" page, and its link colour is
+contrast-guarded (§19.4); **(h)** §7.2.1 — the collective **rename** path now enforces the 30-day
+dissolved-name cooldown (create already did), and the host-transfer confirm copy is now honest that
+it takes effect immediately (the §7.4 acceptance handshake remains a documented deferral); **(i)**
+§19.3 — skeletons replace the bare "Loading…" in the audit-modal desktop table and the collectives
+panel/visibility loaders; **(j)** the dead `LinkedBookingsPanel` component was deleted and its stale
+spec references (§8.2, §15.2, §16.1 #12, retired-code table) corrected. Verified solid by the audit:
+tier gating, card visual distinction across every render path, read-only-vs-editable enforcement,
+time_only PII suppression, §18 read scope, audit + §17 notify on every cross-venue write, accepted-
+only data exposure, month/realtime/refresh. Typecheck/lint clean; **331 unit tests green**;
+calendar + Filter panel ("No linked venues yet") preview-verified.
+(17) **Linked-calendar opening hours + after-hours bookings + chip removal (post-go-live review).**
+With two venues genuinely linked (full-mutual), a live review surfaced four items, all fixed:
+**(a) Linked columns now reflect the LINKED venue's opening hours.** Previously a linked column
+drew no closed-hours shading (it inherited none from the viewing venue). `buildLinkedColumnClosureBlocks`
+derives "closed" blocks from the linked venue's own `working_hours` template (in the linked venue's
+timezone) over the grid window, so e.g. a venue that opens an hour later shows that earlier hour
+greyed on its column (native-grid editable path; unit-tested). **(b) Walk-ins past closing are
+allowed.** The walk-in create path now passes `allowOutsideHours` to `validateAppointmentCustomInterval`,
+so a walk-in taken after close (any duration) is no longer 409'd "Outside working hours". **(c) Staff
+can move/extend a booking past opening hours.** A new `allowOutsideHours` option on the interval
+validators (threaded through `validateAppointmentModificationInterval` → the `[id]` PATCH via an
+`allow_outside_hours` flag) drops only the hours gates (breaks/blocks/overlap/duration still apply).
+Client-side, a drag-move outside hours is now an **amber "outside opening hours" warning** (allowed),
+distinct from a red **conflict** (blocked); resize can extend up to ~2h past the grid close (capped at
+midnight) and flags the same warning; both send `allow_outside_hours`. **(d) Removed the per-card
+linked-venue name chip** on native-grid booking bars — it overlapped the action buttons on short bars
+and was redundant (the column header already reads "Linked · {venue}"); the dashed/hatch treatment
+still marks linked cards, and the week-strip chip (where columns are days) + the read-only lock badge
+remain. Typecheck/lint clean; 1175 unit tests green (incl. new closure-block + outside-hours bypass
+tests); production build clean; live calendar render verified against the dev plus1↔light3 link.
+Note: linked-column shading on the *read-only* `LinkedDayColumn` (time-only / no-edit links) is a
+small follow-up; the full-mutual (editable) path is covered.
+
+A linked-in entity must be instantly distinguishable from own data **without relying on colour
+alone** (WCAG 1.4.1):
+
+- Day/week grid: linked booking cards render in a consistent muted/tinted treatment (reduced
+  saturation **and** a subtle diagonal-hatch or left-border motif), with a persistent
+  "{Venue}" chip. Today the cards reuse the own-venue status palette and are distinguished only
+  by a small header sub-label — **bring the cards themselves to the muted treatment** (month
+  markers already are; make the grid consistent).
+- One shared token set (`linked-surface`, `linked-border`, `linked-muted-text`) so every
+  surface — grid, list rows, modals, month markers, notification items — speaks the same
+  visual language.
+- Read-only affordances use a real icon (not an emoji `🔒`/`🔗`) with an accessible label and a
+  tooltip explaining *why* it's read-only ("view-only: {Venue} granted you calendar visibility
+  without edit rights").
+
+### 19.2 Modal & interaction standards
+
+The shared `Modal` and every flow built on it must provide:
+
+- **Focus trap**, **initial focus** on the first actionable element, and **focus restoration**
+  to the trigger on close; **body scroll lock** while open. (None are present today.)
+- A visible close control in every modal header (the read-only audit modal currently has only
+  Esc/backdrop — a touch dead-end).
+- **Toasts** for success and failure, anchored to the action, plus inline error near the
+  control. Success is currently silent ("Request sent", "Access reduced", "Unlinked" must
+  confirm). Errors must scroll/focus into view, not sit at the top of a long page.
+- **Per-row busy state** — acting on one link must not disable controls on every other link
+  (today a single section-wide `busy` flag freezes the whole list).
+- **One confirmation idiom.** Replace the native `window.confirm` used for "Dissolve" with the
+  in-app `Modal`, and add confirmations for the consequential immediate actions that have none
+  (Decline change, Leave collective, Reduce access).
+- The data-sharing/GDPR notice (§10.2) must also appear in the **"Accept with changes"**
+  sub-view, not only the plain accept view.
+- Reconcile the permission-editor framing: the editor's two columns and the read-only
+  `GrantSummary` must use the **same order and the same "you / them" labelling**, and avoid the
+  internal `mine`/`theirs` mismatch the audit flagged.
+
+### 19.3 Empty, loading & error states
+
+- Skeletons (not bare "Loading…" text) for the settings sections, audit modal, collectives
+  panel, and linked calendar columns.
+- The main calendar's linked-data fetch currently **fails silently to "no columns"** — a load
+  error must be visually distinct from "no links" (a quiet inline "Couldn't load {Venue}'s
+  calendar — retry"), and a **partial** failure (one linked venue errors) must not look like
+  "that venue has no bookings today".
+- The `/book/c/{slug}` page must render a **branded "this collective is unavailable" state**
+  (not a bare 404) when `< 2` active members or dissolved.
+
+### 19.4 Accessibility
+
+WCAG 2.1 AA across the feature: full keyboard operability (including the linked-column picker
+and grid empty-slot "new booking" targets, which today create dozens of focusable overlay
+buttons per column), correct ARIA roles/labels on the custom column checklist, colour-contrast
+validation for host-chosen collective branding (reject or auto-adjust low-contrast
+colour/text combinations on `/book/c`), and `prefers-reduced-motion` honoured on transitions.
+
+### 19.5 Mobile
+
+The audit-log and any data-dense table must have a card-based responsive fallback rather than a
+horizontal-scroll trap inside a modal; modal primary actions must remain reachable (sticky
+footer) on short viewports.
+
+### 19.6 Onboarding & first-run
+
+First visit to the Linked Accounts tab (no links yet) shows a short, dismissible explainer:
+what linking does, what it explicitly does **not** do (no shared clients, no merged data —
+§13), the data-sovereignty guarantee, and a single primary CTA. A brief staff-facing (non-admin)
+help note clarifies that a linked calendar is another venue's data shown for coordination.
+
+---
+
+## 20. Connection & invitation experience (new — normative)
+
+**Status (2026-06-04): ✅ shipped** — see decision-log item (14). Search-by-name combobox + shareable
+invite link (copy + QR) both built and preview-verified. v1 deviation: the invite token is a
+stateless, domain-separated HMAC (30-day expiry) rather than a DB-backed single-use row — it grants
+nothing on its own and the initiator approves every resulting request, so revocation is implicit via
+expiry; a stored/revocable token is a future enhancement.
+
+**Problem.** §6.1 resolved the identifier question in favour of `venues.slug`, and the send-
+request form asks the user to type the other venue's slug. "Slug" is developer jargon, and the
+flow dead-ends if you don't know the other venue's slug — there is no graceful path.
+
+Keep slug as the canonical identifier, but make *getting there* humane:
+
+- **Search by name.** The send-request field accepts a name fragment and queries the existing
+  Admin-only lookup, returning a short pick-list of matching venues (display `name` + town/area
+  if available — never PII) to disambiguate, then resolves to the slug under the hood. Typing a
+  full slug still works.
+- **Shareable invite link.** An Admin can generate a one-time, expiring invite link/QR
+  ("Connect with {My Venue} on Resneo") to hand to a venue they know off-platform. Opening it
+  (as an Admin of any eligible venue) pre-fills a link request *from that venue back to mine*
+  with the default preset, so neither party has to look up an identifier. The link encodes the
+  initiating venue and expires with the same 30-day window as a pending request; it grants
+  nothing until a normal request is sent and accepted.
+- Conflict/lookup errors must never disclose whether a given slug/name exists beyond what the
+  public booking pages already reveal.
+
+This is additive to §6.1; the underlying `account_links` lifecycle is unchanged.
 
 ---
 
 ## End of specification
 
 This document is the source of truth for the linked accounts feature. Any deviation during
-implementation should be reflected back into this document (especially §15.6). When briefing
-an AI coding agent, reference sections by number rather than restating requirements.
+implementation should be reflected back into this document (especially §15.6 and §16). When
+briefing an AI coding agent, reference sections by number rather than restating requirements.

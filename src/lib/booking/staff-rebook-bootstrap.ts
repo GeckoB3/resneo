@@ -36,7 +36,12 @@ export interface StaffRebookBootstrapPayloadV1 {
     durationMinutes: number | null;
   };
   guest: StaffRebookGuestPrefill;
-  /** Pre-filled “Comments or requests” on the appointment details step. */
+  /**
+   * Reserved. The appointment "Comments or requests" field is per-booking and is
+   * intentionally NOT pre-filled on rebook (it starts blank for manual entry);
+   * persistent customer info belongs on the client record. Kept optional so a
+   * future feature could populate it deliberately.
+   */
   appointmentComments?: string;
   /** Default date for staff date pickers (YYYY-MM-DD). */
   initialDate?: string;
@@ -95,16 +100,3 @@ export function discardStaffRebookBootstrapCaches(): void {
   clearStaffRebookBootstrap();
 }
 
-export function buildAppointmentRebookComments(g: StaffRebookGuestPrefill): string {
-  const lines: string[] = [];
-  const add = (label: string, value: string | null | undefined) => {
-    const t = typeof value === 'string' ? value.trim() : '';
-    if (t) lines.push(`${label}: ${t}`);
-  };
-  add('Dietary', g.dietaryNotes);
-  add('Occasion', g.occasion);
-  add('Guest requests', g.specialRequests);
-  add('Guest profile note', g.customerProfileNotes);
-  add('Staff note', g.internalNotes);
-  return lines.join('\n\n');
-}

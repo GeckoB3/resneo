@@ -1,10 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildLinkedColumnClosureBlocks,
   buildPractitionerScheduleClosureBlocks,
   buildVenueScheduleClosureBlocks,
   closedRangesFromOpenWindows,
 } from '@/lib/calendar/schedule-closure-blocks';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
+import type { WorkingHours } from '@/types/booking-models';
+
+describe('buildLinkedColumnClosureBlocks', () => {
+  // Same 10:00–18:00 window on every weekday, so the test is weekday-agnostic.
+  const open10to18: WorkingHours = Object.fromEntries(
+    ['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ start: '10:00', end: '18:00' }]]),
+  ) as WorkingHours;
+
+  it('shades a linked venue’s closed hours within the grid (opens later than this venue)', () => {
+    const blocks = buildLinkedColumnClosureBlocks({
+      columnId: 'linked:v1:p1',
+      workingHours: open10to18,
+      dateYmd: '2030-06-03',
+      timeZone: 'Europe/London',
+      gridStartHour: 9,
+      gridEndHour: 22,
+    });
+    expect(blocks.map((b) => [b.start_time.slice(0, 5), b.end_time.slice(0, 5)])).toEqual([
+      ['09:00', '10:00'],
+      ['18:00', '22:00'],
+    ]);
+    expect(
+      blocks.every((b) => b.calendar_id === 'linked:v1:p1' && b.block_type === 'practitioner_closed'),
+    ).toBe(true);
+  });
+
+  it('treats a day with no working hours as fully closed across the grid', () => {
+    const blocks = buildLinkedColumnClosureBlocks({
+      columnId: 'c',
+      workingHours: {},
+      dateYmd: '2030-06-03',
+      timeZone: 'Europe/London',
+      gridStartHour: 9,
+      gridEndHour: 22,
+    });
+    expect(blocks).toHaveLength(1);
+    expect([blocks[0]!.start_time.slice(0, 5), blocks[0]!.end_time.slice(0, 5)]).toEqual([
+      '09:00',
+      '22:00',
+    ]);
+  });
+});
 
 describe('closedRangesFromOpenWindows', () => {
   it('returns gaps before and after open window', () => {

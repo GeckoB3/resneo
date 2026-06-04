@@ -64,6 +64,7 @@ import {
 import type { PractitionerSlot } from '@/lib/availability/appointment-engine';
 import { practitionerIdForBookingCreate } from '@/lib/booking/practitioner-id-for-booking-create';
 import { AppointmentWaitlistJoin } from './AppointmentWaitlistJoin';
+import { CollectiveCrossSuggestion } from './CollectiveCrossSuggestion';
 import { staffBookingFlowDurationMs } from '@/lib/metrics/staff-booking-flow-duration';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 
@@ -72,13 +73,15 @@ function staffRebookAppointmentInitialDetails(
 ): Partial<GuestDetails> | undefined {
   if (!bootstrap?.guest) return undefined;
   const g = bootstrap.guest;
+  // Only the persistent client identity is pre-filled. Per-booking fields
+  // (dietary notes, occasion, comments/requests) are intentionally left blank so
+  // they're entered fresh for each booking rather than carried over — they would
+  // otherwise leak into the "Comments or requests" box on the details step.
   return {
     first_name: g.firstName?.trim() ?? '',
     last_name: g.lastName?.trim() ?? '',
     email: typeof g.email === 'string' ? g.email : '',
     phone: typeof g.phone === 'string' ? g.phone : '',
-    ...(g.dietaryNotes?.trim() ? { dietary_notes: g.dietaryNotes.trim() } : {}),
-    ...(g.occasion?.trim() ? { occasion: g.occasion.trim() } : {}),
   };
 }
 
@@ -3345,6 +3348,11 @@ export function AppointmentBookingFlow({
                   catalogLoading={catalogLoading}
                   currency={venue.currency}
                 />
+              ) : null}
+              {/* §8.6 — if this venue is in a live collective, point fully-booked
+                  guests at the combined page. Not shown inside a collective page. */}
+              {isPublicGuest && !collectiveId ? (
+                <CollectiveCrossSuggestion venueId={venue.id} accentColour={accentColour} />
               ) : null}
             </div>
           ) : (

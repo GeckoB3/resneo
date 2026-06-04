@@ -2,7 +2,8 @@
 
 /** Shared presentational pieces for the Linked Accounts settings tab. */
 
-import { useEffect, useId, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import type { PillVariant } from '@/components/ui/dashboard/Pill';
 import {
   applyCalendarVisibilityChange,
@@ -21,6 +22,14 @@ import type {
 export const linkedNewBookingButtonClass =
   'inline-flex items-center justify-center rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 sm:text-xs';
 
+/**
+ * Linked Accounts dialog (§19.2/§19.4). A thin wrapper over the app's Radix
+ * `Dialog` primitive, which provides a focus trap, focus restoration, body
+ * scroll lock, a visible close control, portal rendering and full ARIA. The
+ * `maxWidth` (a Tailwind `max-w-*` class) overrides the primitive's size. When
+ * `busy`, dismissal (Escape / overlay / close) is suppressed so an in-flight
+ * action can't be interrupted.
+ */
 export function Modal({
   open,
   onClose,
@@ -38,40 +47,18 @@ export function Modal({
   busy?: boolean;
   maxWidth?: string;
 }) {
-  const titleId = useId();
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, busy]);
-
-  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" role="presentation">
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-900/45"
-        aria-label="Close dialog"
-        disabled={busy}
-        onClick={() => !busy && onClose()}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className={`relative z-[121] w-full ${maxWidth} max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id={titleId} className="text-lg font-bold tracking-tight text-slate-900">
-          {title}
-        </h2>
-        {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
-        <div className="mt-4">{children}</div>
-      </div>
-    </div>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
+      title={title}
+      description={description}
+      contentClassName={maxWidth}
+    >
+      {children}
+    </Dialog>
   );
 }
 
@@ -97,6 +84,70 @@ export function statusPill(status: LinkStatus): { label: string; variant: PillVa
 const SELECT_CLS =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400';
 
+/** A §18 "which of your calendars?" picker — All vs a specific subset. */
+function CalendarScopeField({
+  calendars,
+  value,
+  disabled,
+  onChange,
+}: {
+  calendars: { id: string; name: string }[];
+  value: string[] | null;
+  disabled?: boolean;
+  onChange: (ids: string[] | null) => void;
+}) {
+  const specific = value != null && value.length > 0;
+  const selected = new Set(value ?? []);
+  return (
+    <div className="block">
+      <span className="block text-xs font-medium text-slate-700">Which of your calendars?</span>
+      <div className="mt-1 flex gap-4 text-xs text-slate-700">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            className="border-slate-300"
+            disabled={disabled}
+            checked={!specific}
+            onChange={() => onChange(null)}
+          />
+          All calendars
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            className="border-slate-300"
+            disabled={disabled}
+            checked={specific}
+            onChange={() => onChange(calendars.map((c) => c.id))}
+          />
+          Choose specific
+        </label>
+      </div>
+      {specific ? (
+        <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+          {calendars.map((c) => (
+            <label key={c.id} className="flex items-center gap-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                disabled={disabled}
+                checked={selected.has(c.id)}
+                onChange={(e) => {
+                  const next = new Set(selected);
+                  if (e.target.checked) next.add(c.id);
+                  else next.delete(c.id);
+                  onChange(next.size === 0 ? null : [...next]);
+                }}
+              />
+              {c.name}
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Editor for one direction of a link's permissions, with §5.5 coherence. */
 export function GrantEditor({
   label,
@@ -104,12 +155,15 @@ export function GrantEditor({
   value,
   onChange,
   disabled = false,
+  calendars,
 }: {
   label: string;
   hint?: string;
   value: LinkGrant;
   onChange: (next: LinkGrant) => void;
   disabled?: boolean;
+  /** §18 — the granting venue's own calendars, enabling the scope picker. */
+  calendars?: { id: string; name: string }[];
 }) {
   const v = normaliseGrant(value);
   const calendarDisabled = disabled;
@@ -170,6 +224,15 @@ export function GrantEditor({
             <option value="create_edit_cancel">Create, edit and cancel bookings</option>
           </select>
         </label>
+
+        {calendars && calendars.length > 0 && v.calendar !== 'none' ? (
+          <CalendarScopeField
+            calendars={calendars}
+            value={v.calendarIds ?? null}
+            disabled={disabled}
+            onChange={(ids) => onChange(normaliseGrant({ ...v, calendarIds: ids }))}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -183,6 +246,7 @@ export function GrantPairEditor({
   onChangeMine,
   onChangeTheirs,
   disabled = false,
+  myCalendars,
 }: {
   otherVenueName: string;
   mine: LinkGrant;
@@ -190,6 +254,8 @@ export function GrantPairEditor({
   onChangeMine: (g: LinkGrant) => void;
   onChangeTheirs: (g: LinkGrant) => void;
   disabled?: boolean;
+  /** §18 — your own calendars; only the "mine" direction can be scoped. */
+  myCalendars?: { id: string; name: string }[];
 }) {
   const valid = isLinkConfigurationValid(normaliseGrant(mine), normaliseGrant(theirs));
   return (
@@ -200,6 +266,7 @@ export function GrantPairEditor({
         value={mine}
         onChange={onChangeMine}
         disabled={disabled}
+        calendars={myCalendars}
       />
       <GrantEditor
         label={`What you can do with ${otherVenueName}'s data`}

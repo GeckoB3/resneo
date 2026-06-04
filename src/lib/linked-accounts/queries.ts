@@ -6,8 +6,8 @@ import { normaliseGrant, orderVenuePair, viewLinkForVenue } from './permissions'
 
 const LINK_COLUMNS =
   'id, venue_low_id, venue_high_id, requested_by_venue_id, status, ' +
-  'low_grants_calendar, low_grants_pii, low_grants_act, ' +
-  'high_grants_calendar, high_grants_pii, high_grants_act, ' +
+  'low_grants_calendar, low_grants_pii, low_grants_act, low_grants_calendar_ids, ' +
+  'high_grants_calendar, high_grants_pii, high_grants_act, high_grants_calendar_ids, ' +
   'request_message, pending_change, created_by_user_id, responded_by_user_id, ' +
   'created_at, responded_at, terminated_at, termination_reason, updated_at';
 
@@ -120,11 +120,17 @@ export async function resolveCallerGrantOverVenue(
   const ownerIsLow = link.venue_low_id === ownerVenueId;
   const grant = normaliseGrant(
     ownerIsLow
-      ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
+      ? {
+          calendar: link.low_grants_calendar,
+          pii: link.low_grants_pii,
+          act: link.low_grants_act,
+          calendarIds: link.low_grants_calendar_ids,
+        }
       : {
           calendar: link.high_grants_calendar,
           pii: link.high_grants_pii,
           act: link.high_grants_act,
+          calendarIds: link.high_grants_calendar_ids,
         },
   );
   if (grant.calendar === 'none') return null;
@@ -144,11 +150,17 @@ export async function loadAccessibleLinkedVenueIds(
     const otherIsLow = r.venue_low_id === otherId;
     const grant = normaliseGrant(
       otherIsLow
-        ? { calendar: r.low_grants_calendar, pii: r.low_grants_pii, act: r.low_grants_act }
+        ? {
+            calendar: r.low_grants_calendar,
+            pii: r.low_grants_pii,
+            act: r.low_grants_act,
+            calendarIds: r.low_grants_calendar_ids,
+          }
         : {
             calendar: r.high_grants_calendar,
             pii: r.high_grants_pii,
             act: r.high_grants_act,
+            calendarIds: r.high_grants_calendar_ids,
           },
     );
     if (grant.calendar === 'none') continue;

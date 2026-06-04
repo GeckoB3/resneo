@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin, invalidateCachedStaffIdentity } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
@@ -29,7 +29,7 @@ export async function PATCH(
 
     const { data: target } = await admin
       .from('staff')
-      .select('id, venue_id, email, role')
+      .select('id, venue_id, email, role, user_id')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .single();
@@ -60,6 +60,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to update staff member' }, { status: 500 });
     }
 
+    // §16.1 #10 — a role change (e.g. admin → staff) must take effect immediately,
+    // not after the 30s identity-cache TTL. Bust the cached identity for that user.
+    if (parsed.data.role !== undefined && target.user_id) {
+      invalidateCachedStaffIdentity(target.user_id as string);
+    }
+
     return NextResponse.json({ staff: updated });
   } catch (err) {
     console.error('PATCH /api/venue/staff/[id] failed:', err);
@@ -88,7 +94,7 @@ export async function DELETE(
 
     const { data: target } = await admin
       .from('staff')
-      .select('id, venue_id')
+      .select('id, venue_id, user_id')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .single();
@@ -104,6 +110,9 @@ export async function DELETE(
       console.error('DELETE /api/venue/staff/[id] failed:', deleteErr);
       return NextResponse.json({ error: 'Failed to remove staff member' }, { status: 500 });
     }
+
+    // §16.1 #10 — revoke access immediately rather than after the cache TTL.
+    if (target.user_id) invalidateCachedStaffIdentity(target.user_id as string);
 
     return NextResponse.json({ success: true });
   } catch (err) {

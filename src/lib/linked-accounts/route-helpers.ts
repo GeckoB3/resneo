@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, type VenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { checkRateLimit } from '@/lib/rate-limit';
 import { evaluateLinkEligibility, type EligibilityResult } from './eligibility';
 
 export interface LinkAdminContext {
@@ -27,6 +28,25 @@ export interface LinkAdminContext {
 type Resolution =
   | { ok: true; ctx: LinkAdminContext }
   | { ok: false; response: NextResponse };
+
+/**
+ * Per-venue fixed-window rate limit for Linked Accounts mutating + export routes
+ * (§16.1 #9). Keyed on the venue id rather than IP so a venue can't sidestep the
+ * limit by switching networks. Returns a 429 response when exceeded, else null.
+ */
+export function enforceLinkRateLimit(
+  venueId: string,
+  key: string,
+  limit: number,
+  windowMs: number,
+): NextResponse | null {
+  const r = checkRateLimit(venueId, `linked:${key}`, limit, windowMs);
+  if (r.ok) return null;
+  return NextResponse.json(
+    { error: 'You’re doing that a lot. Please wait a moment and try again.' },
+    { status: 429, headers: { 'Retry-After': String(r.retryAfterSec) } },
+  );
+}
 
 /**
  * Resolve the authenticated venue admin for a Linked Accounts route. Link

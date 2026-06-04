@@ -8,8 +8,13 @@ import {
   linkedBookingCreateSchema,
 } from '@/lib/linked-accounts/validation';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
-import { linkedGrantAllowsCancel, linkedGrantAllowsMutation } from '@/lib/booking/staff-booking-access';
+import {
+  linkedGrantAllowsCalendar,
+  linkedGrantAllowsCancel,
+  linkedGrantAllowsMutation,
+} from '@/lib/booking/staff-booking-access';
 import { normalizeLinkedBookingRpcChanges } from '@/lib/linked-accounts/linked-booking-patch';
+import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -87,6 +92,23 @@ export async function PATCH(request: NextRequest) {
         { status: 403 },
       );
     }
+    // §18 — the booking must be on an in-scope calendar, and a reschedule may not
+    // move it onto a calendar outside the shared scope.
+    const currentColumn =
+      (booking.calendar_id as string | null) ?? (booking.practitioner_id as string | null) ?? null;
+    if (!linkedGrantAllowsCalendar(access.grant, false, currentColumn)) {
+      return NextResponse.json(
+        { error: 'This link does not include that calendar.' },
+        { status: 403 },
+      );
+    }
+    const targetColumn = parsed.data.changes.practitioner_id ?? undefined;
+    if (targetColumn && !linkedGrantAllowsCalendar(access.grant, false, targetColumn)) {
+      return NextResponse.json(
+        { error: 'You cannot move this booking to a calendar outside the shared scope.' },
+        { status: 403 },
+      );
+    }
 
     const rpcChanges = await normalizeLinkedBookingRpcChanges(
       admin,
@@ -112,6 +134,16 @@ export async function PATCH(request: NextRequest) {
       console.error('linked_apply_booking_update RPC failed:', rpcError.message);
       return NextResponse.json({ error: 'Failed to update the booking.' }, { status: 500 });
     }
+
+    // §17.3 — email the owning venue per its preferences.
+    void notifyCrossVenueBookingWrite({
+      admin,
+      owningVenueId: ownerVenueId,
+      actingVenueId: staff.venue_id,
+      actionType: parsed.data.changes.status === 'Cancelled' ? 'cancelled_booking' : 'edited_booking',
+      before: booking as Record<string, unknown>,
+      after: (updated as Record<string, unknown> | null) ?? null,
+    });
 
     return NextResponse.json({ booking: updated });
   } catch (err) {
@@ -172,6 +204,14 @@ export async function POST(request: NextRequest) {
     if (access.grant.act !== 'create_edit_cancel') {
       return NextResponse.json(
         { error: 'This link does not allow creating bookings in the other venue.' },
+        { status: 403 },
+      );
+    }
+    // §18 — on a scoped link the new booking must target an in-scope calendar
+    // (a scoped link with no chosen calendar cannot be satisfied).
+    if (!linkedGrantAllowsCalendar(access.grant, false, input.practitionerId ?? null)) {
+      return NextResponse.json(
+        { error: 'This link only covers specific calendars — choose one of them.' },
         { status: 403 },
       );
     }
@@ -244,6 +284,16 @@ export async function POST(request: NextRequest) {
       console.error('linked_apply_booking_insert RPC failed:', rpcError.message);
       return NextResponse.json({ error: 'Failed to create the booking.' }, { status: 500 });
     }
+
+    // §17.3 — email the owning venue if it opted in to "new booking" emails.
+    void notifyCrossVenueBookingWrite({
+      admin,
+      owningVenueId: input.ownerVenueId,
+      actingVenueId: staff.venue_id,
+      actionType: 'created_booking',
+      before: null,
+      after: { booking_date: input.bookingDate, booking_time: input.bookingTime },
+    });
 
     return NextResponse.json({ booking: created });
   } catch (err) {

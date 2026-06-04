@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
+import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { respondLinkSchema } from '@/lib/linked-accounts/validation';
 import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
 import {
+  calendarIdsEqual,
   describeGrant,
+  diffGrant,
   grantsToColumns,
   isLinkConfigurationValid,
+  normaliseCalendarIds,
   normaliseGrant,
 } from '@/lib/linked-accounts/permissions';
 import type { AccountLinkRow, LinkGrant, PendingChange } from '@/lib/linked-accounts/types';
@@ -36,8 +39,8 @@ async function loadMemberLink(
     .from('account_links')
     .select(
       'id, venue_low_id, venue_high_id, requested_by_venue_id, status, ' +
-        'low_grants_calendar, low_grants_pii, low_grants_act, ' +
-        'high_grants_calendar, high_grants_pii, high_grants_act, ' +
+        'low_grants_calendar, low_grants_pii, low_grants_act, low_grants_calendar_ids, ' +
+        'high_grants_calendar, high_grants_pii, high_grants_act, high_grants_calendar_ids, ' +
         'request_message, pending_change, created_by_user_id, responded_by_user_id, ' +
         'created_at, responded_at, terminated_at, termination_reason, updated_at',
     )
@@ -88,6 +91,9 @@ export async function PATCH(
   const resolved = await resolveLinkAdmin();
   if (!resolved.ok) return resolved.response;
   const { ctx } = resolved;
+  // §16.1 #9 — throttle link mutations (propose/accept/reject/cancel/change) per venue.
+  const limited = enforceLinkRateLimit(ctx.venueId, 'mutate', 30, 60_000);
+  if (limited) return limited;
   const { id } = await params;
 
   let body: unknown;
@@ -179,19 +185,42 @@ export async function PATCH(
               calendar: finalRows.link.low_grants_calendar,
               pii: finalRows.link.low_grants_pii,
               act: finalRows.link.low_grants_act,
+              calendarIds: finalRows.link.low_grants_calendar_ids,
             }
           : {
               calendar: finalRows.link.high_grants_calendar,
               pii: finalRows.link.high_grants_pii,
               act: finalRows.link.high_grants_act,
+              calendarIds: finalRows.link.high_grants_calendar_ids,
             }
         : { calendar: 'none', pii: false, act: 'none' };
+      // §17.5 — on accept-with-changes, show the requester a true before→after
+      // diff of what they can now do to our data (their original request vs the
+      // final grant), rather than just the final state.
+      const accepterIsLow = link.venue_low_id === ctx.venueId;
+      const originalRequesterGrant: LinkGrant = accepterIsLow
+        ? {
+            calendar: link.low_grants_calendar,
+            pii: link.low_grants_pii,
+            act: link.low_grants_act,
+          }
+        : {
+            calendar: link.high_grants_calendar,
+            pii: link.high_grants_pii,
+            act: link.high_grants_act,
+          };
+      const diffBullets = withChanges ? diffGrant(originalRequesterGrant, requesterGrant) : [];
+      const bulletsAreDiff = diffBullets.length > 0;
+      const acceptedBullets = bulletsAreDiff
+        ? diffBullets
+        : describeGrant(requesterGrant).map((s) => `Your venue can ${s}`);
       await notifyLinkAccepted(
         ctx.admin,
         otherVenueId,
         ctx.venue.name,
         withChanges,
-        describeGrant(requesterGrant).map((s) => `Your venue can ${s}`),
+        acceptedBullets,
+        bulletsAreDiff,
       );
       return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
     }
@@ -249,7 +278,15 @@ export async function PATCH(
         cols.low_grants_act === link.low_grants_act &&
         cols.high_grants_calendar === link.high_grants_calendar &&
         cols.high_grants_pii === link.high_grants_pii &&
-        cols.high_grants_act === link.high_grants_act;
+        cols.high_grants_act === link.high_grants_act &&
+        calendarIdsEqual(
+          cols.low_grants_calendar_ids,
+          normaliseCalendarIds(link.low_grants_calendar_ids),
+        ) &&
+        calendarIdsEqual(
+          cols.high_grants_calendar_ids,
+          normaliseCalendarIds(link.high_grants_calendar_ids),
+        );
       if (unchanged) {
         return NextResponse.json(
           { error: 'The proposed permissions match the current permissions.' },
@@ -318,9 +355,11 @@ export async function PATCH(
           low_grants_calendar: pc.low_grants_calendar,
           low_grants_pii: pc.low_grants_pii,
           low_grants_act: pc.low_grants_act,
+          low_grants_calendar_ids: pc.low_grants_calendar_ids ?? null,
           high_grants_calendar: pc.high_grants_calendar,
           high_grants_pii: pc.high_grants_pii,
           high_grants_act: pc.high_grants_act,
+          high_grants_calendar_ids: pc.high_grants_calendar_ids ?? null,
           pending_change: null,
         })
         .eq('id', id);

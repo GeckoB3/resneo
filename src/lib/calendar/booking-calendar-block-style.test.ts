@@ -63,6 +63,19 @@ describe('bookingCalendarBlockPalette', () => {
     expect(bookingCalendarBlockCardStyle(p).backgroundColor).toBe(p.bg);
   });
 
+  it('gives linked cards a non-colour distinction (dashed border + hatch) while keeping the status hue', () => {
+    const p = bookingCalendarBlockPalette({ status: 'Confirmed' });
+    const own = bookingCalendarBlockCardStyle(p);
+    const linked = bookingCalendarBlockCardStyle(p, { linked: true });
+    expect(own.borderStyle).toBe('solid');
+    expect(linked.borderStyle).toBe('dashed');
+    // Status hue still backs the card (legibility / fallback) in both variants.
+    expect(linked.backgroundColor).toBe(p.bg);
+    // The linked surface adds a diagonal hatch the own-venue surface doesn't have.
+    expect(String(linked.backgroundImage)).toContain('repeating-linear-gradient');
+    expect(String(own.backgroundImage)).not.toContain('repeating-linear-gradient');
+  });
+
   it('treats attendance-confirmed Booked as Confirmed stripe', () => {
     expect(
       calendarBookingVisualKey({

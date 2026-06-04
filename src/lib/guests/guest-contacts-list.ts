@@ -106,6 +106,60 @@ export function sanitiseIlikeSearch(raw: string): string {
   return raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
 }
 
+/**
+ * Build the PostgREST `.or()` group for a single search token: the token must
+ * match the first name, last name, email, or phone. For digit-heavy tokens we
+ * also match the phone by its digits — and, for a UK-style national number
+ * (leading `0`), by the significant digits without it — so partial phone numbers
+ * match the E.164-stored value regardless of formatting.
+ *
+ * `token` is assumed already passed through {@link sanitiseIlikeSearch} (so `%`
+ * `_` `\` are escaped and commas removed); we additionally strip parentheses so
+ * they can't break PostgREST's `or()` grouping.
+ */
+function guestSearchTokenOrGroup(token: string): string {
+  const t = token.replace(/[()]/g, '');
+  const conds = [`first_name.ilike.%${t}%`, `last_name.ilike.%${t}%`, `email.ilike.%${t}%`];
+  const digits = t.replace(/\D/g, '');
+  if (digits.length >= 3) {
+    conds.push(`phone.ilike.%${digits}%`);
+    if (digits.startsWith('0')) conds.push(`phone.ilike.%${digits.slice(1)}%`);
+  } else {
+    conds.push(`phone.ilike.%${t}%`);
+  }
+  return conds.join(',');
+}
+
+/**
+ * Split a (sanitised) search string into whitespace tokens and return one
+ * PostgREST `.or()` group per token. Chaining these groups as separate `.or()`
+ * filters AND-s them, so every token must match *some* column — e.g. "and cour"
+ * matches Andrew Courtney, while a single token still matches any one field.
+ */
+export function guestSearchOrGroups(search: string): string[] {
+  return search
+    .split(/\s+/)
+    .map((t) => t.replace(/[()]/g, '').trim())
+    .filter(Boolean)
+    .map(guestSearchTokenOrGroup);
+}
+
+/**
+ * Apply the tokenised guest search to a Supabase query builder. Each token's
+ * `.or()` group is AND-ed with the others (multiple `.or()` filters combine with
+ * AND), giving name/email/phone matching plus multi-token name combinations.
+ */
+export function applyGuestSearch<Q extends { or(filters: string): Q }>(
+  query: Q,
+  search: string,
+): Q {
+  let q = query;
+  for (const group of guestSearchOrGroups(search)) {
+    q = q.or(group);
+  }
+  return q;
+}
+
 export function resolveGuestListSort(raw: string | null): string {
   const s = (raw ?? 'last_visit').trim();
   if (INTERNAL_SORTS.has(s)) return s;
@@ -509,8 +563,7 @@ export async function fetchGuestIdsForSpendSort(
   }
 
   if (params.search) {
-    const p = `%${params.search}%`;
-    q = q.or(`first_name.ilike.${p},last_name.ilike.${p},email.ilike.${p},phone.ilike.${p}`);
+    q = applyGuestSearch(q, params.search);
   }
 
   const today = calendarDateInTimeZone(new Date(), timeZone);

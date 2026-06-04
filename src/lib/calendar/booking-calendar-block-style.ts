@@ -63,7 +63,33 @@ export function bookingCalendarBlockPaletteForDisplayRow(
   return bookingCalendarBlockPaletteWithOverlay(row, overlay);
 }
 
-export function bookingCalendarBlockCardStyle(p: BookingBlockPalette): CSSProperties {
+export function bookingCalendarBlockCardStyle(
+  p: BookingBlockPalette,
+  opts: { linked?: boolean } = {},
+): CSSProperties {
+  if (opts.linked) {
+    // Linked (other-venue) cards must be instantly distinct from own-venue cards
+    // *without relying on colour alone* (§19.1, WCAG 1.4.1): a dashed border, a
+    // subtle diagonal hatch, and a desaturating slate veil read clearly even in
+    // greyscale, while the status hue still shows through underneath.
+    return {
+      color: p.text,
+      backgroundColor: p.bg,
+      backgroundImage: [
+        'repeating-linear-gradient(45deg, rgba(15,23,42,0.06) 0, rgba(15,23,42,0.06) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 6px)',
+        'linear-gradient(177deg, rgba(248,250,252,0.72) 0%, rgba(248,250,252,0.46) 42%, rgba(248,250,252,0.34) 100%)',
+        `linear-gradient(0deg, ${p.bg}, ${p.bg})`,
+      ].join(', '),
+      borderStyle: 'dashed',
+      borderWidth: 1,
+      borderColor: p.border,
+      boxShadow: [
+        'inset 0 1px 0 rgba(255,255,255,0.7)',
+        '0 1px 2px rgba(15,23,42,0.05)',
+        '0 10px 22px -14px rgba(2,32,71,0.20)',
+      ].join(', '),
+    };
+  }
   return {
     color: p.text,
     // Frosted-glass surface: a white sheen over the status hue, easing to a faint

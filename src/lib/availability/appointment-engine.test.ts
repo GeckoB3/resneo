@@ -475,6 +475,36 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
     });
     expect(invalid.ok).toBe(false);
   });
+
+  // p1 works 09:00–18:00; a 19:00 booking is past closing.
+  it('blocks past-closing by default but allows it with allowOutsideHours (staff walk-in / move / resize)', () => {
+    const input = processingInput([]);
+    const blocked = validateAppointmentCustomInterval(input, 'p1', 's15', '19:00', '19:15', undefined, {});
+    expect(blocked.ok).toBe(false);
+    expect(blocked.reason).toMatch(/hours/i);
+
+    const allowed = validateAppointmentCustomInterval(input, 'p1', 's15', '19:00', '19:15', undefined, {
+      allowOutsideHours: true,
+    });
+    expect(allowed.ok).toBe(true);
+  });
+
+  it('allowOutsideHours still blocks a real overlap (it only relaxes the hours gate)', () => {
+    const input = processingInput([
+      {
+        id: 'b1',
+        practitioner_id: 'p1',
+        booking_time: '19:00',
+        duration_minutes: 15,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+      },
+    ]);
+    const overlap = validateAppointmentCustomInterval(input, 'p1', 's15', '19:00', '19:15', undefined, {
+      allowOutsideHours: true,
+    });
+    expect(overlap.ok).toBe(false);
+  });
 });
 
 // ── Add-ons: validating the engine sees the EXTENDED duration ─────────────────

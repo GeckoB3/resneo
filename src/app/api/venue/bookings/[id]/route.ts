@@ -2,6 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
+import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import { stripe } from '@/lib/stripe';
 import type { EngineInput } from '@/types/availability';
@@ -64,6 +66,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import {
+  linkedGrantAllowsCalendar,
   linkedGrantAllowsCancel,
   linkedGrantAllowsMutation,
   loadStaffAccessibleBooking,
@@ -259,7 +262,52 @@ export async function PATCH(
       ownerVenueId: scopeVenueId,
       isOwnVenue,
       linkedGrant,
+      linkId: linkedAccountLinkId,
     } = loaded.ctx;
+
+    // P0 fix (spec §16.1 #1): cross-venue booking writes through this route use
+    // the service-role admin client, so the DB audit trigger cannot see the
+    // acting venue and writes no audit row. Record the cross-venue audit row
+    // explicitly (best-effort) so the owning venue's audit log — and the §17
+    // notification trigger that fires off it — capture every linked-venue
+    // edit/cancel. No-op for own-venue writes.
+    let auditActorUserId: string | null = null;
+    if (!isOwnVenue) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        auditActorUserId = authData.user?.id ?? null;
+      } catch {
+        auditActorUserId = null;
+      }
+    }
+    const auditLinkedBookingChange = async (
+      afterState: Record<string, unknown> | null,
+      actionType: 'edited_booking' | 'cancelled_booking',
+    ): Promise<void> => {
+      if (isOwnVenue || !linkedAccountLinkId) return;
+      await recordBookingWriteAudit({
+        admin: getSupabaseAdminClient(),
+        linkId: linkedAccountLinkId,
+        actingVenueId: staff.venue_id,
+        actingUserId: auditActorUserId,
+        owningVenueId: scopeVenueId,
+        actionType,
+        bookingId: id,
+        beforeState: booking as Record<string, unknown>,
+        afterState,
+      });
+      // §17.3 — email the owning venue per its preferences, after the response.
+      after(() =>
+        notifyCrossVenueBookingWrite({
+          admin: getSupabaseAdminClient(),
+          owningVenueId: scopeVenueId,
+          actingVenueId: staff.venue_id,
+          actionType,
+          before: booking as Record<string, unknown>,
+          after: afterState,
+        }),
+      );
+    };
 
     /** Staff attendance toggle only — any venue staff may update (table, event, class, resource, etc.). */
     const bodyKeys = Object.keys(body as Record<string, unknown>).filter(
@@ -340,6 +388,10 @@ export async function PATCH(
       if (selErr || !updatedAttendance) {
         return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
       }
+      await auditLinkedBookingChange(
+        (updatedAttendance as Record<string, unknown> | null) ?? null,
+        'edited_booking',
+      );
       return NextResponse.json(updatedAttendance);
     }
 
@@ -485,6 +537,10 @@ export async function PATCH(
       if (procSelErr || !updatedProc) {
         return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
       }
+      await auditLinkedBookingChange(
+        (updatedProc as Record<string, unknown> | null) ?? null,
+        'edited_booking',
+      );
       return NextResponse.json(updatedProc);
     }
 
@@ -937,6 +993,10 @@ export async function PATCH(
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      await auditLinkedBookingChange(
+        (updated.data as Record<string, unknown> | null) ?? null,
+        newStatus === 'Cancelled' ? 'cancelled_booking' : 'edited_booking',
+      );
       return NextResponse.json(updated.data);
     }
 
@@ -975,6 +1035,10 @@ export async function PATCH(
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      await auditLinkedBookingChange(
+        (updated.data as Record<string, unknown> | null) ?? null,
+        'edited_booking',
+      );
       return NextResponse.json(updated.data);
     }
 
@@ -1035,6 +1099,10 @@ export async function PATCH(
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      await auditLinkedBookingChange(
+        (updated.data as Record<string, unknown> | null) ?? null,
+        'edited_booking',
+      );
       return NextResponse.json(updated.data);
     }
 
@@ -1153,6 +1221,10 @@ export async function PATCH(
 
       if (!scheduleModifyRequested) {
         const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+        await auditLinkedBookingChange(
+          (updated.data as Record<string, unknown> | null) ?? null,
+          'edited_booking',
+        );
         return NextResponse.json(updated.data);
       }
     }
@@ -1322,6 +1394,10 @@ export async function PATCH(
           }
         }
 
+        await auditLinkedBookingChange(
+          (updatedAfterModify as Record<string, unknown> | null) ?? null,
+          'edited_booking',
+        );
         return NextResponse.json(updatedAfterModify);
       }
 
@@ -1368,6 +1444,9 @@ export async function PATCH(
           body.appointment_service_id !== undefined ||
           body.service_item_id !== undefined
         );
+      // Staff moving/extending a booking past opening hours from the calendar
+      // (the UI shows an amber "outside opening hours" warning first).
+      const allowOutsideHoursCalendar = isAppointment && body.allow_outside_hours === true;
       const idLc = id.toLowerCase();
       const beforeEndHm =
         typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
@@ -1460,6 +1539,7 @@ export async function PATCH(
           processingTimeBlocksOverride:
             body.processing_time_blocks !== undefined ? body.processing_time_blocks : undefined,
           allowManualOverlap: allowManualCalendarOverlap,
+          allowOutsideHours: allowOutsideHoursCalendar,
         });
         if (!intervalResult.ok) {
           return NextResponse.json(
@@ -1549,6 +1629,19 @@ export async function PATCH(
       }
 
       if (body.practitioner_id && isAppointment) {
+        // §18 — for a cross-venue edit, the *move target* calendar must also be in
+        // the link's scope (loadStaffAccessibleBooking only checked the booking's
+        // current calendar). This route writes via the service-role admin client,
+        // so the RLS `link_calendar_allows` backstop never runs — enforce here.
+        if (
+          !isOwnVenue &&
+          !linkedGrantAllowsCalendar(linkedGrant, false, body.practitioner_id as string)
+        ) {
+          return NextResponse.json(
+            { error: 'This link does not include that calendar.' },
+            { status: 403 },
+          );
+        }
         if (booking.calendar_id) {
           bookingUpdate.calendar_id = body.practitioner_id;
         } else {
@@ -1829,6 +1922,10 @@ export async function PATCH(
           console.error('Communication log reset failed after modification:', logResetErr);
         }
       }
+      await auditLinkedBookingChange(
+        (updatedAfterModify as Record<string, unknown> | null) ?? null,
+        'edited_booking',
+      );
       return NextResponse.json({
         ...updatedAfterModify,
         ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
@@ -1872,6 +1969,7 @@ export async function DELETE(
       ownerVenueId: scopeVenueId,
       isOwnVenue,
       linkedGrant,
+      linkId: linkedAccountLinkId,
     } = loaded.ctx;
 
     if (!isOwnVenue && !linkedGrantAllowsCancel(linkedGrant, false)) {
@@ -1921,6 +2019,30 @@ export async function DELETE(
     }
 
     logBookingOp({ operation: 'delete', venue_id: scopeVenueId, booking_id: id });
+
+    // §16.1 #1c — a cross-venue hard-delete is not covered by the audit trigger
+    // (INSERT/UPDATE only) and the admin client skips it, so record it explicitly.
+    // No notification: the booking row is gone, so there is nothing to link to.
+    if (!isOwnVenue && linkedAccountLinkId) {
+      let deleteActorUserId: string | null = null;
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        deleteActorUserId = authData.user?.id ?? null;
+      } catch {
+        deleteActorUserId = null;
+      }
+      await recordBookingWriteAudit({
+        admin,
+        linkId: linkedAccountLinkId,
+        actingVenueId: staff.venue_id,
+        actingUserId: deleteActorUserId,
+        owningVenueId: scopeVenueId,
+        actionType: 'deleted_booking',
+        bookingId: id,
+        beforeState: booking as Record<string, unknown>,
+        afterState: null,
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -277,6 +277,22 @@ button, a, input, select, textarea {
   animation: dashboard-progress 1s ease-in-out infinite;
 }
 
+/* Linked-accounts design tokens (§19.1) — one source of truth so every linked
+   surface (grid chips, list rows, modals, notification items) speaks the same
+   muted visual language. The day/week card fills are computed per booking-status
+   in `bookingCalendarBlockCardStyle`, but their muted base + every other linked
+   affordance derive from these. */
+:root {
+  --linked-surface: rgba(248, 250, 252, 0.7); /* slate-50 @ 70% */
+  --linked-border: #e2e8f0; /* slate-200 */
+  --linked-muted-text: #64748b; /* slate-500 */
+}
+@utility linked-chip {
+  background: var(--linked-surface);
+  border: 1px solid var(--linked-border);
+  color: var(--linked-muted-text);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-slide-in-right,
   .animate-slide-in-bottom,
@@ -286,6 +302,11 @@ button, a, input, select, textarea {
   }
   .skeleton {
     animation: none;
+  }
+  /* Honour reduced-motion for the global interactive-element transition too,
+     so hover/focus state changes are instant rather than animated (§19.4). */
+  button, a, input, select, textarea {
+    transition: none;
   }
 }
 

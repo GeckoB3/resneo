@@ -72,7 +72,7 @@ interface BookingWriteAuditParams {
   actingVenueId: string;
   actingUserId: string | null;
   owningVenueId: string;
-  actionType: 'created_booking' | 'edited_booking' | 'cancelled_booking';
+  actionType: 'created_booking' | 'edited_booking' | 'cancelled_booking' | 'deleted_booking';
   bookingId: string;
   beforeState?: Record<string, unknown> | null;
   afterState?: Record<string, unknown> | null;
@@ -125,6 +125,8 @@ export function auditActionLabel(actionType: string): string {
       return 'Edited booking';
     case 'cancelled_booking':
       return 'Cancelled booking';
+    case 'deleted_booking':
+      return 'Deleted booking';
     default:
       return actionType;
   }

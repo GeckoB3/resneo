@@ -1,6 +1,6 @@
 /** Venue eligibility checks for Linked Accounts (§3). */
 
-import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
 export interface LinkEligibilityVenue {
   pricing_tier?: string | null;
@@ -17,14 +17,16 @@ export interface EligibilityResult {
 }
 
 /**
- * Linked Accounts is available to Appointments-family venues only — the
- * practical discriminator is a non table-reservation booking model on an
- * appointments pricing tier (light / plus / appointments).
+ * Linked Accounts is available to Appointments-family venues only (§3). A
+ * restaurant / founding (table-product) venue is **never** eligible — even if
+ * its `booking_model` happens to be non-table — so we exclude those tiers first,
+ * then accept the Appointments tiers (light / plus / appointments). The
+ * booking-model fallback only applies once the restaurant tiers are ruled out,
+ * for venues whose tier is unset/legacy but clearly not a table product.
  */
 export function isLinkFeatureVenue(venue: LinkEligibilityVenue): boolean {
+  if (isRestaurantTableProductTier(venue.pricing_tier)) return false;
   if (isAppointmentPlanTier(venue.pricing_tier)) return true;
-  // Fall back to booking model when the tier is unusual but the venue clearly
-  // is not a restaurant table-reservation product.
   const model = (venue.booking_model ?? '').toLowerCase().trim();
   return model !== '' && model !== 'table_reservation';
 }

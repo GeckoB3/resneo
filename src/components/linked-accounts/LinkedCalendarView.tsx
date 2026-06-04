@@ -20,7 +20,15 @@ const inputCls =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500';
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // §16.1 #12 — browser-local calendar date, not UTC: `toISOString()` rolls the
+  // day over at UTC midnight, which lands "Today" on the wrong day for venues
+  // far from UTC. The server passes a venue-local `initialDate` where it can;
+  // this is the client fallback for embedded usages that don't.
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function fmtTime(t: string): string {
@@ -55,14 +63,17 @@ export function LinkedCalendarView({
   date: controlledDate,
   onDateChange,
   hideDatePicker = false,
+  /** §16.1 #12 — server-computed venue-local today, so the default day is correct far from UTC. */
+  initialDate,
 }: {
   hideWhenEmpty?: boolean;
   title?: string;
   date?: string;
   onDateChange?: (isoDate: string) => void;
   hideDatePicker?: boolean;
+  initialDate?: string;
 } = {}) {
-  const [internalDate, setInternalDate] = useState(todayIso());
+  const [internalDate, setInternalDate] = useState(initialDate ?? todayIso());
   const date = controlledDate ?? internalDate;
   const setDate = onDateChange ?? setInternalDate;
   const [venues, setVenues] = useState<LinkedVenueCalendar[]>([]);
@@ -336,6 +347,25 @@ function VenueCalendarBlock({
   );
 }
 
+/** Small read-only padlock glyph (§19.1 — a real icon, not the old 🔒 emoji). */
+function ReadOnlyLockIcon({ className = 'h-3 w-3' }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
 function LinkedBookingChip({
   booking,
   timeOnly,
@@ -378,10 +408,20 @@ function LinkedBookingChip({
           {booking.status}
         </Pill>
         {canView ? (
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">View</span>
+          <span
+            className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+            title={`View-only — ${venueName} granted calendar visibility without edit rights.`}
+          >
+            <ReadOnlyLockIcon />
+            View
+          </span>
         ) : !canEdit ? (
-          <span title="You cannot edit this booking" aria-label="Read-only" className="text-slate-400">
-            🔒
+          <span
+            title={`View-only — ${venueName} shares busy/free times only, not booking detail.`}
+            aria-label={`Read-only: ${venueName} shares busy/free times only`}
+            className="text-slate-400"
+          >
+            <ReadOnlyLockIcon />
           </span>
         ) : null}
       </div>

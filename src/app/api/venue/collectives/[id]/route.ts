@@ -74,6 +74,23 @@ export async function PATCH(
           { status: 409 },
         );
       }
+      // §7.2.1 — a renamed collective must also respect the 30-day cooldown on
+      // names of recently-dissolved collectives (same rule as create).
+      const cooldownCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentlyDissolved } = await ctx.admin
+        .from('venue_collectives')
+        .select('id')
+        .ilike('name', name)
+        .eq('status', 'dissolved')
+        .gte('updated_at', cooldownCutoff)
+        .neq('id', id)
+        .maybeSingle();
+      if (recentlyDissolved) {
+        return NextResponse.json(
+          { error: 'That name isn’t available yet. Please choose another.' },
+          { status: 409 },
+        );
+      }
       updates.name = name;
     }
     if (parsed.data.branding !== undefined) updates.branding = parsed.data.branding;

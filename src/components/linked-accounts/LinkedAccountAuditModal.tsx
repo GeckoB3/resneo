@@ -187,7 +187,9 @@ export function LinkedAccountAuditModal({
         <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
       ) : null}
 
-      <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+      {/* Desktop: a table. Mobile: a stacked card list, so a data-dense log is
+          never a horizontal-scroll trap inside the modal (§19.5). */}
+      <div className="mt-3 hidden overflow-x-auto rounded-xl border border-slate-200 sm:block">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -200,11 +202,17 @@ export function LinkedAccountAuditModal({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                  Loading…
-                </td>
-              </tr>
+              <>
+                {[0, 1, 2, 3].map((i) => (
+                  <tr key={i}>
+                    {[0, 1, 2, 3, 4].map((c) => (
+                      <td key={c} className="px-3 py-2.5">
+                        <div className="skeleton h-3 w-full rounded" />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </>
             ) : entries.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
@@ -231,6 +239,48 @@ export function LinkedAccountAuditModal({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-3 space-y-2 sm:hidden">
+        {loading ? (
+          <>
+            <div className="skeleton h-20 rounded-xl" />
+            <div className="skeleton h-20 rounded-xl" />
+          </>
+        ) : entries.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 px-3 py-6 text-center text-xs text-slate-500">
+            No activity recorded for this link yet.
+          </p>
+        ) : (
+          entries.map((e) => {
+            const diff = diffSummary(e);
+            return (
+              <div key={e.id} className="rounded-xl border border-slate-200 p-3 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-semibold text-slate-900">{e.actionLabel}</span>
+                  <span className="shrink-0 text-[11px] text-slate-500">
+                    {formatTimestamp(e.createdAt)}
+                  </span>
+                </div>
+                <dl className="mt-1.5 space-y-0.5 text-slate-600">
+                  <div className="flex gap-1.5">
+                    <dt className="font-medium text-slate-500">By</dt>
+                    <dd className="min-w-0">
+                      {e.actingVenue}
+                      {e.actingUser ? ` · ${e.actingUser}` : ''}
+                    </dd>
+                  </div>
+                  {diff ?? e.resourceType ? (
+                    <div className="flex gap-1.5">
+                      <dt className="font-medium text-slate-500">Details</dt>
+                      <dd className="min-w-0 break-words">{diff ?? e.resourceType}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between text-xs text-slate-600">

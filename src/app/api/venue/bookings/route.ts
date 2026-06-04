@@ -55,6 +55,7 @@ import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/nam
 import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-event';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
+import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 
 function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
   const [startH, startM] = startHHmm.split(':').map(Number);
@@ -969,7 +970,9 @@ export async function POST(request: NextRequest) {
           timeStr,
           endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
           undefined,
-          { allowBookingOverlap: true },
+          // Walk-ins are deliberately allowed past opening hours (e.g. a walk-in
+          // taken after closing). Keep the overlap/duration checks, drop the hours gate.
+          { allowBookingOverlap: true, allowOutsideHours: true },
         );
         if (!intervalCheck.ok) {
           return NextResponse.json(
@@ -1149,6 +1152,15 @@ export async function POST(request: NextRequest) {
           actionType: 'created_booking',
           bookingId: apptBooking.id,
           afterState: { id: apptBooking.id, venue_id: venueId },
+        });
+        // §17.3 — email the owning venue if it opted in to "new booking" emails.
+        void notifyCrossVenueBookingWrite({
+          admin,
+          owningVenueId: linkedCreate.ownerVenueId,
+          actingVenueId: linkedCreate.actingVenueId,
+          actionType: 'created_booking',
+          before: null,
+          after: { booking_date, booking_time: timeForDb },
         });
       }
 

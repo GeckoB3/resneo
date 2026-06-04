@@ -283,18 +283,9 @@ export function UnifiedBookingForm({
     if (typeof guest.email === 'string' && guest.email.trim()) setEmail(guest.email.trim());
     if (typeof guest.phone === 'string' && guest.phone.trim()) setPhone(guest.phone.trim());
     if (guest.dietaryNotes?.trim()) setDietaryNotes(guest.dietaryNotes.trim());
-    const noteParts: string[] = [];
-    if (guest.specialRequests?.trim()) noteParts.push(guest.specialRequests.trim());
-    if (guest.occasion?.trim()) noteParts.push(`Occasion: ${guest.occasion.trim()}`);
-    if (guest.internalNotes?.trim()) noteParts.push(`Staff note: ${guest.internalNotes.trim()}`);
-    if (guest.customerProfileNotes?.trim()) noteParts.push(`Guest profile note: ${guest.customerProfileNotes.trim()}`);
-    if (noteParts.length > 0) {
-      const block = noteParts.join('\n\n');
-      setNotes((prev) => {
-        const p = typeof prev === 'string' ? prev.trim() : '';
-        return p ? `${p}\n\n${block}` : block;
-      });
-    }
+    // The free-text notes box is per-booking and entered fresh each time — it is
+    // deliberately NOT pre-filled from the prior booking's requests, occasion, or
+    // internal/profile notes. Persistent customer info lives on the client record.
 
     setOpenPanel('date');
   }, [staffRebookBootstrap, isEdit]);

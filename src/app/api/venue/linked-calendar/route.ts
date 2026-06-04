@@ -248,6 +248,18 @@ export async function GET(request: NextRequest) {
         }));
       }
 
+      // §18 — restrict to the calendars the owner scoped this link to
+      // (null/empty = all). This is the authoritative read-side enforcement,
+      // since this route uses the admin client (RLS is a backstop). Filtering
+      // `practitioners` here cascades to `columnIds`, resources, CDE columns,
+      // schedule blocks and booking-column resolution below.
+      const scopeIds = access.grant.calendarIds;
+      const isScoped = Array.isArray(scopeIds) && scopeIds.length > 0;
+      if (isScoped) {
+        const allowed = new Set(scopeIds);
+        practitioners = practitioners.filter((p) => allowed.has(p.id));
+      }
+
       // Services — only meaningful to full_details viewers (used by the
       // cross-venue "new booking" form when the link allows creating).
       let services: LinkedService[] = [];
@@ -468,6 +480,13 @@ export async function GET(request: NextRequest) {
           )
         : [];
 
+      // §18 — drop any booking that did not resolve onto an in-scope column.
+      // (For an unscoped link `columnIds` already covers every calendar, so this
+      // only removes rows for scoped links.)
+      const scopedBookings = isScoped
+        ? bookings.filter((b) => b.practitionerId != null && columnIds.has(b.practitionerId))
+        : bookings;
+
       calendars.push({
         venueId: access.venueId,
         venueName: venueNames[access.venueId] ?? 'Linked venue',
@@ -479,7 +498,7 @@ export async function GET(request: NextRequest) {
         practitioners,
         services,
         resources,
-        bookings,
+        bookings: scopedBookings,
         scheduleBlocks,
       });
 

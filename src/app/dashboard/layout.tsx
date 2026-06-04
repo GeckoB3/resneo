@@ -29,6 +29,7 @@ import { SupportSessionControls } from '@/components/dashboard/SupportSessionCon
 import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRebookBootstrapRouteCleanup';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
+import { NotificationBell } from '@/components/linked-accounts/NotificationBell';
 import { WaitlistAvailabilityBanner } from '@/components/dashboard/waitlist/WaitlistAvailabilityBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS, parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
@@ -280,7 +281,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         )}
-        {isAdmin && !isRestaurantTableProductTier(pricingTier) ? <LinkedAccountBanner /> : null}
+        {isAdmin && !isRestaurantTableProductTier(pricingTier) ? (
+          <>
+            <div className="flex justify-end px-4 pt-3 sm:px-6">
+              <NotificationBell />
+            </div>
+            <LinkedAccountBanner />
+          </>
+        ) : null}
         <WaitlistAvailabilityBanner />
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
         <StaffRebookBootstrapRouteCleanup />

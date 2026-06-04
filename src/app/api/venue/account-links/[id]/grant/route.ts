@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
+import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { reduceLinkSchema } from '@/lib/linked-accounts/validation';
 import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
 import {
@@ -25,6 +25,8 @@ export async function POST(
   const resolved = await resolveLinkAdmin();
   if (!resolved.ok) return resolved.response;
   const { ctx } = resolved;
+  const limited = enforceLinkRateLimit(ctx.venueId, 'mutate', 30, 60_000);
+  if (limited) return limited;
   const { id } = await params;
 
   let body: unknown;
@@ -46,8 +48,8 @@ export async function POST(
       .from('account_links')
       .select(
         'id, venue_low_id, venue_high_id, status, pending_change, ' +
-          'low_grants_calendar, low_grants_pii, low_grants_act, ' +
-          'high_grants_calendar, high_grants_pii, high_grants_act',
+          'low_grants_calendar, low_grants_pii, low_grants_act, low_grants_calendar_ids, ' +
+          'high_grants_calendar, high_grants_pii, high_grants_act, high_grants_calendar_ids',
       )
       .eq('id', id)
       .maybeSingle();
@@ -68,11 +70,17 @@ export async function POST(
     }
 
     const current: LinkGrant = iAmLow
-      ? { calendar: link.low_grants_calendar, pii: link.low_grants_pii, act: link.low_grants_act }
+      ? {
+          calendar: link.low_grants_calendar,
+          pii: link.low_grants_pii,
+          act: link.low_grants_act,
+          calendarIds: link.low_grants_calendar_ids,
+        }
       : {
           calendar: link.high_grants_calendar,
           pii: link.high_grants_pii,
           act: link.high_grants_act,
+          calendarIds: link.high_grants_calendar_ids,
         };
     const next = normaliseGrant(parsed.data.grant);
 
@@ -95,11 +103,13 @@ export async function POST(
           low_grants_calendar: next.calendar,
           low_grants_pii: next.pii,
           low_grants_act: next.act,
+          low_grants_calendar_ids: next.calendarIds ?? null,
         }
       : {
           high_grants_calendar: next.calendar,
           high_grants_pii: next.pii,
           high_grants_act: next.act,
+          high_grants_calendar_ids: next.calendarIds ?? null,
         };
 
     await ctx.admin.from('account_links').update(column).eq('id', id);

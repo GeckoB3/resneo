@@ -1,7 +1,6 @@
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { staffRebookInitialDate, type GuestBookingUpcomingRow } from '@/lib/booking/guest-booking-upcoming';
 import {
-  buildAppointmentRebookComments,
   type StaffRebookBootstrapPayloadV1,
   type StaffRebookGuestPrefill,
 } from '@/lib/booking/staff-rebook-bootstrap';
@@ -156,7 +155,9 @@ export function buildStaffRebookBootstrapFromBookingSource(
         durationMinutes: bookingSourceDurationMinutes(row),
       },
       guest,
-      appointmentComments: buildAppointmentRebookComments(guest),
+      // "Comments or requests" is per-booking and entered fresh each time — it is
+      // deliberately NOT pre-filled from the prior booking. Persistent customer
+      // info lives on the client record, not in every booking's comments.
     });
   }
 

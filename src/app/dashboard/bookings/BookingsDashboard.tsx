@@ -56,6 +56,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import { AddTagModal } from '@/components/booking/AddTagModal';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
@@ -419,6 +420,9 @@ export function BookingsDashboard({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [addTagOpen, setAddTagOpen] = useState(false);
+  const [venueTags, setVenueTags] = useState<string[]>([]);
+  const [venueTagsLoaded, setVenueTagsLoaded] = useState(false);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [guestHistoryRevisionById, setGuestHistoryRevisionById] = useState<Record<string, number>>({});
   const [relatedGuestHistoryBooking, setRelatedGuestHistoryBooking] = useState<{
@@ -1253,6 +1257,65 @@ export function BookingsDashboard({
     }
   }, [addToast, selectedIds]);
 
+  // Open the tag modal and lazily load existing venue tags for the suggestions.
+  const openAddTag = useCallback(() => {
+    setAddTagOpen(true);
+    if (venueTagsLoaded) return;
+    setVenueTagsLoaded(true);
+    void fetch('/api/venue/guests/tags')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { tags?: string[] } | null) => {
+        if (d?.tags && Array.isArray(d.tags)) setVenueTags(d.tags);
+      })
+      .catch(() => {});
+  }, [venueTagsLoaded]);
+
+  // Tags live on the contact, so map the selected bookings to their unique guest
+  // ids and reuse the contacts bulk endpoint (mirrors the Contacts page action).
+  const runBulkAddTag = useCallback(
+    async (tag: string) => {
+      const trimmed = tag.trim();
+      if (!trimmed || selectedIds.length === 0) return;
+      const byId = new Map<string, BookingRow>();
+      for (const b of bookings) byId.set(b.id, b);
+      const guestIds = [
+        ...new Set(
+          selectedIds
+            .map((id) => byId.get(id))
+            .filter((b): b is BookingRow => !!b && !!b.guest_id)
+            .map((b) => b.guest_id as string),
+        ),
+      ];
+      if (guestIds.length === 0) {
+        addToast('Selected bookings have no contact record to tag.', 'error');
+        setAddTagOpen(false);
+        return;
+      }
+      setBulkLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/venue/contacts/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_tag', guest_ids: guestIds, tag: trimmed }),
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) throw new Error(typeof j.error === 'string' ? j.error : 'Could not add tag');
+        addToast(`Tag added to ${guestIds.length} ${guestIds.length === 1 ? 'guest' : 'guests'}`, 'success');
+        setVenueTags((prev) => (prev.some((t) => t.toLowerCase() === trimmed.toLowerCase()) ? prev : [...prev, trimmed]));
+        setSelectedIds([]);
+        setAddTagOpen(false);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not add tag';
+        setError(msg);
+        addToast(msg, 'error');
+      } finally {
+        setBulkLoading(false);
+      }
+    },
+    [selectedIds, bookings, addToast],
+  );
+
   /** Selected rows that can still transition to Cancelled (for bulk cancel). */
   const bulkCancelEligibleIds = useMemo(() => {
     return selectedIds.filter((id) => {
@@ -1433,6 +1496,11 @@ export function BookingsDashboard({
     }
     return groups;
   }, [filteredBookings, viewMode]);
+
+  // One "Select all" governs every booking on screen across all day groups
+  // (week / month / custom range) instead of a separate toggle per day.
+  const allFilteredSelected =
+    filteredBookings.length > 0 && filteredBookings.every((b) => selectedIds.includes(b.id));
 
   const stats = useMemo(() => {
     const total = filteredBookings.length;
@@ -1899,6 +1967,28 @@ export function BookingsDashboard({
         />
       ) : (
         <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+            <div className="border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:px-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={(event) => {
+                      if (event.target.checked) setSelectedIds((prev) => Array.from(new Set([...prev, ...filteredBookings.map((b) => b.id)])));
+                      else setSelectedIds((prev) => prev.filter((id) => !filteredBookings.some((b) => b.id === id)));
+                    }}
+                    aria-label="Select all bookings in list"
+                    disabled={filteredBookings.length === 0}
+                  />
+                  Select all
+                </label>
+                <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
+                  {filteredBookings.length} {filteredBookings.length === 1 ? 'booking' : 'bookings'}
+                </span>
+              </div>
+            </div>
+          </div>
           {Object.entries(groupedByDate ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([date, dayBookings]) => (
             <div key={date} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200/90 bg-slate-50 px-5 py-3">
@@ -1947,12 +2037,23 @@ export function BookingsDashboard({
                 onPrefetchBookingDetail={prefetchBookingDetail}
                 venueStaffBookingModel={primaryBookingModel}
                 venueStaffEnabledBookingModels={enabledModels}
+                showSelectAllHeader={false}
               />
             </div>
           ))}
         </div>
       )}
       </div>
+
+      {addTagOpen ? (
+        <AddTagModal
+          recipientCount={selectedIds.length}
+          busy={bulkLoading}
+          existingTags={venueTags}
+          onClose={() => setAddTagOpen(false)}
+          onSubmit={(tag) => void runBulkAddTag(tag)}
+        />
+      ) : null}
 
       {bulkGuestMessageOpen && (
         <BulkGuestMessageModal
@@ -2116,6 +2217,14 @@ export function BookingsDashboard({
             <button
               type="button"
               disabled={bulkLoading}
+              onClick={openAddTag}
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+            >
+              Add tag
+            </button>
+            <button
+              type="button"
+              disabled={bulkLoading}
               onClick={() => setBulkGuestMessageOpen(true)}
               className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
             >
@@ -2188,6 +2297,7 @@ function BookingsAccordionList({
   onPrefetchBookingDetail,
   venueStaffBookingModel,
   venueStaffEnabledBookingModels,
+  showSelectAllHeader = true,
 }: {
   bookings: BookingRow[];
   /** Full loaded list (for multi-service visit duration across filtered siblings). */
@@ -2216,29 +2326,33 @@ function BookingsAccordionList({
   onPrefetchBookingDetail?: (bookingId: string) => void;
   venueStaffBookingModel: BookingModel;
   venueStaffEnabledBookingModels: BookingModel[];
+  /** Hidden in grouped multi-day view, where a single "Select all" sits above all day groups. */
+  showSelectAllHeader?: boolean;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-      <div className="border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:px-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={(event) => {
-                if (event.target.checked) setSelectedIds((prev) => Array.from(new Set([...prev, ...bookings.map((b) => b.id)])));
-                else setSelectedIds((prev) => prev.filter((id) => !bookings.some((b) => b.id === id)));
-              }}
-              aria-label="Select all bookings in list"
-            />
-            Select all
-          </label>
-          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
-            {bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}
-          </span>
+      {showSelectAllHeader ? (
+        <div className="border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:px-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(event) => {
+                  if (event.target.checked) setSelectedIds((prev) => Array.from(new Set([...prev, ...bookings.map((b) => b.id)])));
+                  else setSelectedIds((prev) => prev.filter((id) => !bookings.some((b) => b.id === id)));
+                }}
+                aria-label="Select all bookings in list"
+              />
+              Select all
+            </label>
+            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
+              {bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}
+            </span>
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="flex flex-col gap-2.5 bg-slate-100 p-2 sm:gap-3 sm:p-3">
         {bookings.map((booking) => {
           const expanded = expandedIds.includes(booking.id);

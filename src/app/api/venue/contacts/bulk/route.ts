@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const { data: guests, error: gErr } = await staff.db
       .from('guests')
       .select(
-        'id, name, email, phone, tags, marketing_opt_out, marketing_consent',
+        'id, first_name, last_name, email, phone, tags, marketing_opt_out, marketing_consent',
       )
       .eq('venue_id', staff.venue_id)
       .in('id', body.guest_ids);

@@ -67,6 +67,7 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import { AddTagModal } from '@/components/booking/AddTagModal';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -446,6 +447,10 @@ export function AppointmentBookingsDashboard({
   const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
   const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [addTagOpen, setAddTagOpen] = useState(false);
+  const [venueTags, setVenueTags] = useState<string[]>([]);
+  const [venueTagsLoaded, setVenueTagsLoaded] = useState(false);
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
   /** Own / linked-in / all source filter (section 8.2). */
@@ -1022,6 +1027,16 @@ export function AppointmentBookingsDashboard({
     return Object.entries(groupedByDate).sort(([a], [b]) => a.localeCompare(b) * dayOrder);
   }, [groupedByDate, sortKey, sortDir]);
 
+  // One "Select all" governs every booking on screen across all day groups
+  // (week / month / custom range), rather than a separate toggle per day.
+  const allListSelectableIds = useMemo(
+    () => sortedBookings.filter((b) => !isDashboardLinkedRow(b)).map((b) => b.id),
+    [sortedBookings],
+  );
+  const allListSelected =
+    allListSelectableIds.length > 0 &&
+    allListSelectableIds.every((id) => selectedBookingIds.includes(id));
+
   const stats = useMemo(() => {
     const total = statsBookings.length;
     const confirmed = statsBookings.filter(isAttendanceConfirmed).length;
@@ -1116,6 +1131,66 @@ export function AppointmentBookingsDashboard({
     [addToast, selectedBookingIds],
   );
 
+  // Open the tag modal and lazily load existing venue tags for the suggestions.
+  const openAddTag = useCallback(() => {
+    setAddTagOpen(true);
+    if (venueTagsLoaded) return;
+    setVenueTagsLoaded(true);
+    void fetch('/api/venue/guests/tags')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { tags?: string[] } | null) => {
+        if (d?.tags && Array.isArray(d.tags)) setVenueTags(d.tags);
+      })
+      .catch(() => {});
+  }, [venueTagsLoaded]);
+
+  // Tags live on the contact, so map the selected bookings to their unique guest
+  // ids and reuse the contacts bulk endpoint (mirrors the Contacts page action).
+  const runBulkAddTag = useCallback(
+    async (tag: string) => {
+      const trimmed = tag.trim();
+      if (!trimmed || selectedBookingIds.length === 0) return;
+      const byId = new Map<string, RegistryAppointment>();
+      for (const b of allStatusBookings) byId.set(b.id, b);
+      for (const b of bookings) if (!byId.has(b.id)) byId.set(b.id, b);
+      const guestIds = [
+        ...new Set(
+          selectedBookingIds
+            .map((id) => byId.get(id))
+            .filter((b): b is RegistryAppointment => !!b && !isDashboardLinkedRow(b) && !!b.guest_id)
+            .map((b) => b.guest_id as string),
+        ),
+      ];
+      if (guestIds.length === 0) {
+        addToast('Selected bookings have no contact record to tag.', 'error');
+        setAddTagOpen(false);
+        return;
+      }
+      setBulkBusy(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/venue/contacts/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_tag', guest_ids: guestIds, tag: trimmed }),
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) throw new Error(typeof j.error === 'string' ? j.error : 'Could not add tag');
+        addToast(`Tag added to ${guestIds.length} ${guestIds.length === 1 ? 'guest' : 'guests'}`, 'success');
+        setVenueTags((prev) => (prev.some((t) => t.toLowerCase() === trimmed.toLowerCase()) ? prev : [...prev, trimmed]));
+        setSelectedBookingIds([]);
+        setAddTagOpen(false);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not add tag';
+        setError(msg);
+        addToast(msg, 'error');
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [selectedBookingIds, allStatusBookings, bookings, addToast],
+  );
+
   const sendGuestMessage = useCallback(
     async (bookingId: string, message: string, channel: GuestMessageChannel): Promise<GuestMessageSendResult> => {
       const trimmed = message.trim();
@@ -1207,7 +1282,7 @@ export function AppointmentBookingsDashboard({
     const sortTriggerClass =
       'min-h-8 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:text-xs';
     return (
-      <div className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
+      <div className="flex w-full min-w-0 flex-row items-center gap-2 sm:w-auto">
         <label htmlFor="appt-sort-key" className="shrink-0 text-[11px] font-semibold text-slate-500 sm:text-xs">
           Sort
         </label>
@@ -1256,24 +1331,34 @@ export function AppointmentBookingsDashboard({
             : 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5'
         }
       >
-        <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
-          <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={(e) => toggleAllInList(list, e.target.checked)}
-              aria-label="Select all bookings in this list"
-              disabled={selectableIds.length === 0}
-            />
-            Select all
-          </label>
-          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-            {showSort ? <SortControl /> : null}
-            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
-              {list.length} {list.length === 1 ? 'booking' : 'bookings'}
-            </span>
+        {/* In grouped (multi-day) view the day section already carries its header
+            and a single "Select all" sits at the top of the whole list, so the
+            per-list header is only rendered for the flat single-day view. */}
+        {nested ? null : (
+          <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => toggleAllInList(list, e.target.checked)}
+                  aria-label="Select all bookings in this list"
+                  disabled={selectableIds.length === 0}
+                />
+                Select all
+              </label>
+              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:hidden">
+                {list.length} {list.length === 1 ? 'booking' : 'bookings'}
+              </span>
+            </div>
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
+              {showSort ? <SortControl /> : null}
+              <span className="hidden shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:inline sm:text-xs">
+                {list.length} {list.length === 1 ? 'booking' : 'bookings'}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
         <div className="flex flex-col gap-2.5 bg-slate-100 p-2 sm:gap-3 sm:p-3">
           {list.map((b) => renderAppointmentRow(b))}
         </div>
@@ -2009,11 +2094,28 @@ export function AppointmentBookingsDashboard({
       ) : (
         <div className="space-y-4">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-            <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3 sm:px-4">
-              <SortControl />
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:text-xs">
-                {sortedBookings.length} {sortedBookings.length === 1 ? 'booking' : 'bookings'}
-              </span>
+            <div className="flex flex-col gap-2 border-b border-slate-200/90 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-[11px] font-semibold text-slate-600 hover:text-slate-800 sm:text-xs">
+                  <input
+                    type="checkbox"
+                    checked={allListSelected}
+                    onChange={(e) => toggleAllInList(sortedBookings, e.target.checked)}
+                    aria-label="Select all bookings in list"
+                    disabled={allListSelectableIds.length === 0}
+                  />
+                  Select all
+                </label>
+                <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:hidden">
+                  {sortedBookings.length} {sortedBookings.length === 1 ? 'booking' : 'bookings'}
+                </span>
+              </div>
+              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
+                <SortControl />
+                <span className="hidden shrink-0 text-[11px] font-semibold tabular-nums text-slate-500 sm:inline sm:text-xs">
+                  {sortedBookings.length} {sortedBookings.length === 1 ? 'booking' : 'bookings'}
+                </span>
+              </div>
             </div>
           </div>
           {sortedDayEntries.map(([date, dayBookings]) => (
@@ -2040,6 +2142,55 @@ export function AppointmentBookingsDashboard({
           visibility={linkedDetailModal.visibility}
           booking={linkedDetailModal.booking}
           onClose={() => setLinkedDetailModal(null)}
+        />
+      ) : null}
+
+      {/* Floating bulk-actions tray — appears when bookings are selected (mirrors Contacts: tag / message). */}
+      {selectedBookingIds.length > 0 ? (
+        <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2">
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100 sm:flex-nowrap sm:px-4 sm:py-2.5">
+            <span className="mr-1 w-full shrink-0 text-center text-sm font-semibold text-slate-800 sm:w-auto sm:text-left">
+              {selectedBookingIds.length} selected
+            </span>
+            <div className="hidden h-4 w-px shrink-0 bg-slate-200 sm:block" />
+            <button
+              type="button"
+              disabled={bulkBusy || bulkGuestMessageSending}
+              onClick={openAddTag}
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+            >
+              Add tag
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy || bulkGuestMessageSending}
+              onClick={() => setBulkGuestMessageOpen(true)}
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+            >
+              Message
+            </button>
+            <div className="hidden h-4 w-px shrink-0 bg-slate-200 sm:block" />
+            <button
+              type="button"
+              onClick={() => setSelectedBookingIds([])}
+              aria-label="Clear selection"
+              className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {addTagOpen ? (
+        <AddTagModal
+          recipientCount={selectedBookingIds.length}
+          busy={bulkBusy}
+          existingTags={venueTags}
+          onClose={() => setAddTagOpen(false)}
+          onSubmit={(tag) => void runBulkAddTag(tag)}
         />
       ) : null}
 

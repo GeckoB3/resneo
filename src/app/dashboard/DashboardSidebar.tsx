@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/browser';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import { dispatchNavReselect } from '@/lib/ui/nav-reselect';
 import { FullscreenToggleButton } from '@/components/ui/FullscreenToggleButton';
+import { NotificationBell } from '@/components/linked-accounts/NotificationBell';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -85,6 +86,8 @@ export interface DashboardSidebarProps {
   appointmentWaitlistEnabled?: boolean;
   /** Settings → Compliance — shows the Compliance nav item on Appointments tiers. */
   complianceRecordsEnabled?: boolean;
+  /** Venue has at least one accepted link — gates the notification bell in the footer. */
+  hasLinkedAccounts?: boolean;
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/settings']);
@@ -177,6 +180,7 @@ export function DashboardSidebar({
   venueTerminology: _venueTerminology = null,
   appointmentWaitlistEnabled = false,
   complianceRecordsEnabled = false,
+  hasLinkedAccounts = false,
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -591,6 +595,7 @@ export function DashboardSidebar({
                 onNavigate={closeMobile}
               />
             </div>
+            {hasLinkedAccounts ? <NotificationBell /> : null}
             <FullscreenToggleButton />
           </div>
           <button

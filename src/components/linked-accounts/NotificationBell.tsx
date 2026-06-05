@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase/browser';
 import type { LinkNotificationView } from '@/lib/linked-accounts/notification-center';
 
@@ -58,7 +59,11 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [venueId, setVenueId] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  // Popover is portalled to <body> and opens upward from the bell, because the
+  // bell lives at the bottom of the sidebar whose `overflow-hidden` would clip it.
+  const [coords, setCoords] = useState<{ left: number; bottom: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -114,11 +119,33 @@ export function NotificationBell() {
     if (open) void load();
   }, [open, load]);
 
-  // Close on outside click / Escape.
+  // Position the portalled popover above the bell, clamped to the viewport.
+  useEffect(() => {
+    if (!open) return;
+    const POPOVER_WIDTH = 352; // matches w-[22rem]
+    const place = () => {
+      const btn = buttonRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 8));
+      setCoords({ left, bottom: window.innerHeight - rect.top + 8 });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  // Close on outside click / Escape — the popover is portalled, so check it too.
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || popRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
@@ -171,14 +198,15 @@ export function NotificationBell() {
   const badge = unread > 9 ? '9+' : String(unread);
 
   return (
-    <div ref={wrapRef} className="relative">
+    <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-        className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        className="relative inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-2.5 text-slate-600 ring-1 ring-slate-100 transition-colors hover:bg-white/70 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
       >
         <svg
           aria-hidden
@@ -203,12 +231,15 @@ export function NotificationBell() {
         ) : null}
       </button>
 
-      {open ? (
-        <div
-          role="dialog"
-          aria-label="Notifications"
-          className="absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
-        >
+      {open && coords
+        ? createPortal(
+            <div
+              ref={popRef}
+              role="dialog"
+              aria-label="Notifications"
+              style={{ position: 'fixed', left: coords.left, bottom: coords.bottom }}
+              className="z-[60] w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
+            >
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
             <button
@@ -270,8 +301,10 @@ export function NotificationBell() {
               ))
             )}
           </div>
-        </div>
-      ) : null}
-    </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

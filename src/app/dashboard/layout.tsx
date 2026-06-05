@@ -29,7 +29,7 @@ import { SupportSessionControls } from '@/components/dashboard/SupportSessionCon
 import { StaffRebookBootstrapRouteCleanup } from '@/components/dashboard/StaffRebookBootstrapRouteCleanup';
 import { isVenueSubscriptionExpiredCancelled } from '@/lib/billing/subscription-entitlement';
 import { LinkedAccountBanner } from '@/components/linked-accounts/LinkedAccountBanner';
-import { NotificationBell } from '@/components/linked-accounts/NotificationBell';
+import { venueHasAcceptedLink } from '@/lib/linked-accounts/queries';
 import { WaitlistAvailabilityBanner } from '@/components/dashboard/waitlist/WaitlistAvailabilityBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS, parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
@@ -58,6 +58,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let enabledModels: BookingModel[] = [];
   let venueId: string | undefined;
   let isAdmin = false;
+  let hasLinkedAccounts = false;
   let planStatus: string = 'active';
   let subscriptionExpiredCancelled = false;
   let onboardingCompleted = true;
@@ -169,6 +170,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         console.error('[dashboard/layout] Venue row missing for staff venue_id', { venueId });
       }
     }
+
+    // The notification bell only surfaces for admins on appointment-type tiers, and
+    // only when the venue is actually linked to another — skip the query otherwise.
+    if (venueId && isAdmin && !isRestaurantTableProductTier(pricingTier)) {
+      hasLinkedAccounts = await venueHasAcceptedLink(admin, venueId);
+    }
   } catch (e) {
     if (e && typeof e === 'object' && 'digest' in e) throw e;
   }
@@ -195,6 +202,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           isAdmin,
           venueTerminology,
           complianceRecordsEnabled: appointmentsFeatureFlags.compliance_records_enabled,
+          hasLinkedAccounts,
         }}
       >
       <main className="dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
@@ -282,12 +290,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {isAdmin && !isRestaurantTableProductTier(pricingTier) ? (
-          <>
-            <div className="flex justify-end px-4 pt-3 sm:px-6">
-              <NotificationBell />
-            </div>
-            <LinkedAccountBanner />
-          </>
+          <LinkedAccountBanner />
         ) : null}
         <WaitlistAvailabilityBanner />
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}

@@ -6,6 +6,15 @@ import {
 } from './notification-prefs';
 
 describe('resolveLinkedNotificationPrefs', () => {
+  it('defaults every category off (a new link is quiet until the venue opts in)', () => {
+    expect(DEFAULT_LINKED_NOTIFICATION_PREFS).toEqual({
+      cancel: false,
+      reschedule: false,
+      create: false,
+      notes: false,
+    });
+  });
+
   it('returns the defaults for null / non-object input', () => {
     expect(resolveLinkedNotificationPrefs(null)).toEqual(DEFAULT_LINKED_NOTIFICATION_PREFS);
     expect(resolveLinkedNotificationPrefs(undefined)).toEqual(DEFAULT_LINKED_NOTIFICATION_PREFS);
@@ -15,8 +24,8 @@ describe('resolveLinkedNotificationPrefs', () => {
 
   it('merges a partial blob over the defaults', () => {
     expect(resolveLinkedNotificationPrefs({ create: true })).toEqual({
-      cancel: true,
-      reschedule: true,
+      cancel: false,
+      reschedule: false,
       create: true,
       notes: false,
     });

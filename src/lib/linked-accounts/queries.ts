@@ -104,6 +104,19 @@ export async function getAcceptedLinkBetween(
   return (data as unknown as AccountLinkRow | null) ?? null;
 }
 
+/** Whether the venue has at least one accepted link, i.e. is linked to another venue. */
+export async function venueHasAcceptedLink(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<boolean> {
+  const { count } = await admin
+    .from('account_links')
+    .select('id', { count: 'exact', head: true })
+    .or(`venue_low_id.eq.${venueId},venue_high_id.eq.${venueId}`)
+    .eq('status', 'accepted');
+  return (count ?? 0) > 0;
+}
+
 /**
  * What `callerVenueId` is permitted to do to `ownerVenueId`'s data, via the
  * accepted link between them. Returns null when there is no usable access.

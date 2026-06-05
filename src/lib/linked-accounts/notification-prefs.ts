@@ -20,13 +20,13 @@ export const LINKED_NOTIFICATION_CATEGORIES: LinkedNotificationCategory[] = [
 ];
 
 /**
- * §17.3 defaults: high-impact changes (a partner cancelling or moving your
- * client's appointment) email by default; lower-impact new bookings and
- * notes-only edits do not.
+ * Defaults: every category is off. Most venues do not want cross-venue activity
+ * emails, so a newly linked venue starts quiet and opts in per category from
+ * Settings → Linked Accounts. In-app bell notifications (§17.2) are unaffected.
  */
 export const DEFAULT_LINKED_NOTIFICATION_PREFS: LinkedNotificationPrefs = {
-  cancel: true,
-  reschedule: true,
+  cancel: false,
+  reschedule: false,
   create: false,
   notes: false,
 };

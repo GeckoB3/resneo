@@ -1247,7 +1247,7 @@ export function ExpandedBookingContent({
                 <a
                   href={guestTelHref}
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97]"
+                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] sm:min-h-8 sm:text-[11px]"
                 >
                   <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.125A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
@@ -1263,7 +1263,7 @@ export function ExpandedBookingContent({
                     if (!linkedViewOnly) openGuestMessageComposer('email');
                   }}
                   disabled={linkedViewOnly}
-                  className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] disabled:cursor-default disabled:opacity-50 disabled:active:scale-100"
+                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3.5 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-colors hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] sm:min-h-8 sm:text-[11px] disabled:cursor-default disabled:opacity-50 disabled:active:scale-100"
                 >
                   <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
@@ -1322,7 +1322,8 @@ export function ExpandedBookingContent({
         onKeyDown={(e) => e.stopPropagation()}
       >
         <div className="rounded-b-2xl bg-gradient-to-b from-white to-slate-50/40 px-2.5 py-2.5 sm:px-3 sm:py-3">
-          <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+          {/* Mobile: even 2-up grid of large (44px) tap targets; desktop keeps the compact pill wrap. */}
+          <div className="grid grid-cols-2 gap-2 [&>button]:min-h-11 [&>button]:w-full [&>button]:rounded-xl [&>button]:text-[13px] sm:flex sm:flex-wrap sm:items-center sm:gap-x-1 sm:gap-y-2 sm:[&>button]:min-h-8 sm:[&>button]:w-auto sm:[&>button]:rounded-[10px] sm:[&>button]:text-[11px]">
             {forwardActions.map((action) => (
               <button
                 key={action.target}
@@ -1790,7 +1791,7 @@ export function ExpandedBookingContent({
 
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Payments and confirmation</span>
+          <span><span className="sm:hidden">Payments</span><span className="hidden sm:inline">Payments and confirmation</span></span>
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{effectiveBooking.deposit_status}</span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />

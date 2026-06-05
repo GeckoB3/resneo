@@ -1505,8 +1505,9 @@ go read the audit log" is not enough. This is the single highest-value missing c
   **Refresh:** 60s polling + refetch on open (realtime via the Supabase channel is a Phase 2.5
   enhancement — would require adding `account_link_notifications` to the realtime publication).
 - **Phase 3 — email + preferences (§17.3/§17.4) — ✅ shipped 2026-06-04.**
-  - Per-venue email prefs in `venues.linked_notification_prefs jsonb` (defaults: cancel/reschedule
-    **on**, create/notes **off**); pure resolver + `classifyCrossVenueWrite` (unit-tested) in
+  - Per-venue email prefs in `venues.linked_notification_prefs jsonb` (defaults: **all categories
+    off** — a newly linked venue is quiet until it opts in per category; updated 2026-06-05 from the
+    original cancel/reschedule-on default); pure resolver + `classifyCrossVenueWrite` (unit-tested) in
     `notification-prefs.ts`.
   - `notifyCrossVenueBookingWrite` (in `notifications.ts`, reusing `formatNotificationCopy` for
     copy parity with the in-app notice) sends the email gated by the owning venue's per-category
@@ -1570,7 +1571,8 @@ When a partner creates/edits/cancels a booking in your venue (i.e. an
 `account_link_audit_log` row with `acting_venue_id ≠ owning_venue_id` is written):
 
 - **Cancellations and reschedules of an existing booking → immediate notice** (in-app always;
-  email per recipient preference, default on). These are high-impact: a client's appointment
+  email per recipient preference, **default off** as of 2026-06-05 — most venues prefer the bell
+  alone and opt into email per category). These are high-impact: a client's appointment
   moved or removed by another venue must not be discovered late. Copy names the partner venue,
   the client (if PII is granted to *you* — it is your own data, so always), the service, and
   the before/after time.
@@ -1587,8 +1589,9 @@ linked venue [cancels / reschedules / creates / edits notes]" × [in-app / email
 defaults per §17.3. SMS remains out of scope (§9).
 
 **Shipped (2026-06-04):** the **email** column of this matrix — four per-venue toggles
-(`venues.linked_notification_prefs`), defaults cancel/reschedule on, create/notes off, edited
-via `GET|PATCH /api/venue/notifications/preferences` and the `NotificationPrefsCard` UI. **In-app
+(`venues.linked_notification_prefs`), **all off by default** (updated 2026-06-05 from the original
+cancel/reschedule-on default), edited via `GET|PATCH /api/venue/notifications/preferences` and the
+`NotificationPrefsCard` UI. **In-app
 is always on** in v1 (not per-category configurable — the trigger creates in-app rows
 unconditionally), so only the email column is exposed; per-category in-app muting is a future
 option.

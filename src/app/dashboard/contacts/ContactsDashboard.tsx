@@ -32,6 +32,7 @@ import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
 import { CONTACTS_BOOKINGS_REFRESH_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import { AddTagModal } from '@/components/booking/AddTagModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
@@ -435,7 +436,6 @@ export function ContactsDashboard({
   const [lastServiceId, setLastServiceId] = useState<string | null>(null);
   const [rosterStaff, setRosterStaff] = useState<Array<{ id: string; name: string }>>([]);
   const [venueServices, setVenueServices] = useState<Array<{ id: string; name: string }>>([]);
-  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [venueTags, setVenueTags] = useState<string[]>([]);
   const [guests, setGuests] = useState<GuestListRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -458,6 +458,7 @@ export function ContactsDashboard({
   const [bulkContactMessageOpen, setBulkContactMessageOpen] = useState(false);
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [addTagOpen, setAddTagOpen] = useState(false);
   const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'filter' | 'sort' | 'pageSize'>('none');
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
@@ -544,7 +545,6 @@ export function ContactsDashboard({
     filter,
     segment,
     segmentTag,
-    tagFilter,
     dateFrom,
     dateTo,
     marketing,
@@ -581,7 +581,6 @@ export function ContactsDashboard({
         segment,
       });
       if (debouncedSearch) params.set('search', debouncedSearch);
-      if (tagFilter.length) params.set('tags', tagFilter.join(','));
       if (dateFrom) params.set('date_from', dateFrom);
       if (dateTo) params.set('date_to', dateTo);
       if (segment === 'marketing') params.set('marketing', marketing);
@@ -617,7 +616,6 @@ export function ContactsDashboard({
     page,
     limit,
     debouncedSearch,
-    tagFilter,
     filter,
     segment,
     dateFrom,
@@ -663,27 +661,32 @@ export function ContactsDashboard({
     void loadList();
   }, [loadList]);
 
-  const runBulkAddTag = useCallback(async () => {
-    const tag = window.prompt('Tag to add to selected contacts?');
-    if (!tag?.trim()) return;
-    setBulkBusy(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/venue/contacts/bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add_tag', guest_ids: selectedIds, tag: tag.trim() }),
-      });
-      const j = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(typeof j.error === 'string' ? j.error : 'Bulk action failed');
-      setSelectedIds([]);
-      await loadList();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Bulk action failed');
-    } finally {
-      setBulkBusy(false);
-    }
-  }, [selectedIds, loadList]);
+  const runBulkAddTag = useCallback(
+    async (tag: string) => {
+      const trimmed = tag.trim();
+      if (!trimmed || selectedIds.length === 0) return;
+      setBulkBusy(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/venue/contacts/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_tag', guest_ids: selectedIds, tag: trimmed }),
+        });
+        const j = (await res.json()) as { error?: string };
+        if (!res.ok) throw new Error(typeof j.error === 'string' ? j.error : 'Bulk action failed');
+        setSelectedIds([]);
+        setAddTagOpen(false);
+        await loadList();
+        void loadVenueTags();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Bulk action failed');
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [selectedIds, loadList, loadVenueTags],
+  );
 
   const runBulkContactMessage = useCallback(
     async (message: string, channel: GuestMessageChannel) => {
@@ -866,11 +869,6 @@ export function ContactsDashboard({
     return () => window.cancelAnimationFrame(frame);
   }, [expandedGuestId, showDeepLinkContactLoading, detail?.guest.id]);
 
-  const toggleTagFilter = useCallback((tag: string) => {
-    setTagFilter((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
-    setPage(0);
-  }, []);
-
   const onSaveGuestDetails = useCallback(async (): Promise<boolean> => {
     if (!detail) return false;
     setEditSaving(true);
@@ -932,7 +930,6 @@ export function ContactsDashboard({
           include_custom_fields: '1',
         });
         if (debouncedSearch) params.set('search', debouncedSearch);
-        if (tagFilter.length) params.set('tags', tagFilter.join(','));
         if (dateFrom) params.set('date_from', dateFrom);
         if (dateTo) params.set('date_to', dateTo);
         if (segment === 'marketing') params.set('marketing', marketing);
@@ -1014,7 +1011,6 @@ export function ContactsDashboard({
     lastServiceId,
     lastServiceKind,
     debouncedSearch,
-    tagFilter,
     currency,
     normalisedSegmentTagFilter,
   ]);
@@ -1051,7 +1047,6 @@ export function ContactsDashboard({
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const hasActiveFilters = Boolean(
     debouncedSearch ||
-      tagFilter.length ||
       segment !== 'all' ||
       filter !== 'identified' ||
       dateFrom ||
@@ -1123,15 +1118,9 @@ export function ContactsDashboard({
             </span>
           </span>
         ) : null}
-        {tagFilter.length > 0 ? (
-          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-800">
-            <span className="font-normal text-slate-500">Tags</span>
-            <span>{tagFilter.length}</span>
-          </span>
-        ) : null}
       </div>
     ),
-    [totalCount, page, totalPages, segment, segmentTag, filter, debouncedSearch, tagFilter.length],
+    [totalCount, page, totalPages, segment, segmentTag, filter, debouncedSearch],
   );
 
   const selectRowClass = (selected: boolean) =>
@@ -1660,28 +1649,6 @@ export function ContactsDashboard({
             description={`Tap a row to open the full profile. Bulk actions apply to checked ${clientLower}s on this page.`}
           />
           <SectionCard.Body className="min-w-0 space-y-6">
-          {venueTags.length > 0 && (
-            <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50/40 to-slate-50/80 p-4 shadow-sm ring-1 ring-slate-900/[0.03]">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Filter by tags</p>
-              <div className="flex flex-wrap gap-2">
-                {venueTags.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => toggleTagFilter(t)}
-                    className={`min-h-10 rounded-full px-3.5 py-2 text-sm font-medium shadow-sm transition-all ${
-                      tagFilter.includes(t)
-                        ? 'bg-brand-600 text-white shadow-md ring-2 ring-brand-400/35'
-                        : 'bg-white text-slate-600 ring-1 ring-slate-200/90 hover:bg-slate-50 hover:ring-slate-300'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {selectedIds.length > 0 ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-brand-200 bg-brand-50/40 p-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-medium text-slate-800">{selectedIds.length} selected</span>
@@ -1689,7 +1656,7 @@ export function ContactsDashboard({
                 <button
                   type="button"
                   disabled={bulkBusy || bulkContactMessageSending}
-                  onClick={() => void runBulkAddTag()}
+                  onClick={() => setAddTagOpen(true)}
                   className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                 >
                   Add tag…
@@ -1870,6 +1837,17 @@ export function ContactsDashboard({
         </SectionCard.Body>
       </SectionCard>
       </div>
+
+      {addTagOpen && selectedIds.length > 0 ? (
+        <AddTagModal
+          recipientCount={selectedIds.length}
+          busy={bulkBusy}
+          existingTags={venueTags}
+          recipientNoun={clientLower}
+          onClose={() => setAddTagOpen(false)}
+          onSubmit={(tag) => void runBulkAddTag(tag)}
+        />
+      ) : null}
 
       {bulkContactMessageOpen && selectedIds.length > 0 ? (
         <BulkGuestMessageModal

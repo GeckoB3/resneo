@@ -1641,6 +1641,7 @@ export function ContactsDashboard({
             searchAriaLabel="Search contacts"
             searchPanel={(
               <OperationsToolbarGuestSearchPanel
+                initialQuery={search}
                 onQueryChange={(q) => {
                   setSearch(q);
                   setPage(0);
@@ -1673,6 +1674,24 @@ export function ContactsDashboard({
             description={`Tap a row to open the full profile. Bulk actions apply to checked ${clientLower}s on this page.`}
           />
           <SectionCard.Body className="min-w-0 space-y-6">
+          {searchActive ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50/60 px-3 py-2.5">
+              <p className="min-w-0 text-sm text-brand-900">
+                Showing {clientLower}s matching{' '}
+                <span className="font-semibold break-words">&ldquo;{debouncedSearch}&rdquo;</span>
+              </p>
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-300"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+                Clear search
+              </button>
+            </div>
+          ) : null}
           {selectedIds.length > 0 ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-brand-200 bg-brand-50/40 p-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-medium text-slate-800">{selectedIds.length} selected</span>

@@ -17,6 +17,13 @@ import type { GuestListRow } from '@/types/contacts';
 export interface OperationsToolbarGuestSearchPanelProps {
   /** Sync typed query to a parent list filter (e.g. contacts / day sheet). */
   onQueryChange?: (query: string) => void;
+  /**
+   * Seed the input on mount with the parent's active search. The popover unmounts
+   * when closed, so passing the live filter here keeps the term (and the "Clear
+   * search" link) visible whenever the list is still filtered and the popover is
+   * reopened — instead of showing a blank box while the list stays filtered.
+   */
+  initialQuery?: string;
   /** Pre-fill staff booking modal date/time when booking from this surface. */
   initialDate?: string;
   initialTime?: string;
@@ -85,6 +92,7 @@ function GuestSearchResultRow({
  */
 export function OperationsToolbarGuestSearchPanel({
   onQueryChange,
+  initialQuery,
   initialDate,
   initialTime,
   preselectedPractitionerId,
@@ -95,7 +103,7 @@ export function OperationsToolbarGuestSearchPanel({
   const venue = useDashboardToolbarVenue();
   const { warmGuestDetail } = useDashboardDetailCache();
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
   const { results, loading, error, showHint, showEmpty, minQueryLength } = useGuestToolbarSearch(query);
 
   const [bookingBootstrap, setBookingBootstrap] = useState<StaffRebookBootstrapPayloadV1 | null>(null);

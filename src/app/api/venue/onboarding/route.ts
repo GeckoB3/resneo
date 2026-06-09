@@ -126,9 +126,9 @@ export async function PATCH(request: Request) {
     }
 
     // Resolve a unique booking-page slug, then persist. A clashing business name must never block
-    // onboarding, so we pick the first free variant automatically — preferred slug, then the
-    // de-hyphenated form, then `-2`, `-3`, … — and retry on the rare race where a chosen variant is
-    // taken between the availability check and the write.
+    // onboarding, so we pick the first free variant automatically — the preferred slug, then the
+    // fewest-digit numbered suffix (`my-business2`, `my-business3`, …) — and retry on the rare race
+    // where a chosen variant is taken between the availability check and the write.
     const slugCandidates = preferredSlug ? candidateVenueSlugs(preferredSlug) : [];
     let currentSlug: string | null = null;
     if (preferredSlug) {

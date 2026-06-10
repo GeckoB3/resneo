@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
@@ -26,7 +26,8 @@ import { renderAppointmentWaitlistOfferSms } from '@/lib/emails/templates/appoin
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // Bearer (mobile) + cookie (web) auth — see createVenueRouteClient.
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

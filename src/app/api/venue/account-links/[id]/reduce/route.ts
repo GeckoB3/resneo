@@ -139,7 +139,9 @@ export async function POST(
           high_grants_calendar_ids: next.calendarIds ?? null,
         };
 
-    await ctx.admin.from('account_links').update(column).eq('id', id);
+    // A unilateral change supersedes any in-flight negotiated proposal — clearing it
+    // stops a stale proposal being accepted later and re-raising what was just reduced.
+    await ctx.admin.from('account_links').update({ ...column, pending_change: null }).eq('id', id);
 
     // Reducing visibility below full_details invalidates any collective that
     // depends on this link (§7.5).

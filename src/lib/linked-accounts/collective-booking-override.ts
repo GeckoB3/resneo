@@ -5,7 +5,7 @@
  * SECURITY: overrides are resolved here from the `collective_service_providers`
  * row — NEVER trusted from the client. The customer-facing flow only sends
  * `collective_id` + `collective_service_item_id`; the booking's price and the
- * slot length it occupies come from the approved provider record. A forged or
+ * slot length it occupies come from the active provider record. A forged or
  * stale id resolves to `null` and the booking proceeds at the venue's own terms.
  */
 
@@ -31,9 +31,11 @@ export interface ResolveOverrideParams {
 /**
  * Resolve the effective override for a combined-page booking, or `null` when it
  * isn't a (valid, bookable) combined offering. Requires: a live `unified_catalog`
- * collective the venue actively belongs to; an `active` item; and a bookable
- * (`approved` + `active`) provider for (item, venue, source service) — matching
- * the chosen practitioner, or a venue-wide ("all practitioners") provider.
+ * collective the venue actively belongs to; an `active` item; and an `active`
+ * provider for (item, venue, source service) — matching the chosen practitioner,
+ * or a venue-wide ("all practitioners") provider. Host assignments go live
+ * immediately (per-service member consent was removed), so `approval_status`
+ * is deliberately NOT consulted — legacy `pending` rows are bookable too.
  */
 export async function resolveCollectiveServiceOverride(
   admin: SupabaseClient,
@@ -78,8 +80,7 @@ export async function resolveCollectiveServiceOverride(
     .eq('item_id', collectiveServiceItemId)
     .eq('venue_id', venueId)
     .eq('source_service_id', sourceServiceId)
-    .eq('status', 'active')
-    .eq('approval_status', 'approved');
+    .eq('status', 'active');
   const rows = providers ?? [];
   const provider =
     (practitionerId ? rows.find((r) => r.practitioner_id === practitionerId) : null) ??

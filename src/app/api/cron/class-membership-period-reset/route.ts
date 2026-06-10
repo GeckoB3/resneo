@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { parseMembershipRules } from '@/lib/class-commerce/product-schemas';
 
 interface MembershipRow {
@@ -29,7 +30,9 @@ interface AllowanceLedgerRow {
  * past AND has no `period_reset` ledger row inside the current period, insert a
  * `period_reset` row recording the carry-over (rollover) into the new period.
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('class-membership-period-reset', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

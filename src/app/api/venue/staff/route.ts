@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 /** GET /api/venue/staff - list staff for the venue (admin only). Includes linked practitioner for Model B. */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

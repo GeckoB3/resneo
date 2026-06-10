@@ -25,7 +25,8 @@ export default async function LoginPage({
       redirect(allowVenueShell ? '/dashboard' : '/super');
     }
     if (isSalesAgent(user)) {
-      redirect('/sales');
+      // Dual-role salespeople (venue staff / customer too) pick a surface on login.
+      redirect('/auth/choose-destination');
     }
     redirect('/dashboard');
   }

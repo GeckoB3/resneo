@@ -1,24 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/browser';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 
 interface Props {
   email: string;
   name: string | null;
+  /** Dual-role salespeople (venue staff / customer) can hop between surfaces. */
+  showSwitch?: boolean;
 }
 
-export function SalesSidebar({ email, name }: Props) {
-  const router = useRouter();
+export function SalesSidebar({ email, name, showSwitch = false }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push('/login');
-    router.refresh();
+    await signOutCleanly('/login');
   }
 
   const displayName = name?.trim() || 'Sales';
@@ -32,7 +29,15 @@ export function SalesSidebar({ email, name }: Props) {
           className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-slate-300 hover:bg-slate-800"
           aria-label="Toggle navigation"
         >
-          {mobileOpen ? '✕' : '☰'}
+          {mobileOpen ? (
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          )}
         </button>
       </div>
 
@@ -61,6 +66,9 @@ export function SalesSidebar({ email, name }: Props) {
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-3 rounded-lg bg-slate-800 px-3 py-2.5 text-sm font-medium text-white"
           >
+            <svg className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
+            </svg>
             Dashboard
           </Link>
         </nav>
@@ -75,6 +83,14 @@ export function SalesSidebar({ email, name }: Props) {
               <p className="text-[11px] text-slate-500 truncate">{email}</p>
             </div>
           </div>
+          {showSwitch && (
+            <Link
+              href="/auth/choose-destination"
+              className="block w-full rounded-lg border border-slate-700 px-3 py-2 text-center text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            >
+              Switch dashboard
+            </Link>
+          )}
           <button
             onClick={handleSignOut}
             className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200"

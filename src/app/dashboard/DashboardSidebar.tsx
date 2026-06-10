@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import { dispatchNavReselect } from '@/lib/ui/nav-reselect';
 import { FullscreenToggleButton } from '@/components/ui/FullscreenToggleButton';
@@ -370,14 +371,9 @@ export function DashboardSidebar({
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.push('/login');
-      router.refresh();
-    } finally {
-      // Leave disabled briefly — navigation unmounts this component anyway.
-    }
+    // Hard teardown (cache purge + Clear-Site-Data + full navigation) so the
+    // next account on this browser can never see this session's cached data.
+    await signOutCleanly('/login');
   }
 
   const isActive = (href: string) => {

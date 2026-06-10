@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { previousMonthStartUtc, runMonthlyStatementsForAll } from '@/lib/sales/earnings';
 
 /**
@@ -11,7 +12,9 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('sales-monthly', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

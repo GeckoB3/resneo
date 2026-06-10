@@ -14,6 +14,8 @@ export interface StaffSurfaceBookingModalProps {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** Fires at booking POST success (before the staff confirmation is dismissed) — see {@link StaffSurfaceBookingStack}. */
+  onBookingSubmitted?: () => void;
   venueId: string;
   currency: string;
   bookingModel: BookingModel;
@@ -52,6 +54,7 @@ export function StaffSurfaceBookingModal({
   open,
   onClose,
   onCreated,
+  onBookingSubmitted,
   venueId,
   currency,
   bookingModel,
@@ -125,6 +128,7 @@ export function StaffSurfaceBookingModal({
             advancedMode={advancedMode}
             bookingIntent={intent}
             onCreated={onCreated}
+            onBookingSubmitted={onBookingSubmitted}
             onClose={onClose}
             initialDate={preselectedDate ?? staffRebookBootstrap?.initialDate}
             initialTime={preselectedTime}

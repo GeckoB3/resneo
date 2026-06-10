@@ -69,6 +69,7 @@ export async function GET(req: NextRequest) {
 
     const admin = getSupabaseAdminClient();
 
+    // Test/development venues are excluded so reports reflect real customer data.
     let venueQuery = admin
       .from('venues')
       .select(
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
          subscription_current_period_start, subscription_current_period_end,
          stripe_subscription_id, onboarding_completed`,
       )
+      .eq('is_test', false)
       .order('created_at', { ascending: false });
 
     if (search) {
@@ -93,11 +95,13 @@ export async function GET(req: NextRequest) {
       admin
         .from('venues')
         .select('id', { count: 'exact', head: true })
+        .eq('is_test', false)
         .gte('created_at', from.toISOString())
         .lt('created_at', toExclusive.toISOString()),
       admin
         .from('venues')
         .select('id', { count: 'exact', head: true })
+        .eq('is_test', false)
         .in('plan_status', ['cancelled', 'cancelling'])
         .lt('created_at', from.toISOString())
         .gte('updated_at', from.toISOString())

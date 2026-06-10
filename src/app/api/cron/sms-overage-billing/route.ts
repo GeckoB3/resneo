@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { reportUnreportedSmsUsageRows } from '@/lib/sms-usage';
 
 /**
  * Monthly safety net: report any SMS overage segments that were counted locally
  * but not accepted by Stripe Billing Meter events at send time.
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('sms-overage-billing', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

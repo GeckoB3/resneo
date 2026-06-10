@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { materializeRecurringReservation } from '@/lib/class-commerce/materialize-recurring-reservation';
 
 /**
  * Cron: process due `class_recurring_reservations` and create free class_session bookings where possible.
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('class-recurring-materialize', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

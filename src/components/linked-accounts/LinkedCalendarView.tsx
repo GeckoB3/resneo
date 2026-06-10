@@ -191,7 +191,17 @@ export function LinkedCalendarView({
       ) : null}
 
       {loading ? (
-        <p className="py-8 text-center text-sm text-slate-500">Loading linked calendars…</p>
+        <div role="status" aria-label="Loading linked calendars" className="space-y-5">
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="h-4 w-44 animate-pulse rounded bg-slate-200" />
+              <div className="mt-3 space-y-2">
+                <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
+                <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : venues.length === 0 ? (
         <p className="py-8 text-center text-sm text-slate-500">
           No linked venues share calendar visibility with you yet. Set up a link under Settings →
@@ -470,6 +480,12 @@ export function EditLinkedBookingModal({
     pingLinkedBookingView(booking.id);
   }, [booking.id]);
 
+  const hasChanges =
+    date !== booking.bookingDate ||
+    time !== fmtTime(booking.bookingTime) ||
+    status !== booking.status ||
+    notes.trim() !== '';
+
   const save = async (overrideStatus?: string) => {
     setBusy(true);
     setError(null);
@@ -571,7 +587,13 @@ export function EditLinkedBookingModal({
             <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
               Close
             </button>
-            <button type="button" className={btnPrimary} disabled={busy} onClick={() => save()}>
+            <button
+              type="button"
+              className={btnPrimary}
+              disabled={busy || !hasChanges}
+              title={hasChanges ? undefined : 'No changes yet'}
+              onClick={() => save()}
+            >
               {busy ? 'Saving…' : 'Save changes'}
             </button>
           </div>
@@ -894,7 +916,7 @@ export function CreateLinkedBookingModal({
             ))}
           </select>
         </label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <label className="block">
             <span className="block text-sm font-medium text-slate-700">Date</span>
             <input

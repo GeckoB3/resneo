@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
-import { isSalesAgent } from '@/lib/sales/auth';
 import { SignupPlanConflictBanner } from '@/components/signup/SignupPlanConflictBanner';
 import { SignupNavAuth } from '@/components/signup/SignupNavAuth';
 
@@ -12,9 +11,6 @@ export default async function SignupLayout({ children }: { children: React.React
   const { data: { user } } = await supabase.auth.getUser();
   if (user && isPlatformSuperuser(user)) {
     redirect('/super');
-  }
-  if (user && isSalesAgent(user)) {
-    redirect('/sales');
   }
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">

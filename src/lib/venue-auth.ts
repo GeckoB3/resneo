@@ -136,6 +136,26 @@ async function resolveStaffIdentityUncached(
   const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], context);
   if (!row) return null;
 
+  // Lazy backfill: rows created before user_id was set at insert only resolve
+  // via this fragile email match. When the match is a single unclaimed row,
+  // persist the durable auth link so future resolution survives email changes.
+  // Fire-and-forget — resolution must not block on it; .is('user_id', null)
+  // guards against racing another request that already claimed the row.
+  if (row.user_id == null && (rows ?? []).length === 1) {
+    void admin
+      .from('staff')
+      .update({ user_id: userId })
+      .eq('id', row.id)
+      .is('user_id', null)
+      .then(({ error: backfillErr }) => {
+        if (backfillErr) {
+          console.warn(`[${context}] staff user_id backfill failed:`, backfillErr.message, {
+            staffId: row.id,
+          });
+        }
+      });
+  }
+
   return {
     id: row.id,
     venue_id: row.venue_id,

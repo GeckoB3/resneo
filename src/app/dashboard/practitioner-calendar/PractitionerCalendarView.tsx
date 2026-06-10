@@ -951,6 +951,19 @@ function computeBookingClusterLayouts(
 }
 
 /** Deposit + attendance “Confirmed” pill — bottom-left; pill uses white + indigo ring to read on any block hue. */
+/**
+ * True when {@link BookingBlockPills} would render at least one pill. Used to gate
+ * the pills row (and its top divider) so an empty row — which would otherwise show
+ * just a thin separator line across the bar — never renders.
+ */
+function bookingHasBlockPills(b: Booking): boolean {
+  return (
+    (showDepositPendingPill(b) && ['Pending', 'Booked', 'Confirmed'].includes(b.status)) ||
+    (showAttendanceConfirmedSupplementPill(b) && ['Pending', 'Booked', 'Seated'].includes(b.status)) ||
+    ((b.addons_count ?? 0) > 0 && (b.booking_addon_labels?.length ?? 0) === 0)
+  );
+}
+
 function BookingBlockPills({ b }: { b: Booking }) {
   return (
     <>
@@ -5494,6 +5507,7 @@ export function PractitionerCalendarView({
               onBookingCreated={() => {
                 void fetchData();
               }}
+              onBookingSubmitted={() => void refetchBookingsList()}
             />
           )}
         />
@@ -6523,7 +6537,9 @@ export function PractitionerCalendarView({
                           const cardDensity =
                             isOverlapLane || contentHeightPx < 56 ? 'compact' : 'comfortable';
                           const showPillsRow =
-                            !isOverlapLane && contentHeightPx >= (cardDensity === 'compact' ? 72 : 88);
+                            !isOverlapLane &&
+                            contentHeightPx >= (cardDensity === 'compact' ? 72 : 88) &&
+                            bookingHasBlockPills(b);
                           return (
                             <DraggableBookingShell
                               key={`${b.id}-${b.status}-${b.client_arrived_at ?? ''}`}
@@ -6831,7 +6847,8 @@ export function PractitionerCalendarView({
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
-                                          const showSegPills = !isOverlapLane && segmentApproxPx >= 88;
+                                          const showSegPills =
+                                            !isOverlapLane && segmentApproxPx >= 88 && bookingHasBlockPills(b);
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                                           const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
                                           return (
@@ -7276,6 +7293,7 @@ export function PractitionerCalendarView({
             clearStaffBookingPrefill();
             void refetchBookingsList();
           }}
+          onBookingSubmitted={() => void refetchBookingsList()}
           venueId={eventBookPrefill?.linkedOwnerVenueId ?? venueId}
           currency={currency}
           bookingModel={bookingModel}
@@ -7362,6 +7380,7 @@ export function PractitionerCalendarView({
             setLinkedCreating(null);
             void loadLinkedData();
           }}
+          onBookingSubmitted={() => void loadLinkedData()}
           venueId={linkedCreating.venue.venueId}
           currency={currency}
           bookingModel={bookingModel}

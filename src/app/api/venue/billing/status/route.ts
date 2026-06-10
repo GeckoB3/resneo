@@ -1,6 +1,6 @@
 import type Stripe from 'stripe';
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
 import {
@@ -140,9 +140,9 @@ async function retrieveUpcomingInvoiceSafe(
  * GET /api/venue/billing/status
  * Live Stripe + DB snapshot for the Settings > Plan tab, including Customer Portal returns.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff || !requireAdmin(staff)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403, headers: NO_STORE_HEADERS });

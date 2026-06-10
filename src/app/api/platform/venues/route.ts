@@ -14,6 +14,7 @@ const PAGE_SIZE = 50;
  *   search    – case-insensitive substring match on venue name or slug
  *   tier      – filter by pricing_tier (appointments | restaurant | founding)
  *   status    – filter by plan_status  (active | past_due | cancelled | trialing)
+ *   env       – live (default) | test | all — separates dev/test venues from real data
  */
 export async function GET(req: NextRequest) {
   const auth = await requirePlatformSuperuserAuth();
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get('search')?.trim() ?? '';
   const tier = searchParams.get('tier')?.trim() ?? '';
   const status = searchParams.get('status')?.trim() ?? '';
+  const env = searchParams.get('env')?.trim() || 'live';
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -35,8 +37,8 @@ export async function GET(req: NextRequest) {
     .select(
       `id, name, slug, email, phone, pricing_tier, plan_status, billing_access_source,
        stripe_customer_id, stripe_subscription_id,
-       subscription_current_period_end, booking_model,
-       created_at, onboarding_completed,
+       subscription_current_period_start, subscription_current_period_end, booking_model,
+       created_at, onboarding_completed, is_test,
        staff ( id, email, name, phone, role, created_at )`,
       { count: 'exact' },
     )
@@ -51,6 +53,11 @@ export async function GET(req: NextRequest) {
   }
   if (status) {
     query = query.eq('plan_status', status);
+  }
+  if (env === 'test') {
+    query = query.eq('is_test', true);
+  } else if (env !== 'all') {
+    query = query.eq('is_test', false);
   }
 
   const { data: venues, count, error } = await query;

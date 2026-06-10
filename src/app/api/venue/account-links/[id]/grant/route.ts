@@ -112,7 +112,9 @@ export async function POST(
           high_grants_calendar_ids: next.calendarIds ?? null,
         };
 
-    await ctx.admin.from('account_links').update(column).eq('id', id);
+    // A unilateral change supersedes any in-flight negotiated proposal — clearing it
+    // stops a stale proposal being accepted later and overriding this venue's newest intent.
+    await ctx.admin.from('account_links').update({ ...column, pending_change: null }).eq('id', id);
 
     await reconcileCollectivesAfterLinkChange(ctx.admin, [
       link.venue_low_id,

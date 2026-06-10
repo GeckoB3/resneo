@@ -9,6 +9,7 @@ import {
   listActiveSalespeople,
   resolveSalesInviteBaseUrl,
 } from '@/lib/sales/admin';
+import { recordPlatformAuditEvent } from '@/lib/platform/audit';
 
 const createBodySchema = z
   .object({
@@ -94,6 +95,13 @@ export async function POST(request: Request) {
         createdBy: user.id,
         ...rewardOpts,
       });
+      await recordPlatformAuditEvent(admin, {
+        superuser: user,
+        action: 'salesperson.create',
+        targetType: 'salesperson',
+        targetId: email,
+        summary: `Created salesperson ${email} (password)`,
+      });
       return NextResponse.json({ ok: true, ...result, method: 'password' as const });
     }
 
@@ -104,6 +112,13 @@ export async function POST(request: Request) {
       baseUrl,
       createdBy: user.id,
       ...rewardOpts,
+    });
+    await recordPlatformAuditEvent(admin, {
+      superuser: user,
+      action: 'salesperson.create',
+      targetType: 'salesperson',
+      targetId: email,
+      summary: `Created salesperson ${email} (magic link invite)`,
     });
     return NextResponse.json({ ok: true, ...result, method: 'magic_link' as const });
   } catch (e) {

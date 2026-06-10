@@ -407,11 +407,19 @@ interface AppointmentBookingFlowProps {
   collectiveServiceItemId?: string;
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
+  /**
+   * Fires the moment a booking is created/updated (POST success) rather than when staff
+   * dismiss the confirmation screen ({@link onBookingCreated}) — lets host calendars
+   * refresh their grid while the modal is still open.
+   */
+  onBookingSubmitted?: () => void;
   initialDate?: string;
   initialTime?: string;
   preselectedPractitionerId?: string;
   preselectedServiceId?: string;
   waitlistOfferEntryId?: string;
+  /** Public flow: open on "Select a service", skipping the single/group mode chooser (`?start=service`). */
+  initialStep?: 'service';
   /** Staff walk-ins: optional guest contact (defaults name to Walk In). */
   staffBookingSource?: 'phone' | 'walk-in';
   editBooking?: {
@@ -490,11 +498,13 @@ export function AppointmentBookingFlow({
   collectiveServiceItemId,
   bookingAudience = 'public',
   onBookingCreated,
+  onBookingSubmitted,
   initialDate,
   initialTime,
   preselectedPractitionerId,
   preselectedServiceId,
   waitlistOfferEntryId,
+  initialStep,
   staffBookingSource = 'phone',
   editBooking,
   staffRebookBootstrap = null,
@@ -571,7 +581,7 @@ export function AppointmentBookingFlow({
 
   // Shared state
   const [step, setStep] = useState<Step>(() =>
-    editBooking ? 'service' : isLockedPractitionerFlow ? 'service' : isStaff ? 'service' : 'mode_choice',
+    editBooking || isLockedPractitionerFlow || isStaff || initialStep === 'service' ? 'service' : 'mode_choice',
   );
   const [date, setDate] = useState(() => editBooking?.booking_date ?? initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
@@ -612,6 +622,15 @@ export function AppointmentBookingFlow({
     cancellation_notice_hours: number;
     payment_url?: string;
   } | null>(null);
+
+  // Keyed by booking id so host re-renders (new callback identity) don't re-fire the notify.
+  const submittedNotifiedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!createResult?.booking_id) return;
+    if (submittedNotifiedIdRef.current === createResult.booking_id) return;
+    submittedNotifiedIdRef.current = createResult.booking_id;
+    onBookingSubmitted?.();
+  }, [createResult, onBookingSubmitted]);
 
   const [multiServiceSegments, setMultiServiceSegments] = useState<MultiServiceSegment[] | null>(null);
   const [addingExtraService, setAddingExtraService] = useState(false);
@@ -2519,7 +2538,7 @@ export function AppointmentBookingFlow({
 
       {step === 'service' && (
         <div>
-          {!isLockedPractitionerFlow && !isEdit && !isStaff && (
+          {!isLockedPractitionerFlow && !isEdit && !isStaff && initialStep !== 'service' && (
             isPublicGuest ? (
               <AppointmentBackLink onClick={() => setStep('mode_choice')} />
             ) : (

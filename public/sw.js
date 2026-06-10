@@ -1,4 +1,6 @@
-const CACHE_NAME = 'reserve-ni-daysheet-v1';
+// v2: drop v1 entries cached before logout started purging this store —
+// the activate handler deletes every cache that is not CACHE_NAME.
+const CACHE_NAME = 'reserve-ni-daysheet-v2';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -34,10 +36,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, clone);
-        });
+        // Cache successful responses only: a 401/redirect cached here would be
+        // replayed to whoever uses this browser next time the network fails.
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, clone);
+          });
+        }
         return response;
       })
       .catch(() => caches.match(event.request))

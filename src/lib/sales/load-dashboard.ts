@@ -1,8 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
+  computeMonthlyStatement,
   countActivePayingSubscribers,
   monthStartUtc,
+  type BonusTierRow,
   type SalespersonRow,
 } from '@/lib/sales/earnings';
 import { planDisplayName } from '@/lib/pricing-constants';
@@ -92,8 +94,23 @@ export async function loadSalesDashboardForUser(
     ]);
 
   const awardedSet = new Set((awards ?? []).map((a) => (a as { threshold: number }).threshold));
-  const tierRows = (tiers ?? []) as Array<{ threshold: number; amount_pence: number }>;
+  const tierRows = (tiers ?? []) as BonusTierRow[];
   const activePaying = await countActivePayingSubscribers(db, spId);
+
+  // Live "this month so far" estimate (not persisted; the cron writes the official statement).
+  const currentMonth = monthStartUtc(new Date());
+  let currentMonthEstimate = 0;
+  try {
+    const liveBreakdown = await computeMonthlyStatement({
+      admin: db,
+      salesperson,
+      periodMonth: currentMonth,
+      bonusTiers: tierRows,
+    });
+    currentMonthEstimate = liveBreakdown.total_pence;
+  } catch (e) {
+    console.error('[sales/load-dashboard] current month estimate failed', e);
+  }
 
   const nextTier =
     tierRows.find((t) => !awardedSet.has(t.threshold) && activePaying < t.threshold) ?? null;
@@ -166,10 +183,6 @@ export async function loadSalesDashboardForUser(
     0,
   );
 
-  const currentMonthStmt = (statements ?? []).find(
-    (s) => (s as { period_month: string }).period_month === nowMonth,
-  ) as { total_pence: number } | undefined;
-
   return {
     salesperson: {
       id: salesperson.id,
@@ -188,7 +201,7 @@ export async function loadSalesDashboardForUser(
       validated_signups: validatedSignups,
       active_paying_subscribers: activePaying,
       lifetime_earnings_pence: lifetimeEarnings,
-      current_month_estimated_pence: currentMonthStmt?.total_pence ?? 0,
+      current_month_estimated_pence: currentMonthEstimate,
     },
     bonus_ladder: {
       tiers: tierRows.map((t) => ({

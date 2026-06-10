@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { requireCompliancePlan } from '@/lib/compliance/auth';
 import { revokeFormLink } from '@/lib/compliance/form-links-service';
@@ -9,9 +9,9 @@ interface RouteCtx {
 }
 
 /** POST /api/venue/compliance/form-links/[id]/revoke — revoke an unconsumed link. */
-export async function POST(_request: NextRequest, ctx: RouteCtx) {
+export async function POST(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     const gate = await requireCompliancePlan(staff);

@@ -34,6 +34,7 @@ import {
 import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
 import { recordSalesInvoiceRevenue } from '@/lib/sales/invoice-revenue';
 import { syncSalesAttributionWithPlanStatus } from '@/lib/sales/churn';
+import { recordPlatformInvoice } from '@/lib/platform/invoices';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -166,6 +167,11 @@ export async function POST(request: NextRequest) {
           await recordSalesInvoiceRevenue(supabase, invoice);
         } catch (e) {
           console.error('[Subscription webhook] recordSalesInvoiceRevenue failed:', e);
+        }
+        try {
+          await recordPlatformInvoice(supabase, invoice);
+        } catch (e) {
+          console.error('[Subscription webhook] recordPlatformInvoice failed:', e);
         }
         break;
       }
@@ -371,6 +377,9 @@ async function handleCheckoutCompleted(
       email: userEmail,
       name: userEmail.split('@')[0] ?? 'Admin',
       role: 'admin',
+      // Durable auth link: identity resolution prefers user_id over the
+      // fragile email match, which breaks when the sign-in email changes.
+      user_id: supabaseUserId,
     });
 
     if (staffError) {
@@ -565,6 +574,12 @@ async function handleSubscriptionDeleted(
       })
       .eq('id', vid);
     updatedAny = true;
+
+    try {
+      await syncSalesAttributionWithPlanStatus(supabase, vid, planStatus);
+    } catch (e) {
+      console.error('[Subscription webhook] sales churn sync (deleted) failed:', e);
+    }
   }
 
   /**
@@ -586,5 +601,18 @@ async function handleSubscriptionDeleted(
         subscription_current_period_end: periodEndIso,
       })
       .eq('stripe_customer_id', customerId);
+
+    try {
+      const { data: fallbackRows } = await supabase
+        .from('venues')
+        .select('id')
+        .eq('stripe_customer_id', customerId);
+      for (const row of fallbackRows ?? []) {
+        const vid = (row as { id?: string }).id;
+        if (vid) await syncSalesAttributionWithPlanStatus(supabase, vid, planStatus);
+      }
+    } catch (e) {
+      console.error('[Subscription webhook] sales churn sync (deleted fallback) failed:', e);
+    }
   }
 }

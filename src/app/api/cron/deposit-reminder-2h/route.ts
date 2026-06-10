@@ -4,6 +4,7 @@ import { sendCommunication } from '@/lib/communications';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { tryGetPaymentTokenSecret } from '@/lib/payment-token';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
@@ -15,7 +16,9 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('deposit-reminder-2h', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

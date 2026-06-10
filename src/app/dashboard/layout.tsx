@@ -7,6 +7,7 @@ import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { DashboardShell } from './DashboardShell';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
+import { BfcacheReloadGuard } from '@/components/BfcacheReloadGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
 import { DashboardDetailCacheProvider } from '@/components/providers/DashboardDetailCacheProvider';
 import { DashboardToolbarVenueProvider } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
@@ -34,6 +35,9 @@ import { loadCollectiveBookingLinksForVenue } from '@/lib/linked-accounts/collec
 import { WaitlistAvailabilityBanner } from '@/components/dashboard/waitlist/WaitlistAvailabilityBanner';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { DEFAULT_RESOLVED_APPOINTMENTS_FEATURE_FLAGS, parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { loadActiveAnnouncementsForUser, type ActiveAnnouncement } from '@/lib/platform/announcements';
+import { PlatformAnnouncementBanners } from '@/components/dashboard/PlatformAnnouncementBanners';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { VenueFeatureFlagsProvider } from '@/components/providers/VenueFeatureFlagsProvider';
 import type { ResolvedAppointmentsFeatureFlags } from '@/lib/feature-flags';
 
@@ -186,6 +190,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (e && typeof e === 'object' && 'digest' in e) throw e;
   }
 
+  let platformAnnouncements: ActiveAnnouncement[] = [];
+  try {
+    platformAnnouncements = await loadActiveAnnouncementsForUser(
+      getSupabaseAdminClient(),
+      identity.id,
+    );
+  } catch (e) {
+    console.error('[dashboard/layout] announcements load failed:', e);
+  }
+
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-100">
       <DashboardShell
@@ -296,11 +310,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         )}
+        <PlatformAnnouncementBanners announcements={platformAnnouncements} />
         {isAdmin && !isRestaurantTableProductTier(pricingTier) ? (
           <LinkedAccountBanner />
         ) : null}
         <WaitlistAvailabilityBanner />
         {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
+        <BfcacheReloadGuard />
         <StaffRebookBootstrapRouteCleanup />
         <VenueFeatureFlagsProvider flags={appointmentsFeatureFlags}>
         <DashboardVenueBootstrapProvider value={venueBootstrap}>

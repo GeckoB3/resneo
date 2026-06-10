@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
 
 interface RecurrenceRule {
@@ -30,7 +31,9 @@ function enumerateDates(start: string, end: string): string[] {
 /**
  * Expands recurring event/class calendars into event_sessions rows (idempotent via recurrence_key).
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('materialize-event-sessions', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

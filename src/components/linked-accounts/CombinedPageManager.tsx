@@ -126,7 +126,7 @@ export function CombinedPageManager({
   };
 
   /** PATCH the collective settings (mode / address); refresh both views. */
-  const settings = async (body: Record<string, unknown>): Promise<void> => {
+  const settings = async (body: Record<string, unknown>): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
@@ -139,8 +139,10 @@ export function CombinedPageManager({
       if (!res.ok) throw new Error(json.error ?? 'Failed to update settings.');
       onChanged();
       await load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update settings.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -406,7 +408,7 @@ export function CombinedPageManager({
         </div>
       ) : null}
 
-      <div className="max-h-[68vh] space-y-5 overflow-y-auto pr-1">
+      <div className="max-h-[min(68vh,calc(100dvh-11rem))] space-y-5 overflow-y-auto pr-1">
         {error ? (
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
             {error}
@@ -479,7 +481,7 @@ function PageAddressSection({
 }: {
   collective: CollectiveView;
   busy: boolean;
-  onSettings: (body: Record<string, unknown>) => Promise<void>;
+  onSettings: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const adopt = collective.slugStrategy === 'adopt_member';
   return (
@@ -556,13 +558,23 @@ function PageNameField({
 }: {
   collective: CollectiveView;
   busy: boolean;
-  onSettings: (body: Record<string, unknown>) => Promise<void>;
+  onSettings: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [name, setName] = useState(collective.name);
+  const [save, setSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-slate-700">
-        Page name (shown to customers)
+      <span className="mb-1 flex items-center justify-between text-sm font-medium text-slate-700">
+        <span>Page name (shown to customers)</span>
+        <span aria-live="polite" className="text-xs font-normal">
+          {save === 'saving' ? (
+            <span className="text-slate-400">Saving…</span>
+          ) : save === 'saved' ? (
+            <span className="text-emerald-600">Saved</span>
+          ) : save === 'error' ? (
+            <span className="text-rose-600">Couldn&rsquo;t save — try again</span>
+          ) : null}
+        </span>
       </span>
       <input
         className={inputCls}
@@ -572,7 +584,16 @@ function PageNameField({
         onChange={(e) => setName(e.target.value)}
         onBlur={() => {
           const v = name.trim();
-          if (v.length >= 2 && v !== collective.name) void onSettings({ name: v });
+          if (v.length < 2 || v === collective.name) return;
+          setSave('saving');
+          void onSettings({ name: v }).then((ok) => {
+            if (!ok) {
+              setSave('error');
+              return;
+            }
+            setSave('saved');
+            setTimeout(() => setSave((s) => (s === 'saved' ? 'idle' : s)), 2500);
+          });
         }}
       />
     </label>

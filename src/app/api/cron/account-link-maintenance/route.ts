@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import {
   notifyLinkExpired,
@@ -30,7 +31,9 @@ interface VenueState {
  * (§6.3, §6.7): expire stale pending requests, suspend links when a venue's
  * subscription lapses, resume them on restore, and expire long-suspended links.
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('account-link-maintenance', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

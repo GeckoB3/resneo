@@ -136,6 +136,9 @@ export async function POST(request: Request) {
         email: user.email,
         name: user.email?.split('@')[0] ?? 'Admin',
         role: 'admin',
+        // Durable auth link: identity resolution prefers user_id over the
+        // fragile email match, which breaks when the sign-in email changes.
+        user_id: user.id,
       });
 
       if (staffError) {

@@ -175,6 +175,9 @@ export async function POST(request: Request) {
       email: ownerEmail,
       name: ownerEmail.split('@')[0] ?? 'Admin',
       role: 'admin',
+      // Durable auth link (password mode only — magic-link mode creates the
+      // auth user later, and identity resolution lazily backfills user_id).
+      user_id: authUserId,
     });
 
     if (staffError) {

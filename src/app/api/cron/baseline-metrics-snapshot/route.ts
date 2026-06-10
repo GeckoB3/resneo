@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import {
   captureVenueBaselineSnapshot,
   rolling90DayPeriod,
@@ -14,7 +15,9 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('baseline-metrics-snapshot', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

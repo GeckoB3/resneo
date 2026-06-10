@@ -3,10 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { collectiveMemberActionSchema } from '@/lib/linked-accounts/validation';
 import {
-  hasFullMutualWriteLinks,
   loadCollectiveViewsForVenue,
   reconcileCollective,
 } from '@/lib/linked-accounts/collectives';
+import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveInvitation,
@@ -113,12 +113,15 @@ export async function PATCH(
         );
       }
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
-      const ok = await hasFullMutualWriteLinks(ctx.admin, input.venueId, members);
-      if (!ok) {
+      // Same gate as collective CREATE (D4 mutual write + D8 single timezone) — an
+      // invite must not admit a venue the create path would have rejected.
+      const eligibility = await checkCombinedEligibility(ctx.admin, [input.venueId, ...members]);
+      if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
-              'That venue must grant full create/edit/cancel access with every current member before it can join the combined page.',
+              eligibility.reason ??
+              'That venue can’t join the combined page yet.',
           },
           { status: 400 },
         );
@@ -214,12 +217,15 @@ export async function PATCH(
         );
       }
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
-      const ok = await hasFullMutualWriteLinks(ctx.admin, ctx.venueId, members);
-      if (!ok) {
+      // Same gate as collective CREATE (D4 mutual write + D8 single timezone): link
+      // or timezone changes since the invite must block acceptance, not just creation.
+      const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...members]);
+      if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
-              'You must grant full create/edit/cancel access with every member before joining the combined page.',
+              eligibility.reason ??
+              'Your venue can’t join the combined page yet.',
           },
           { status: 400 },
         );

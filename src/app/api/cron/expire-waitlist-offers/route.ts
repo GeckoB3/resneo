@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { processExpiredWaitlistOffers } from '@/lib/booking/process-expired-waitlist-offers';
 import { syncStaffChooseWaitlistOpportunitiesCron } from '@/lib/booking/sync-staff-choose-waitlist-opportunities';
@@ -13,7 +14,9 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('expire-waitlist-offers', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

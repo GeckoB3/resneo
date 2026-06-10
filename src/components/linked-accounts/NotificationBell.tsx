@@ -163,11 +163,14 @@ export function NotificationBell() {
     setItems((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnread(0);
     try {
-      await fetch('/api/venue/notifications/read', {
+      const res = await fetch('/api/venue/notifications/read', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ all: true }),
       });
+      // A non-OK response means the server kept them unread — resync now rather
+      // than letting the badge silently disagree until some later refresh.
+      if (!res.ok) void load();
     } catch {
       void load();
     }
@@ -238,7 +241,7 @@ export function NotificationBell() {
               role="dialog"
               aria-label="Notifications"
               style={{ position: 'fixed', left: coords.left, bottom: coords.bottom }}
-              className="z-[60] w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
+              className="z-[60] w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
             >
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
@@ -254,7 +257,17 @@ export function NotificationBell() {
 
           <div className="max-h-[24rem] overflow-y-auto overscroll-contain">
             {!loaded ? (
-              <p className="px-4 py-6 text-center text-sm text-slate-400">Loading…</p>
+              <div role="status" aria-label="Loading notifications" className="space-y-1 px-4 py-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-start gap-3 py-2.5">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full bg-slate-200" aria-hidden />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="h-3 w-3/4 animate-pulse rounded bg-slate-200" />
+                      <div className="h-2.5 w-1/2 animate-pulse rounded bg-slate-100" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : groups.length === 0 ? (
               <div className="px-4 py-8 text-center">
                 <p className="text-sm font-medium text-slate-700">You&rsquo;re all caught up</p>

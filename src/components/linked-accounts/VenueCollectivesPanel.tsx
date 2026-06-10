@@ -66,16 +66,19 @@ export function VenueCollectivesPanel({
   // added from the Manage combined page → Members tab, and it's ended via Dissolve.
   const hasLiveCollective = collectives.some((c) => c.status !== 'dissolved');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<CollectiveView[] | null> => {
     setLoading(true);
     try {
       const res = await fetch('/api/venue/collectives');
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to load collectives.');
-      setCollectives(json.collectives ?? []);
+      const list: CollectiveView[] = json.collectives ?? [];
+      setCollectives(list);
       setError(null);
+      return list;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load collectives.');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -99,7 +102,12 @@ export function VenueCollectivesPanel({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Action failed.');
-      await load();
+      const list = await load();
+      // Re-point (or close) an open Manage modal so it never shows a stale
+      // membership state after accept/decline/leave from the row.
+      if (list) {
+        setManageTarget((cur) => (cur ? (list.find((c) => c.id === cur.id) ?? null) : cur));
+      }
       refreshLayout();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed.');

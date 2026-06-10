@@ -14,6 +14,7 @@ const KNOWN_ACTIONS = new Set([
   'created_booking',
   'edited_booking',
   'cancelled_booking',
+  'deleted_booking',
 ]);
 
 function csvCell(value: string): string {
@@ -54,6 +55,11 @@ export async function GET(
       if (limited) return limited;
     }
     const actionFilter = sp.get('action');
+    // Reject unknown action filters instead of silently ignoring them — returning
+    // the unfiltered list for a bad filter misreads as "this action never happened".
+    if (actionFilter && !KNOWN_ACTIONS.has(actionFilter)) {
+      return NextResponse.json({ error: 'Unknown action filter.' }, { status: 400 });
+    }
     const fromDate = sp.get('from');
     const toDate = sp.get('to');
     const actingUserId = sp.get('actingUserId');
@@ -68,7 +74,7 @@ export async function GET(
         )
         .eq('link_id', id)
         .order('created_at', { ascending: false });
-      if (actionFilter && KNOWN_ACTIONS.has(actionFilter)) {
+      if (actionFilter) {
         q = q.eq('action_type', actionFilter);
       }
       if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00.000Z`);

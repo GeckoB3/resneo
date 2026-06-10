@@ -16,6 +16,61 @@ const postBodySchema = z.object({
   reason: z.string().min(3).max(2000),
 });
 
+/** GET /api/platform/support-sessions — recent sessions (active first) for the audit page. */
+export async function GET() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user || !isPlatformSuperuser(user)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const admin = getSupabaseAdminClient();
+  const { data: sessions, error } = await admin
+    .from('support_sessions')
+    .select(
+      'id, superuser_email, superuser_display_name, venue_id, apparent_staff_id, reason, started_at, expires_at, ended_at',
+    )
+    .order('started_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error('[platform/support-sessions GET]', error.message);
+    return NextResponse.json({ error: 'Failed to load sessions' }, { status: 500 });
+  }
+
+  const rows = (sessions ?? []) as Array<{
+    id: string;
+    superuser_email: string;
+    superuser_display_name: string | null;
+    venue_id: string;
+    apparent_staff_id: string;
+    reason: string;
+    started_at: string;
+    expires_at: string;
+    ended_at: string | null;
+  }>;
+
+  const venueIds = [...new Set(rows.map((s) => s.venue_id))];
+  const venueNameById = new Map<string, string>();
+  if (venueIds.length) {
+    const { data: venues } = await admin.from('venues').select('id, name').in('id', venueIds);
+    for (const v of (venues ?? []) as Array<{ id: string; name: string }>) {
+      venueNameById.set(v.id, v.name);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  return NextResponse.json({
+    sessions: rows.map((s) => ({
+      ...s,
+      venue_name: venueNameById.get(s.venue_id) ?? s.venue_id,
+      active: !s.ended_at && s.expires_at > nowIso,
+    })),
+  });
+}
+
 /** POST /api/platform/support-sessions — start support session with selected staff permissions (superuser only). */
 export async function POST(request: Request) {
   try {

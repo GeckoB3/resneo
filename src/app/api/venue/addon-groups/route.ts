@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
@@ -25,7 +25,7 @@ const OWNER_VENUE_UUID_RE =
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -66,7 +66,7 @@ const createBodySchema = z.object({
 /** POST /api/venue/addon-groups — admin only */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) {
@@ -136,7 +136,7 @@ const linksUpdateBodySchema = z.object({
  */
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) {

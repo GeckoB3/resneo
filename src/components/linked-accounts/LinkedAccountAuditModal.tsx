@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, btnSecondary } from './linked-accounts-ui';
 
 interface AuditEntry {
@@ -26,6 +26,7 @@ const ACTION_OPTIONS = [
   { value: 'created_booking', label: 'Created booking' },
   { value: 'edited_booking', label: 'Edited booking' },
   { value: 'cancelled_booking', label: 'Cancelled booking' },
+  { value: 'deleted_booking', label: 'Deleted booking' },
 ];
 
 const inputCls =
@@ -81,7 +82,12 @@ export function LinkedAccountAuditModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Monotonic request id: a slow response from OLD filters must not overwrite the
+  // results (or surface an error) of a newer request the user has since made.
+  const requestSeqRef = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -95,14 +101,16 @@ export function LinkedAccountAuditModal({
       if (toDate) qs.set('to', toDate);
       const res = await fetch(`/api/venue/account-links/${linkId}/audit?${qs}`);
       const data = await res.json();
+      if (seq !== requestSeqRef.current) return; // superseded by newer filters
       if (!res.ok) throw new Error(data.error ?? 'Failed to load audit log.');
       setEntries(data.entries ?? []);
       setUsers(data.users ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load audit log.');
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) setLoading(false);
     }
   }, [linkId, page, action, actingUserId, fromDate, toDate]);
 

@@ -39,16 +39,60 @@ export async function resolvePostLoginDestination(
     return next.startsWith('/super') ? next : '/super';
   }
 
-  if (isSalesAgent) {
-    return next.startsWith('/sales') ? next : '/sales';
-  }
-
   // Only treat the resolved `next` as an explicit caller intent when the caller
   // actually passed something. `resolveAuthNextPath('')` defaults to `/dashboard`,
   // and treating that default as "the caller explicitly asked for /dashboard"
   // would skip the dual-role chooser for any user who logged in without a
   // ?next= param (e.g. plain password sign-in from /login).
   const callerProvidedNext = Boolean(rawNext && rawNext.trim());
+
+  if (isSalesAgent) {
+    // Honour an explicit destination (sales, venue, or customer surface).
+    if (callerProvidedNext && (next === '/sales' || next.startsWith('/sales/'))) return next;
+    if (
+      callerProvidedNext &&
+      (next === '/dashboard' ||
+        next.startsWith('/dashboard/') ||
+        next === '/account' ||
+        next.startsWith('/account/') ||
+        next === '/onboarding' ||
+        next.startsWith('/onboarding/') ||
+        isPublicBookingAuthReturnPath(next))
+    ) {
+      return next;
+    }
+
+    // Dual-role salespeople (also venue staff and/or a venue customer) choose on login.
+    const emailNorm = userEmail.trim().toLowerCase();
+    const [staffByUserRes, staffByEmailRes, guestByUserRes, guestByEmailRes] = await Promise.all([
+      admin
+        .from('staff')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .is('revoked_at', null),
+      emailNorm
+        ? admin
+            .from('staff')
+            .select('id', { count: 'exact', head: true })
+            .ilike('email', emailNorm)
+            .is('revoked_at', null)
+        : Promise.resolve({ count: 0 }),
+      admin.from('guests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+      emailNorm
+        ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', emailNorm)
+        : Promise.resolve({ count: 0 }),
+    ]);
+
+    const salesHasStaff =
+      ((staffByUserRes.count ?? 0) > 0) || ((staffByEmailRes.count ?? 0) > 0);
+    const salesHasGuest =
+      ((guestByUserRes.count ?? 0) > 0) || ((guestByEmailRes.count ?? 0) > 0);
+
+    if (salesHasStaff || salesHasGuest) {
+      return '/auth/choose-destination';
+    }
+    return '/sales';
+  }
 
   const explicitAccount =
     callerProvidedNext && (next === '/account' || next.startsWith('/account/'));

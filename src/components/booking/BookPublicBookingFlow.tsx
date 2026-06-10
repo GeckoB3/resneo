@@ -74,6 +74,8 @@ export function BookPublicBookingFlow({
   );
 
   const tabParam = searchParams.get('tab');
+  /** `?start=service`: appointment flows open on "Select a service", skipping the single/group chooser. */
+  const initialStep = searchParams.get('start') === 'service' ? ('service' as const) : undefined;
   const waitlistOfferEntryId = searchParams.get('waitlist_offer') ?? undefined;
   const waitlistPrefillDate = searchParams.get('date') ?? undefined;
   const waitlistPrefillTime = searchParams.get('time') ?? undefined;
@@ -186,6 +188,7 @@ export function BookPublicBookingFlow({
           preselectedServiceId={preselectedServiceId ?? waitlistPrefillServiceId}
           initialDate={initialDate ?? waitlistPrefillDate}
           initialTime={initialTime ?? waitlistPrefillTime}
+          initialStep={initialStep}
         />
       </PublicBookingAccountGateProvider>
     </div>

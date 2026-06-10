@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import {
   filterIdsToManagedCalendars,
   getVenueStaff,
@@ -380,7 +380,7 @@ const OWNER_VENUE_UUID_RE =
  * Optional `?owner_venue_id=` loads the linked owner venue catalogue (requires edit grant). */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -543,7 +543,7 @@ export async function GET(request: NextRequest) {
 /** POST /api/venue/appointment-services - create an appointment service (admin or staff on managed calendars). */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -865,7 +865,7 @@ export async function POST(request: NextRequest) {
 /** PATCH /api/venue/appointment-services - admin: full edit; staff: assigned calendars only. */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -1429,7 +1429,7 @@ export async function PATCH(request: NextRequest) {
 /** DELETE /api/venue/appointment-services - delete a service (admin, or staff if only on managed calendars). */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { sendClassCommerceComm } from '@/lib/communications/send-class-commerce';
 
 interface BalanceRow {
@@ -24,7 +25,9 @@ function isoDaysFromNow(days: number): string {
  *  1. Expire any balance whose expires_at has passed (idempotent via ledger key).
  *  2. Send a single 7-day-before reminder email per balance.
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('class-credit-expiry', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

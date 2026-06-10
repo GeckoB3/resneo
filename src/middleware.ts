@@ -121,8 +121,9 @@ export async function middleware(request: NextRequest) {
   const isChooseDestination = pathname.startsWith('/auth/choose-destination');
   const isPlatformUI = pathname.startsWith('/super');
   const isPlatformAPI = pathname.startsWith('/api/platform');
-  const isSalesUI = pathname.startsWith('/sales');
-  const isSalesAPI = pathname.startsWith('/api/sales');
+  const isSalesUI = pathname === '/sales' || pathname.startsWith('/sales/');
+  // Note: must NOT match the public /api/sales-program/* validation endpoint.
+  const isSalesAPI = pathname === '/api/sales' || pathname.startsWith('/api/sales/');
   const signupPlan = request.nextUrl.searchParams.get('plan');
 
   if (pathname === '/signup/business-type' && (signupPlan === 'restaurant' || signupPlan === 'founding')) {
@@ -277,9 +278,6 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(sess ? '/dashboard' : '/super', request.url));
     }
     const jwtSales = isSalesAgentRoleInJwt(user.app_metadata);
-    if (jwtSales) {
-      return NextResponse.redirect(new URL('/sales', request.url));
-    }
     const admin = getSupabaseAdminClient();
     const meta = user.user_metadata;
     const needsSetPassword = meta.has_set_password === false;

@@ -37,6 +37,10 @@ export interface CalendarGridBooking {
   endTime: string;
   status: string;
   colour?: string | null;
+  /** Arrived/attendance overlay — lets calendar bars colour an arrived-waiting guest (amber). */
+  client_arrived_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
+  guest_attendance_confirmed_at?: string | null;
 }
 
 export interface CalendarGridDay {
@@ -385,7 +389,7 @@ export async function getCalendarGrid(params: {
     supabase
       .from('bookings')
       .select(
-        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id',
+        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at',
       )
       .eq('venue_id', venueId)
       .in('calendar_id', calendarIds)
@@ -461,6 +465,9 @@ export async function getCalendarGrid(params: {
       guest_id: string;
       service_item_id?: string | null;
       appointment_service_id?: string | null;
+      client_arrived_at?: string | null;
+      staff_attendance_confirmed_at?: string | null;
+      guest_attendance_confirmed_at?: string | null;
     };
     const key = `${row.calendar_id}|${row.booking_date}`;
     const sid = row.service_item_id ?? row.appointment_service_id;
@@ -473,6 +480,9 @@ export async function getCalendarGrid(params: {
       startTime: String(row.booking_time).slice(0, 5),
       endTime: end,
       status: row.status,
+      client_arrived_at: row.client_arrived_at ?? null,
+      staff_attendance_confirmed_at: row.staff_attendance_confirmed_at ?? null,
+      guest_attendance_confirmed_at: row.guest_attendance_confirmed_at ?? null,
     });
     bookingsByCalDate.set(key, list);
   }

@@ -1,24 +1,15 @@
 'use client';
 
-import { createClient } from '@/lib/supabase/browser';
-import { useRouter } from 'next/navigation';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 import { useState } from 'react';
 
 export function OnboardingLogoutButton() {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   async function handleSignOut() {
     if (busy) return;
     setBusy(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.push('/login?redirectTo=/onboarding');
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
+    await signOutCleanly('/login?redirectTo=/onboarding');
   }
 
   return (

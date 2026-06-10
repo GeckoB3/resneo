@@ -41,19 +41,12 @@ export async function GET(request: NextRequest) {
       needsSetPassword,
     });
 
-    destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper && !isSales);
+    destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper);
 
     if (isSuper) {
       const pathOnly = destination.split('?')[0] ?? '';
       if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
         destination = '/super';
-      }
-    }
-
-    if (isSales && !isSuper) {
-      const pathOnly = destination.split('?')[0] ?? '';
-      if (pathOnly !== '/sales' && !pathOnly.startsWith('/sales/')) {
-        destination = '/sales';
       }
     }
 

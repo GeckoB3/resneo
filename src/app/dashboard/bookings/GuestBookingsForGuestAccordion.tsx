@@ -67,6 +67,11 @@ export interface GuestHistoryRelatedBookingPayload {
   row: GuestBookingHistoryRow;
 }
 
+/** Cancelled in any casing/spelling the DB has used ('Cancelled', 'Canceled'). */
+function isCancelledBookingStatus(status: string | null | undefined): boolean {
+  return typeof status === 'string' && status.trim().toLowerCase().startsWith('cancel');
+}
+
 function formatDateNice(value: string): string {
   const d = new Date(`${value}T12:00:00`);
   if (Number.isNaN(d.getTime())) return value;
@@ -427,8 +432,12 @@ export function GuestBookingsForGuestAccordion({
       return { upcomingRows: [] as GuestBookingHistoryRow[], previousRows: [] as GuestBookingHistoryRow[] };
     }
     const now = new Date();
-    const upcoming = rows.filter((r) => isBookingUpcomingBeforeScheduledEnd(r, now, venueTimeZone));
-    const previous = rows.filter((r) => !isBookingUpcomingBeforeScheduledEnd(r, now, venueTimeZone));
+    // Cancelled bookings never count as upcoming even when their slot is in the future — they
+    // fall through to "Previous" alongside completed / no-show visits.
+    const isUpcoming = (r: GuestBookingHistoryRow) =>
+      !isCancelledBookingStatus(r.status) && isBookingUpcomingBeforeScheduledEnd(r, now, venueTimeZone);
+    const upcoming = rows.filter(isUpcoming);
+    const previous = rows.filter((r) => !isUpcoming(r));
     upcoming.sort((a, b) => {
       const dc = a.booking_date.localeCompare(b.booking_date);
       if (dc !== 0) return dc;

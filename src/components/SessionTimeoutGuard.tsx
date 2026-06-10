@@ -1,23 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/browser';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 
 interface Props {
   venueId: string;
 }
 
 export function SessionTimeoutGuard({ venueId }: Props) {
-  const router = useRouter();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeoutMinutesRef = useRef<number | null>(null);
 
   const signOut = useCallback(async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push('/login?reason=session_expired');
-  }, [router]);
+    // Idle timeout exists for unattended/shared devices — exactly where a full
+    // cache + storage teardown matters most.
+    await signOutCleanly('/login?reason=session_expired');
+  }, []);
 
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);

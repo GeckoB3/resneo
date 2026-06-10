@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { runComplianceExpiry } from '@/lib/compliance/expiry-cron';
 import { runComplianceFormReminders } from '@/lib/compliance/auto-send';
 
@@ -11,7 +12,9 @@ import { runComplianceFormReminders } from '@/lib/compliance/auto-send';
  *  2. Send a single expiry reminder (fresh link) per record within the venue's cadence.
  *  3. Chase pending form links for upcoming bookings (capped, throttled, stops on consume).
  */
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('compliance-expiry', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

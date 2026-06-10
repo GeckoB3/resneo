@@ -177,6 +177,11 @@ export async function POST(request: NextRequest) {
             { status: 409 },
           );
         }
+        // §7.7 attribution: record which collective routed this booking BEFORE the
+        // venue id is rewritten to the owning venue (the synthetic venue id IS the
+        // collective id). Without this, combined-page bookings carried no
+        // collective_id/collective_service_item_id at all.
+        parsed.data.collective_id = parsed.data.venue_id;
         parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
         parsed.data.venue_id = target.venueId;
         parsed.data.appointment_service_id = target.sourceServiceId;

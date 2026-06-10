@@ -5,6 +5,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
@@ -25,7 +26,9 @@ import {
   msUntilBookingStartUtc,
 } from '@/lib/cron/comms-timing';
 
-export async function GET(request: NextRequest) {
+export const GET = withCronRunLogging('send-communications', handleGet);
+
+async function handleGet(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

@@ -2,11 +2,10 @@
 
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/browser';
-import { useRouter } from 'next/navigation';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 import { useEffect, useState } from 'react';
 
 export function SignupNavAuth() {
-  const router = useRouter();
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -23,10 +22,7 @@ export function SignupNavAuth() {
   }, []);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push('/signup');
-    router.refresh();
+    await signOutCleanly('/signup');
   }
 
   if (loggedIn === null) {

@@ -8,6 +8,7 @@ import {
   revokeSalesperson,
   updateSalespersonRewards,
 } from '@/lib/sales/admin';
+import { recordPlatformAuditEvent } from '@/lib/platform/audit';
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -55,6 +56,14 @@ export async function PATCH(
       await replaceSalespersonBonusTiers(admin, id, bonus_tiers);
     }
 
+    await recordPlatformAuditEvent(admin, {
+      superuser: user,
+      action: 'salesperson.update',
+      targetType: 'salesperson',
+      targetId: id,
+      summary: `Updated salesperson rewards/settings (${Object.keys(parsed.data).join(', ')})`,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unexpected error';
@@ -79,6 +88,15 @@ export async function DELETE(
     const { id } = await params;
     const admin = getSupabaseAdminClient();
     await revokeSalesperson({ admin, salespersonId: id });
+
+    await recordPlatformAuditEvent(admin, {
+      superuser: user,
+      action: 'salesperson.revoke',
+      targetType: 'salesperson',
+      targetId: id,
+      summary: 'Revoked salesperson access',
+    });
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     const status =

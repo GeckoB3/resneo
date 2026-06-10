@@ -1,70 +1,83 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 interface KpiData {
-  totalVenues: number;
-  activeVenues: number;
+  totalLiveVenues: number;
+  active: number;
+  trialing: number;
+  pastDue: number;
+  cancelled: number;
+  appointments: number;
+  restaurantFounding: number;
   totalStaff: number;
-  byTier: { appointments: number; restaurant: number; founding: number };
+  testVenues: number;
 }
 
 async function fetchKpis(): Promise<KpiData> {
   const admin = getSupabaseAdminClient();
 
   const [venuesResult, staffResult] = await Promise.all([
-    admin.from('venues').select('id, pricing_tier, plan_status'),
+    admin.from('venues').select('id, pricing_tier, plan_status, is_test'),
     admin.from('staff').select('id', { count: 'exact', head: true }),
   ]);
 
   const venues = venuesResult.data ?? [];
   const totalStaff = staffResult.count ?? 0;
 
-  let activeVenues = 0;
-  let appointments = 0;
-  let restaurant = 0;
-  let founding = 0;
+  const data: KpiData = {
+    totalLiveVenues: 0,
+    active: 0,
+    trialing: 0,
+    pastDue: 0,
+    cancelled: 0,
+    appointments: 0,
+    restaurantFounding: 0,
+    totalStaff,
+    testVenues: 0,
+  };
 
   for (const v of venues) {
+    if ((v as { is_test?: boolean }).is_test) {
+      data.testVenues++;
+      continue;
+    }
+    data.totalLiveVenues++;
+
     const tier = ((v.pricing_tier as string) ?? '').toLowerCase().trim();
     const status = ((v.plan_status as string) ?? '').toLowerCase().trim();
 
-    if (status === 'active' || status === 'trialing') activeVenues++;
-    if (tier === 'appointments' || tier === 'plus' || tier === 'light') appointments++;
-    else if (tier === 'restaurant') restaurant++;
-    else if (tier === 'founding') founding++;
+    if (status === 'active') data.active++;
+    else if (status === 'trialing') data.trialing++;
+    else if (status === 'past_due') data.pastDue++;
+    else if (status === 'cancelled' || status === 'cancelling') data.cancelled++;
+
+    if (tier === 'appointments' || tier === 'plus' || tier === 'light') data.appointments++;
+    else if (tier === 'restaurant' || tier === 'founding') data.restaurantFounding++;
   }
 
-  return {
-    totalVenues: venues.length,
-    activeVenues,
-    totalStaff,
-    byTier: { appointments, restaurant, founding },
-  };
+  return data;
 }
 
 export async function KpiCards() {
   const data = await fetchKpis();
 
-  const cards = [
-    { label: 'Total Venues', value: data.totalVenues, color: 'bg-blue-50 text-blue-700' },
-    { label: 'Active Subscriptions', value: data.activeVenues, color: 'bg-emerald-50 text-emerald-700' },
-      { label: 'Appointments (Light / Plus / Pro)', value: data.byTier.appointments, color: 'bg-violet-50 text-violet-700' },
-    { label: 'Restaurant / Founding', value: data.byTier.restaurant + data.byTier.founding, color: 'bg-amber-50 text-amber-700' },
-    { label: 'Total Staff Logins', value: data.totalStaff, color: 'bg-slate-100 text-slate-700' },
+  const cards: Array<{ label: string; value: number; valueClass: string; hint?: string }> = [
+    { label: 'Live venues', value: data.totalLiveVenues, valueClass: 'text-blue-700', hint: 'excludes test venues' },
+    { label: 'Paying (active)', value: data.active, valueClass: 'text-emerald-700' },
+    { label: 'Trialing', value: data.trialing, valueClass: 'text-cyan-700' },
+    { label: 'Past due', value: data.pastDue, valueClass: data.pastDue > 0 ? 'text-red-600' : 'text-slate-700' },
+    { label: 'Cancelled / cancelling', value: data.cancelled, valueClass: 'text-slate-700' },
+    { label: 'Appointments plans', value: data.appointments, valueClass: 'text-violet-700', hint: 'Light / Plus / Pro' },
+    { label: 'Restaurant / Founding', value: data.restaurantFounding, valueClass: 'text-amber-700' },
+    { label: 'Staff logins', value: data.totalStaff, valueClass: 'text-slate-700', hint: 'all venues' },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
       {cards.map((c) => (
-        <div
-          key={c.label}
-          className="rounded-xl border border-slate-200 bg-white p-5"
-        >
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-            {c.label}
-          </p>
-          <p className={`mt-2 text-2xl font-bold ${c.color.split(' ')[1]}`}>
-            {c.value}
-          </p>
+        <div key={c.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wider text-slate-400">{c.label}</p>
+          <p className={`mt-2 text-2xl font-bold ${c.valueClass}`}>{c.value}</p>
+          {c.hint ? <p className="mt-0.5 text-[11px] text-slate-400">{c.hint}</p> : null}
         </div>
       ))}
     </div>

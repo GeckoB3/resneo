@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
@@ -45,7 +45,7 @@ const bulkSchema = z.union([
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

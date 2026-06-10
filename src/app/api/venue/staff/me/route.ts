@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, getLinkedPractitionerId, getStaffManagedCalendarIds } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  getLinkedPractitionerId,
+  getStaffManagedCalendarIds,
+  invalidateCachedStaffIdentity,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -133,6 +138,12 @@ export async function PATCH(request: NextRequest) {
         }
 
         updates.email = normalised;
+        // The signed-in browser keeps its old JWT (stale email claim) until the access
+        // token refreshes, and staff rows created at signup carry no user_id — so once
+        // staff.email changes, email-based identity resolution would find nothing and
+        // the dashboard would bounce the user into signup. Persist the durable
+        // auth-user link so resolution by user_id succeeds regardless of the JWT email.
+        updates.user_id = user.id;
       }
     }
 
@@ -155,6 +166,10 @@ export async function PATCH(request: NextRequest) {
     if (updateErr) {
       console.error('PATCH /api/venue/staff/me update failed:', updateErr);
       return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
+    }
+
+    if (updates.email !== undefined) {
+      invalidateCachedStaffIdentity(user.id);
     }
 
     return NextResponse.json({ staff: updated });

@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
 import { labelForBookingModelKey } from '@/lib/platform/subscriber-report';
+import { planDisplayName } from '@/lib/pricing-constants';
 
 interface PeriodByModel {
   [key: string]: number;
@@ -70,12 +71,6 @@ function tierBadge(tier: string) {
   if (t === 'restaurant') return 'bg-blue-100 text-blue-700';
   if (t === 'founding') return 'bg-amber-100 text-amber-800';
   return 'bg-slate-100 text-slate-600';
-}
-
-function tierPillLabel(tier: string): string {
-  const t = tier.toLowerCase().trim();
-  if (t === 'appointments') return 'appointments pro';
-  return tier;
 }
 
 function statusBadge(status: string) {
@@ -168,7 +163,8 @@ export function SubscribersPageClient() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Subscribers</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
-          Plans, enabled booking surfaces, booking volume, and subscription lifecycle signals across all venues. Booking
+          Plans, enabled booking surfaces, booking volume, and subscription lifecycle signals across all{' '}
+          <span className="font-medium text-slate-700">live</span> venues (test/development venues are excluded). Booking
           counts use each booking&apos;s <span className="font-medium text-slate-700">created_at</span> timestamp.
           &quot;Churned&quot; counts venues that moved to cancelled or cancelling and had a profile update in the range
           after their venue was created (approximate; not a full billing audit trail).
@@ -326,7 +322,7 @@ export function SubscribersPageClient() {
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1">
                           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(v.pricing_tier)}`}>
-                            {tierPillLabel(v.pricing_tier)}
+                            {planDisplayName(v.pricing_tier)}
                           </span>
                           {isSuperuserFreeBillingAccess(v.billing_access_source) ? (
                             <span className="inline-flex rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">

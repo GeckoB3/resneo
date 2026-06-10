@@ -49,6 +49,7 @@ export function clearSalesCodeCookie(): void {
   document.cookie = `${SALES_CODE_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
 }
 
+/** Sales codes take precedence over the venue referral programme; drop the referral cookie. */
 export function clearReferralCodeCookieForSalesPrecedence(): void {
   if (typeof document === 'undefined') return;
   document.cookie = 'reserveni_ref=; Max-Age=0; Path=/; SameSite=Lax';
@@ -57,8 +58,9 @@ export function clearReferralCodeCookieForSalesPrecedence(): void {
 export function loadSalesCodeFromCookieOrUrl(fromUrl: string | null): string | null {
   if (fromUrl && fromUrl.trim()) {
     const upper = fromUrl.trim().toUpperCase();
+    // Persist so the code survives email-confirmation round trips. The referral
+    // cookie is only cleared after the sales code validates (sales takes precedence).
     persistSalesCodeCookie(upper);
-    clearReferralCodeCookieForSalesPrecedence();
     return upper;
   }
   const fromCookie = readCookie(SALES_CODE_COOKIE_NAME);

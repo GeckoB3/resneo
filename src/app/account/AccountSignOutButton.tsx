@@ -1,23 +1,15 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/browser';
+import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
 
 export function AccountSignOutButton() {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   async function signOut() {
     setBusy(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.replace('/login');
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
+    // Hard teardown; the navigation replaces this page, so busy never resets.
+    await signOutCleanly('/login');
   }
 
   return (

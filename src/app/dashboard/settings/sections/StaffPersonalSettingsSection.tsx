@@ -8,6 +8,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { createClient } from '@/lib/supabase/browser';
 
 interface StaffProfileRow {
   id: string;
@@ -79,6 +80,7 @@ export function StaffPersonalSettingsSection({
       setProfileSuccess(null);
       setSavingProfile(true);
       try {
+        const emailChanged = profile !== null && email.trim().toLowerCase() !== profile.email.toLowerCase();
         const phoneTrim = phone.trim();
         const phoneE164 = phoneTrim ? normalizeToE164(phone, 'GB') : null;
         if (phoneTrim && !phoneE164) {
@@ -107,6 +109,18 @@ export function StaffPersonalSettingsSection({
         setName(row.name ?? '');
         setEmail(row.email);
         setPhone(row.phone ?? '');
+        if (emailChanged) {
+          // The server updated the auth email, but this browser's access token still
+          // carries the old email claim. Mint a fresh token now so the session stays
+          // consistent with the new sign-in email; the staff user_id link keeps the
+          // session valid server-side even if this refresh fails.
+          try {
+            await createClient().auth.refreshSession();
+          } catch {
+            // best-effort
+          }
+          router.refresh();
+        }
         setProfileSuccess('Profile saved.');
         setTimeout(() => setProfileSuccess(null), 4000);
       } catch (err) {
@@ -115,7 +129,7 @@ export function StaffPersonalSettingsSection({
         setSavingProfile(false);
       }
     },
-    [name, email, phone],
+    [name, email, phone, profile, router],
   );
 
   const onChangePassword = useCallback(async (e: React.FormEvent) => {

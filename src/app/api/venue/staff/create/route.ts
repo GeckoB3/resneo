@@ -190,6 +190,9 @@ export async function POST(request: NextRequest) {
         email: normalisedEmail,
         name: name?.trim() || null,
         role,
+        // Durable auth link: the auth user was just created (or matched) above,
+        // so identity resolution never has to rely on the fragile email match.
+        user_id: authUserId,
       })
       .select('id, email, name, role, created_at')
       .single();

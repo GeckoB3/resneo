@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 
 /**
@@ -13,7 +14,9 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('dietary-digest', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

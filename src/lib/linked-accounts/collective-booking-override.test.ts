@@ -51,7 +51,7 @@ describe('resolveCollectiveServiceOverride', () => {
     await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toBeNull();
   });
 
-  it('returns null when there is no approved provider for the service', async () => {
+  it('returns null when there is no active provider for the service', async () => {
     const admin = makeAdmin({
       collective_service_items: { id: 'item-1', collective_id: 'col-1', default_price_pence: null, default_duration_minutes: null, status: 'active' },
       venue_collectives: { id: 'col-1', status: 'active', page_mode: 'unified_catalog' },
@@ -93,6 +93,25 @@ describe('resolveCollectiveServiceOverride', () => {
     await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toEqual({
       collectiveServiceItemId: 'item-1',
       pricePence: 7000, // source, not the 6000 item default
+      durationMinutes: 45,
+    });
+  });
+
+  it('resolves a legacy pending-approval provider (consent model removed — attribution must not be lost)', async () => {
+    const admin = makeAdmin({
+      collective_service_items: { id: 'item-1', collective_id: 'col-1', status: 'active' },
+      venue_collectives: { id: 'col-1', status: 'active', page_mode: 'unified_catalog' },
+      venue_collective_members: { id: 'mem-1' },
+      // approval_status is deliberately not consulted: rows created before the
+      // consent removal may still say 'pending' but are bookable.
+      collective_service_providers: [
+        { id: 'prov-1', practitioner_id: null, approval_status: 'pending' },
+      ],
+      appointment_services: { price_pence: 7000, duration_minutes: 45 },
+    });
+    await expect(resolveCollectiveServiceOverride(admin, baseParams)).resolves.toEqual({
+      collectiveServiceItemId: 'item-1',
+      pricePence: 7000,
       durationMinutes: 45,
     });
   });

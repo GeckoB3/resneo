@@ -68,6 +68,12 @@ export interface StaffSurfaceBookingStackProps {
   currency: string;
   advancedMode?: boolean;
   onCreated: () => void;
+  /**
+   * Fires as soon as a booking is created (POST success), before staff dismiss the
+   * confirmation screen — hosts can refresh calendars/lists behind the open modal.
+   * Currently wired for the appointment flow; other surfaces fire {@link onCreated} only.
+   */
+  onBookingSubmitted?: () => void;
   onClose?: () => void;
   initialDate?: string;
   initialTime?: string;
@@ -142,6 +148,7 @@ function StaffSurfaceBookingStackInner({
   currency,
   advancedMode = false,
   onCreated,
+  onBookingSubmitted,
   onClose,
   initialDate,
   initialTime,
@@ -366,6 +373,7 @@ function StaffSurfaceBookingStackInner({
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
+            onBookingSubmitted={onBookingSubmitted}
             initialDate={initialDate}
             initialTime={initialTime}
             preselectedPractitionerId={preselectedPractitionerId}

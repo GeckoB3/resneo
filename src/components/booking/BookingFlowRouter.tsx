@@ -64,6 +64,8 @@ interface Props {
   preselectedServiceId?: string;
   initialDate?: string;
   initialTime?: string;
+  /** Appointment flows: open on "Select a service", skipping the single/group mode chooser. */
+  initialStep?: 'service';
 }
 
 /**
@@ -94,6 +96,7 @@ export function BookingFlowRouter({
   preselectedServiceId,
   initialDate,
   initialTime,
+  initialStep,
 }: Props) {
   const model: BookingModel =
     activeBookingModel ?? ((venue.booking_model as BookingModel | undefined) ?? 'table_reservation');
@@ -116,6 +119,7 @@ export function BookingFlowRouter({
           preselectedServiceId={preselectedServiceId}
           initialDate={initialDate}
           initialTime={initialTime}
+          initialStep={initialStep}
         />
       );
     case 'event_ticket':

@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { withCronRunLogging } from '@/lib/platform/cron-log';
 
 export async function GET(request: NextRequest) {
   return POST(request);
 }
 
 /** Hard-delete auth users whose 30-day account deletion grace period has elapsed. */
-export async function POST(request: NextRequest) {
+export const POST = withCronRunLogging('account-hard-delete', handlePost);
+
+async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 

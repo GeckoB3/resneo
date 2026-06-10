@@ -26,6 +26,9 @@ import {
 } from '@/lib/referrals/client';
 import {
   loadSalesCodeFromCookieOrUrl,
+  clearSalesCodeCookie,
+  clearReferralCodeCookieForSalesPrecedence,
+  persistSalesCodeCookie,
   validateSalesCodeClient,
   type SalesValidationOk,
 } from '@/lib/sales/client';
@@ -57,10 +60,14 @@ export default function ChoosePlanPage() {
         if (cancelled) return;
         if (salesResult.ok) {
           setSalesValid(salesResult);
+          persistSalesCodeCookie(salesResult.code);
+          clearReferralCodeCookieForSalesPrecedence();
           setReferralValid(null);
           setReferralLoading(false);
           return;
         }
+        // Stale/invalid sales code: drop it so the referral path (or nothing) applies.
+        clearSalesCodeCookie();
       }
 
       const fromUrl = searchParams?.get('ref') ?? null;

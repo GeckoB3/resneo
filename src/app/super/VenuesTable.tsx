@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SuperProvisionPanel } from './SuperProvisionPanel';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
+import { planDisplayName } from '@/lib/pricing-constants';
+import { labelForBookingModelKey } from '@/lib/platform/subscriber-report';
 
 interface StaffRow {
   id: string;
@@ -24,11 +26,28 @@ interface VenueRow {
   billing_access_source?: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  subscription_current_period_start: string | null;
   subscription_current_period_end: string | null;
   booking_model: string;
   created_at: string;
   onboarding_completed: boolean;
+  is_test: boolean;
   staff: StaffRow[];
+}
+
+interface VenueInsights {
+  bookings: {
+    all_time: number;
+    last_30_days: number;
+    last_7_days: number;
+    upcoming: number;
+    cancelled_last_30_days: number;
+    last_booking_created_at: string | null;
+    last_booking_source: string | null;
+  };
+  guests: {
+    total: number;
+  };
 }
 
 interface ApiResponse {
@@ -41,6 +60,7 @@ interface ApiResponse {
 
 const TIER_OPTIONS = ['', 'appointments', 'plus', 'light', 'restaurant', 'founding'] as const;
 const STATUS_OPTIONS = ['', 'active', 'trialing', 'past_due', 'cancelled', 'cancelling'] as const;
+type EnvFilter = 'live' | 'test' | 'all';
 
 function tierBadge(tier: string) {
   const t = tier.toLowerCase().trim();
@@ -50,13 +70,6 @@ function tierBadge(tier: string) {
   if (t === 'restaurant') return 'bg-blue-100 text-blue-700';
   if (t === 'founding') return 'bg-amber-100 text-amber-800';
   return 'bg-slate-100 text-slate-600';
-}
-
-/** DB stores Pro as `appointments`; show a clearer label in the plan pill. */
-function tierPillLabel(tier: string): string {
-  const t = tier.toLowerCase().trim();
-  if (t === 'appointments') return 'appointments pro';
-  return tier;
 }
 
 function statusBadge(status: string) {
@@ -75,6 +88,30 @@ function roleBadge(role: string) {
     : 'bg-slate-100 text-slate-600';
 }
 
+function formatShortDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return '—';
+  }
+}
+
+function relativeDays(iso: string | null): string {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days} days ago`;
+  if (days < 365) return `${Math.round(days / 30.4)} mo ago`;
+  return `${(days / 365.25).toFixed(1)} yr ago`;
+}
+
 export function VenuesTable() {
   const [venues, setVenues] = useState<VenueRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -84,6 +121,7 @@ export function VenuesTable() {
   const [search, setSearch] = useState('');
   const [tier, setTier] = useState('');
   const [status, setStatus] = useState('');
+  const [env, setEnv] = useState<EnvFilter>('live');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [signInModal, setSignInModal] = useState<{
     staffId: string;
@@ -96,6 +134,7 @@ export function VenuesTable() {
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
+      params.set('env', env);
       if (search) params.set('search', search);
       if (tier) params.set('tier', tier);
       if (status) params.set('status', status);
@@ -112,7 +151,7 @@ export function VenuesTable() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, tier, status]);
+  }, [page, search, tier, status, env]);
 
   useEffect(() => {
     fetchVenues();
@@ -120,13 +159,43 @@ export function VenuesTable() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, tier, status]);
+  }, [search, tier, status, env]);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-100 px-4 pt-4">
         <SuperProvisionPanel onCreated={() => void fetchVenues()} />
       </div>
+
+      {/* Live / Test tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-100 px-4 pt-3">
+        {(
+          [
+            { key: 'live', label: 'Live venues' },
+            { key: 'test', label: 'Test venues' },
+            { key: 'all', label: 'All' },
+          ] as Array<{ key: EnvFilter; label: string }>
+        ).map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setEnv(tab.key)}
+            className={`-mb-px rounded-t-lg border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              env === tab.key
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+        {env === 'test' && (
+          <span className="ml-2 self-center text-xs text-slate-400">
+            Test venues are excluded from KPIs and the Subscribers report.
+          </span>
+        )}
+      </div>
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3">
         <div className="relative flex-1 min-w-[200px]">
@@ -147,7 +216,7 @@ export function VenuesTable() {
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
         >
           {TIER_OPTIONS.map((t) => (
-            <option key={t} value={t}>{t ? t.charAt(0).toUpperCase() + t.slice(1) : 'All tiers'}</option>
+            <option key={t} value={t}>{t ? planDisplayName(t) : 'All plans'}</option>
           ))}
         </select>
         <select
@@ -191,7 +260,7 @@ export function VenuesTable() {
             ) : venues.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
-                  No venues found.
+                  {env === 'test' ? 'No test venues. Expand a live venue to mark it as a test venue.' : 'No venues found.'}
                 </td>
               </tr>
             ) : (
@@ -203,6 +272,7 @@ export function VenuesTable() {
                     venue={venue}
                     expanded={expanded}
                     onToggle={() => setExpandedId(expanded ? null : venue.id)}
+                    onChanged={() => void fetchVenues()}
                     onRequestSignInAs={(staffId, staffLabel) =>
                       setSignInModal({ staffId, venueName: venue.name, staffLabel })
                     }
@@ -336,19 +406,67 @@ function VenueRowGroup({
   venue,
   expanded,
   onToggle,
+  onChanged,
   onRequestSignInAs,
 }: {
   venue: VenueRow;
   expanded: boolean;
   onToggle: () => void;
+  onChanged: () => void;
   onRequestSignInAs: (staffId: string, staffLabel: string) => void;
 }) {
   const staffCount = venue.staff?.length ?? 0;
-  const created = new Date(venue.created_at).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  const [insights, setInsights] = useState<VenueInsights | null>(null);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
+  const [togglingTest, setTogglingTest] = useState(false);
+
+  useEffect(() => {
+    if (!expanded || insights) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/platform/venues/${encodeURIComponent(venue.id)}/insights`, {
+          credentials: 'same-origin',
+        });
+        const body = (await res.json().catch(() => ({}))) as VenueInsights & { error?: string };
+        if (cancelled) return;
+        if (!res.ok) throw new Error(body.error ?? 'Failed to load insights');
+        setInsights(body);
+      } catch (e) {
+        if (!cancelled) setInsightsError(e instanceof Error ? e.message : 'Failed to load insights');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, insights, venue.id]);
+
+  async function toggleTestFlag() {
+    const next = !venue.is_test;
+    const confirmMsg = next
+      ? `Mark "${venue.name}" as a TEST venue? It will be excluded from platform KPIs and the Subscribers report.`
+      : `Mark "${venue.name}" as a LIVE venue? It will be included in platform KPIs and reports again.`;
+    if (!window.confirm(confirmMsg)) return;
+    setTogglingTest(true);
+    try {
+      const res = await fetch(`/api/platform/venues/${encodeURIComponent(venue.id)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_test: next }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? 'Update failed');
+      }
+      onChanged();
+    } catch (e) {
+      console.error('Failed to toggle test flag:', e);
+      window.alert(e instanceof Error ? e.message : 'Failed to update venue');
+    } finally {
+      setTogglingTest(false);
+    }
+  }
 
   const stripeSubShort = venue.stripe_subscription_id
     ? `...${venue.stripe_subscription_id.slice(-8)}`
@@ -372,13 +490,20 @@ function VenueRowGroup({
           </svg>
         </td>
         <td className="px-4 py-3">
-          <p className="font-medium text-slate-900">{venue.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-slate-900">{venue.name}</p>
+            {venue.is_test && (
+              <span className="inline-block rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700">
+                Test
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400">{venue.slug}</p>
         </td>
         <td className="px-4 py-3 hidden md:table-cell">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(venue.pricing_tier)}`}>
-              {tierPillLabel(venue.pricing_tier)}
+              {planDisplayName(venue.pricing_tier)}
             </span>
             {isSuperuserFreeBillingAccess(venue.billing_access_source) ? (
               <span className="inline-block rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
@@ -389,17 +514,17 @@ function VenueRowGroup({
         </td>
         <td className="px-4 py-3 hidden md:table-cell">
           <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(venue.plan_status)}`}>
-            {venue.plan_status}
+            {venue.plan_status.replace('_', ' ')}
           </span>
         </td>
         <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-600">
-          {venue.booking_model?.replace(/_/g, ' ')}
+          {labelForBookingModelKey(venue.booking_model ?? '')}
         </td>
         <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-600">
           {staffCount}
         </td>
         <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">
-          {created}
+          {formatShortDate(venue.created_at)}
         </td>
         <td className="px-4 py-3 hidden xl:table-cell">
           {venue.stripe_subscription_id ? (
@@ -418,31 +543,15 @@ function VenueRowGroup({
         </td>
       </tr>
 
-      {/* Expanded staff detail */}
+      {/* Expanded detail */}
       {expanded && (
         <tr>
           <td colSpan={8} className="bg-slate-50 px-4 py-0">
-            <div className="py-4 pl-8">
-              <div className="mb-3 flex items-center gap-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Staff ({staffCount})
-                </h4>
-                {venue.email && (
-                  <span className="text-xs text-slate-400">
-                    Contact: {venue.email}
-                  </span>
-                )}
-                {venue.subscription_current_period_end && (
-                  <span className="text-xs text-slate-400">
-                    Period ends: {new Date(venue.subscription_current_period_end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </span>
-                )}
-              </div>
-
+            <div className="space-y-4 py-4 pl-8">
               {/* Mobile tier/status badges */}
-              <div className="mb-3 flex flex-wrap gap-2 md:hidden">
+              <div className="flex flex-wrap gap-2 md:hidden">
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(venue.pricing_tier)}`}>
-                  {tierPillLabel(venue.pricing_tier)}
+                  {planDisplayName(venue.pricing_tier)}
                 </span>
                 {isSuperuserFreeBillingAccess(venue.billing_access_source) ? (
                   <span className="inline-block rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
@@ -450,62 +559,182 @@ function VenueRowGroup({
                   </span>
                 ) : null}
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(venue.plan_status)}`}>
-                  {venue.plan_status}
+                  {venue.plan_status.replace('_', ' ')}
                 </span>
               </div>
 
-              {staffCount === 0 ? (
-                <p className="text-xs text-slate-400 italic">No staff members.</p>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                        <th className="px-3 py-2">Name</th>
-                        <th className="px-3 py-2">Email</th>
-                        <th className="px-3 py-2 hidden sm:table-cell">Phone</th>
-                        <th className="px-3 py-2">Role</th>
-                        <th className="px-3 py-2 hidden sm:table-cell">Added</th>
-                        <th className="px-3 py-2 text-right">Support</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {venue.staff.map((s) => (
-                        <tr key={s.id}>
-                          <td className="px-3 py-2 text-slate-700">{s.name ?? '--'}</td>
-                          <td className="px-3 py-2 text-slate-600">{s.email}</td>
-                          <td className="px-3 py-2 text-slate-600 hidden sm:table-cell">{s.phone ?? '--'}</td>
-                          <td className="px-3 py-2">
-                            <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${roleBadge(s.role)}`}>
-                              {s.role}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-slate-500 hidden sm:table-cell">
-                            {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const label = s.name?.trim() || s.email;
-                                onRequestSignInAs(s.id, label);
-                              }}
-                              className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
-                            >
-                              Sign in as
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Usage insights */}
+              <div>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Usage
+                </h4>
+                {insightsError ? (
+                  <p className="text-xs text-rose-600">{insightsError}</p>
+                ) : !insights ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="h-16 animate-pulse rounded-lg border border-slate-200 bg-white" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    <InsightStat label="All-time bookings" value={String(insights.bookings.all_time)} />
+                    <InsightStat label="Last 30 days" value={String(insights.bookings.last_30_days)} />
+                    <InsightStat label="Last 7 days" value={String(insights.bookings.last_7_days)} />
+                    <InsightStat label="Upcoming" value={String(insights.bookings.upcoming)} />
+                    <InsightStat
+                      label="Cancelled (30d)"
+                      value={String(insights.bookings.cancelled_last_30_days)}
+                      warn={insights.bookings.cancelled_last_30_days > 0}
+                    />
+                    <InsightStat label="Guests" value={String(insights.guests.total)} />
+                  </div>
+                )}
+                {insights && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Last booking: <span className="font-medium text-slate-700">{relativeDays(insights.bookings.last_booking_created_at)}</span>
+                    {insights.bookings.last_booking_source ? ` (${insights.bookings.last_booking_source})` : ''}
+                  </p>
+                )}
+              </div>
+
+              {/* Billing & meta */}
+              <div className="grid gap-3 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="font-semibold uppercase tracking-wide text-slate-400">Contact</p>
+                  <p className="mt-1">{venue.email ?? '—'}</p>
+                  <p>{venue.phone ?? ''}</p>
                 </div>
-              )}
+                <div>
+                  <p className="font-semibold uppercase tracking-wide text-slate-400">Billing period</p>
+                  <p className="mt-1">
+                    {formatShortDate(venue.subscription_current_period_start)} → {formatShortDate(venue.subscription_current_period_end)}
+                  </p>
+                  <div className="mt-1 flex gap-3">
+                    {venue.stripe_subscription_id && (
+                      <a
+                        href={`https://dashboard.stripe.com/subscriptions/${venue.stripe_subscription_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-blue-600 hover:underline"
+                      >
+                        Subscription ↗
+                      </a>
+                    )}
+                    {venue.stripe_customer_id && (
+                      <a
+                        href={`https://dashboard.stripe.com/customers/${venue.stripe_customer_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-blue-600 hover:underline"
+                      >
+                        Customer ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="font-semibold uppercase tracking-wide text-slate-400">Onboarding</p>
+                  <p className="mt-1">{venue.onboarding_completed ? 'Completed' : 'In progress'}</p>
+                  <p className="mt-1">
+                    <a
+                      href={`/book/${venue.slug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-blue-600 hover:underline"
+                    >
+                      Public booking page ↗
+                    </a>
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold uppercase tracking-wide text-slate-400">Environment</p>
+                  <p className="mt-1">{venue.is_test ? 'Test / development venue' : 'Live venue'}</p>
+                  <button
+                    type="button"
+                    disabled={togglingTest}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleTestFlag();
+                    }}
+                    className={`mt-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+                      venue.is_test
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                        : 'border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100'
+                    }`}
+                  >
+                    {togglingTest ? 'Updating…' : venue.is_test ? 'Mark as live venue' : 'Mark as test venue'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Staff */}
+              <div>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Staff ({staffCount})
+                </h4>
+                {staffCount === 0 ? (
+                  <p className="text-xs text-slate-400 italic">No staff members.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                          <th className="px-3 py-2">Name</th>
+                          <th className="px-3 py-2">Email</th>
+                          <th className="px-3 py-2 hidden sm:table-cell">Phone</th>
+                          <th className="px-3 py-2">Role</th>
+                          <th className="px-3 py-2 hidden sm:table-cell">Added</th>
+                          <th className="px-3 py-2 text-right">Support</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {venue.staff.map((s) => (
+                          <tr key={s.id}>
+                            <td className="px-3 py-2 text-slate-700">{s.name ?? '--'}</td>
+                            <td className="px-3 py-2 text-slate-600">{s.email}</td>
+                            <td className="px-3 py-2 text-slate-600 hidden sm:table-cell">{s.phone ?? '--'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${roleBadge(s.role)}`}>
+                                {s.role}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-slate-500 hidden sm:table-cell">
+                              {formatShortDate(s.created_at)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const label = s.name?.trim() || s.email;
+                                  onRequestSignInAs(s.id, label);
+                                }}
+                                className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
+                              >
+                                Sign in as
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+function InsightStat({ label, value, warn = false }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`mt-0.5 text-lg font-bold tabular-nums ${warn ? 'text-amber-700' : 'text-slate-900'}`}>{value}</p>
+    </div>
   );
 }

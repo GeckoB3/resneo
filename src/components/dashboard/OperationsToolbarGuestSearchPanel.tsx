@@ -29,6 +29,8 @@ export interface OperationsToolbarGuestSearchPanelProps {
   initialTime?: string;
   preselectedPractitionerId?: string;
   onBookingCreated?: () => void;
+  /** Fires at booking POST success, before the staff confirmation is dismissed (appointment flow). */
+  onBookingSubmitted?: () => void;
 }
 
 function GuestSearchResultRow({
@@ -97,6 +99,7 @@ export function OperationsToolbarGuestSearchPanel({
   initialTime,
   preselectedPractitionerId,
   onBookingCreated,
+  onBookingSubmitted,
 }: OperationsToolbarGuestSearchPanelProps) {
   const inputId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +229,7 @@ export function OperationsToolbarGuestSearchPanel({
             setBookingBootstrap(null);
             onBookingCreated?.();
           }}
+          onBookingSubmitted={onBookingSubmitted}
           venueId={venue.venueId}
           currency={venue.currency}
           bookingModel={venue.bookingModel}

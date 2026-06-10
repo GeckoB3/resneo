@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
@@ -31,7 +31,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    // Bearer-capable (mobile app) with cookie fallback (web dashboard).
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

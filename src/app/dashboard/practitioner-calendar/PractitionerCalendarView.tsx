@@ -998,17 +998,21 @@ const BOOKING_RESIZE_HOLD_MS = 1000;
 const BOOKING_RESIZE_HOLD_TOLERANCE_PX = 10;
 
 /**
- * Press-and-hold affordance shown over a duration slider while it is arming (before
- * {@link BOOKING_RESIZE_HOLD_MS} elapses). The filling bar mirrors the hold timer so the
- * user learns the handle must be held ~1s before it will resize the bar — the cue that
- * makes the accidental-resize guard ({@link withResizeHold}) discoverable.
+ * Press-and-hold affordance shown over a booking gesture handle while it is arming
+ * (before {@link BOOKING_RESIZE_HOLD_MS} elapses). The filling bar mirrors the hold
+ * timer so the user learns the handle must be held ~1s before it takes effect — the
+ * cue that makes the accidental-edit guards (duration resize and drag-to-reschedule)
+ * discoverable. `placement` is 'bottom' for the duration slider, 'center' for the
+ * move grip (which spans the card's full height).
  */
-function ResizeHoldHint({ label }: { label: string }) {
+function ResizeHoldHint({ label, placement = 'bottom' }: { label: string; placement?: 'bottom' | 'center' }) {
   return (
     <span
       role="status"
-      className="pointer-events-none absolute left-1/2 z-[44] flex -translate-x-1/2 select-none flex-col items-center gap-1 whitespace-nowrap rounded-md bg-slate-900/95 px-2 py-1 text-[10px] font-semibold leading-none text-white shadow-md"
-      style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+      className={`pointer-events-none absolute left-1/2 z-[44] flex -translate-x-1/2 select-none flex-col items-center gap-1 whitespace-nowrap rounded-md bg-slate-900/95 px-2 py-1 text-[10px] font-semibold leading-none text-white shadow-md ${
+        placement === 'center' ? 'top-1/2 -translate-y-1/2' : ''
+      }`}
+      style={placement === 'bottom' ? { bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX } : undefined}
     >
       <span>{label}</span>
       <span className="h-[3px] w-12 overflow-hidden rounded-full bg-white/25" aria-hidden>
@@ -2349,6 +2353,14 @@ export function PractitionerCalendarView({
    * (and so a stray scroll-touch does not silently change a duration). Cleared on arm/cancel.
    */
   const [resizeArming, setResizeArming] = useState<{ kind: 'booking' | 'block'; id: string } | null>(null);
+  /**
+   * Same as {@link resizeArming} but for the drag-to-reschedule grip: which card is mid
+   * press-and-hold before the dnd-kit sensor's activation delay elapses. Drives the
+   * "Hold to move" hint only — real activation gating lives in the sensor constraints.
+   */
+  const [moveArming, setMoveArming] = useState<{ kind: 'booking' | 'block'; id: string } | null>(null);
+  /** Non-passive touchmove blocker active while a dnd-kit move drag is live; grips stay pannable at rest. */
+  const dragTouchScrollBlockerRef = useRef<((e: TouchEvent) => void) | null>(null);
   const justResizedBookingIdRef = useRef<string | null>(null);
   const justResizedBlockIdRef = useRef<string | null>(null);
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
@@ -2391,10 +2403,18 @@ export function PractitionerCalendarView({
   } | null>(null);
   const [mousePanning, setMousePanning] = useState(false);
 
+  /**
+   * Drag-to-reschedule must be deliberately armed the same way as the duration slider:
+   * press and hold the grip for {@link BOOKING_RESIZE_HOLD_MS} before the booking starts
+   * moving. Movement past the tolerance during the hold (i.e. a scroll) aborts activation,
+   * so brushing the grip while scrolling on mobile no longer changes a start time.
+   */
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 12 } }),
+    useSensor(PointerSensor, {
+      activationConstraint: { delay: BOOKING_RESIZE_HOLD_MS, tolerance: BOOKING_RESIZE_HOLD_TOLERANCE_PX },
+    }),
     useSensor(TouchSensor, {
-      activationConstraint: { delay: 450, tolerance: 4 },
+      activationConstraint: { delay: BOOKING_RESIZE_HOLD_MS, tolerance: BOOKING_RESIZE_HOLD_TOLERANCE_PX },
     }),
   );
 
@@ -4351,6 +4371,10 @@ export function PractitionerCalendarView({
     setCalendarDragPreview(null);
     setCalendarDragTarget(null);
     calendarDragTargetRef.current = null;
+    if (dragTouchScrollBlockerRef.current) {
+      document.removeEventListener('touchmove', dragTouchScrollBlockerRef.current);
+      dragTouchScrollBlockerRef.current = null;
+    }
   }
 
   const scheduleBlocksInVisibleColumns = useMemo(() => {
@@ -4376,6 +4400,22 @@ export function PractitionerCalendarView({
   );
 
   function handleDragStart(e: DragStartEvent) {
+    // The hold elapsed and the sensor armed: clear the "Hold to move" hint, give the same
+    // haptic tick as the duration slider, and suppress native scroll for the drag's
+    // duration (the grip's touch-action stays pannable at rest so scrolls pass through).
+    setMoveArming(null);
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(12);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!dragTouchScrollBlockerRef.current) {
+      const blockTouchScroll = (ev: TouchEvent) => ev.preventDefault();
+      document.addEventListener('touchmove', blockTouchScroll, { passive: false });
+      dragTouchScrollBlockerRef.current = blockTouchScroll;
+    }
     const b = e.active.data.current?.booking as Booking | undefined;
     const bl = e.active.data.current?.block as CalendarBlock | undefined;
     if (b) {
@@ -4634,6 +4674,42 @@ export function PractitionerCalendarView({
       window.addEventListener('pointermove', onPreMove, { passive: true });
       window.addEventListener('pointerup', onPreEnd);
       window.addEventListener('pointercancel', onPreEnd);
+    },
+    [],
+  );
+
+  /**
+   * Cosmetic twin of the dnd-kit sensor activation delay: shows the "Hold to move" hint
+   * while a reschedule grip is pressed, and clears it on the same conditions the sensor
+   * uses to abort (movement past tolerance, early release) or once the delay elapses and
+   * the real drag activates. Activation gating itself lives in {@link sensors}.
+   */
+  const beginMoveHoldHint = useCallback(
+    (kind: 'booking' | 'block', id: string) => (downEvent: ReactPointerEvent<HTMLButtonElement>) => {
+      if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+      const pointerId = downEvent.pointerId;
+      const startX = downEvent.clientX;
+      const startY = downEvent.clientY;
+      const clear = () => {
+        window.clearTimeout(timer);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+        setMoveArming((cur) => (cur && cur.kind === kind && cur.id === id ? null : cur));
+      };
+      const onMove = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) clear();
+      };
+      const onEnd = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        clear();
+      };
+      const timer = window.setTimeout(clear, BOOKING_RESIZE_HOLD_MS);
+      setMoveArming({ kind, id });
+      window.addEventListener('pointermove', onMove, { passive: true });
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
     },
     [],
   );
@@ -6179,6 +6255,7 @@ export function PractitionerCalendarView({
                           blockResizeVisual?.blockId === bl.id ? blockResizeVisual.deltaYPx : 0;
                         const resizeArmingThis =
                           resizeArming?.kind === 'block' && resizeArming.id === bl.id;
+                        const moveArmingThis = moveArming?.kind === 'block' && moveArming.id === bl.id;
                         const displayEndHm =
                           blockResizePreviewEnd?.blockId === bl.id
                             ? blockResizePreviewEnd.endHm
@@ -6202,18 +6279,25 @@ export function PractitionerCalendarView({
                                     ref={handle.setActivatorNodeRef}
                                     type="button"
                                     data-no-calendar-pan="true"
-                                    className="relative z-[2] shrink-0 cursor-grab touch-none bg-black/[0.06] px-0.5 text-[10px] text-slate-500 transition hover:bg-black/[0.1] active:cursor-grabbing"
+                                    className={`relative z-[2] shrink-0 cursor-grab [touch-action:pan-x_pan-y] px-0.5 text-[10px] text-slate-500 transition active:cursor-grabbing ${
+                                      moveArmingThis ? 'bg-black/[0.14]' : 'bg-black/[0.06] hover:bg-black/[0.1]'
+                                    }`}
                                     style={{
                                       width: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
                                       minWidth: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
                                     }}
-                                    aria-label="Drag to move block"
+                                    aria-label="Press and hold, then drag to move block"
                                     {...handle.listeners}
                                     {...handle.attributes}
+                                    onPointerDown={(e) => {
+                                      handle.listeners?.onPointerDown?.(e);
+                                      beginMoveHoldHint('block', bl.id)(e);
+                                    }}
                                   >
                                     ⋮⋮
                                   </button>
                                 ) : null}
+                                {moveArmingThis ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -6422,6 +6506,7 @@ export function PractitionerCalendarView({
                             resizeVisual?.bookingId === b.id ? resizeVisual.deltaYPx : 0;
                           const resizeArmingThis =
                             resizeArming?.kind === 'booking' && resizeArming.id === b.id;
+                          const moveArmingThis = moveArming?.kind === 'booking' && moveArming.id === b.id;
                           const displayEndHm =
                             resizePreviewEnd?.bookingId === b.id
                               ? resizePreviewEnd.endHm
@@ -6469,7 +6554,9 @@ export function PractitionerCalendarView({
                                       ref={handle.setActivatorNodeRef}
                                       type="button"
                                       data-no-calendar-pan="true"
-                                      className="group/grip relative z-[2] flex shrink-0 cursor-grab touch-none items-center justify-center bg-black/0 transition-colors duration-150 hover:bg-black/[0.06] active:cursor-grabbing"
+                                      className={`group/grip relative z-[2] flex shrink-0 cursor-grab [touch-action:pan-x_pan-y] items-center justify-center transition-colors duration-150 active:cursor-grabbing ${
+                                        moveArmingThis ? 'bg-black/[0.12]' : 'bg-black/0 hover:bg-black/[0.06]'
+                                      }`}
                                       style={{
                                         width: isOverlapLane
                                           ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
@@ -6478,9 +6565,13 @@ export function PractitionerCalendarView({
                                           ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
                                           : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
                                       }}
-                                      aria-label="Drag to reschedule"
+                                      aria-label="Press and hold, then drag to reschedule"
                                       {...handle.listeners}
                                       {...handle.attributes}
+                                      onPointerDown={(e) => {
+                                        handle.listeners?.onPointerDown?.(e);
+                                        beginMoveHoldHint('booking', b.id)(e);
+                                      }}
                                     >
                                       {!isOverlapLane && (
                                         <svg
@@ -6499,6 +6590,7 @@ export function PractitionerCalendarView({
                                       )}
                                     </button>
                                   ) : null}
+                                  {moveArmingThis ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                   <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
                                       {(shellRowWidthPx) => {
                                         const actionBlockHeight = Math.max(

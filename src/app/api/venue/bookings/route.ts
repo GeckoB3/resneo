@@ -39,6 +39,8 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import type { BookingModel } from '@/types/booking-models';
 import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
@@ -87,6 +89,8 @@ const phoneBookingSchema = z.object({
   require_deposit: z.boolean().optional(),
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
+  /** Optional sub-option for the appointment service (variant duration / price overrides). */
+  service_variant_id: z.string().uuid().optional(),
   experience_event_id: z.string().uuid().optional(),
   ticket_lines: z.array(ticketLineSchema).optional(),
   class_instance_id: z.string().uuid().optional(),
@@ -874,6 +878,29 @@ export async function POST(request: NextRequest) {
         svcWindow,
       );
 
+      // ── Variant: apply its duration/buffer/price/deposit overrides to the engine
+      // input BEFORE slot validation and add-on extension, mirroring public create.
+      let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
+      if (parsed.data.service_variant_id) {
+        chosenVariant = await loadActiveVariantForService({
+          admin,
+          venueId,
+          serviceId: appointment_service_id,
+          variantId: parsed.data.service_variant_id,
+        });
+        if (!chosenVariant) {
+          return NextResponse.json(
+            { error: 'Invalid service_variant_id for this service' },
+            { status: 400 },
+          );
+        }
+        applyVariantToAppointmentInput({
+          services: appointmentInput.services,
+          serviceId: appointment_service_id,
+          variant: chosenVariant,
+        });
+      }
+
       // ── Resolve add-ons before slot validation so the engine fits the longer total.
       // The snapshots are inserted into `booking_addons` after the parent row is created.
       let chosenAddonSnapshots: ReturnType<typeof buildAddonSnapshots> = [];
@@ -1078,6 +1105,7 @@ export async function POST(request: NextRequest) {
         estimated_end_time: estimatedEndTime,
         addons_total_price_pence: chosenAddonTotals.total_price_pence,
         addons_total_duration_minutes: chosenAddonTotals.total_duration_minutes,
+        service_variant_id: parsed.data.service_variant_id ?? null,
       };
 
       if (useUnifiedAppointmentStorage) {
@@ -1091,7 +1119,7 @@ export async function POST(request: NextRequest) {
       }
 
       apptInsert.processing_time_blocks = svc
-        ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: null })
+        ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: chosenVariant })
         : [];
 
       if (linkedCreate) {

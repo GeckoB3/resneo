@@ -48,7 +48,8 @@ export type CommunicationLogMessageType =
   | 'compliance_form_reminder_email'
   | 'compliance_form_reminder_sms'
   | 'compliance_record_expiring_email'
-  | 'compliance_record_expiring_sms';
+  | 'compliance_record_expiring_sms'
+  | 'owner_booking_notification_email';
 
 const LOG_MESSAGE_TYPE_MAP: Record<
   CommunicationMessageKey,

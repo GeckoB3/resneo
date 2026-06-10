@@ -22,6 +22,10 @@ export interface VenueSettings {
   price_band: string | null;
   no_show_grace_minutes: number;
   kitchen_email: string | null;
+  /** New booking alert to the business owner (Communications settings); off by default. */
+  owner_booking_notification_enabled?: boolean;
+  /** Alert recipient override; null falls back to the venue profile email. */
+  owner_booking_notification_email?: string | null;
   communication_templates: Record<string, { subject?: string; body?: string }> | null;
   opening_hours: OpeningHoursSettings | null;
   /** Unified / appointment venues: date-range closures or amended opening hours (see venue-opening-exceptions API). */

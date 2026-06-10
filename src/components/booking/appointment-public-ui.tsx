@@ -66,16 +66,16 @@ export const AppointmentPublicShell = forwardRef<
   const accentStyle = appointmentAccentStyle(accentColour);
 
   if (embed) {
+    // Embed only: the host page (and the iframe's own <main>) already provides a container,
+    // so the inner card chrome — border, shadow, ring, accent bar, rounded background — is
+    // dropped for a flush, cleaner look. Public and staff booking pages keep the card below.
     return (
       <div
         ref={ref}
         className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative w-full min-w-0 ${className}`.trim()}
         style={accentStyle}
       >
-        <div className="ap-shell w-full min-w-0 overflow-visible rounded-xl border bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
-          <div className="ap-accent-bar h-1 w-full rounded-t-[11px]" />
-          <div className="px-3 py-4 sm:px-4 sm:py-5">{children}</div>
-        </div>
+        <div className="w-full min-w-0 overflow-visible px-2 py-3 sm:px-3">{children}</div>
       </div>
     );
   }

@@ -35,6 +35,10 @@ const venueProfileSchema = z.object({
   price_band: z.string().max(50).optional(),
   no_show_grace_minutes: z.number().int().min(10).max(60).optional(),
   kitchen_email: z.string().email().max(255).optional().or(z.literal('')),
+  /** New booking alert to the business owner (Communications settings); off by default. */
+  owner_booking_notification_enabled: z.boolean().optional(),
+  /** Alert recipient override; empty clears (falls back to the venue profile email). */
+  owner_booking_notification_email: z.string().email().max(255).optional().or(z.literal('')),
   timezone: z.string().max(50).optional(),
   /** Public booking page link; empty clears. Stored as https URL or null. */
   website_url: z.string().max(2000).optional(),
@@ -106,7 +110,7 @@ export async function GET(request: NextRequest) {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
       .eq('id', staff.venue_id)
       .single();
 
@@ -215,6 +219,13 @@ export async function PATCH(request: NextRequest) {
     if (data.price_band !== undefined) update.price_band = data.price_band;
     if (data.no_show_grace_minutes !== undefined) update.no_show_grace_minutes = data.no_show_grace_minutes;
     if (data.kitchen_email !== undefined) update.kitchen_email = data.kitchen_email === '' ? null : data.kitchen_email;
+    if (data.owner_booking_notification_enabled !== undefined) {
+      update.owner_booking_notification_enabled = data.owner_booking_notification_enabled;
+    }
+    if (data.owner_booking_notification_email !== undefined) {
+      update.owner_booking_notification_email =
+        data.owner_booking_notification_email === '' ? null : data.owner_booking_notification_email;
+    }
     if (data.timezone !== undefined) update.timezone = data.timezone;
     if (data.website_url !== undefined) {
       const raw = typeof data.website_url === 'string' ? data.website_url : '';
@@ -344,7 +355,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour, booking_page_config',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour, booking_page_config',
       )
       .single();
 

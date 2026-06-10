@@ -22,14 +22,24 @@ import { SMS_INCLUDED_LIGHT } from "@/lib/billing/sms-allowance";
 import { SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
 
 interface CommunicationTemplatesSectionProps {
-  venue: { id: string };
+  venue: {
+    id: string;
+    /** Venue profile email — default recipient for new booking alerts. */
+    email?: string | null;
+    owner_booking_notification_enabled?: boolean;
+    owner_booking_notification_email?: string | null;
+  };
   isAdmin: boolean;
   pricingTier?: string;
   bookingModel?: string;
   enabledModels?: BookingModel[];
   depositConfig?: unknown;
   serviceEngineTable?: boolean;
-  onUpdate?: (patch: Record<string, unknown>) => void;
+  /** Syncs saved venue-level fields (new booking alert) back into the parent venue state. */
+  onUpdate?: (patch: {
+    owner_booking_notification_enabled?: boolean;
+    owner_booking_notification_email?: string | null;
+  }) => void;
   /** Stripe subscription present — Plan checkout completed; hide Light SMS “add a card” banner. */
   hasStripeSubscription?: boolean;
   /** Appointment waitlist v2 enabled — shows waitlist invite channel settings. */
@@ -175,6 +185,7 @@ export function CommunicationTemplatesSection({
   enabledModels = [],
   hasStripeSubscription = false,
   waitlistV2Enabled = false,
+  onUpdate,
   onInitialLoadComplete,
 }: CommunicationTemplatesSectionProps) {
   const primary =
@@ -407,6 +418,66 @@ export function CommunicationTemplatesSection({
     [],
   );
 
+  // ── New booking alert (business owner) — venue-level, email-only, off by default ──
+  const [ownerAlertEnabled, setOwnerAlertEnabled] = useState(
+    Boolean(venue.owner_booking_notification_enabled),
+  );
+  const [ownerAlertEmail, setOwnerAlertEmail] = useState(
+    venue.owner_booking_notification_email ?? "",
+  );
+  const [ownerAlertError, setOwnerAlertError] = useState<string | null>(null);
+
+  const saveOwnerAlert = useCallback(
+    async (patch: {
+      owner_booking_notification_enabled?: boolean;
+      owner_booking_notification_email?: string;
+    }) => {
+      if (!isAdmin) return;
+      if (savedFlashRef.current) {
+        clearTimeout(savedFlashRef.current);
+        savedFlashRef.current = null;
+      }
+      setSaveStatus("saving");
+      try {
+        const response = await fetch("/api/venue", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        onUpdate?.({
+          ...(patch.owner_booking_notification_enabled !== undefined
+            ? { owner_booking_notification_enabled: patch.owner_booking_notification_enabled }
+            : {}),
+          ...(patch.owner_booking_notification_email !== undefined
+            ? { owner_booking_notification_email: patch.owner_booking_notification_email || null }
+            : {}),
+        });
+        setSaveStatus("saved");
+        savedFlashRef.current = setTimeout(() => setSaveStatus("idle"), 1500);
+      } catch (error) {
+        console.error("Failed to save new booking alert setting:", error);
+        setSaveStatus("error");
+      }
+    },
+    [isAdmin, onUpdate],
+  );
+
+  const commitOwnerAlertEmail = useCallback(() => {
+    const trimmed = ownerAlertEmail.trim();
+    if (trimmed === (venue.owner_booking_notification_email ?? "").trim()) {
+      setOwnerAlertError(null);
+      return;
+    }
+    if (trimmed && !/^\S+@\S+\.\S+$/.test(trimmed)) {
+      setOwnerAlertError("Enter a valid email address.");
+      return;
+    }
+    setOwnerAlertError(null);
+    setOwnerAlertEmail(trimmed);
+    void saveOwnerAlert({ owner_booking_notification_email: trimmed });
+  }, [ownerAlertEmail, venue.owner_booking_notification_email, saveOwnerAlert]);
+
   if (loading) {
     return (
       <Skeleton.Card className="p-0">
@@ -533,6 +604,76 @@ export function CommunicationTemplatesSection({
           />
         </div>
       ) : null}
+
+      <div className="space-y-4 border-t border-slate-200 pt-6">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Business notifications</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Alerts sent to you and your team rather than to guests.
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-start justify-between gap-4 p-5">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900">New booking alert</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Email the business whenever a booking is made, so you and your staff know
+                straight away. Sent by email only.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={ownerAlertEnabled}
+              aria-label={`${ownerAlertEnabled ? "Disable" : "Enable"} new booking alert`}
+              disabled={!isAdmin}
+              onClick={() => {
+                const next = !ownerAlertEnabled;
+                setOwnerAlertEnabled(next);
+                void saveOwnerAlert({ owner_booking_notification_enabled: next });
+              }}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+                ownerAlertEnabled ? "bg-brand-600" : "bg-slate-200"
+              } ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            >
+              <span
+                className={`mt-0.5 inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-out ${
+                  ownerAlertEnabled ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+
+          {ownerAlertEnabled && (
+            <div className="border-t border-slate-100 px-5 pb-5 pt-4">
+              <label className="block text-xs font-medium text-slate-600">
+                Notification email
+                <input
+                  type="email"
+                  value={ownerAlertEmail}
+                  disabled={!isAdmin}
+                  placeholder={venue.email?.trim() || "name@business.com"}
+                  onChange={(event) => setOwnerAlertEmail(event.target.value)}
+                  onBlur={commitOwnerAlertEmail}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                  className="mt-1.5 block w-full max-w-sm rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 disabled:opacity-50"
+                />
+              </label>
+              {ownerAlertError ? (
+                <p className="mt-1.5 text-xs text-red-600">{ownerAlertError}</p>
+              ) : (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {venue.email?.trim()
+                    ? `Leave blank to use your venue email (${venue.email.trim()}).`
+                    : "No venue email is set in Profile — enter an address here to receive alerts."}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {previewState && (
         <PreviewModal

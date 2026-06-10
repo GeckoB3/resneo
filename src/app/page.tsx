@@ -433,53 +433,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Book a demo ─────────────────────────────────────── */}
-      <section id="book-demo" className="scroll-mt-16 bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
-            <HomeReveal>
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Book a demo</h2>
-              <p className="mt-4 max-w-md text-slate-500">
-                Pick a time that suits you and one of the team will give you a personal walkthrough of Resneo.
-              </p>
-              <ul className="mt-8 space-y-4">
-                {[
-                  "See the dashboard, calendar, and booking flow live",
-                  "Ask anything about pricing, setup, or switching from another system",
-                  "No commitment",
-                ].map((point) => (
-                  <li key={point} className="flex items-start gap-3 text-sm text-slate-600">
-                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
-                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                      </svg>
-                    </span>
-                    {point}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-8 text-sm text-slate-500">
-                And here&rsquo;s the best part: the booking form on the right <em>is</em> Resneo, the same widget your
-                customers would use on your website.
-              </p>
-            </HomeReveal>
-            <HomeReveal delay={100}>
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <iframe
-                  src={demoEmbedSrc}
-                  width="100%"
-                  height={EMBED_IFRAME_DEFAULT_HEIGHT_PX}
-                  style={{ border: "none", overflow: "hidden" }}
-                  scrolling="no"
-                  id="reserveni-widget"
-                  title="Book a Resneo demo"
-                />
-              </div>
-            </HomeReveal>
-          </div>
-        </div>
-      </section>
-
       {/* ── Contact ─────────────────────────────────────────── */}
       <section id="contact" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">
@@ -522,6 +475,53 @@ export default function Home() {
                   </Link>{" "}
                   for more information.
                 </p>
+              </div>
+            </HomeReveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Book a demo ─────────────────────────────────────── */}
+      <section id="book-demo" className="scroll-mt-16 bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
+            <HomeReveal>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Book a demo</h2>
+              <p className="mt-4 max-w-md text-slate-500">
+                Pick a time that suits you and one of the team will give you a personal walkthrough of Resneo.
+              </p>
+              <ul className="mt-8 space-y-4">
+                {[
+                  "See the dashboard, calendar, and booking flow live",
+                  "Ask anything about pricing, setup, or switching from another system",
+                  "No commitment",
+                ].map((point) => (
+                  <li key={point} className="flex items-start gap-3 text-sm text-slate-600">
+                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
+                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                      </svg>
+                    </span>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-8 text-sm text-slate-500">
+                And here&rsquo;s the best part: the booking form on the right <em>is</em> Resneo, the same widget your
+                customers would use on your website.
+              </p>
+            </HomeReveal>
+            <HomeReveal delay={100}>
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <iframe
+                  src={demoEmbedSrc}
+                  width="100%"
+                  height={EMBED_IFRAME_DEFAULT_HEIGHT_PX}
+                  style={{ border: "none", overflow: "hidden" }}
+                  scrolling="no"
+                  id="reserveni-widget"
+                  title="Book a Resneo demo"
+                />
               </div>
             </HomeReveal>
           </div>

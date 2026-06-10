@@ -3,6 +3,7 @@ import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ensureComplianceFormLinksForBooking } from '@/lib/compliance/auto-send';
+import { sendOwnerBookingNotification } from './owner-booking-notification';
 import { sendPolicyMessage } from './outbound';
 
 /**
@@ -112,6 +113,9 @@ export async function sendBookingConfirmationNotifications(
   const enriched = await enrichBookingForConfirmation(booking);
   const email = await sendBookingConfirmationEmail(enriched, venue, venueId);
   const sms = await sendBookingConfirmationSms(enriched, venue, venueId);
+  // New booking alert to the business owner — venue-level setting, independent of the
+  // guest confirmation policy above. Deduped per booking inside the sender.
+  await sendOwnerBookingNotification(enriched, venue, venueId);
   return { email, sms };
 }
 

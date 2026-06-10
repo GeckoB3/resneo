@@ -1626,6 +1626,7 @@ function SettingsViewInner({
             serviceEngineTable={showRestaurantTableProfileSections && !isAppointmentsProduct && hasServiceConfig}
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
             waitlistV2Enabled={initialFeatureFlagsResolved.waitlist_v2}
+            onUpdate={onUpdate}
           />
         ) : null}
 

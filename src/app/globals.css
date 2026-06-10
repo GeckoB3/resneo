@@ -258,6 +258,13 @@ button, a, input, select, textarea {
   50% { transform: translateX(80%); }
   100% { transform: translateX(220%); }
 }
+/* Press-and-hold progress for the calendar duration slider: fills left→right over
+   the hold window (BOOKING_RESIZE_HOLD_MS) so users learn the handle must be held
+   before it resizes a booking. Uses scaleX (origin-left) for a cheap GPU fill. */
+@keyframes resize-hold-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
 
 @utility animate-slide-in-right {
   animation: ds-slide-in-right 180ms ease-out both;
@@ -275,6 +282,10 @@ button, a, input, select, textarea {
 }
 @utility animate-dashboard-progress {
   animation: dashboard-progress 1s ease-in-out infinite;
+}
+@utility animate-resize-hold {
+  transform: scaleX(0);
+  animation: resize-hold-fill 1s linear forwards;
 }
 
 /* Linked-accounts design tokens (§19.1) — one source of truth so every linked
@@ -299,6 +310,12 @@ button, a, input, select, textarea {
   .animate-fade-in,
   .animate-dashboard-progress {
     animation: none;
+  }
+  /* No motion: skip the fill sweep but keep the track filled so the hold hint
+     stays legible (the "Hold to adjust" label carries the instruction). */
+  .animate-resize-hold {
+    animation: none;
+    transform: scaleX(1);
   }
   .skeleton {
     animation: none;

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { findOrCreateGuest } from '@/lib/guests';
+import { normalizeToE164 } from '@/lib/phone/e164';
+import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
 import {
   aggregateBookingSignalsForGuests,
   applyGuestsDirectorySegment,
@@ -391,6 +395,89 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     console.error('GET /api/venue/guests failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+const createGuestSchema = z.object({
+  first_name: z.string().max(100).optional(),
+  last_name: z.string().max(100).optional(),
+  email: z.string().email().max(255).optional().or(z.literal('')),
+  phone: z.string().max(24).optional().or(z.literal('')),
+});
+
+/**
+ * POST /api/venue/guests - create a contact from the directory (venue staff).
+ * Requires a name, email or phone. Dedupe matches `findOrCreateGuest` (email
+ * first, then phone), so re-adding an existing contact returns that record
+ * with `created: false` instead of inserting a duplicate.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createVenueRouteClient(request);
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = createGuestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    const firstName = parsed.data.first_name?.trim() || null;
+    const lastName = parsed.data.last_name?.trim() || null;
+    const email = parsed.data.email?.trim() || null;
+    const rawPhone = parsed.data.phone?.trim() || null;
+
+    let phone: string | null = null;
+    if (rawPhone) {
+      phone = normalizeToE164(rawPhone);
+      if (!phone) {
+        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+      }
+    }
+
+    if (!firstName && !lastName && !email && !phone) {
+      return NextResponse.json(
+        { error: 'Add a name, email or phone number to save a contact.' },
+        { status: 400 },
+      );
+    }
+
+    const { guest, created } = await findOrCreateGuest(staff.db, staff.venue_id, {
+      first_name: firstName,
+      last_name: lastName,
+      email,
+      phone,
+    });
+
+    if (created) {
+      await insertContactAuditEvent(staff.db, {
+        venue_id: staff.venue_id,
+        guest_id: guest.id,
+        actor_staff_id: staff.id,
+        event_type: 'contact_created',
+        metadata: { source: 'contacts_directory' },
+      });
+    }
+
+    return NextResponse.json(
+      {
+        guest: {
+          id: guest.id,
+          first_name: guest.first_name,
+          last_name: guest.last_name,
+          email: guest.email,
+          phone: guest.phone,
+        },
+        created,
+      },
+      { status: created ? 201 : 200 },
+    );
+  } catch (err) {
+    console.error('POST /api/venue/guests failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

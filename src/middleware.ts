@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveAuthIdentity, resolveAuthUserMetadata } from '@/lib/auth/resolve-auth-identity';
 import { isPlatformRoleInJwt } from '@/lib/platform-auth';
+import { isSalesAgentRoleInJwt } from '@/lib/sales/auth';
 import {
   SIGNUP_PENDING_BUSINESS_TYPE_KEY,
   SIGNUP_PENDING_PLAN_KEY,
@@ -120,6 +121,8 @@ export async function middleware(request: NextRequest) {
   const isChooseDestination = pathname.startsWith('/auth/choose-destination');
   const isPlatformUI = pathname.startsWith('/super');
   const isPlatformAPI = pathname.startsWith('/api/platform');
+  const isSalesUI = pathname.startsWith('/sales');
+  const isSalesAPI = pathname.startsWith('/api/sales');
   const signupPlan = request.nextUrl.searchParams.get('plan');
 
   if (pathname === '/signup/business-type' && (signupPlan === 'restaurant' || signupPlan === 'founding')) {
@@ -144,8 +147,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // Unauthenticated: protect dashboard, account, platform UI/API, and post-login chooser
-  if (!user && (isDashboard || isAccount || isPlatformUI || isPlatformAPI || isChooseDestination)) {
-    if (isPlatformAPI) {
+  if (!user && (isDashboard || isAccount || isPlatformUI || isPlatformAPI || isSalesUI || isSalesAPI || isChooseDestination)) {
+    if (isPlatformAPI || isSalesAPI) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
     const url = request.nextUrl.clone();
@@ -251,6 +254,17 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  if ((isSalesUI || isSalesAPI) && user) {
+    const isSales = isSalesAgentRoleInJwt(user.app_metadata);
+    const isSuperuser = isPlatformRoleInJwt(user.app_metadata, user.email);
+    if (!isSales && !isSuperuser) {
+      if (isSalesAPI) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+  }
+
   // Logged-in user on /login: redirect to the right surface
   if (user && pathname === '/login') {
     const explicit = request.nextUrl.searchParams.get('redirectTo');
@@ -262,6 +276,10 @@ export async function middleware(request: NextRequest) {
       const sess = await loadSupportSessionRow(request, user.id);
       return NextResponse.redirect(new URL(sess ? '/dashboard' : '/super', request.url));
     }
+    const jwtSales = isSalesAgentRoleInJwt(user.app_metadata);
+    if (jwtSales) {
+      return NextResponse.redirect(new URL('/sales', request.url));
+    }
     const admin = getSupabaseAdminClient();
     const meta = user.user_metadata;
     const needsSetPassword = meta.has_set_password === false;
@@ -271,6 +289,7 @@ export async function middleware(request: NextRequest) {
       userEmail: user.email ?? '',
       rawNext: null,
       isPlatformSuperuser: false,
+      isSalesAgent: jwtSales,
       needsSetPassword,
     });
     dest = withSetPasswordGateIfNeeded(dest, needsSetPassword);

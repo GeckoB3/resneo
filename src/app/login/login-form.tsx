@@ -5,6 +5,7 @@ import { SET_PASSWORD_PATH } from '@/lib/auth-link';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/browser';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
+import { hasSalesAgentJwtRole } from '@/lib/sales/auth';
 
 export type LoginFormVariant = 'default' | 'booking';
 
@@ -66,6 +67,8 @@ export function LoginForm({
       destination = redirectTo ?? '/dashboard';
       if (!redirectTo && hasPlatformSuperuserJwtRole(user)) {
         destination = '/super';
+      } else if (!redirectTo && hasSalesAgentJwtRole(user)) {
+        destination = '/sales';
       }
     }
     window.location.href = destination;

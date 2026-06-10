@@ -16,6 +16,8 @@ import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
+import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
+import { sendNewSignupNotification } from '@/lib/emails/internal-signup-notification';
 import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 
 export async function POST(request: Request) {
@@ -174,23 +176,45 @@ export async function POST(request: Request) {
 
     await updateVenueSmsMonthlyAllowance(venue.id);
 
+    // Internal heads-up that a new account just signed up. Only this guarded
+    // creation path (or the webhook's — whichever ran first) sends it, and a
+    // send failure never fails the signup.
+    await sendNewSignupNotification({
+      signupEmail: ownerEmail,
+      plan,
+      businessType,
+      planStatus,
+      venueId: venue.id,
+      referralCode: session.metadata?.referral_code?.trim() || null,
+      source: 'signup_complete',
+    });
+
     // Referral programme: if the venue signed up via a referral link, mark the
     // referrals row as referee_signed_up. Idempotent — the webhook path runs the
     // same call. We do NOT eagerly create the referrer's own referral_codes row
     // here: the venue's name is still "My Business" at this point. The Refer & Earn
     // page creates it lazily once the user has completed onboarding and renamed.
     try {
-      const referralCodeFromSession = session.metadata?.referral_code?.trim() || null;
-      if (referralCodeFromSession) {
-        await attachReferralOnSignup({
+      const salesCodeFromSession = session.metadata?.sales_code?.trim() || null;
+      if (salesCodeFromSession) {
+        await attachSalesAttributionOnSignup({
           admin,
-          referralCode: referralCodeFromSession,
+          salesCode: salesCodeFromSession,
           referredVenueId: venue.id,
-          refereeEmail: ownerEmail,
         });
+      } else {
+        const referralCodeFromSession = session.metadata?.referral_code?.trim() || null;
+        if (referralCodeFromSession) {
+          await attachReferralOnSignup({
+            admin,
+            referralCode: referralCodeFromSession,
+            referredVenueId: venue.id,
+            refereeEmail: ownerEmail,
+          });
+        }
       }
     } catch (e) {
-      console.error('[signup/complete] referral wiring failed (non-fatal):', e);
+      console.error('[signup/complete] sales/referral wiring failed (non-fatal):', e);
     }
 
     /** Unified appointment venues: use default notification_settings (email-only confirmation; SMS/reminder 2/no-show opt-in). */

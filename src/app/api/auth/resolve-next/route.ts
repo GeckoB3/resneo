@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
+import { hasSalesAgentJwtRole } from '@/lib/sales/auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 
 /**
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     const meta = user.user_metadata as Record<string, unknown> | undefined;
     const needsSetPassword = meta?.has_set_password === false;
     const isSuper = hasPlatformSuperuserJwtRole(user);
+    const isSales = hasSalesAgentJwtRole(user);
 
     const admin = getSupabaseAdminClient();
     let destination = await resolvePostLoginDestination({
@@ -35,15 +37,23 @@ export async function GET(request: NextRequest) {
       userEmail: user.email ?? '',
       rawNext,
       isPlatformSuperuser: isSuper,
+      isSalesAgent: isSales,
       needsSetPassword,
     });
 
-    destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper);
+    destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper && !isSales);
 
     if (isSuper) {
       const pathOnly = destination.split('?')[0] ?? '';
       if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
         destination = '/super';
+      }
+    }
+
+    if (isSales && !isSuper) {
+      const pathOnly = destination.split('?')[0] ?? '';
+      if (pathOnly !== '/sales' && !pathOnly.startsWith('/sales/')) {
+        destination = '/sales';
       }
     }
 

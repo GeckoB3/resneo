@@ -26,10 +26,14 @@ import {
   releaseStripeWebhookEvent,
 } from '@/lib/webhooks/stripe-event-idempotency';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
+import { sendNewSignupNotification } from '@/lib/emails/internal-signup-notification';
 import {
   maybeCreditReferrerForInvoice,
   markReferralsFailedForReferee,
 } from '@/lib/referrals/credit-referrer';
+import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
+import { recordSalesInvoiceRevenue } from '@/lib/sales/invoice-revenue';
+import { syncSalesAttributionWithPlanStatus } from '@/lib/sales/churn';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -157,6 +161,11 @@ export async function POST(request: NextRequest) {
           await maybeCreditReferrerForInvoice(supabase, invoice);
         } catch (e) {
           console.error('[Subscription webhook] maybeCreditReferrerForInvoice failed:', e);
+        }
+        try {
+          await recordSalesInvoiceRevenue(supabase, invoice);
+        } catch (e) {
+          console.error('[Subscription webhook] recordSalesInvoiceRevenue failed:', e);
         }
         break;
       }
@@ -372,21 +381,43 @@ async function handleCheckoutCompleted(
 
   await updateVenueSmsMonthlyAllowance(venue.id);
 
+  // Internal heads-up that a new account just signed up. Only this guarded
+  // creation path (or the success page's — whichever ran first) sends it, and
+  // a send failure never fails the webhook.
+  await sendNewSignupNotification({
+    signupEmail: userEmail ?? null,
+    plan,
+    businessType,
+    planStatus: signupPlanStatus,
+    venueId: venue.id,
+    referralCode: (metadata.referral_code ?? '').trim() || null,
+    source: 'stripe_webhook',
+  });
+
   // Referral programme: attach the referrals row if this venue signed up via a link.
   // We do NOT eagerly create the new venue's own referral_codes row here — it's
   // created lazily on first dashboard view, once onboarding has set the real name.
   try {
-    const referralCode = (metadata.referral_code ?? '').trim() || null;
-    if (referralCode) {
-      await attachReferralOnSignup({
+    const salesCode = (metadata.sales_code ?? '').trim() || null;
+    if (salesCode) {
+      await attachSalesAttributionOnSignup({
         admin: supabase,
-        referralCode,
+        salesCode,
         referredVenueId: venue.id,
-        refereeEmail: userEmail ?? null,
       });
+    } else {
+      const referralCode = (metadata.referral_code ?? '').trim() || null;
+      if (referralCode) {
+        await attachReferralOnSignup({
+          admin: supabase,
+          referralCode,
+          referredVenueId: venue.id,
+          refereeEmail: userEmail ?? null,
+        });
+      }
     }
   } catch (e) {
-    console.error('[Subscription webhook] referral wiring failed (non-fatal):', e);
+    console.error('[Subscription webhook] sales/referral wiring failed (non-fatal):', e);
   }
 }
 
@@ -431,11 +462,19 @@ async function handleSubscriptionUpdated(
 
   updates.plan_status = mapStripeSubscriptionToPlanStatus(subscription);
 
+  const planStatus = updates.plan_status as string;
   const { data: venueRows } = await supabase.from('venues').select('id').eq('stripe_customer_id', customerId);
   await supabase.from('venues').update(updates).eq('stripe_customer_id', customerId);
   for (const row of venueRows ?? []) {
     const vid = (row as { id: string }).id;
-    if (vid) await updateVenueSmsMonthlyAllowance(vid);
+    if (vid) {
+      await updateVenueSmsMonthlyAllowance(vid);
+      try {
+        await syncSalesAttributionWithPlanStatus(supabase, vid, planStatus);
+      } catch (e) {
+        console.error('[Subscription webhook] syncSalesAttributionWithPlanStatus failed:', e);
+      }
+    }
   }
 }
 

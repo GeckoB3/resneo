@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { isSalesAgent } from '@/lib/sales/auth';
 import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { LoginForm } from './login-form';
 import { AuthCallbackErrorBanner } from './AuthCallbackErrorBanner';
@@ -22,6 +23,9 @@ export default async function LoginPage({
     if (isPlatformSuperuser(user)) {
       const allowVenueShell = await hasActiveVenueSupportSession(supabase);
       redirect(allowVenueShell ? '/dashboard' : '/super');
+    }
+    if (isSalesAgent(user)) {
+      redirect('/sales');
     }
     redirect('/dashboard');
   }

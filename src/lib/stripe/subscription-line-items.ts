@@ -1,6 +1,7 @@
 import type Stripe from 'stripe';
 import { SIGNUP_TRIAL_DAYS } from '@/lib/signup-trial-copy';
 import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
+import { SALES_REFEREE_BONUS_DAYS } from '@/lib/sales/constants';
 
 /**
  * Metered SMS overage price (Stripe Dashboard -> Products, backed by SMS usage meter).
@@ -113,6 +114,13 @@ export function buildSignupCheckoutSubscriptionData(): Stripe.Checkout.SessionCr
 export function buildSignupCheckoutSubscriptionDataWithReferral(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
   return {
     trial_period_days: SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS,
+  };
+}
+
+/** Sales programme: extend standard trial by SALES_REFEREE_BONUS_DAYS (14). */
+export function buildSignupCheckoutSubscriptionDataWithSales(): Stripe.Checkout.SessionCreateParams.SubscriptionData {
+  return {
+    trial_period_days: SIGNUP_TRIAL_DAYS + SALES_REFEREE_BONUS_DAYS,
   };
 }
 

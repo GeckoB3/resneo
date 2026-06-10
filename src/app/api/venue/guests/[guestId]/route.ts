@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
-import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { calendarDateInTimeZone, getVenueTimeZone } from '@/lib/guests/guest-contacts-list';
 import { z } from 'zod';
@@ -465,7 +464,7 @@ export async function PATCH(
   { params }: { params: Promise<{ guestId: string }> },
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

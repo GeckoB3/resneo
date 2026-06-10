@@ -10,6 +10,8 @@ export interface PostLoginDestinationInput {
   rawNext: string | null | undefined;
   /** From JWT / app_metadata — superusers never go to customer account by default. */
   isPlatformSuperuser: boolean;
+  /** External sales agents route to /sales by default. */
+  isSalesAgent?: boolean;
   /** When true, caller should send user to set-password first (caller wraps next). */
   needsSetPassword: boolean;
 }
@@ -27,6 +29,7 @@ export async function resolvePostLoginDestination(
     userEmail,
     rawNext,
     isPlatformSuperuser,
+    isSalesAgent = false,
     needsSetPassword: _needsSetPassword,
   } = input;
 
@@ -34,6 +37,10 @@ export async function resolvePostLoginDestination(
 
   if (isPlatformSuperuser) {
     return next.startsWith('/super') ? next : '/super';
+  }
+
+  if (isSalesAgent) {
+    return next.startsWith('/sales') ? next : '/sales';
   }
 
   // Only treat the resolved `next` as an explicit caller intent when the caller

@@ -29,7 +29,13 @@ import {
   validateReferralCodeClient,
   type ReferralValidationOk,
 } from '@/lib/referrals/client';
+import {
+  loadSalesCodeFromCookieOrUrl,
+  validateSalesCodeClient,
+  type SalesValidationOk,
+} from '@/lib/sales/client';
 import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
+import { SALES_REFEREE_BONUS_DAYS } from '@/lib/sales/constants';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
@@ -51,11 +57,22 @@ export default function PaymentPage() {
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
   /** Referral state — when present, the user gets a 14-day trial + 30 free days. */
   const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
+  /** Sales code — takes precedence; extends trial by 14 days. */
+  const [salesValid, setSalesValid] = useState<SalesValidationOk | null>(null);
 
-  // Hydrate referral state from cookie so we can surface the extended trial.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const salesCode = loadSalesCodeFromCookieOrUrl(null);
+      if (salesCode) {
+        const salesResult = await validateSalesCodeClient(salesCode);
+        if (cancelled) return;
+        if (salesResult.ok) {
+          setSalesValid(salesResult);
+          setReferralValid(null);
+          return;
+        }
+      }
       const code = loadReferralCodeFromCookieOrUrl(null);
       if (!code) return;
       const result = await validateReferralCodeClient(code);
@@ -157,7 +174,8 @@ export default function PaymentPage() {
     }
 
     try {
-      const referralCode = loadReferralCodeFromCookieOrUrl(null);
+      const salesCode = loadSalesCodeFromCookieOrUrl(null);
+      const referralCode = salesCode ? null : loadReferralCodeFromCookieOrUrl(null);
       const res = await fetch('/api/signup/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -165,6 +183,7 @@ export default function PaymentPage() {
         body: JSON.stringify({
           business_type: businessType,
           plan,
+          sales_code: salesCode,
           referral_code: referralCode,
         }),
       });
@@ -241,7 +260,18 @@ export default function PaymentPage() {
         </p>
       </div>
 
-      {referralValid && (
+      {salesValid && (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p className="font-medium">Sales offer applied ({salesValid.code})</p>
+          <p className="mt-1 text-blue-800">
+            Your trial is extended to {SIGNUP_TRIAL_DAYS + SALES_REFEREE_BONUS_DAYS} days (
+            {SIGNUP_TRIAL_DAYS}-day standard trial + {SALES_REFEREE_BONUS_DAYS} extra days). Your first charge
+            happens after the full {SIGNUP_TRIAL_DAYS + SALES_REFEREE_BONUS_DAYS} days.
+          </p>
+        </div>
+      )}
+
+      {referralValid && !salesValid && (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <p className="font-medium">Referred by {referralValid.referrer_venue_name}</p>
           <p className="mt-1 text-emerald-800">
@@ -334,9 +364,11 @@ export default function PaymentPage() {
                 <div className="mt-2 flex justify-between">
                   <span className="text-base font-semibold text-slate-900">
                     After{' '}
-                    {referralValid
-                      ? `${SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS}-day`
-                      : `${SIGNUP_TRIAL_DAYS}-day`}{' '}
+                    {salesValid
+                      ? `${SIGNUP_TRIAL_DAYS + SALES_REFEREE_BONUS_DAYS}-day`
+                      : referralValid
+                        ? `${SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS}-day`
+                        : `${SIGNUP_TRIAL_DAYS}-day`}{' '}
                     trial
                   </span>
                   <span className="text-base font-bold text-slate-900">&pound;{totalPrice}/mo</span>

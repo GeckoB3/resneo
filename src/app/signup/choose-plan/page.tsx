@@ -24,6 +24,12 @@ import {
   validateReferralCodeClient,
   type ReferralValidationOk,
 } from '@/lib/referrals/client';
+import {
+  loadSalesCodeFromCookieOrUrl,
+  validateSalesCodeClient,
+  type SalesValidationOk,
+} from '@/lib/sales/client';
+import { SALES_REFEREE_BONUS_DAYS } from '@/lib/sales/constants';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -38,18 +44,29 @@ export default function ChoosePlanPage() {
   const searchParams = useSearchParams();
   const [segment, setSegment] = useState<Segment>('appointments');
   const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
+  const [salesValid, setSalesValid] = useState<SalesValidationOk | null>(null);
   const [referralLoading, setReferralLoading] = useState(true);
 
-  // Hydrate the referral from ?ref= or the persisted cookie, then validate.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const salesFromUrl = searchParams?.get('sales') ?? null;
+      const salesInitial = loadSalesCodeFromCookieOrUrl(salesFromUrl);
+      if (salesInitial) {
+        const salesResult = await validateSalesCodeClient(salesInitial);
+        if (cancelled) return;
+        if (salesResult.ok) {
+          setSalesValid(salesResult);
+          setReferralValid(null);
+          setReferralLoading(false);
+          return;
+        }
+      }
+
       const fromUrl = searchParams?.get('ref') ?? null;
       const initial = loadReferralCodeFromCookieOrUrl(fromUrl);
       if (!initial) {
-        if (!cancelled) {
-          setReferralLoading(false);
-        }
+        if (!cancelled) setReferralLoading(false);
         return;
       }
       const result = await validateReferralCodeClient(initial);
@@ -101,7 +118,16 @@ export default function ChoosePlanPage() {
         </p>
       </div>
 
-      {!referralLoading && referralValid && (
+      {!referralLoading && salesValid && (
+        <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p className="font-medium">Sales offer applied ({salesValid.code})</p>
+          <p className="mt-1 text-blue-800">
+            Your trial includes an extra {SALES_REFEREE_BONUS_DAYS} days on any plan you choose below.
+          </p>
+        </div>
+      )}
+
+      {!referralLoading && referralValid && !salesValid && (
         <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <p className="font-medium">Referred by {referralValid.referrer_venue_name}</p>
           <p className="mt-1 text-emerald-800">

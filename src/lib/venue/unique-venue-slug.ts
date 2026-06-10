@@ -13,12 +13,14 @@ const DEFAULT_MAX_NUMBERED_SUFFIX = 99;
 /**
  * Candidate slug variants for a preferred slug, in priority order:
  *
- *  1. the preferred slug itself (`joes-barbers`)
- *  2. the same slug with hyphens removed — only when the name had more than one word, so this
- *     actually differs from the base (`joes-barbers` → `joesbarbers`)
- *  3. numbered suffixes (`joes-barbers-2`, `joes-barbers-3`, …)
+ *  1. the preferred slug itself (`my-business`)
+ *  2. the same slug with the fewest extra digits, appended directly (no separator):
+ *     `my-business2`, `my-business3`, … — so a second venue with a duplicate name gets the
+ *     shortest unique URL (`my-business2`, never `my-business-2` or a zero-padded form).
  *
- * The caller checks each against the slugs already in use and takes the first free one.
+ * Numbering starts at 2 and grows one digit at a time only as needed (2…9, then 10…), so the
+ * slug always uses the minimum number of digits required to be unique. The caller checks each
+ * against the slugs already in use and takes the first free one.
  */
 export function candidateVenueSlugs(
   preferredSlug: string,
@@ -29,13 +31,8 @@ export function candidateVenueSlugs(
 
   const candidates: string[] = [base];
 
-  const withoutHyphens = base.replace(/-/g, '');
-  if (withoutHyphens && withoutHyphens !== base) {
-    candidates.push(withoutHyphens);
-  }
-
   for (let n = 2; n <= maxNumberedSuffix; n += 1) {
-    candidates.push(`${base}-${n}`);
+    candidates.push(`${base}${n}`);
   }
 
   return candidates;

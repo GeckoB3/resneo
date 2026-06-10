@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
@@ -19,9 +19,9 @@ import {
 import { isWaitlistFreedSlotStillUnbooked } from '@/lib/booking/is-waitlist-freed-slot-unbooked';
 
 /** GET /api/venue/waitlist/alerts — open staff waitlist availability alerts */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -87,7 +87,7 @@ export async function GET() {
 /** POST /api/venue/waitlist/alerts — offer or dismiss a staff alert */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

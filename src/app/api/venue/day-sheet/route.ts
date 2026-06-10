@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import {
   computeAvailability,
@@ -112,7 +112,7 @@ const DAY_SHEET_BOOKING_SELECT =
 export async function GET(request: NextRequest) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

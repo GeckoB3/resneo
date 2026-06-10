@@ -33,7 +33,9 @@ function isAllowedMagicLinkDestination(pathWithOptionalQuery: string): boolean {
     pathOnly === '/auth/choose-destination' ||
     pathOnly.startsWith('/auth/choose-destination/') ||
     pathOnly === '/super' ||
-    pathOnly.startsWith('/super/')
+    pathOnly.startsWith('/super/') ||
+    pathOnly === '/sales' ||
+    pathOnly.startsWith('/sales/')
   );
 }
 

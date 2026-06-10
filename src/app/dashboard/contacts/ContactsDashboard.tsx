@@ -28,6 +28,7 @@ import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/Operat
 import { ClampedFixedDropdown } from '@/components/ui/ClampedFixedDropdown';
 import { ContactDetailPanel } from '@/components/dashboard/contacts/ContactDetailPanel';
 import { MergeContactsModal } from '@/components/dashboard/contacts/MergeContactsModal';
+import { CreateContactModal, type CreatedContactSummary } from '@/components/dashboard/contacts/CreateContactModal';
 import { useDebouncedCallback } from '@/lib/hooks/use-debounced-callback';
 import { CONTACTS_BOOKINGS_REFRESH_DEBOUNCE_MS } from '@/lib/realtime/dashboard-sync-constants';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
@@ -459,6 +460,7 @@ export function ContactsDashboard({
   const [bulkContactMessageSending, setBulkContactMessageSending] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [addTagOpen, setAddTagOpen] = useState(false);
+  const [createContactOpen, setCreateContactOpen] = useState(false);
   const [filterPopoverKind, setFilterPopoverKind] = useState<'none' | 'filter' | 'sort' | 'pageSize'>('none');
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const sortFilterTriggerRef = useRef<HTMLButtonElement>(null);
@@ -834,6 +836,22 @@ export function ContactsDashboard({
   const toggleContactExpand = useCallback((id: string) => {
     setExpandedGuestId((prev) => (prev === id ? null : id));
   }, []);
+
+  /** After the create-contact modal saves: open the (new or matched) record and refresh the list behind it. */
+  const onContactCreated = useCallback(
+    (guest: CreatedContactSummary, created: boolean) => {
+      setCreateContactOpen(false);
+      addToast(
+        created
+          ? `${clientWord} added to contacts`
+          : `Already in contacts — opened the existing ${clientLower}`,
+        'success',
+      );
+      openContact(guest.id);
+      void loadList({ silent: true });
+    },
+    [addToast, clientLower, clientWord, loadList, openContact],
+  );
 
   useEffect(() => {
     const guestIdFromQuery = searchParams.get('guest')?.trim();
@@ -1651,18 +1669,31 @@ export function ContactsDashboard({
             )}
             toolbarTools={contactsToolbarTools}
             trailingActions={(
-              <button
-                type="button"
-                disabled={exporting || loading}
-                onClick={() => void exportFilteredCsv()}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
-                aria-label="Export CSV"
-              >
-                <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 12 12 16.5m0 0 4.5-4.5M12 16.5V3" />
-                </svg>
-                <span className="hidden sm:inline">{exporting ? 'Export…' : 'Export'}</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCreateContactOpen(true)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm shadow-brand-900/20 transition-colors hover:bg-brand-700 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
+                  aria-label={`New ${clientLower}`}
+                >
+                  <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  <span className="hidden sm:inline">New {clientLower}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={exporting || loading}
+                  onClick={() => void exportFilteredCsv()}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 sm:w-auto sm:px-2 sm:text-[11px] sm:font-semibold"
+                  aria-label="Export CSV"
+                >
+                  <svg className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 12 12 16.5m0 0 4.5-4.5M12 16.5V3" />
+                  </svg>
+                  <span className="hidden sm:inline">{exporting ? 'Export…' : 'Export'}</span>
+                </button>
+              </>
             )}
           />
         </div>
@@ -1746,7 +1777,18 @@ export function ContactsDashboard({
                     </svg>
                     Clear search
                   </button>
-                ) : undefined
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCreateContactOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    New {clientLower}
+                  </button>
+                )
               }
             />
           ) : (
@@ -1897,6 +1939,14 @@ export function ContactsDashboard({
         </SectionCard.Body>
       </SectionCard>
       </div>
+
+      {createContactOpen ? (
+        <CreateContactModal
+          clientNoun={clientLower}
+          onClose={() => setCreateContactOpen(false)}
+          onCreated={onContactCreated}
+        />
+      ) : null}
 
       {addTagOpen && selectedIds.length > 0 ? (
         <AddTagModal

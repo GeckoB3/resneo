@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
-import { CLIENT_FIELDS, BOOKING_FIELDS } from '@/lib/import/constants';
+import { targetFieldsForFileType } from '@/lib/import/constants';
 import { runAiColumnMapping } from '@/lib/import/ai-map-columns';
 import { getCachedMappings, storeCachedMappings } from '@/lib/import/mapping-cache';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -33,22 +33,30 @@ export async function POST(
     column_profile?: unknown;
   };
 
-  const ft = f.file_type === 'bookings' ? 'bookings' : 'clients';
-  const targetFields = ft === 'bookings' ? BOOKING_FIELDS : CLIENT_FIELDS;
+  const ft = f.file_type === 'bookings' ? 'bookings' : f.file_type === 'staff' ? 'staff' : 'clients';
+  const targetFields = targetFieldsForFileType(ft);
 
   const { data: session } = await staff.db
     .from('import_sessions')
-    .select('detected_platform')
+    .select('detected_platform, session_settings')
     .eq('id', sessionId)
     .single();
 
   const detected = (session as { detected_platform?: string | null } | null)?.detected_platform;
+  const settings =
+    ((session as { session_settings?: Record<string, unknown> | null } | null)?.session_settings ??
+      {}) as Record<string, unknown>;
+  const userInstructions =
+    typeof settings.ai_instructions === 'string' && settings.ai_instructions.trim()
+      ? settings.ai_instructions.trim()
+      : null;
 
   // Cache first: the same export format (exact header list) recurs across
-  // venues, so most runs need no AI call at all.
+  // venues, so most runs need no AI call at all. User-written instructions are
+  // session-specific, so they bypass the shared cache entirely (read & write).
   const cacheAdmin = getSupabaseAdminClient();
   const headers = f.headers ?? [];
-  const cached = await getCachedMappings(cacheAdmin, headers, ft);
+  const cached = userInstructions ? null : await getCachedMappings(cacheAdmin, headers, ft);
 
   let ai: { mappings: import('@/lib/import/ai-map-columns').AiMappingRow[]; model: string } | null = null;
   let fromCache = false;
@@ -65,8 +73,9 @@ export async function POST(
       columnProfiles: Array.isArray(f.column_profile)
         ? (f.column_profile as import('@/lib/import/column-profile').ColumnProfile[])
         : null,
+      userInstructions,
     });
-    if (ai?.mappings?.length) {
+    if (ai?.mappings?.length && !userInstructions) {
       await storeCachedMappings(cacheAdmin, headers, ft, ai.mappings, ai.model);
     }
   }

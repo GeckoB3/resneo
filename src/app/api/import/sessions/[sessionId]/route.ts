@@ -52,6 +52,8 @@ const patchBodySchema = z.object({
     .object({
       ambiguous_date_format: z.enum(['dd/MM/yyyy', 'MM/dd/yyyy']).optional().nullable(),
       [SEND_IMPORT_REMINDERS_SESSION_KEY]: z.boolean().optional(),
+      /** Free-text guidance from the user that steers the AI mapping stages. */
+      ai_instructions: z.string().max(2000).optional().nullable(),
     })
     .optional(),
 });

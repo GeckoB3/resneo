@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getSmsUsageDisplayForVenue } from '@/lib/billing/sms-usage-display';
@@ -12,8 +12,8 @@ const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' } as const;
 /**
  * GET /api/venue/sms-usage-display — admin-only SMS usage banner for reports/settings UI.
  */
-export async function GET() {
-  const supabase = await createClient();
+export async function GET(request: NextRequest) {
+  const supabase = await createVenueRouteClient(request);
   const staff = await getVenueStaff(supabase);
   if (!staff) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });

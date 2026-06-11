@@ -11,6 +11,7 @@ type ExtractResponse = {
   futureRowCount?: number;
   extractedReferenceCount?: number;
   insertedBookingRowCount?: number;
+  staffReferenceCount?: number;
   requiresTableConfirmation?: boolean;
   bookingModel?: string;
   mode?: string;
@@ -18,6 +19,7 @@ type ExtractResponse = {
 
 type BookingRef = {
   id: string;
+  file_id?: string;
   reference_type: string;
   raw_value: string;
   booking_count?: number;
@@ -26,6 +28,19 @@ type BookingRef = {
   ai_suggested_entity_name?: string | null;
   ai_confidence?: string | null;
   resolution_action?: string | null;
+};
+
+type RefDefault = {
+  reference_id: string;
+  suggested_duration_minutes: number | null;
+  suggested_price_pence: number | null;
+  sample_count: number;
+};
+
+type CreateDraft = {
+  name: string;
+  duration: string;
+  price: string;
 };
 
 type Catalog = {
@@ -59,17 +74,38 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
   const [mappingId, setMappingId] = useState<string | null>(null);
   const [bulkAccepting, setBulkAccepting] = useState(false);
   const [selectByRef, setSelectByRef] = useState<Record<string, string>>({});
+  const [fileTypeById, setFileTypeById] = useState<Record<string, string>>({});
+  const [defaultsByRef, setDefaultsByRef] = useState<Record<string, RefDefault>>({});
+  const [createOpenByRef, setCreateOpenByRef] = useState<Record<string, boolean>>({});
+  const [createDraftByRef, setCreateDraftByRef] = useState<Record<string, CreateDraft>>({});
 
   const loadSession = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
     const data = await readResponseJson<{
       session?: { references_resolved?: boolean };
       booking_references?: BookingRef[];
+      files?: Array<{ id: string; file_type: string }>;
       error?: string;
     }>(res);
     if (!res.ok) throw new Error(data.error ?? 'Failed to load session');
     setRefs((data.booking_references ?? []) as BookingRef[]);
     setResolvedFlag(data.session?.references_resolved === true);
+    const ft: Record<string, string> = {};
+    for (const f of data.files ?? []) ft[f.id] = f.file_type;
+    setFileTypeById(ft);
+  }, [sessionId]);
+
+  const loadDefaults = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/import/sessions/${sessionId}/reference-defaults`);
+      if (!res.ok) return;
+      const data = await readResponseJson<{ suggestions?: RefDefault[] }>(res);
+      const map: Record<string, RefDefault> = {};
+      for (const s of data.suggestions ?? []) map[s.reference_id] = s;
+      setDefaultsByRef(map);
+    } catch {
+      /* prefill suggestions are best-effort */
+    }
   }, [sessionId]);
 
   const runExtract = useCallback(async () => {
@@ -91,11 +127,12 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       const catRes = await fetch(`/api/import/sessions/${sessionId}/reference-catalog`);
       const cat = await readResponseJson<Catalog & { error?: string }>(catRes);
       if (catRes.ok) setCatalog(cat);
+      await loadDefaults();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     }
     setLoading(false);
-  }, [sessionId, loadSession]);
+  }, [sessionId, loadSession, loadDefaults]);
 
   useEffect(() => {
     void runExtract();
@@ -262,6 +299,64 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     setMappingId(null);
   }
 
+  function defaultDraftForRef(ref: BookingRef): CreateDraft {
+    const d = defaultsByRef[ref.id];
+    return {
+      name: ref.raw_value,
+      duration: d?.suggested_duration_minutes ? String(d.suggested_duration_minutes) : '',
+      price: d?.suggested_price_pence != null ? (d.suggested_price_pence / 100).toFixed(2) : '',
+    };
+  }
+
+  function toggleCreate(ref: BookingRef) {
+    setCreateDraftByRef((prev) => ({ ...prev, [ref.id]: prev[ref.id] ?? defaultDraftForRef(ref) }));
+    setCreateOpenByRef((prev) => ({ ...prev, [ref.id]: !prev[ref.id] }));
+  }
+
+  function createButtonLabel(ref: BookingRef): string | null {
+    if (ref.reference_type === 'service') return 'Add as new service';
+    if (ref.reference_type === 'staff') {
+      return catalog?.bookingModel === 'practitioner_appointment'
+        ? 'Add as new practitioner'
+        : 'Add as bookable staff';
+    }
+    return null;
+  }
+
+  /** Create the service/staff entity from the inline setup form. */
+  async function applyCreate(ref: BookingRef) {
+    const draft = createDraftByRef[ref.id] ?? defaultDraftForRef(ref);
+    setMappingId(ref.id);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {
+        resolution_action: 'create',
+        create_label: draft.name.trim() || ref.raw_value,
+      };
+      if (ref.reference_type === 'service') {
+        const duration = Number.parseInt(draft.duration, 10);
+        if (Number.isFinite(duration) && duration > 0) body.create_duration_minutes = duration;
+        const cleanPrice = draft.price.replace(/[£,\s]/g, '');
+        const pounds = Number.parseFloat(cleanPrice);
+        if (cleanPrice !== '' && Number.isFinite(pounds) && pounds >= 0) {
+          body.create_price_pence = Math.round(pounds * 100);
+        }
+      }
+      const res = await fetch(`/api/import/sessions/${sessionId}/references/${ref.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await readResponseJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error ?? 'Could not create');
+      setCreateOpenByRef((prev) => ({ ...prev, [ref.id]: false }));
+      await reloadResolvedFlag();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    }
+    setMappingId(null);
+  }
+
   function optionsForRef(ref: BookingRef): { id: string; name: string }[] {
     if (!catalog) return [];
     if (ref.reference_type === 'service') {
@@ -281,9 +376,11 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Match booking references</h1>
+        <h1 className="text-xl font-semibold text-slate-900">Set up services &amp; staff</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Future bookings are checked against your venue&apos;s booking model. Complete this step before validation.
+          The services and staff named in your files are matched to what you already have on Resneo. Anything we
+          couldn&apos;t match can be added as new right here — services just need a duration and price. Complete this
+          step before validation.
         </p>
       </div>
 
@@ -310,6 +407,12 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
           {(extract.insertedBookingRowCount ?? 0) > 0 && (
             <p className="text-slate-600">
               Staged <strong>{extract.insertedBookingRowCount}</strong> row(s) for import processing.
+            </p>
+          )}
+          {(extract.staffReferenceCount ?? 0) > 0 && (
+            <p className="text-slate-600">
+              Found <strong>{extract.staffReferenceCount}</strong> staff member(s) in your staff list — match or add
+              them under the Staff tab below.
             </p>
           )}
           {extract.mode === 'no_future_rows' && (
@@ -370,8 +473,9 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-slate-600">
-                  Map each external label to an existing catalogue entry, or skip to exclude those booking rows from
-                  import.
+                  For each item: <strong>Map</strong> it to something you already have on Resneo,{' '}
+                  <strong>Add as new</strong> to set it up now (services ask for duration and price), or{' '}
+                  <strong>Skip</strong> to leave those booking rows out of the import.
                 </p>
                 {refs.filter((r) => !r.is_resolved && r.ai_suggested_entity_id).length > 1 && (
                   <button
@@ -394,58 +498,194 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                   const opts = optionsForRef(ref);
                   const suggested = ref.ai_suggested_entity_id;
                   const value = selectByRef[ref.id] ?? suggested ?? '';
+                  const fromStaffList = ref.file_id ? fileTypeById[ref.file_id] === 'staff' : false;
+                  const createLabel = createButtonLabel(ref);
+                  const createOpen = Boolean(createOpenByRef[ref.id]);
+                  const draft = createDraftByRef[ref.id] ?? defaultDraftForRef(ref);
+                  const refDefault = defaultsByRef[ref.id];
+                  const durationMissing = ref.reference_type === 'service' && !draft.duration.trim();
+                  const priceMissing = ref.reference_type === 'service' && !draft.price.trim();
                   return (
-                    <li key={ref.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="font-medium text-slate-900">{ref.raw_value}</p>
-                        <p className="text-xs text-slate-500">
-                          {ref.booking_count ?? 0} booking(s)
-                          {ref.ai_confidence && suggested ? (
-                            <>
-                              {' '}
-                              · AI suggestion: {ref.ai_suggested_entity_name ?? suggested} ({ref.ai_confidence})
-                            </>
-                          ) : null}
-                        </p>
-                      </div>
-                      {!ref.is_resolved ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select
-                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                            value={value}
-                            onChange={(e) =>
-                              setSelectByRef((prev) => ({
-                                ...prev,
-                                [ref.id]: e.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Choose…</option>
-                            {opts.map((o) => (
-                              <option key={o.id} value={o.id}>
-                                {o.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            disabled={mappingId === ref.id || !value}
-                            className="rounded-lg bg-brand-600 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                            onClick={() => void applyMap(ref)}
-                          >
-                            Map
-                          </button>
-                          <button
-                            type="button"
-                            disabled={mappingId === ref.id}
-                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-medium text-slate-700"
-                            onClick={() => void applySkip(ref)}
-                          >
-                            Skip
-                          </button>
+                    <li key={ref.id} className="px-3 py-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-medium text-slate-900">{ref.raw_value}</p>
+                          <p className="text-xs text-slate-500">
+                            {fromStaffList ? 'From your staff list' : `${ref.booking_count ?? 0} booking(s)`}
+                            {ref.ai_confidence && suggested ? (
+                              <>
+                                {' '}
+                                · AI suggestion: {ref.ai_suggested_entity_name ?? suggested} ({ref.ai_confidence})
+                              </>
+                            ) : null}
+                          </p>
                         </div>
-                      ) : (
-                        <span className="text-xs font-medium text-green-700">Done</span>
+                        {!ref.is_resolved ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                              value={value}
+                              onChange={(e) =>
+                                setSelectByRef((prev) => ({
+                                  ...prev,
+                                  [ref.id]: e.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">Choose…</option>
+                              {opts.map((o) => (
+                                <option key={o.id} value={o.id}>
+                                  {o.name}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={mappingId === ref.id || !value}
+                              className="rounded-lg bg-brand-600 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              onClick={() => void applyMap(ref)}
+                            >
+                              Map
+                            </button>
+                            {createLabel && (
+                              <button
+                                type="button"
+                                disabled={mappingId === ref.id}
+                                className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
+                                  createOpen
+                                    ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
+                                    : 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                                }`}
+                                onClick={() => toggleCreate(ref)}
+                              >
+                                {createLabel}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={mappingId === ref.id}
+                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-medium text-slate-700"
+                              onClick={() => void applySkip(ref)}
+                            >
+                              Skip
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-medium text-green-700">Done</span>
+                        )}
+                      </div>
+                      {!ref.is_resolved && createOpen && (
+                        <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                          {ref.reference_type === 'service' ? (
+                            <>
+                              <p className="text-xs font-semibold text-slate-800">
+                                Set up this service
+                                {refDefault && (refDefault.suggested_duration_minutes || refDefault.suggested_price_pence != null) ? (
+                                  <span className="ml-1 font-normal text-slate-600">
+                                    — we pre-filled what we found in your booking data
+                                  </span>
+                                ) : null}
+                              </p>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Service name</span>
+                                  <input
+                                    className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
+                                    value={draft.name}
+                                    onChange={(e) =>
+                                      setCreateDraftByRef((prev) => ({
+                                        ...prev,
+                                        [ref.id]: { ...draft, name: e.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                                    Duration (minutes)
+                                  </span>
+                                  <input
+                                    className={`w-28 rounded border px-2 py-1 text-xs ${
+                                      durationMissing ? 'border-amber-400 bg-amber-50' : 'border-slate-200'
+                                    }`}
+                                    inputMode="numeric"
+                                    placeholder="e.g. 45"
+                                    value={draft.duration}
+                                    onChange={(e) =>
+                                      setCreateDraftByRef((prev) => ({
+                                        ...prev,
+                                        [ref.id]: { ...draft, duration: e.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Price (£)</span>
+                                  <input
+                                    className={`w-28 rounded border px-2 py-1 text-xs ${
+                                      priceMissing ? 'border-amber-400 bg-amber-50' : 'border-slate-200'
+                                    }`}
+                                    inputMode="decimal"
+                                    placeholder="e.g. 28.00"
+                                    value={draft.price}
+                                    onChange={(e) =>
+                                      setCreateDraftByRef((prev) => ({
+                                        ...prev,
+                                        [ref.id]: { ...draft, price: e.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={mappingId === ref.id || durationMissing || !draft.name.trim()}
+                                  onClick={() => void applyCreate(ref)}
+                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                  {mappingId === ref.id ? 'Creating…' : 'Create service'}
+                                </button>
+                              </div>
+                              {(durationMissing || priceMissing) && (
+                                <p className="text-[11px] text-amber-800">
+                                  {durationMissing
+                                    ? 'Your file didn’t include a duration for this service — set one to continue. '
+                                    : ''}
+                                  {priceMissing
+                                    ? 'No price found — you can leave it blank and add it later under Services.'
+                                    : ''}
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <div className="flex flex-wrap items-end gap-3">
+                              <label className="flex flex-col gap-0.5">
+                                <span className="text-[10px] uppercase tracking-wide text-slate-500">Name</span>
+                                <input
+                                  className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
+                                  value={draft.name}
+                                  onChange={(e) =>
+                                    setCreateDraftByRef((prev) => ({
+                                      ...prev,
+                                      [ref.id]: { ...draft, name: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                disabled={mappingId === ref.id || !draft.name.trim()}
+                                onClick={() => void applyCreate(ref)}
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                {mappingId === ref.id ? 'Creating…' : createLabel}
+                              </button>
+                              <p className="basis-full text-[11px] text-slate-600">
+                                Creates a bookable calendar with default working hours — fine-tune it later under
+                                Staff &amp; Calendars.
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </li>
                   );

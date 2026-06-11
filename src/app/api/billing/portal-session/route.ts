@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
@@ -8,9 +8,9 @@ import { normalizePublicBaseUrl } from '@/lib/public-base-url';
  * POST /api/billing/portal-session
  * Creates a Stripe Customer Portal session for the venue billing customer.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff || !requireAdmin(staff)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });

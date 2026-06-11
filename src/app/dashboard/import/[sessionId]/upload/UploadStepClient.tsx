@@ -13,6 +13,21 @@ type ImportFile = {
   headers: string[] | null;
 };
 
+type KindDetection = {
+  file_id: string;
+  filename: string;
+  detected_kind: string;
+  confidence: string;
+  applied: boolean;
+  reason: string;
+};
+
+const KIND_LABELS: Record<string, string> = {
+  clients: 'Client list',
+  bookings: 'Booking history',
+  staff: 'Staff list',
+};
+
 export function UploadStepClient({ sessionId }: { sessionId: string }) {
   const [files, setFiles] = useState<ImportFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,6 +35,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [detections, setDetections] = useState<Record<string, KindDetection>>({});
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
@@ -58,9 +74,20 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           method: 'POST',
           body: fd,
         });
-        const j = await readResponseJson<{ error?: string; warnings?: string[] }>(res);
+        const j = await readResponseJson<{
+          error?: string;
+          warnings?: string[];
+          kind_detections?: KindDetection[];
+        }>(res);
         if (!res.ok) throw new Error(j.error ?? 'Upload failed');
         if (Array.isArray(j.warnings)) collectedWarnings.push(...j.warnings);
+        if (Array.isArray(j.kind_detections)) {
+          setDetections((prev) => {
+            const next = { ...prev };
+            for (const d of j.kind_detections!) next[d.file_id] = d;
+            return next;
+          });
+        }
       }
       setWarnings(collectedWarnings);
       await load();
@@ -98,9 +125,11 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Upload your files</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Drop in the client and booking exports from your previous system — Excel
-          (<code className="rounded bg-slate-100 px-1">.xlsx</code>) or CSV both work, exactly as they came out. Then
-          label each one as client list or booking history.
+          Drop in whatever exports you have from your previous system — Excel
+          (<code className="rounded bg-slate-100 px-1">.xlsx</code>) or CSV both work, exactly as they came out. We
+          work out whether each file is a client list, booking history, or staff list; you just confirm. A file that
+          mixes client and booking details (most booking exports do) should be labelled{' '}
+          <strong>Booking history</strong> — the client details in it are imported too.
         </p>
       </div>
 
@@ -142,11 +171,14 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
       ) : (
         <ul className="space-y-3">
           {files.some((f) => f.file_type === 'staff') && (
-            <li className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-              <strong>Staff lists</strong> are stored for your reference but are not imported as client or booking rows.
+            <li className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+              <strong>Staff lists</strong>: each staff member is matched to your existing calendars on the “Match
+              references” step, where you can also add them as new bookable staff.
             </li>
           )}
-          {files.map((f) => (
+          {files.map((f) => {
+            const det = detections[f.id];
+            return (
             <li
               key={f.id}
               className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
@@ -156,6 +188,18 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
                 <p className="text-xs text-slate-500">
                   {f.row_count ?? 0} rows · {f.column_count ?? 0} columns
                 </p>
+                {det?.applied && f.file_type === det.detected_kind && (
+                  <p className="mt-1 text-[11px] font-medium text-emerald-700">
+                    Auto-detected: {KIND_LABELS[det.detected_kind] ?? det.detected_kind} — change it below if that&apos;s
+                    wrong.
+                  </p>
+                )}
+                {det && !det.applied && det.detected_kind !== 'unknown' && f.file_type === 'unknown' && (
+                  <p className="mt-1 text-[11px] font-medium text-amber-700">
+                    Our best guess: {KIND_LABELS[det.detected_kind] ?? det.detected_kind}. {det.reason} Please confirm
+                    below.
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <select
@@ -166,7 +210,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
                   <option value="unknown">Not sure</option>
                   <option value="clients">Client list</option>
                   <option value="bookings">Booking history</option>
-                  <option value="staff">Staff</option>
+                  <option value="staff">Staff list</option>
                 </select>
                 <button
                   type="button"
@@ -177,7 +221,8 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
                 </button>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 
@@ -220,7 +265,10 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         </Link>
       </div>
       {!canContinue && files.length > 0 && (
-        <p className="text-xs text-amber-700">Label each file as Client list or Booking history (not &quot;Not sure&quot;).</p>
+        <p className="text-xs text-amber-700">
+          Confirm a label for each file — Client list, Booking history, or Staff list. We pre-fill the ones we can
+          detect.
+        </p>
       )}
     </div>
   );

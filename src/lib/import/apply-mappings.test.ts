@@ -95,3 +95,79 @@ describe('applyMappingsToDataRow datetime recovery', () => {
     expect(targets.booking_time).toBe('10:00');
   });
 });
+
+describe('applyMappingsToDataRow split action', () => {
+  function split(
+    source_column: string,
+    parts: string[],
+    separator = ' ',
+  ): DbMappingRow {
+    return map(source_column, null, {
+      action: 'split',
+      split_config: { separator, parts: parts.map((field) => ({ field })) },
+    });
+  }
+
+  it('uses name-aware splitting for first/last name pairs (keeps compound surnames)', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Name: 'John Michael Smith' },
+      [split('Name', ['first_name', 'last_name'])],
+    );
+    expect(targets.first_name).toBe('John');
+    expect(targets.last_name).toBe('Michael Smith');
+  });
+
+  it('handles "Surname, First" via the name splitter regardless of part order', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Name: 'Smith, John' },
+      [split('Name', ['first_name', 'last_name'])],
+    );
+    expect(targets.first_name).toBe('John');
+    expect(targets.last_name).toBe('Smith');
+  });
+
+  it('applies name-aware splitting to guest name pairs in booking files', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Customer: 'Anna van der Berg' },
+      [split('Customer', ['guest_first_name', 'guest_last_name'])],
+    );
+    expect(targets.guest_first_name).toBe('Anna');
+    expect(targets.guest_last_name).toBe('van der Berg');
+  });
+
+  it('absorbs the remainder into the last part for positional splits', () => {
+    const { targets } = applyMappingsToDataRow(
+      { When: '2026-03-14 2:30 PM' },
+      [split('When', ['booking_date', 'booking_time'])],
+    );
+    expect(targets.booking_date).toBe('2026-03-14');
+    expect(targets.booking_time).toBe('2:30 PM');
+  });
+
+  it('splits single-token values without losing the only part', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Name: 'Cher' },
+      [split('Name', ['first_name', 'last_name'])],
+    );
+    expect(targets.first_name).toBe('Cher');
+    expect(targets.last_name).toBe('');
+  });
+});
+
+describe('applyMappingsToDataRow staff name combination', () => {
+  it('combines staff first/last columns into staff_name', () => {
+    const { targets } = applyMappingsToDataRow(
+      { First: 'Alice', Last: 'Brown' },
+      [map('First', 'staff_first_name'), map('Last', 'staff_last_name')],
+    );
+    expect(targets.staff_name).toBe('Alice Brown');
+  });
+
+  it('does not overwrite an explicit staff_name mapping', () => {
+    const { targets } = applyMappingsToDataRow(
+      { Name: 'Alice Brown', First: 'Alice' },
+      [map('Name', 'staff_name'), map('First', 'staff_first_name')],
+    );
+    expect(targets.staff_name).toBe('Alice Brown');
+  });
+});

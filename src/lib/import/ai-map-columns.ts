@@ -64,13 +64,15 @@ const MAPPING_SCHEMA: Record<string, unknown> = {
 export async function runAiColumnMapping(params: {
   headers: string[];
   sampleRows: Record<string, string>[];
-  fileType: 'clients' | 'bookings';
+  fileType: 'clients' | 'bookings' | 'staff';
   detectedPlatform?: string | null;
   targetFields: SchemaField[];
   /** Full-file column statistics — much stronger signal than 5 sample rows. */
   columnProfiles?: ColumnProfile[] | null;
+  /** Free-text guidance written by the user ("the Ref column is our client ID", …). */
+  userInstructions?: string | null;
 }): Promise<{ mappings: AiMappingRow[]; model: string } | null> {
-  const { headers, sampleRows, fileType, detectedPlatform, targetFields, columnProfiles } = params;
+  const { headers, sampleRows, fileType, detectedPlatform, targetFields, columnProfiles, userInstructions } = params;
 
   const profileSection = columnProfiles?.length
     ? `
@@ -80,15 +82,30 @@ ${JSON.stringify(columnProfiles, null, 1)}
 `
     : '';
 
-  const userPrompt = `
-The user has uploaded a CSV file containing ${fileType} data.
-${detectedPlatform ? `We believe this is from ${detectedPlatform}.` : 'The source platform is unknown.'}
+  const instructionsSection = userInstructions?.trim()
+    ? `
+The user wrote these instructions about their data — FOLLOW THEM, they override the
+generic rules below wherever they conflict:
+"""
+${userInstructions.trim().slice(0, 2000)}
+"""
+`
+    : '';
 
+  const fileKindLine =
+    fileType === 'staff'
+      ? 'a STAFF LIST (each row is a member of staff). Map name/contact columns to the staff fields.'
+      : `${fileType} data.`;
+
+  const userPrompt = `
+The user has uploaded a CSV file containing ${fileKindLine}
+${detectedPlatform ? `We believe this is from ${detectedPlatform}.` : 'The source platform is unknown.'}
+${instructionsSection}
 CSV column headers:
 ${JSON.stringify(headers)}
 
 Sample data (first rows):
-${JSON.stringify(sampleRows.slice(0, 5), null, 1)}
+${JSON.stringify(sampleRows.slice(0, 8), null, 1)}
 ${profileSection}
 Resneo target fields:
 ${JSON.stringify(
@@ -102,10 +119,14 @@ Return one mappings entry per CSV column.
 Rules:
 - Only suggest target fields that exist in the provided field list.
 - A target field can only be the destination of ONE source column. If two columns could map to the same field, pick the better one and ignore the other.
+- Be thorough: map every column that plausibly corresponds to a target field. Required fields matter most — if any column could satisfy a required field, map it rather than ignoring it.
 - For client files, map columns called First Name, Forename, Given Name, or similar to "first_name"; Surname, Last Name, Family Name, or similar to "last_name".
-- If a client file only has one combined Name / Full Name / Client Name / Customer Name column, map it to "full_name" or use action "split" into first_name and last_name.
+- If a client file only has one combined Name / Full Name / Client Name / Customer Name column, map it to "full_name" (preferred — Resneo splits it into first/last automatically, handling "Surname, First" and compound surnames).
 - For booking files, map guest/client first-name columns to "guest_first_name" and surname columns to "guest_last_name"; a single combined name column maps to "guest_full_name".
-- A column whose values combine date AND time (e.g. "2026-03-14 14:30" or "14/03/2026 2:30 PM") should use action "split" with separator " " into booking_date and booking_time when both are needed.
+- Booking exports usually contain the client's details too (name, email, phone) — map those to the guest_*/client_* booking fields; they are used to create or match client records.
+- A column whose values combine date AND time (e.g. "2026-03-14 14:30" or "14/03/2026 2:30 PM") can be mapped directly to "booking_date" — the time component is recovered automatically. Use action "split" into booking_date + booking_time only when the user asks for it.
+- For staff files, a single combined name column maps to "staff_name"; separate columns map to "staff_first_name"/"staff_last_name".
+- Columns holding genuinely useful client data with no matching target field (e.g. allergies, referral source) should NOT be ignored — leave them action "map" with target_field null is invalid, so use action "ignore" but say in reasoning that the user may want a custom field for it.
 - Confidence: 'high' if clearly matching, 'medium' if reasonable guess, 'low' if uncertain.
 - Prefer 'ignore' over a low-confidence mapping for columns you are unsure about.
 - split_config must be null unless action is "split".

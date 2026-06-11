@@ -7,7 +7,7 @@ const STEPS = [
   { href: 'upload', label: 'Upload' },
   { href: 'map', label: 'Map' },
   { href: 'review', label: 'Review' },
-  { href: 'references', label: 'References' },
+  { href: 'references', label: 'Services & staff' },
   { href: 'validate', label: 'Validate' },
   { href: 'importing', label: 'Import' },
 ] as const;

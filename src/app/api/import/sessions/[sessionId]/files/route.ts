@@ -9,6 +9,7 @@ import {
   type IngestedDataset,
 } from '@/lib/import/ingest-file';
 import { inferDateFormatFromProfiles, profileColumns } from '@/lib/import/column-profile';
+import { detectFileKind } from '@/lib/import/detect-file-kind';
 
 export async function POST(
   request: NextRequest,
@@ -73,6 +74,14 @@ export async function POST(
         : 'unknown';
 
     const createdFiles: unknown[] = [];
+    const kindDetections: Array<{
+      file_id: string;
+      filename: string;
+      detected_kind: string;
+      confidence: string;
+      applied: boolean;
+      reason: string;
+    }> = [];
     let detectedPlatformOverall: string | null = null;
     let anyTemplateApplied = false;
     let anyBookingsDataset = false;
@@ -86,6 +95,20 @@ export async function POST(
 
       const profile = profileColumns(ds.headers, ds.rows);
       allProfiles.push(...profile);
+
+      // Auto-classify unlabelled files so the user confirms a pre-filled label
+      // instead of working it out themselves. Only one-sided evidence is
+      // applied; ambiguous files stay 'unknown' with the guess surfaced in the UI.
+      let dsFileType = fileType;
+      const detection = detectFileKind({
+        filename: ds.label,
+        headers: ds.headers,
+        rowCount: ds.rowCount,
+        columnProfiles: profile,
+      });
+      if (fileType === 'unknown' && detection.kind !== 'unknown' && detection.confidence === 'high') {
+        dsFileType = detection.kind;
+      }
 
       const safeName = ds.label.replace(/[^a-zA-Z0-9._-]+/g, '_');
       const storagePath = `${staff.venue_id}/${sessionId}/${Date.now()}_${safeName}.csv`;
@@ -107,7 +130,7 @@ export async function POST(
           session_id: sessionId,
           venue_id: staff.venue_id,
           filename: ds.label,
-          file_type: fileType,
+          file_type: dsFileType,
           storage_path: storagePath,
           row_count: ds.rowCount,
           column_count: ds.headers.length,
@@ -126,9 +149,17 @@ export async function POST(
         return NextResponse.json({ error: 'Failed to save file metadata' }, { status: 500 });
       }
       createdFiles.push(fileRow);
-      if (fileType === 'bookings') anyBookingsDataset = true;
+      kindDetections.push({
+        file_id: (fileRow as { id: string }).id,
+        filename: ds.label,
+        detected_kind: detection.kind,
+        confidence: detection.confidence,
+        applied: dsFileType !== fileType,
+        reason: detection.reason,
+      });
+      if (dsFileType === 'bookings') anyBookingsDataset = true;
 
-      const tplKey = platformTemplateKey(platform, fileType as 'clients' | 'bookings');
+      const tplKey = platformTemplateKey(platform, dsFileType as 'clients' | 'bookings');
       const template = tplKey ? PLATFORM_MAPPINGS[tplKey] : null;
 
       if (template && Object.keys(template).length) {
@@ -201,6 +232,7 @@ export async function POST(
       template_applied: anyTemplateApplied,
       warnings,
       inferred_date_format: inferredDateFormat,
+      kind_detections: kindDetections,
     });
   } catch (e) {
     console.error('[import files POST]', e);

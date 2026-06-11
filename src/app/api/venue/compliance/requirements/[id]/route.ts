@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { requireCompliancePlan } from '@/lib/compliance/auth';
 import { complianceRequirementPatchSchema } from '@/lib/compliance/zod-schemas';
@@ -12,7 +12,7 @@ interface RouteCtx {
 /** PATCH /api/venue/compliance/requirements/[id] — update enforcement / lock period (admin). */
 export async function PATCH(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Admin role required.' }, { status: 403 });
@@ -42,9 +42,9 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
 }
 
 /** DELETE /api/venue/compliance/requirements/[id] — remove a requirement (admin). */
-export async function DELETE(_request: NextRequest, ctx: RouteCtx) {
+export async function DELETE(request: NextRequest, ctx: RouteCtx) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Admin role required.' }, { status: 403 });

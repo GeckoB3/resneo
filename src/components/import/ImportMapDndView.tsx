@@ -29,6 +29,7 @@ export type ColumnDetail = {
   action: string;
   target_field?: string | null;
   ai_confidence?: string | null;
+  split_config?: { separator?: string; parts?: Array<{ field: string }> } | null;
 };
 
 type Props = {
@@ -43,6 +44,10 @@ type Props = {
   onMappingsChange: (next: MapDndMapping[]) => void;
   /** Drag or tap-select a column, then drop here to store as a custom profile field. */
   onCreateCustomField?: (sourceColumn: string) => void;
+  /** Open the split editor for a column (e.g. full name → first + last). */
+  onRequestSplit?: (sourceColumn: string) => void;
+  /** Remove an existing split so the column can be mapped normally again. */
+  onRemoveSplit?: (sourceColumn: string) => void;
 };
 
 function DraggableColumn({
@@ -53,6 +58,7 @@ function DraggableColumn({
   selected,
   onSelect,
   mappedToLabel,
+  onSplit,
 }: {
   id: string;
   label: string;
@@ -61,6 +67,7 @@ function DraggableColumn({
   selected: boolean;
   onSelect: () => void;
   mappedToLabel?: string | null;
+  onSplit?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id,
@@ -112,6 +119,19 @@ function DraggableColumn({
       >
         {selected ? 'Selected — tap a field' : 'Select for mapping'}
       </button>
+      {onSplit && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSplit();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="mt-1 w-full cursor-pointer rounded border border-indigo-200 py-1 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-50"
+        >
+          Split into multiple fields…
+        </button>
+      )}
     </div>
   );
 }
@@ -120,10 +140,16 @@ function StaticColumnCard({
   label,
   sample,
   kind,
+  splitSummary,
+  onEdit,
+  onRemove,
 }: {
   label: string;
   sample: string;
   kind: 'custom' | 'split';
+  splitSummary?: string | null;
+  onEdit?: () => void;
+  onRemove?: () => void;
 }) {
   return (
     <div
@@ -136,7 +162,35 @@ function StaticColumnCard({
       </p>
       <p className="text-sm font-medium text-slate-900">{label}</p>
       <p className="mt-1 truncate text-xs text-slate-600">{sample || '—'}</p>
-      <p className="mt-2 text-[10px] text-slate-500">Adjust details on the Review step.</p>
+      {splitSummary ? (
+        <p className="mt-1 text-[10px] font-medium text-indigo-800">→ {splitSummary}</p>
+      ) : null}
+      {kind === 'split' && (onEdit || onRemove) ? (
+        <div className="mt-2 flex gap-2">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded border border-indigo-200 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              Edit split
+            </button>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Remove split
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="mt-2 text-[10px] text-slate-500">
+          {kind === 'custom' ? 'Adjust details on the Review step.' : null}
+        </p>
+      )}
     </div>
   );
 }
@@ -293,6 +347,8 @@ export function ImportMapDndView({
   clientLabel,
   onMappingsChange,
   onCreateCustomField,
+  onRequestSplit,
+  onRemoveSplit,
 }: Props) {
   const [dragLabel, setDragLabel] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
@@ -491,6 +547,7 @@ export function ImportMapDndView({
         selected={selectedSource === h}
         onSelect={() => setSelectedSource((s) => (s === h ? null : h))}
         mappedToLabel={mappedLabel}
+        onSplit={onRequestSplit ? () => onRequestSplit(h) : undefined}
       />
     );
   }
@@ -511,12 +568,23 @@ export function ImportMapDndView({
               {customSplit.map((h) => {
                 const d = detailBySource.get(h);
                 const sample = (sampleRows?.[0] ?? {})[h] ?? '';
+                const isSplit = d?.action === 'split';
+                const splitSummary =
+                  isSplit && d?.split_config?.parts?.length
+                    ? d.split_config.parts
+                        .filter((p) => p.field)
+                        .map((p) => fieldLabelByKey[p.field] ?? p.field)
+                        .join(' + ')
+                    : null;
                 return (
                   <StaticColumnCard
                     key={h}
                     label={h}
                     sample={sample}
-                    kind={d?.action === 'split' ? 'split' : 'custom'}
+                    kind={isSplit ? 'split' : 'custom'}
+                    splitSummary={splitSummary}
+                    onEdit={isSplit && onRequestSplit ? () => onRequestSplit(h) : undefined}
+                    onRemove={isSplit && onRemoveSplit ? () => onRemoveSplit(h) : undefined}
                   />
                 );
               })}

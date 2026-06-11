@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 import {
@@ -12,12 +12,12 @@ import {
  * marks the guest as No Show. Idempotent.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   ctx: { params: Promise<{ id: string; bookingId: string }> },
 ) {
   try {
     const { id, bookingId } = await ctx.params;
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });

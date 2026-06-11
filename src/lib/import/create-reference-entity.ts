@@ -14,10 +14,19 @@ export async function createEntityForBookingImport(params: {
   referenceType: 'service' | 'staff';
   name: string;
   sessionId: string;
+  /** Service setup collected from the user (import wizard); falls back to 60min / no price. */
+  durationMinutes?: number | null;
+  pricePence?: number | null;
 }): Promise<{ id: string; entityType: 'service_item' | 'unified_calendar' | 'appointment_service' | 'practitioner' }> {
   const { admin, venueId, bookingModel, referenceType, name, sessionId } = params;
   const label = name.trim();
   if (!label) throw new Error('Name required');
+  const duration =
+    params.durationMinutes && params.durationMinutes > 0 && params.durationMinutes <= 24 * 60
+      ? Math.round(params.durationMinutes)
+      : 60;
+  const pricePence =
+    params.pricePence != null && params.pricePence >= 0 ? Math.round(params.pricePence) : null;
 
   if (bookingModel === 'unified_scheduling') {
     if (referenceType === 'service') {
@@ -28,10 +37,10 @@ export async function createEntityForBookingImport(params: {
           name: label,
           description: null,
           item_type: 'service',
-          duration_minutes: 60,
+          duration_minutes: duration,
           buffer_minutes: 0,
           processing_time_minutes: 0,
-          price_pence: null,
+          price_pence: pricePence,
           payment_requirement: 'none',
           deposit_pence: null,
           price_type: 'fixed',
@@ -98,9 +107,9 @@ export async function createEntityForBookingImport(params: {
           venue_id: venueId,
           name: label,
           description: null,
-          duration_minutes: 60,
+          duration_minutes: duration,
           buffer_minutes: 0,
-          price_pence: null,
+          price_pence: pricePence,
           deposit_pence: null,
           is_active: true,
           sort_order: 0,

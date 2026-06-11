@@ -33,6 +33,20 @@ export async function POST(
   const venueMode = await resolveVenueMode(admin, venueId);
   const bm = venueMode.bookingModel;
 
+  const { data: sessionRow } = await admin
+    .from('import_sessions')
+    .select('session_settings')
+    .eq('id', sessionId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  const sessionSettings =
+    ((sessionRow as { session_settings?: Record<string, unknown> | null } | null)?.session_settings ??
+      {}) as Record<string, unknown>;
+  const userInstructions =
+    typeof sessionSettings.ai_instructions === 'string' && sessionSettings.ai_instructions.trim()
+      ? sessionSettings.ai_instructions.trim()
+      : null;
+
   const { data: refs } = await admin
     .from('import_booking_references')
     .select('id, reference_type, raw_value, is_resolved')
@@ -206,6 +220,7 @@ export async function POST(
         raw_value: r.raw_value,
       })),
       candidates,
+      userInstructions,
     });
 
     modelUsed = ai?.model ?? null;

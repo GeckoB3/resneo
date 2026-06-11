@@ -21,6 +21,9 @@ const patchSchema = z.object({
     ])
     .optional(),
   create_label: z.string().min(1).max(200).optional(),
+  /** Service setup from the import wizard (services only; ignored for staff). */
+  create_duration_minutes: z.number().int().min(1).max(1440).optional().nullable(),
+  create_price_pence: z.number().int().min(0).max(10_000_000).optional().nullable(),
 });
 
 export async function PATCH(
@@ -81,6 +84,8 @@ export async function PATCH(
       referenceType: r.reference_type as 'service' | 'staff',
       name: label,
       sessionId,
+      durationMinutes: parsed.data.create_duration_minutes ?? null,
+      pricePence: parsed.data.create_price_pence ?? null,
     });
     createdId = created.id;
     createdType = created.entityType;

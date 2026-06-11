@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import {
   classMembershipProductBodySchema,
@@ -13,9 +13,9 @@ import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
  * GET /api/venue/class-membership-products — list membership products (staff).
  * POST — create; creates Stripe Product + recurring Price on the venue connected account when billing fields are provided.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });
@@ -42,7 +42,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Staff access required' }, { status: 403 });

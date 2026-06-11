@@ -134,8 +134,31 @@ export const BOOKING_FIELDS: SchemaField[] = [
   { key: 'resource_name', label: 'Resource', required: false, type: 'text' },
 ];
 
+/**
+ * Staff list files: rows become staff references the user can map to existing
+ * calendars/practitioners or create as new ones on the References step.
+ */
+export const STAFF_FIELDS: SchemaField[] = [
+  { key: 'staff_name', label: 'Staff Member Name', required: true, type: 'text', examples: ['Alice Brown'] },
+  { key: 'staff_first_name', label: 'Staff First Name', required: false, type: 'text' },
+  { key: 'staff_last_name', label: 'Staff Surname', required: false, type: 'text' },
+  { key: 'staff_email', label: 'Staff Email', required: false, type: 'email' },
+  { key: 'staff_phone', label: 'Staff Phone', required: false, type: 'phone' },
+  { key: 'staff_role', label: 'Role / Job Title', required: false, type: 'text' },
+];
+
 export const CLIENT_FIELD_KEYS = new Set(CLIENT_FIELDS.map((f) => f.key));
 export const BOOKING_FIELD_KEYS = new Set(BOOKING_FIELDS.map((f) => f.key));
+export const STAFF_FIELD_KEYS = new Set(STAFF_FIELDS.map((f) => f.key));
+
+export type ImportFileType = 'clients' | 'bookings' | 'staff' | 'unknown';
+
+/** Mapping target schema for a given file type ('unknown' maps like a client list). */
+export function targetFieldsForFileType(fileType: string): SchemaField[] {
+  if (fileType === 'bookings') return BOOKING_FIELDS;
+  if (fileType === 'staff') return STAFF_FIELDS;
+  return CLIENT_FIELDS;
+}
 
 export type PlatformId =
   | 'fresha'

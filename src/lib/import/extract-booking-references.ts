@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingModel } from '@/types/booking-models';
 import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
+import { refreshImportReferencesResolved } from '@/lib/import/refresh-references-resolved';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
 import {
@@ -23,6 +24,8 @@ export type ExtractBookingReferencesResult = {
   futureRowCount: number;
   extractedReferenceCount: number;
   insertedBookingRowCount: number;
+  /** Staff members found in uploaded staff-list files (deduped against booking refs). */
+  staffReferenceCount: number;
   requiresTableConfirmation: boolean;
   bookingModel: BookingModel;
   mode:
@@ -33,6 +36,36 @@ export type ExtractBookingReferencesResult = {
     | 'unified_refs_pending'
     | 'ready';
 };
+
+type StaffListEntry = { name: string; count: number; fileId: string };
+
+/**
+ * Parses staff-list files into distinct staff names. Only meaningful for
+ * booking models where staff become bookable entities (salon-style venues).
+ */
+async function collectStaffListEntries(
+  admin: SupabaseClient,
+  files: Array<{ id: string; storage_path: string; file_type: string }>,
+  byFile: Map<string, DbMappingRow[]>,
+): Promise<StaffListEntry[]> {
+  const out = new Map<string, StaffListEntry>();
+  for (const f of files) {
+    if (f.file_type !== 'staff') continue;
+    const maps = byFile.get(f.id) ?? [];
+    if (!maps.length) continue;
+    const parsed = await downloadAndParseCsv(admin, f.storage_path);
+    for (const row of parsed.rows) {
+      const { targets } = applyMappingsToDataRow(row, maps);
+      const name = targets.staff_name?.trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const ex = out.get(key);
+      if (ex) ex.count += 1;
+      else out.set(key, { name, count: 1, fileId: f.id });
+    }
+  }
+  return [...out.values()];
+}
 
 /**
  * Deletes staged rows/refs, re-parses booking CSVs, inserts `import_booking_rows` for future rows
@@ -63,22 +96,8 @@ export async function runExtractBookingReferences(
 
   const hasBookingFile = Boolean((session as { has_booking_file?: boolean }).has_booking_file);
 
-  if (!hasBookingFile) {
-    await admin
-      .from('import_sessions')
-      .update({ references_resolved: true, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
-    return {
-      referencesResolved: true,
-      futureRowCount: 0,
-      extractedReferenceCount: 0,
-      insertedBookingRowCount: 0,
-      requiresTableConfirmation: false,
-      bookingModel,
-      mode: 'no_booking_file',
-    };
-  }
-
+  // Always re-stage from scratch: clear previous rows/refs first so staff-list
+  // references are extracted even when there is no bookings file.
   await admin.from('import_booking_rows').delete().eq('session_id', sessionId);
   await admin.from('import_booking_references').delete().eq('session_id', sessionId);
 
@@ -88,22 +107,8 @@ export async function runExtractBookingReferences(
     .eq('session_id', sessionId)
     .order('created_at');
 
-  const bookingFiles = (files ?? []).filter((f) => (f as { file_type: string }).file_type === 'bookings');
-  if (!bookingFiles.length) {
-    await admin
-      .from('import_sessions')
-      .update({ references_resolved: true, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
-    return {
-      referencesResolved: true,
-      futureRowCount: 0,
-      extractedReferenceCount: 0,
-      insertedBookingRowCount: 0,
-      requiresTableConfirmation: false,
-      bookingModel,
-      mode: 'no_booking_file',
-    };
-  }
+  const allFiles = (files ?? []) as Array<{ id: string; storage_path: string; file_type: string }>;
+  const bookingFiles = allFiles.filter((f) => f.file_type === 'bookings');
 
   const { data: mappingRows } = await admin
     .from('import_column_mappings')
@@ -118,29 +123,73 @@ export async function runExtractBookingReferences(
     byFile.set(fid, list);
   }
 
+  // Staff lists become bookable-staff references on salon-style models. Table
+  // venues keep their simple confirm flow, so staff files stay reference-only.
+  const staffEnabled = bookingModel === 'unified_scheduling' || bookingModel === 'practitioner_appointment';
+  const staffEntries = staffEnabled ? await collectStaffListEntries(admin, allFiles, byFile) : [];
+
+  async function insertStaffListRefs(excludeNames: Set<string>): Promise<number> {
+    const rows = staffEntries
+      .filter((e) => !excludeNames.has(e.name.toLowerCase()))
+      .map((e) => ({
+        session_id: sessionId,
+        file_id: e.fileId,
+        venue_id: venueId,
+        reference_type: 'staff',
+        raw_value: e.name,
+        booking_count: 0,
+        is_resolved: false,
+      }));
+    for (let start = 0; start < rows.length; start += INSERT_CHUNK_SIZE) {
+      const chunk = rows.slice(start, start + INSERT_CHUNK_SIZE);
+      const { error } = await admin.from('import_booking_references').insert(chunk);
+      if (error) {
+        console.error('[extract-booking-references] staff refs insert', error);
+        throw new Error('Failed to stage staff references');
+      }
+    }
+    return rows.length;
+  }
+
+  /** No bookings staged: staff refs (if any) are the only thing to resolve. */
+  async function staffOnlyResult(
+    mode: 'no_booking_file' | 'no_booking_date_mapping' | 'no_future_rows',
+  ): Promise<ExtractBookingReferencesResult> {
+    const staffCount = await insertStaffListRefs(new Set());
+    const resolved = await refreshImportReferencesResolved(admin, sessionId, venueId);
+    return {
+      referencesResolved: resolved,
+      futureRowCount: 0,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: 0,
+      staffReferenceCount: staffCount,
+      requiresTableConfirmation: false,
+      bookingModel,
+      mode,
+    };
+  }
+
+  if (!hasBookingFile || !bookingFiles.length) {
+    return staffOnlyResult('no_booking_file');
+  }
+
   let anyBookingDateMapping = false;
   for (const f of bookingFiles) {
-    const maps = byFile.get((f as { id: string }).id) ?? [];
-    if (maps.some((m) => m.action === 'map' && m.target_field === 'booking_date')) {
+    const maps = byFile.get(f.id) ?? [];
+    if (
+      maps.some(
+        (m) =>
+          (m.action === 'map' && m.target_field === 'booking_date') ||
+          (m.action === 'split' && m.split_config?.parts?.some((p) => p.field === 'booking_date')),
+      )
+    ) {
       anyBookingDateMapping = true;
       break;
     }
   }
 
   if (!anyBookingDateMapping) {
-    await admin
-      .from('import_sessions')
-      .update({ references_resolved: true, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
-    return {
-      referencesResolved: true,
-      futureRowCount: 0,
-      extractedReferenceCount: 0,
-      insertedBookingRowCount: 0,
-      requiresTableConfirmation: false,
-      bookingModel,
-      mode: 'no_booking_date_mapping',
-    };
+    return staffOnlyResult('no_booking_date_mapping');
   }
 
   type StagedRow = {
@@ -302,19 +351,7 @@ export async function runExtractBookingReferences(
   const futureRowCount = futureRows.length;
 
   if (futureRowCount === 0) {
-    await admin
-      .from('import_sessions')
-      .update({ references_resolved: true, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
-    return {
-      referencesResolved: true,
-      futureRowCount: 0,
-      extractedReferenceCount: 0,
-      insertedBookingRowCount: 0,
-      requiresTableConfirmation: false,
-      bookingModel,
-      mode: 'no_future_rows',
-    };
+    return staffOnlyResult('no_future_rows');
   }
 
   const rowInserts = futureRows.map((r) => ({
@@ -379,6 +416,7 @@ export async function runExtractBookingReferences(
       futureRowCount,
       extractedReferenceCount: 0,
       insertedBookingRowCount: rowInserts.length,
+      staffReferenceCount: 0,
       requiresTableConfirmation: true,
       bookingModel,
       mode: 'table_pending',
@@ -443,21 +481,20 @@ export async function runExtractBookingReferences(
     }
   }
 
-  const referencesResolved = refRows.length === 0;
+  // Staff-list members not already referenced by a booking become their own refs.
+  const bookingStaffNames = new Set(
+    refRows.filter((r) => r.reference_type === 'staff').map((r) => r.raw_value.toLowerCase()),
+  );
+  const staffReferenceCount = await insertStaffListRefs(bookingStaffNames);
 
-  await admin
-    .from('import_sessions')
-    .update({
-      references_resolved: referencesResolved,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', sessionId);
+  const referencesResolved = await refreshImportReferencesResolved(admin, sessionId, venueId);
 
   return {
     referencesResolved,
     futureRowCount,
     extractedReferenceCount: refRows.length,
     insertedBookingRowCount: rowInserts.length,
+    staffReferenceCount,
     requiresTableConfirmation: false,
     bookingModel,
     mode: referencesResolved ? 'ready' : 'unified_refs_pending',

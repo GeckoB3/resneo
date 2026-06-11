@@ -73,10 +73,21 @@ const SHORTLIST_SIZE = 12;
 export async function runAiMapReferences(params: {
   references: RefToMatch[];
   candidates: RefCandidate[];
+  /** Free-text guidance written by the user (e.g. "K. Smith is Katie Smith"). */
+  userInstructions?: string | null;
 }): Promise<{ suggestions: AiRefSuggestion[]; model: string } | null> {
   if (!params.references.length) {
     return { suggestions: [], model: 'none' };
   }
+
+  const instructionsSection = params.userInstructions?.trim()
+    ? `
+The user wrote these instructions about their data — follow them where relevant:
+"""
+${params.userInstructions.trim().slice(0, 2000)}
+"""
+`
+    : '';
 
   const all: AiRefSuggestion[] = [];
   let model = 'unknown';
@@ -100,7 +111,7 @@ export async function runAiMapReferences(params: {
     });
 
     const userPrompt = `
-Each reference below is a raw string from another platform's export. For each one,
+${instructionsSection}Each reference below is a raw string from another platform's export. For each one,
 pick the best-matching candidate from ITS OWN "candidates" list (these are already
 filtered to compatible types and ranked by name similarity), or null if none is a
 genuine match for the same real-world service/person/thing.

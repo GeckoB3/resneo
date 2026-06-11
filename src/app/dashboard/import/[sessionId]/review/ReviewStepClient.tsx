@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { readResponseJson } from '@/lib/api/read-response-json';
-import { BOOKING_FIELDS, CLIENT_FIELDS, type SchemaField } from '@/lib/import/constants';
+import { targetFieldsForFileType, type SchemaField } from '@/lib/import/constants';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
 
 type ImportFile = {
@@ -28,7 +28,7 @@ type MappingRow = {
 };
 
 function fieldListForFile(fileType: string): SchemaField[] {
-  return fileType === 'bookings' ? BOOKING_FIELDS : CLIENT_FIELDS;
+  return targetFieldsForFileType(fileType);
 }
 
 function labelForField(key: string | null | undefined, fileType: string): string {

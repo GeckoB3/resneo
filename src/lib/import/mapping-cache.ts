@@ -16,7 +16,7 @@ export function mappingCacheKey(headers: string[]): string {
 export async function getCachedMappings(
   admin: SupabaseClient,
   headers: string[],
-  fileType: 'clients' | 'bookings',
+  fileType: 'clients' | 'bookings' | 'staff',
 ): Promise<{ mappings: AiMappingRow[]; model: string | null } | null> {
   const hash = mappingCacheKey(headers);
   const { data, error } = await admin
@@ -45,7 +45,7 @@ export async function getCachedMappings(
 export async function storeCachedMappings(
   admin: SupabaseClient,
   headers: string[],
-  fileType: 'clients' | 'bookings',
+  fileType: 'clients' | 'bookings' | 'staff',
   mappings: AiMappingRow[],
   model: string,
 ): Promise<void> {

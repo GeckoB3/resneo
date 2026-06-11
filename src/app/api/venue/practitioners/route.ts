@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
-import { createClient } from '@/lib/supabase/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import {
   getVenueStaff,
@@ -351,7 +350,7 @@ export async function GET(request: NextRequest) {
 /** POST /api/venue/practitioners - create a new practitioner (admin only). */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
@@ -533,7 +532,7 @@ const staffBreaksOnlySchema = z.object({
 /** PATCH /api/venue/practitioners - admin: any field; staff: only breaks for their linked practitioner row. */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -739,7 +738,7 @@ export async function PATCH(request: NextRequest) {
 /** DELETE /api/venue/practitioners - delete a practitioner (admin only). */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });

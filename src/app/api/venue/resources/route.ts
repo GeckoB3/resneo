@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import {
   getVenueStaff,
   getStaffManagedCalendarIds,
@@ -274,9 +274,9 @@ async function mapUnifiedCalendarToResourceWithAvailabilityWarning(
 }
 
 /** GET /api/venue/resources - list resources for the venue. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -305,7 +305,7 @@ export async function GET() {
 /** POST /api/venue/resources - create a resource (admin or staff on a managed calendar column). */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -421,7 +421,7 @@ export async function POST(request: NextRequest) {
 /** PATCH /api/venue/resources - update a resource (admins: any column; staff: managed calendars only). */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
@@ -631,7 +631,7 @@ export async function PATCH(request: NextRequest) {
 /** DELETE /api/venue/resources - delete a resource (admin, or staff if resource is on a calendar they manage). */
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

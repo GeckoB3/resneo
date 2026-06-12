@@ -125,6 +125,13 @@ function appointmentServiceDraftFromApiRow(row: Record<string, unknown>, practit
     min_booking_notice_hours: win.min_booking_notice_hours,
     cancellation_notice_hours: win.cancellation_notice_hours,
     allow_same_day_booking: win.allow_same_day_booking,
+    booking_interval_minutes:
+      typeof row.booking_interval_minutes === 'number'
+        ? row.booking_interval_minutes
+        : DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES.booking_interval_minutes,
+    booking_minute_marks: Array.isArray(row.booking_minute_marks)
+      ? (row.booking_minute_marks as number[])
+      : null,
     custom_availability_enabled: Boolean(row.custom_availability_enabled),
     custom_working_hours:
       Boolean(row.custom_availability_enabled) && row.custom_working_hours && typeof row.custom_working_hours === 'object'
@@ -192,6 +199,8 @@ export function serviceDraftToApiPayload(
     min_booking_notice_hours: draft.min_booking_notice_hours,
     cancellation_notice_hours: draft.cancellation_notice_hours,
     allow_same_day_booking: draft.allow_same_day_booking,
+    booking_interval_minutes: draft.booking_interval_minutes,
+    booking_minute_marks: draft.booking_minute_marks,
   };
 
   if (isAdmin) {

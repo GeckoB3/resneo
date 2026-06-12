@@ -105,6 +105,7 @@ export default function Home() {
           </Link>
           <div className="hidden items-center gap-8 md:flex">
             <a href="#features" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Features</a>
+            <Link href="/solutions" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Solutions</Link>
             <a href="#pricing" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Pricing</a>
             <a href="#faq" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">FAQ</a>
             <Link href="/about" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">About</Link>
@@ -535,6 +536,7 @@ export default function Home() {
             &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
+            <Link href="/solutions" className="transition-colors hover:text-slate-900">Solutions</Link>
             <Link href="/about" className="transition-colors hover:text-slate-900">About</Link>
             <a href="#pricing" className="transition-colors hover:text-slate-900">Sign up</a>
             <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>

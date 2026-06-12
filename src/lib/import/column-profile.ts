@@ -38,10 +38,16 @@ export interface ColumnProfile {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const TIME_RE = /^\d{1,2}:\d{2}(:\d{2})?(\s?[AaPp][Mm])?$/;
-const NUMERIC_DATE_RE = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DATETIME_RE =
+/** A bare clock time, e.g. "9:30", "09:30:00", "2:30 PM". Shared with the irregularity detector. */
+export const TIME_RE = /^\d{1,2}:\d{2}(:\d{2})?(\s?[AaPp][Mm])?$/;
+/** A numeric date "d/m/yyyy" (slash, dot, or dash separated). */
+export const NUMERIC_DATE_RE = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/;
+/** An ISO date "yyyy-MM-dd". */
+export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A "d-MMM-yy" / "d-MMM-yyyy" dash-month date, e.g. "12-May-26". */
+export const DASH_MONTH_DATE_RE = /^\d{1,2}-[A-Za-z]{3,}-\d{2,4}$/;
+/** A combined date+time value, e.g. "2026-03-14 14:30" or "14/03/2026 2:30 PM". */
+export const DATETIME_RE =
   /^(\d{4}-\d{2}-\d{2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})[T ]\d{1,2}:\d{2}(:\d{2})?(\s?[AaPp][Mm])?$/;
 const PHONE_RE = /^[+()0-9][0-9()\s./-]{6,19}$/;
 const NUMBER_RE = /^-?[£$€]?\s?\d{1,3}([,. ]\d{3})*([.,]\d+)?%?$/;

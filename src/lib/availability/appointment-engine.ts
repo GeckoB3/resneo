@@ -20,6 +20,11 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import {
+  bookingIntervalGrid,
+  normalizeBookingIntervalMinutes,
+  sanitizeBookingMinuteMarks,
+} from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
@@ -525,8 +530,20 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         date,
       );
 
+      // Candidate start times. Without a per-hour restriction we step by the interval from the range
+      // start — identical to the legacy fixed 15-minute grid for unconfigured services, so existing
+      // services keep their exact slot times. A genuine restriction (a strict, non-empty subset of the
+      // interval grid) is inherently hour-relative, so those marks are anchored to the top of the hour.
+      const bookingInterval = normalizeBookingIntervalMinutes(svc.booking_interval_minutes);
+      const restrictMarks = sanitizeBookingMinuteMarks(svc.booking_minute_marks, bookingInterval);
+      const bookingGrid = bookingIntervalGrid(bookingInterval);
+      const hasHourRestriction = restrictMarks.length > 0 && restrictMarks.length < bookingGrid.length;
+      const allowedStartOffset = hasHourRestriction ? new Set(restrictMarks) : null;
+      const startStep = hasHourRestriction ? 1 : bookingInterval;
+
       for (const range of serviceEffectiveRanges) {
-        for (let t = range.start; t + totalSpan <= range.end; t += 15) {
+        for (let t = range.start; t + totalSpan <= range.end; t += startStep) {
+          if (allowedStartOffset && !allowedStartOffset.has(((t % 60) + 60) % 60)) continue;
           // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
           if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
 
@@ -1229,6 +1246,8 @@ export async function fetchCalendarAppointmentInput(params: {
       is_active: true,
       sort_order: (s.sort_order as number) ?? 0,
       created_at: (s.created_at as string) ?? new Date().toISOString(),
+      booking_interval_minutes: (s.booking_interval_minutes as number | undefined) ?? undefined,
+      booking_minute_marks: (s.booking_minute_marks as number[] | null | undefined) ?? null,
       custom_availability_enabled: Boolean(s.custom_availability_enabled),
       custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
     };

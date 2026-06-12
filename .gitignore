@@ -52,6 +52,8 @@ supabase/.temp/
 
 # tooling / local
 scripts/output/
+# generated seed output (scratch data, not source)
+scripts/seed-plus1-demo-output.json
 # local agent / IDE
 .claude/
 

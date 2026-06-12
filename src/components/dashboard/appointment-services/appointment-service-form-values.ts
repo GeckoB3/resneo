@@ -1,4 +1,5 @@
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import { DEFAULT_BOOKING_INTERVAL_MINUTES } from '@/lib/appointments/booking-interval';
 import type {
   ClassPaymentRequirement,
   ProcessingTimeBlock,
@@ -68,6 +69,10 @@ export interface AppointmentServiceFormValues {
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
+  /** Spacing (minutes, 1-60) of bookable start times, anchored to the top of the hour. */
+  booking_interval_minutes: number;
+  /** Allowed start-minute offsets within the hour (0-59), or `null` for every interval mark. */
+  booking_minute_marks: number[] | null;
   custom_availability_enabled: boolean;
   custom_working_hours: ServiceCustomScheduleV2;
   variants: AppointmentServiceVariantFormRow[];
@@ -102,6 +107,8 @@ export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValu
   min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
   cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+  booking_interval_minutes: DEFAULT_BOOKING_INTERVAL_MINUTES,
+  booking_minute_marks: null,
   custom_availability_enabled: false,
   custom_working_hours: { version: 2, rules: [] },
   variants: [],

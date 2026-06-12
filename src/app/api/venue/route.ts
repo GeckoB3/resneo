@@ -23,6 +23,15 @@ const bookingPageImageFramingSchema = z.object({
   zoom: z.number().min(0.5).max(3).optional(),
 });
 
+/** Free-form cover crop: top-left + size as fractions of the source image, plus its aspect. */
+const bookingPageCoverCropBoxSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  ar: z.number(),
+});
+
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Slug: lowercase letters, numbers, hyphens only').optional(),
@@ -61,7 +70,8 @@ const venueProfileSchema = z.object({
       announcement: z.string().max(600).nullable().optional(),
       font_preset: z.string().max(40).nullable().optional(),
       logo_crop: bookingPageImageFramingSchema.nullable().optional(),
-      cover_crop: bookingPageImageFramingSchema.nullable().optional(),
+      /** Free-form cover crop region (fractions of the source image) chosen in the editor. */
+      cover_crop_box: bookingPageCoverCropBoxSchema.nullable().optional(),
       /** When false, cover is constrained to the booking content column instead of edge-to-edge. */
       cover_full_width: z.boolean().optional(),
       gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),

@@ -112,12 +112,24 @@ const hexColour = z
   .nullable()
   .optional();
 
-/** Image framing (logo/cover) — ranges are re-clamped by the server sanitiser. */
+/** Image framing (logo) — ranges are re-clamped by the server sanitiser. */
 const imageFramingSchema = z
   .object({
     x: z.number(),
     y: z.number(),
     zoom: z.number(),
+  })
+  .nullable()
+  .optional();
+
+/** Free-form cover crop (fractions of the source image) — re-clamped by the server sanitiser. */
+const coverCropBoxSchema = z
+  .object({
+    x: z.number(),
+    y: z.number(),
+    w: z.number(),
+    h: z.number(),
+    ar: z.number(),
   })
   .nullable()
   .optional();
@@ -137,7 +149,7 @@ export const collectiveBookingPageConfigSchema = z
     brand_accent: hexColour,
     font_preset: z.string().max(40).nullable().optional(),
     logo_crop: imageFramingSchema,
-    cover_crop: imageFramingSchema,
+    cover_crop_box: coverCropBoxSchema,
     about: z.string().max(2000).nullable().optional(),
     announcement: z.string().max(300).nullable().optional(),
     cover_photo_url: z.union([z.literal(''), z.string().url().max(500)]).nullable().optional(),

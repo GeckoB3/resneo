@@ -71,8 +71,11 @@ export async function runAiColumnMapping(params: {
   columnProfiles?: ColumnProfile[] | null;
   /** Free-text guidance written by the user ("the Ref column is our client ID", …). */
   userInstructions?: string | null;
+  /** Columns already mapped deterministically by name — the AI must not reuse these fields. */
+  knownMappings?: Array<{ source_column: string; target_field: string }> | null;
 }): Promise<{ mappings: AiMappingRow[]; model: string } | null> {
-  const { headers, sampleRows, fileType, detectedPlatform, targetFields, columnProfiles, userInstructions } = params;
+  const { headers, sampleRows, fileType, detectedPlatform, targetFields, columnProfiles, userInstructions, knownMappings } =
+    params;
 
   const profileSection = columnProfiles?.length
     ? `
@@ -92,6 +95,14 @@ ${userInstructions.trim().slice(0, 2000)}
 `
     : '';
 
+  const knownSection = knownMappings?.length
+    ? `
+These columns are ALREADY mapped by an exact column-name match — treat them as decided.
+Do NOT map any OTHER column to these same target fields; map the remaining columns only:
+${JSON.stringify(knownMappings, null, 1)}
+`
+    : '';
+
   const fileKindLine =
     fileType === 'staff'
       ? 'a STAFF LIST (each row is a member of staff). Map name/contact columns to the staff fields.'
@@ -100,7 +111,7 @@ ${userInstructions.trim().slice(0, 2000)}
   const userPrompt = `
 The user has uploaded a CSV file containing ${fileKindLine}
 ${detectedPlatform ? `We believe this is from ${detectedPlatform}.` : 'The source platform is unknown.'}
-${instructionsSection}
+${instructionsSection}${knownSection}
 CSV column headers:
 ${JSON.stringify(headers)}
 

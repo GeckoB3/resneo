@@ -181,6 +181,13 @@ export interface AppointmentService {
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
+  /** Spacing (minutes, 1-60) of guest booking start times, anchored to the top of the hour. Default 15. */
+  booking_interval_minutes?: number;
+  /**
+   * Optional allowed start-minute offsets within the hour (0-59). `null`/omitted = every interval mark.
+   * e.g. [0,5,10,15,20,25] = bookable every 5 minutes for the first half of each hour.
+   */
+  booking_minute_marks?: number[] | null;
   /**
    * When true, guest bookable slots for this service are the intersection of
    * venue + calendar hours with `custom_working_hours` for each calendar day.

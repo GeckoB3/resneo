@@ -10,6 +10,11 @@ const DATE_FORMATS_TRY = [
   'dd-MM-yyyy',
   'd MMMM yyyy',
   'MMMM d, yyyy',
+  // Salon/report exports often use a dash-month-name date, e.g. "12-May-26".
+  'd-MMM-yy',
+  'd-MMM-yyyy',
+  'dd-MMM-yy',
+  'dd-MMM-yyyy',
 ] as const;
 
 export function normaliseEmail(raw: string | null | undefined): string | null {

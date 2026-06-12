@@ -1,13 +1,13 @@
 import {
-  sanitizeBookingPageCoverCrop,
-  type BookingPageCoverCrop,
+  sanitizeBookingPageCoverCropBox,
+  type BookingPageCoverCropBox,
 } from '@/lib/booking/booking-page-cover';
 import {
   sanitizeBookingPageLogoCrop,
   type BookingPageLogoCrop,
 } from '@/lib/booking/booking-page-logo';
 
-export type { BookingPageCoverCrop, BookingPageLogoCrop };
+export type { BookingPageCoverCropBox, BookingPageLogoCrop };
 
 /**
  * Public booking-page branding (Phase 1 of the Booking Site Studio).
@@ -71,8 +71,11 @@ export interface BookingPageConfig {
   font_preset?: BookingFontPreset | null;
   /** Circular logo framing on the public booking page header. */
   logo_crop?: BookingPageLogoCrop | null;
-  /** Cover banner framing on the public booking page. */
-  cover_crop?: BookingPageCoverCrop | null;
+  /**
+   * Free-form cover crop chosen in the editor. Absent → the whole photo shows at its natural
+   * aspect ratio (never cropped). Present → only the selected region is displayed.
+   */
+  cover_crop_box?: BookingPageCoverCropBox | null;
   /** When false, cover sits in the content column instead of edge-to-edge (default full width). */
   cover_full_width?: boolean;
   /** Short "about / welcome" text shown under the header. */
@@ -326,8 +329,8 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
   const logoCrop = sanitizeBookingPageLogoCrop(src.logo_crop);
   if (logoCrop) config.logo_crop = logoCrop;
 
-  const coverCrop = sanitizeBookingPageCoverCrop(src.cover_crop);
-  if (coverCrop) config.cover_crop = coverCrop;
+  const coverCropBox = sanitizeBookingPageCoverCropBox(src.cover_crop_box);
+  if (coverCropBox) config.cover_crop_box = coverCropBox;
 
   if (src.cover_full_width === true) config.cover_full_width = true;
   else if (src.cover_full_width === false) config.cover_full_width = false;
@@ -372,6 +375,14 @@ export function mergeBookingPageConfigPatch(
   }
   if ('cover_full_width' in incoming) {
     merged.cover_full_width = incoming.cover_full_width === true;
+  }
+  if ('cover_crop_box' in incoming) {
+    const box = sanitizeBookingPageCoverCropBox(incoming.cover_crop_box);
+    if (box) {
+      merged.cover_crop_box = box;
+    } else {
+      delete merged.cover_crop_box;
+    }
   }
   if ('show_services_tab' in incoming) {
     if (incoming.show_services_tab === true) {

@@ -38,6 +38,7 @@ import {
   processingTimeBlocksSchema,
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
+import { normalizeBookingStartForStorage } from '@/lib/appointments/booking-interval';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -107,6 +108,8 @@ const serviceSchema = z
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
+    booking_interval_minutes: z.number().int().min(1).max(60).optional(),
+    booking_minute_marks: z.array(z.number().int().min(0).max(59)).max(60).nullable().optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
@@ -173,6 +176,8 @@ const servicePatchSchema = z
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
+    booking_interval_minutes: z.number().int().min(1).max(60).optional(),
+    booking_minute_marks: z.array(z.number().int().min(0).max(59)).max(60).nullable().optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
@@ -294,11 +299,37 @@ function locationPatchFields(
   return updates;
 }
 
+/**
+ * Apply booking interval + minute marks to a PATCH payload, normalizing for storage. Resolves the
+ * effective interval/marks from the patch when present, else the current row, so changing only one
+ * of the two still re-anchors marks to the right grid. No-op when the patch touches neither field
+ * (e.g. a staff edit, whose payload is permission-filtered and never carries these admin fields).
+ */
+function applyBookingStartPatch(
+  payload: Record<string, unknown>,
+  currentRow: Record<string, unknown>,
+): void {
+  const touchesInterval = payload.booking_interval_minutes !== undefined;
+  const touchesMarks = payload.booking_minute_marks !== undefined;
+  if (!touchesInterval && !touchesMarks) return;
+  const effInterval = touchesInterval
+    ? payload.booking_interval_minutes
+    : currentRow.booking_interval_minutes;
+  const effMarks = touchesMarks
+    ? (payload.booking_minute_marks as number[] | null)
+    : ((currentRow.booking_minute_marks as number[] | null | undefined) ?? null);
+  const norm = normalizeBookingStartForStorage(effInterval, effMarks);
+  payload.booking_interval_minutes = norm.booking_interval_minutes;
+  payload.booking_minute_marks = norm.booking_minute_marks;
+}
+
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
   return {
     ...row,
     colour: row.colour ?? '#3B82F6',
     location_type: (row.location_type as string | undefined) ?? 'business_venue',
+    booking_interval_minutes: (row.booking_interval_minutes as number | undefined) ?? 15,
+    booking_minute_marks: (row.booking_minute_marks as number[] | null | undefined) ?? null,
     custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
@@ -771,6 +802,7 @@ export async function POST(request: NextRequest) {
         min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
         allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
+        ...normalizeBookingStartForStorage(parsed.data.booking_interval_minutes, parsed.data.booking_minute_marks),
         ...locationInsertFields(parsed.data),
         ...(staff.role === 'admin'
           ? {
@@ -876,6 +908,7 @@ export async function POST(request: NextRequest) {
       min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
       cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
       allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
+      ...normalizeBookingStartForStorage(parsed.data.booking_interval_minutes, parsed.data.booking_minute_marks),
       ...locationInsertFields(parsed.data),
     };
     const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();
@@ -1219,6 +1252,8 @@ export async function PATCH(request: NextRequest) {
         updatePayload.processing_time_blocks = procCheckU.normalized ?? [];
       }
 
+      applyBookingStartPatch(updatePayload, serviceRow as Record<string, unknown>);
+
       let savedRow = serviceRow as Record<string, unknown>;
       if (Object.keys(updatePayload).length > 0) {
         const { data, error } = await admin
@@ -1466,6 +1501,8 @@ export async function PATCH(request: NextRequest) {
     if (Object.prototype.hasOwnProperty.call(patchPayload, 'processing_time_blocks')) {
       patchPayload.processing_time_blocks = procCheckL.normalized ?? [];
     }
+
+    applyBookingStartPatch(patchPayload, serviceRow as Record<string, unknown>);
 
     let savedRow = serviceRow as Record<string, unknown>;
     if (Object.keys(patchPayload).length > 0) {

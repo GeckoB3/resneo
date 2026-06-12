@@ -54,6 +54,9 @@ import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointmen
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { buildAddonSnapshots, totalsFromSnapshots } from '@/lib/addons/snapshot-addons';
 import {
   applyGroupBookingStatusChange,
   applyGroupClientArrivedChange,
@@ -1693,6 +1696,60 @@ export async function PATCH(
         bookingUpdate.service_variant_id = (body as { service_variant_id?: string | null }).service_variant_id;
       }
 
+      // Add-ons (web parity with create): when staff change add-ons in the modify
+      // sheet, validate them against the (possibly new) service, snapshot them, and
+      // refresh the breakdown totals. The wall-clock end time already reflects the
+      // chosen add-ons because the client folds add-on minutes into
+      // `duration_minutes`; this only persists the `booking_addons` rows + totals.
+      let addonRowsToReplace: ReturnType<typeof buildAddonSnapshots> | null = null;
+      if (isAppointment && body.addons !== undefined) {
+        const rawAddons = body.addons;
+        if (!Array.isArray(rawAddons)) {
+          return NextResponse.json({ error: 'addons must be an array' }, { status: 400 });
+        }
+        if (rawAddons.length === 0) {
+          bookingUpdate.addons_total_price_pence = 0;
+          bookingUpdate.addons_total_duration_minutes = 0;
+          addonRowsToReplace = [];
+        } else {
+          const bookingUsesServiceItem = Boolean(booking.service_item_id);
+          const addonParentId = bookingUsesServiceItem
+            ? ((body.service_item_id as string | undefined) ?? (booking.service_item_id as string | null))
+            : ((body.appointment_service_id as string | undefined) ??
+              (booking.appointment_service_id as string | null));
+          if (!addonParentId) {
+            return NextResponse.json({ error: 'Cannot resolve the service for add-ons' }, { status: 400 });
+          }
+          const { groups, groupsById } = await loadAddonsForBooking({
+            admin,
+            venueId: scopeVenueId,
+            schema: bookingUsesServiceItem ? 'service_item' : 'appointment_service',
+            parentId: addonParentId,
+            includeHidden: true,
+          });
+          const addonValidation = validateAddonSelections({
+            selections: rawAddons as { addon_id: string }[],
+            groupsForService: groups,
+            source: 'staff',
+          });
+          if (!addonValidation.ok) {
+            return NextResponse.json(
+              { error: 'INVALID_ADDON_SELECTION', details: addonValidation.errors },
+              { status: 400 },
+            );
+          }
+          const snapshots = buildAddonSnapshots({
+            selected: addonValidation.resolvedAddons,
+            groupsById,
+            segmentIndex: null,
+          });
+          const totals = totalsFromSnapshots(snapshots);
+          bookingUpdate.addons_total_price_pence = totals.total_price_pence;
+          bookingUpdate.addons_total_duration_minutes = totals.total_duration_minutes;
+          addonRowsToReplace = snapshots;
+        }
+      }
+
       if (!isAppointment && tableRescheduleServiceId && tableModifyEngineInput) {
         const { durationMinutes: engineDurationMinutes, bufferMinutes } =
           await resolveDurationAndBufferForTableAssignment(
@@ -1823,6 +1880,28 @@ export async function PATCH(
           { error: 'Booking was modified elsewhere. Refresh and try again.', code: 'stale_booking' },
           { status: 412 },
         );
+      }
+
+      // Replace the booking's add-on snapshots after the parent row update lands
+      // (matches the create flow's `booking_addons` write). REPLACE semantics:
+      // delete the existing rows, then insert the new selection (empty = cleared).
+      if (addonRowsToReplace !== null) {
+        const { error: addonDelErr } = await admin
+          .from('booking_addons')
+          .delete()
+          .eq('booking_id', id);
+        if (addonDelErr) {
+          console.error('booking_addons modify delete failed:', addonDelErr);
+          return NextResponse.json({ error: 'Failed to update add-ons for booking' }, { status: 500 });
+        }
+        if (addonRowsToReplace.length > 0) {
+          const addonRows = addonRowsToReplace.map((s) => ({ ...s, booking_id: id }));
+          const { error: addonInsErr } = await admin.from('booking_addons').insert(addonRows);
+          if (addonInsErr) {
+            console.error('booking_addons modify insert failed:', addonInsErr);
+            return NextResponse.json({ error: 'Failed to update add-ons for booking' }, { status: 500 });
+          }
+        }
       }
 
       const afterEndHm =

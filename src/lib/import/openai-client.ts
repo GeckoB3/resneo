@@ -19,6 +19,19 @@ export function importAiModel(): string {
   return process.env.OPENAI_IMPORT_MODEL?.trim() || 'gpt-5.4-nano';
 }
 
+/**
+ * Model for the reshape stage. Reshaping a messy report into a clean table needs
+ * more reasoning than column mapping (forward-filling section headers, inferring
+ * a missing first date), so it defaults to a stronger model than the nano mapper.
+ */
+export function importReshapeModel(): string {
+  return (
+    process.env.OPENAI_IMPORT_RESHAPE_MODEL?.trim() ||
+    process.env.OPENAI_IMPORT_MODEL?.trim() ||
+    'gpt-5.4-mini'
+  );
+}
+
 export function importAiAvailable(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
@@ -37,13 +50,15 @@ export async function runImportAiJson<T>(params: {
   schemaName: string;
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
+  /** Override the default mapping model (e.g. the reshape stage uses a stronger one). */
+  model?: string;
 }): Promise<{ data: T; model: string } | null> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     console.warn(`[import ${params.callSite}] OPENAI_API_KEY not set`);
     return null;
   }
-  const model = importAiModel();
+  const model = params.model?.trim() || importAiModel();
   const openai = new OpenAI({
     apiKey,
     timeout: IMPORT_AI_TIMEOUT_MS,

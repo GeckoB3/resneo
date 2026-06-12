@@ -8,14 +8,11 @@ import { BookingFontPresetSelect } from '@/app/dashboard/settings/sections/Booki
 import {
   BOOKING_PAGE_COVER_SETTINGS_FRAME_CLASS,
   BOOKING_PAGE_COVER_SETTINGS_PLACEHOLDER_FRAME_CLASS,
-  DEFAULT_BOOKING_PAGE_COVER_CROP,
-  resolveBookingPageCoverCrop,
-  sanitizeBookingPageCoverCrop,
-  type BookingPageCoverCrop,
+  resolveBookingPageCoverCropBox,
+  type BookingPageCoverCropBox,
 } from '@/lib/booking/booking-page-cover';
-import { BookingPageDraggableCover } from '@/app/dashboard/settings/sections/BookingPageDraggableCover';
+import { BookingPageCoverCropper } from '@/app/dashboard/settings/sections/BookingPageCoverCropper';
 import { BookingPageDraggableLogo } from '@/app/dashboard/settings/sections/BookingPageDraggableLogo';
-import { BookingPageImageFramingControls } from '@/app/dashboard/settings/sections/BookingPageImageFramingControls';
 import { BookingPageLogoFramingControls } from '@/app/dashboard/settings/sections/BookingPageLogoFramingControls';
 import { InlineBookingPreview } from './InlineBookingPreview';
 import {
@@ -158,9 +155,10 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   const [logoCrop, setLogoCrop] = useState<BookingPageLogoCrop>(() =>
     resolveBookingPageLogoCrop(cfg0.logo_crop),
   );
-  const [coverCrop, setCoverCrop] = useState<BookingPageCoverCrop>(() =>
-    resolveBookingPageCoverCrop(cfg0.cover_crop),
+  const [coverCropBox, setCoverCropBox] = useState<BookingPageCoverCropBox | null>(() =>
+    resolveBookingPageCoverCropBox(cfg0.cover_crop_box),
   );
+  const [cropperOpen, setCropperOpen] = useState(false);
   const [coverFullWidth, setCoverFullWidth] = useState(cfg0.cover_full_width === true);
   const [about, setAbout] = useState(cfg0.about ?? '');
   const [announcement, setAnnouncement] = useState(cfg0.announcement ?? '');
@@ -242,10 +240,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       const framed = sanitizeBookingPageLogoCrop(logoCrop);
       if (framed) config.logo_crop = framed;
     }
-    if (coverUrl) {
-      const framed = sanitizeBookingPageCoverCrop(coverCrop);
-      if (framed) config.cover_crop = framed;
-    }
+    // The whole photo shows by default; a crop box (if set) narrows it to the chosen region.
+    config.cover_crop_box = coverUrl ? coverCropBox : null;
     config.cover_full_width = coverFullWidth;
     return config;
   }, [
@@ -254,7 +250,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     brandAccent,
     fontPreset,
     logoCrop,
-    coverCrop,
+    coverCropBox,
     coverFullWidth,
     logoUrl,
     coverUrl,
@@ -335,7 +331,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowAboutTab(c.show_about_tab === true);
     setTeamProfiles(c.team_profiles ?? {});
     setLogoCrop(resolveBookingPageLogoCrop(c.logo_crop));
-    setCoverCrop(resolveBookingPageCoverCrop(c.cover_crop));
+    setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
     setCoverFullWidth(c.cover_full_width === true);
     // Reset the dirty-check baseline; the auto-save effect re-captures it from buildConfigFromState()
     // (the same producer it compares against) once the seeded state settles. Seeding it from the
@@ -350,6 +346,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
     setCoverFullWidth(c.cover_full_width === true);
+    setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync only when the saved config changes
   }, [adapter.getConfig]);
 
@@ -449,7 +446,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         try {
           const url = await adapter.cover.upload(file);
           await adapter.cover.saveUrl(url);
-          setCoverCrop({ ...DEFAULT_BOOKING_PAGE_COVER_CROP });
+          // A new photo invalidates any prior crop region.
+          setCoverCropBox(null);
           report({ status: 'saved', message: 'Cover photo updated.' });
         } catch (err) {
           setCoverError(err instanceof Error ? err.message : 'Upload failed');
@@ -474,7 +472,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     report({ status: 'saving', message: null });
     try {
       await adapter.cover.saveUrl(null);
-      setCoverCrop({ ...DEFAULT_BOOKING_PAGE_COVER_CROP });
+      setCoverCropBox(null);
       report({ status: 'saved', message: 'Cover photo removed.' });
     } catch (err) {
       setCoverError(err instanceof Error ? err.message : 'Failed to remove');
@@ -655,6 +653,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         setFontPreset(c.font_preset ?? 'default');
         setAnnouncement(c.announcement ?? '');
         setCoverFullWidth(c.cover_full_width === true);
+        setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
         // Reuse the member's existing public image URLs (no re-upload).
         void adapter.logo.saveUrl(source.logoUrl ?? null);
         void adapter.cover.saveUrl(source.coverPhotoUrl ?? null);
@@ -963,23 +962,9 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {coverUrl ? (
-              isAdmin ? (
-                <BookingPageDraggableCover
-                  coverUrl={coverUrl}
-                  crop={coverCrop}
-                  disabled={coverSaving || coverRemoving}
-                  onCropChange={setCoverCrop}
-                />
-              ) : (
-                <div className={BOOKING_PAGE_COVER_SETTINGS_FRAME_CLASS}>
-                  <BookingPageCoverPhoto
-                    coverUrl={coverUrl}
-                    alt="Cover"
-                    crop={coverCrop}
-                    className="h-full w-full"
-                  />
-                </div>
-              )
+              <div className={BOOKING_PAGE_COVER_SETTINGS_FRAME_CLASS}>
+                <BookingPageCoverPhoto coverUrl={coverUrl} alt="Cover" cropBox={coverCropBox} />
+              </div>
             ) : (
               <div className={BOOKING_PAGE_COVER_SETTINGS_PLACEHOLDER_FRAME_CLASS}>No cover photo</div>
             )}
@@ -1002,18 +987,30 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
                   <>
                     <button
                       type="button"
+                      onClick={() => setCropperOpen(true)}
+                      disabled={coverSaving || coverRemoving}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {coverCropBox ? 'Edit crop' : 'Crop photo'}
+                    </button>
+                    {coverCropBox && (
+                      <button
+                        type="button"
+                        onClick={() => setCoverCropBox(null)}
+                        disabled={coverSaving || coverRemoving}
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        Reset crop
+                      </button>
+                    )}
+                    <button
+                      type="button"
                       onClick={onCoverRemove}
                       disabled={coverSaving || coverRemoving}
                       className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
                     >
                       {coverRemoving ? 'Removing…' : 'Remove photo'}
                     </button>
-                    <BookingPageImageFramingControls
-                      controlId="cover"
-                      crop={coverCrop}
-                      disabled={coverSaving || coverRemoving}
-                      onChange={setCoverCrop}
-                    />
                   </>
                 )}
               </>
@@ -1025,14 +1022,27 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               {coverError && <p className="text-sm text-red-600">{coverError}</p>}
               <p className="text-xs text-slate-500">
                 {coverUrl
-                  ? coverFullWidth
-                    ? 'Drag to reposition. Shown as a full-width banner at the top of your booking page (fixed height, crops to fit).'
-                    : 'Drag to reposition. Shown above your venue name at a fixed content width on all screen sizes (fixed height, crops to fit).'
+                  ? coverCropBox
+                    ? coverFullWidth
+                      ? 'Showing your selected crop as a full-width banner. Use Edit crop to change the area, or Reset crop to show the whole photo.'
+                      : 'Showing your selected crop above your venue name. Use Edit crop to change the area, or Reset crop to show the whole photo.'
+                    : coverFullWidth
+                      ? 'Showing the whole photo as a full-width banner — never cropped. Use Crop photo to choose a specific area.'
+                      : 'Showing the whole photo above your venue name — never cropped. Use Crop photo to choose a specific area.'
                   : coverFullWidth
-                    ? 'Upload a photo to show as a full-width banner at the top of your booking page (fixed height).'
-                    : 'Upload a photo to show above your venue name at a fixed content width (fixed height).'}
+                    ? 'Upload a photo to show as a full-width banner at the top of your booking page.'
+                    : 'Upload a photo to show above your venue name at a fixed content width.'}
               </p>
             </div>
+          )}
+          {isAdmin && coverUrl && cropperOpen && (
+            <BookingPageCoverCropper
+              open
+              onOpenChange={setCropperOpen}
+              coverUrl={coverUrl}
+              initialCrop={coverCropBox}
+              onApply={setCoverCropBox}
+            />
           )}
         </div>
 

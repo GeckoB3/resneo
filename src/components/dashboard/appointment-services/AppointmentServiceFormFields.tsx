@@ -8,6 +8,7 @@ import {
   type AppointmentServiceVariantFormRow,
 } from '@/components/dashboard/appointment-services/appointment-service-form-values';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
+import { BookingIntervalEditor } from '@/components/dashboard/appointment-services/BookingIntervalEditor';
 import { AddonGroupsSection } from '@/components/dashboard/appointment-services/AddonGroupsSection';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
@@ -657,6 +658,19 @@ export function AppointmentServiceFormFields({
           Allow same-day bookings
         </label>
       </div>
+
+      <BookingIntervalEditor
+        intervalMinutes={form.booking_interval_minutes}
+        minuteMarks={form.booking_minute_marks}
+        onChange={(next) =>
+          setForm((f) => ({
+            ...f,
+            booking_interval_minutes: next.booking_interval_minutes,
+            booking_minute_marks: next.booking_minute_marks,
+          }))
+        }
+        fieldIdSuffix={fieldGroupSuffix}
+      />
 
       {isAdmin && (
         <div className="min-w-0 max-w-full space-y-2 rounded-lg border border-slate-200 p-3">

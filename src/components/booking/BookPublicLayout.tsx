@@ -12,7 +12,10 @@ import { bookingPageThemeVars } from '@/lib/booking/booking-page-theme';
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 
 import { BookingPageCoverBanner } from '@/components/booking/BookingPageCoverBanner';
-import { bookingPageCoverIsFullWidth } from '@/lib/booking/booking-page-cover';
+import {
+  bookingPageCoverCropBoxFromConfig,
+  bookingPageCoverIsFullWidth,
+} from '@/lib/booking/booking-page-cover';
 import { BookingPageLogo } from '@/components/booking/BookingPageLogo';
 import { BookingPageSocialLinks } from '@/components/booking/BookingPageSocialLinks';
 import { BOOKING_FONT_STYLESHEET, bookingPageFontVars } from '@/lib/booking/booking-page-font-presets';
@@ -203,6 +206,7 @@ export function BookPublicLayout({
     venue.booking_model,
   );
   const coverFullWidth = bookingPageCoverIsFullWidth(pageConfig);
+  const coverCropBox = bookingPageCoverCropBoxFromConfig(pageConfig);
 
   if (venue.booking_paused) {
 
@@ -259,7 +263,7 @@ export function BookPublicLayout({
       {venue.cover_photo_url && coverFullWidth ? (
         <BookingPageCoverBanner
           coverUrl={venue.cover_photo_url}
-          crop={pageConfig?.cover_crop}
+          cropBox={coverCropBox}
           fullWidth
         />
       ) : null}
@@ -273,7 +277,7 @@ export function BookPublicLayout({
           {venue.cover_photo_url && !coverFullWidth ? (
             <BookingPageCoverBanner
               coverUrl={venue.cover_photo_url}
-              crop={pageConfig?.cover_crop}
+              cropBox={coverCropBox}
               fullWidth={false}
             />
           ) : null}

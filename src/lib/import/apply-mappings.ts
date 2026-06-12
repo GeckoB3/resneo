@@ -118,10 +118,22 @@ export function applyMappingsToDataRow(
     }
   }
 
+  // Resneo stores names as separate first + surname columns, so a single
+  // combined name column is always split. `splitFullName` handles "Surname,
+  // First" and compound surnames ("Anna van der Berg"). Explicit first/last
+  // mappings win — we only fill what's missing.
   if (targets.full_name && (!targets.first_name || !targets.last_name)) {
     const { first, last } = splitFullName(targets.full_name);
     targets.first_name ||= first;
     targets.last_name ||= last;
+  }
+
+  // Booking exports carry the client's name in one column too; split it into
+  // the guest first/surname fields the importer uses to match/create clients.
+  if (targets.guest_full_name && (!targets.guest_first_name || !targets.guest_last_name)) {
+    const { first, last } = splitFullName(targets.guest_full_name);
+    targets.guest_first_name ||= first;
+    targets.guest_last_name ||= last;
   }
 
   // Staff lists: separate first/last columns combine into the canonical name.

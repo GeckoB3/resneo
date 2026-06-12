@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireImportAdmin } from '@/lib/import/auth';
 import { targetFieldsForFileType } from '@/lib/import/constants';
-import { runAiColumnMapping } from '@/lib/import/ai-map-columns';
+import { runAiColumnMapping, type AiMappingRow } from '@/lib/import/ai-map-columns';
+import { aliasMapColumns } from '@/lib/import/header-aliases';
+import { autoSplitCombinedNames } from '@/lib/import/auto-split-names';
 import { getCachedMappings, storeCachedMappings } from '@/lib/import/mapping-cache';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
@@ -35,6 +37,13 @@ export async function POST(
 
   const ft = f.file_type === 'bookings' ? 'bookings' : f.file_type === 'staff' ? 'staff' : 'clients';
   const targetFields = targetFieldsForFileType(ft);
+  const headers = f.headers ?? [];
+
+  // Deterministic name-based mappings: instant, exact, and stored as confirmed.
+  // They win over any AI guess for the same column or target field.
+  const aliasMappings = aliasMapColumns(headers, ft);
+  const aliasByColumn = new Map(aliasMappings.map((a) => [a.source_column, a.target_field]));
+  const aliasFields = new Set(aliasMappings.map((a) => a.target_field));
 
   const { data: session } = await staff.db
     .from('import_sessions')
@@ -55,10 +64,9 @@ export async function POST(
   // venues, so most runs need no AI call at all. User-written instructions are
   // session-specific, so they bypass the shared cache entirely (read & write).
   const cacheAdmin = getSupabaseAdminClient();
-  const headers = f.headers ?? [];
   const cached = userInstructions ? null : await getCachedMappings(cacheAdmin, headers, ft);
 
-  let ai: { mappings: import('@/lib/import/ai-map-columns').AiMappingRow[]; model: string } | null = null;
+  let ai: { mappings: AiMappingRow[]; model: string } | null = null;
   let fromCache = false;
   if (cached) {
     ai = { mappings: cached.mappings, model: cached.model ?? 'cache' };
@@ -74,17 +82,44 @@ export async function POST(
         ? (f.column_profile as import('@/lib/import/column-profile').ColumnProfile[])
         : null,
       userInstructions,
+      knownMappings: aliasMappings,
     });
     if (ai?.mappings?.length && !userInstructions) {
       await storeCachedMappings(cacheAdmin, headers, ft, ai.mappings, ai.model);
     }
   }
 
-  const modelUsed = ai?.model ?? null;
+  const modelUsed = ai?.model ?? (aliasMappings.length ? 'alias' : null);
 
-  // AI failed or returned nothing: keep whatever mappings the user already has
+  // Merge deterministic alias mappings with the AI result. Aliases override the
+  // AI for the same column, and any AI mapping that targets an alias-claimed
+  // field is dropped (a field can only have one source column).
+  const aiMappings = ai?.mappings ?? [];
+  const merged: AiMappingRow[] = [];
+  const seenColumns = new Set<string>();
+  for (const m of aiMappings) {
+    seenColumns.add(m.source_column);
+    if (aliasByColumn.has(m.source_column)) continue; // alias added below
+    if (m.action === 'map' && m.target_field && aliasFields.has(m.target_field)) {
+      merged.push({ ...m, action: 'ignore', target_field: null, split_config: null });
+    } else {
+      merged.push(m);
+    }
+  }
+  // Alias rows: confirmed mappings (ai_suggested=false + high confidence → the
+  // map UI renders these as confirmed rather than a suggestion to review).
+  const aliasRows: AiMappingRow[] = aliasMappings.map((a) => ({
+    source_column: a.source_column,
+    action: 'map',
+    target_field: a.target_field,
+    confidence: 'high',
+    reasoning: 'Matched by column name.',
+    split_config: null,
+  }));
+
+  // No AI and no aliases: keep whatever mappings the user already has
   // (platform-template prefills or manual work) instead of wiping them.
-  if (!ai?.mappings?.length) {
+  if (merged.length === 0 && aliasRows.length === 0) {
     return NextResponse.json({
       ok: false,
       mappings: [],
@@ -99,18 +134,23 @@ export async function POST(
   }
 
   let sortOrder = 0;
-  const rows = ai.mappings.map((m) => ({
+  const toRow = (m: AiMappingRow, isAlias: boolean) => ({
     file_id: fileId,
     session_id: sessionId,
     source_column: m.source_column,
     target_field: m.action === 'map' ? m.target_field : null,
     action: m.action === 'split' ? 'split' : m.action === 'ignore' ? 'ignore' : 'map',
     split_config: m.action === 'split' ? m.split_config ?? null : null,
-    ai_suggested: true,
+    // Alias matches are confirmed (not a suggestion the user must vet).
+    ai_suggested: !isAlias,
     ai_confidence: m.confidence,
     ai_reasoning: m.reasoning,
     sort_order: sortOrder++,
-  }));
+  });
+  const rows = autoSplitCombinedNames([
+    ...aliasRows.map((m) => toRow(m, true)),
+    ...merged.map((m) => toRow(m, false)),
+  ]);
 
   await staff.db.from('import_column_mappings').insert(rows);
 

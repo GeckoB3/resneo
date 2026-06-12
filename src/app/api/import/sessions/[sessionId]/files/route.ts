@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import Papa from 'papaparse';
 import { requireImportAdmin } from '@/lib/import/auth';
 import { detectPlatform, platformTemplateKey, FIELD_ALIASES, PLATFORM_MAPPINGS } from '@/lib/import/constants';
 import { syncImportSessionBookingFlags } from '@/lib/import/sync-booking-session-flags';
@@ -10,6 +11,9 @@ import {
 } from '@/lib/import/ingest-file';
 import { inferDateFormatFromProfiles, profileColumns } from '@/lib/import/column-profile';
 import { detectFileKind } from '@/lib/import/detect-file-kind';
+import { detectIrregularGrid } from '@/lib/import/detect-irregular';
+import { importAiAvailable } from '@/lib/import/openai-client';
+import { autoSplitCombinedNames } from '@/lib/import/auto-split-names';
 
 export async function POST(
   request: NextRequest,
@@ -85,6 +89,7 @@ export async function POST(
     let detectedPlatformOverall: string | null = null;
     let anyTemplateApplied = false;
     let anyBookingsDataset = false;
+    let anyReshapePending = false;
     const allProfiles: ReturnType<typeof profileColumns> = [];
 
     for (const ds of datasets) {
@@ -110,8 +115,18 @@ export async function POST(
         dsFileType = detection.kind;
       }
 
+      // Report-shaped files (date headers + times beneath, page noise, repeated
+      // headers) can't be mapped as-is: they need AI reshaping into a clean
+      // table first. Detect that here; the actual reshape runs in a polled
+      // endpoint so this upload request stays fast.
+      const irregular = detectIrregularGrid(ds.rawGrid, {
+        fileTypeHint: dsFileType as 'clients' | 'bookings' | 'staff' | 'unknown',
+      });
+      const willReshape = irregular.isIrregular && importAiAvailable();
+
       const safeName = ds.label.replace(/[^a-zA-Z0-9._-]+/g, '_');
-      const storagePath = `${staff.venue_id}/${sessionId}/${Date.now()}_${safeName}.csv`;
+      const stamp = Date.now();
+      const storagePath = `${staff.venue_id}/${sessionId}/${stamp}_${safeName}.csv`;
 
       const { error: upErr } = await staff.db.storage
         .from('imports')
@@ -122,6 +137,33 @@ export async function POST(
       if (upErr) {
         console.error('[import upload]', upErr);
         return NextResponse.json({ error: 'Failed to store file' }, { status: 500 });
+      }
+
+      // Preserve the FULL original grid (all section-header/page/noise rows) so
+      // the reshape has the faithful source and the user can undo to it. The
+      // collapsed `csvText` above drops rows above the detected header, which
+      // would lose the first section's date/staff.
+      let storagePathOriginal: string | null = null;
+      if (willReshape) {
+        storagePathOriginal = `${staff.venue_id}/${sessionId}/${stamp}_${safeName}.original.csv`;
+        const rawCsv = Papa.unparse(ds.rawGrid, { newline: '\n' });
+        const { error: origErr } = await staff.db.storage
+          .from('imports')
+          .upload(storagePathOriginal, Buffer.from(rawCsv, 'utf-8'), {
+            contentType: 'text/csv',
+            upsert: false,
+          });
+        if (origErr) {
+          console.error('[import upload original]', origErr);
+          storagePathOriginal = null;
+        }
+      }
+
+      const baseWarnings = warnings.filter((w) => w.startsWith(ds.label));
+      if (willReshape) {
+        baseWarnings.push(
+          `${ds.label}: this looks like a report (${irregular.reasons.join('; ')}). We'll reorganise it into a table automatically — you can review and undo it.`,
+        );
       }
 
       const { data: fileRow, error: insErr } = await staff.db
@@ -139,7 +181,9 @@ export async function POST(
           column_profile: profile,
           header_row_index: ds.headerRowIndex,
           source_sheet_name: ds.sheetName,
-          ingest_warnings: warnings.filter((w) => w.startsWith(ds.label)),
+          ingest_warnings: baseWarnings,
+          reshape_status: willReshape ? 'pending' : null,
+          storage_path_original: storagePathOriginal,
         })
         .select('*')
         .single();
@@ -149,6 +193,7 @@ export async function POST(
         return NextResponse.json({ error: 'Failed to save file metadata' }, { status: 500 });
       }
       createdFiles.push(fileRow);
+      if (willReshape) anyReshapePending = true;
       kindDetections.push({
         file_id: (fileRow as { id: string }).id,
         filename: ds.label,
@@ -159,13 +204,15 @@ export async function POST(
       });
       if (dsFileType === 'bookings') anyBookingsDataset = true;
 
-      const tplKey = platformTemplateKey(platform, dsFileType as 'clients' | 'bookings');
+      // Skip platform templates for files we're about to reshape — their current
+      // (messy) headers aren't the real columns; mapping happens post-reshape.
+      const tplKey = willReshape ? null : platformTemplateKey(platform, dsFileType as 'clients' | 'bookings');
       const template = tplKey ? PLATFORM_MAPPINGS[tplKey] : null;
 
       if (template && Object.keys(template).length) {
         let sortOrder = 0;
         const aliasMap = tplKey ? FIELD_ALIASES[tplKey] ?? {} : {};
-        const mappingRows = Object.entries(template).flatMap(([source_column, target_field]) => {
+        const templateRows = Object.entries(template).flatMap(([source_column, target_field]) => {
           if (!ds.headers.includes(source_column)) return [];
           const canonical = aliasMap[source_column];
           if (canonical && ds.headers.includes(canonical)) return [];
@@ -174,13 +221,17 @@ export async function POST(
               file_id: (fileRow as { id: string }).id,
               session_id: sessionId,
               source_column,
-              target_field,
+              target_field: target_field as string | null,
               action: 'map',
+              split_config: null as { separator?: string; parts?: Array<{ field: string }> } | null,
               ai_suggested: false,
               sort_order: sortOrder++,
             },
           ];
         });
+        // Combined name columns (e.g. Booksy "Customer Name") become a first/last
+        // split up front so the user just confirms.
+        const mappingRows = autoSplitCombinedNames(templateRows);
         if (mappingRows.length > 0) {
           await staff.db.from('import_column_mappings').insert(mappingRows);
           anyTemplateApplied = true;
@@ -233,6 +284,7 @@ export async function POST(
       warnings,
       inferred_date_format: inferredDateFormat,
       kind_detections: kindDetections,
+      reshape_pending: anyReshapePending,
     });
   } catch (e) {
     console.error('[import files POST]', e);

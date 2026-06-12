@@ -38,6 +38,23 @@ export function disambiguateHeaders(headers: string[]): {
   return { unique, duplicates };
 }
 
+/**
+ * Downloads a stored CSV as a raw grid (no header assumption). Used by the AI
+ * reshape stage, which needs to see section-header rows, page markers, and
+ * repeated headers that `downloadAndParseCsv` would fold into the header row.
+ */
+export async function downloadCsvGrid(admin: SupabaseClient, storagePath: string): Promise<string[][]> {
+  const { data, error } = await admin.storage.from('imports').download(storagePath);
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to download import file');
+  }
+  const text = await data.text();
+  const parsed = Papa.parse<string[]>(text, { header: false, skipEmptyLines: 'greedy' });
+  return (parsed.data ?? []).map((row) =>
+    Array.isArray(row) ? row.map((c) => (typeof c === 'string' ? c : String(c ?? ''))) : [],
+  );
+}
+
 export async function downloadAndParseCsv(
   admin: SupabaseClient,
   storagePath: string,

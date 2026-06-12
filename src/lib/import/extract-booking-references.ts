@@ -393,7 +393,11 @@ export async function runExtractBookingReferences(
 
   for (let start = 0; start < rowInserts.length; start += INSERT_CHUNK_SIZE) {
     const chunk = rowInserts.slice(start, start + INSERT_CHUNK_SIZE);
-    const { error: insRowErr } = await admin.from('import_booking_rows').insert(chunk);
+    // Idempotent on (session_id, file_id, row_number): if two extractions race
+    // (e.g. a double-submit), the loser's rows are skipped rather than crashing.
+    const { error: insRowErr } = await admin
+      .from('import_booking_rows')
+      .upsert(chunk, { onConflict: 'session_id,file_id,row_number', ignoreDuplicates: true });
     if (insRowErr) {
       console.error('[extract-booking-references] row insert', {
         error: insRowErr,

@@ -1,8 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { readResponseJson } from '@/lib/api/read-response-json';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
+import {
+  AppointmentServiceModal,
+  type ServiceModalCalendar,
+} from '@/components/dashboard/appointment-services/AppointmentServiceModal';
+import type { AppointmentServiceFormValues } from '@/components/dashboard/appointment-services/appointment-service-form-values';
+import type { OpeningHours } from '@/types/availability';
+import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
+import type { WorkingHours } from '@/types/booking-models';
 
 type ExtractResponse = {
   ok?: boolean;
@@ -43,6 +52,15 @@ type CreateDraft = {
   price: string;
 };
 
+/** Venue context the full Add Service modal needs, fetched lazily on first use. */
+type ServiceFormContext = {
+  openingHours: OpeningHours | null;
+  openingExceptions: VenueOpeningException[];
+  stripeConnected: boolean;
+  currencySymbol: string;
+  calendars: ServiceModalCalendar[];
+};
+
 type Catalog = {
   bookingModel: string;
   serviceItems: { id: string; name: string }[];
@@ -78,6 +96,11 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
   const [defaultsByRef, setDefaultsByRef] = useState<Record<string, RefDefault>>({});
   const [createOpenByRef, setCreateOpenByRef] = useState<Record<string, boolean>>({});
   const [createDraftByRef, setCreateDraftByRef] = useState<Record<string, CreateDraft>>({});
+  // Full "Add service" modal (service refs only): the ref being created, the
+  // venue context the form needs, and a per-ref "opening…" flag while context loads.
+  const [serviceModalRefId, setServiceModalRefId] = useState<string | null>(null);
+  const [openingModalRefId, setOpeningModalRefId] = useState<string | null>(null);
+  const [svcContext, setSvcContext] = useState<ServiceFormContext | null>(null);
 
   const loadSession = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
@@ -134,7 +157,14 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     setLoading(false);
   }, [sessionId, loadSession, loadDefaults]);
 
+  // Run the (delete-then-restage) extraction exactly once per mount. Without
+  // this guard React strict mode double-invokes the effect in dev, firing two
+  // concurrent extract-references calls that race on the booking-row insert and
+  // fail with a duplicate-key error on large files.
+  const extractStartedRef = useRef(false);
   useEffect(() => {
+    if (extractStartedRef.current) return;
+    extractStartedRef.current = true;
     void runExtract();
   }, [runExtract]);
 
@@ -357,6 +387,90 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     setMappingId(null);
   }
 
+  /** Load venue context for the full service form once; returns it (or null on failure). */
+  const ensureServiceContext = useCallback(async (): Promise<ServiceFormContext | null> => {
+    if (svcContext) return svcContext;
+    try {
+      const [venueRes, practRes] = await Promise.all([
+        fetch('/api/venue'),
+        fetch('/api/venue/practitioners?roster=1'),
+      ]);
+      const venue = await readResponseJson<{
+        opening_hours?: OpeningHours | null;
+        venue_opening_exceptions?: unknown;
+        currency?: string;
+        stripe_connected_account_id?: string | null;
+      }>(venueRes);
+      const pract = await readResponseJson<{
+        practitioners?: Array<{
+          id: string;
+          name: string;
+          is_active?: boolean;
+          calendar_type?: string;
+          working_hours?: WorkingHours | null;
+        }>;
+      }>(practRes);
+      const calendars: ServiceModalCalendar[] = (pract.practitioners ?? [])
+        .filter((p) => p.is_active !== false && p.calendar_type !== 'resource')
+        .map((p) => ({ id: p.id, name: p.name, working_hours: p.working_hours ?? null }));
+      const ctx: ServiceFormContext = {
+        openingHours: venue.opening_hours ?? null,
+        openingExceptions: parseVenueOpeningExceptions(venue.venue_opening_exceptions),
+        stripeConnected: Boolean(venue.stripe_connected_account_id),
+        currencySymbol: currencySymbolFromCode(venue.currency ?? 'GBP'),
+        calendars,
+      };
+      setSvcContext(ctx);
+      return ctx;
+    } catch {
+      setError('Could not load service setup details — please try again.');
+      return null;
+    }
+  }, [svcContext]);
+
+  /** Open the full Add Service modal for a service reference (loads context first). */
+  async function openServiceModal(ref: BookingRef) {
+    setError(null);
+    setOpeningModalRefId(ref.id);
+    const ctx = await ensureServiceContext();
+    setOpeningModalRefId(null);
+    if (ctx) setServiceModalRefId(ref.id);
+  }
+
+  /** After the modal creates a real service, link it to the reference and log it for undo. */
+  async function handleServiceCreated(ref: BookingRef, created: { id: string; name: string }) {
+    setServiceModalRefId(null);
+    setMappingId(ref.id);
+    setError(null);
+    try {
+      await resolveReferenceOnServer(ref, created.id);
+      // Services created via the real services API aren't tracked by the import;
+      // log an import_record so undo reverses this one too (best-effort).
+      const entityType = entityTypeForRef(ref);
+      if (entityType === 'service_item' || entityType === 'appointment_service') {
+        await fetch(`/api/import/sessions/${sessionId}/record-created-entity`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_id: created.id, entity_type: entityType }),
+        }).catch(() => {});
+      }
+      await reloadResolvedFlag();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    }
+    setMappingId(null);
+  }
+
+  /** Seed values for the full service form from the booking-data suggestions. */
+  function initialServiceForm(ref: BookingRef): Partial<AppointmentServiceFormValues> {
+    const d = defaultsByRef[ref.id];
+    return {
+      name: ref.raw_value,
+      ...(d?.suggested_duration_minutes ? { duration_minutes: d.suggested_duration_minutes } : {}),
+      price: d?.suggested_price_pence != null ? (d.suggested_price_pence / 100).toFixed(2) : '',
+    };
+  }
+
   function optionsForRef(ref: BookingRef): { id: string; name: string }[] {
     if (!catalog) return [];
     if (ref.reference_type === 'service') {
@@ -502,9 +616,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                   const createLabel = createButtonLabel(ref);
                   const createOpen = Boolean(createOpenByRef[ref.id]);
                   const draft = createDraftByRef[ref.id] ?? defaultDraftForRef(ref);
-                  const refDefault = defaultsByRef[ref.id];
-                  const durationMissing = ref.reference_type === 'service' && !draft.duration.trim();
-                  const priceMissing = ref.reference_type === 'service' && !draft.price.trim();
+                  const isServiceRef = ref.reference_type === 'service';
                   return (
                     <li key={ref.id} className="px-3 py-3">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -550,15 +662,17 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                             {createLabel && (
                               <button
                                 type="button"
-                                disabled={mappingId === ref.id}
+                                disabled={mappingId === ref.id || openingModalRefId === ref.id}
                                 className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
                                   createOpen
                                     ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                                     : 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
                                 }`}
-                                onClick={() => toggleCreate(ref)}
+                                onClick={() =>
+                                  isServiceRef ? void openServiceModal(ref) : toggleCreate(ref)
+                                }
                               >
-                                {createLabel}
+                                {openingModalRefId === ref.id ? 'Opening…' : createLabel}
                               </button>
                             )}
                             <button
@@ -574,117 +688,35 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                           <span className="text-xs font-medium text-green-700">Done</span>
                         )}
                       </div>
-                      {!ref.is_resolved && createOpen && (
+                      {!ref.is_resolved && createOpen && !isServiceRef && (
                         <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-                          {ref.reference_type === 'service' ? (
-                            <>
-                              <p className="text-xs font-semibold text-slate-800">
-                                Set up this service
-                                {refDefault && (refDefault.suggested_duration_minutes || refDefault.suggested_price_pence != null) ? (
-                                  <span className="ml-1 font-normal text-slate-600">
-                                    — we pre-filled what we found in your booking data
-                                  </span>
-                                ) : null}
-                              </p>
-                              <div className="flex flex-wrap items-end gap-3">
-                                <label className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Service name</span>
-                                  <input
-                                    className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
-                                    value={draft.name}
-                                    onChange={(e) =>
-                                      setCreateDraftByRef((prev) => ({
-                                        ...prev,
-                                        [ref.id]: { ...draft, name: e.target.value },
-                                      }))
-                                    }
-                                  />
-                                </label>
-                                <label className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                                    Duration (minutes)
-                                  </span>
-                                  <input
-                                    className={`w-28 rounded border px-2 py-1 text-xs ${
-                                      durationMissing ? 'border-amber-400 bg-amber-50' : 'border-slate-200'
-                                    }`}
-                                    inputMode="numeric"
-                                    placeholder="e.g. 45"
-                                    value={draft.duration}
-                                    onChange={(e) =>
-                                      setCreateDraftByRef((prev) => ({
-                                        ...prev,
-                                        [ref.id]: { ...draft, duration: e.target.value },
-                                      }))
-                                    }
-                                  />
-                                </label>
-                                <label className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Price (£)</span>
-                                  <input
-                                    className={`w-28 rounded border px-2 py-1 text-xs ${
-                                      priceMissing ? 'border-amber-400 bg-amber-50' : 'border-slate-200'
-                                    }`}
-                                    inputMode="decimal"
-                                    placeholder="e.g. 28.00"
-                                    value={draft.price}
-                                    onChange={(e) =>
-                                      setCreateDraftByRef((prev) => ({
-                                        ...prev,
-                                        [ref.id]: { ...draft, price: e.target.value },
-                                      }))
-                                    }
-                                  />
-                                </label>
-                                <button
-                                  type="button"
-                                  disabled={mappingId === ref.id || durationMissing || !draft.name.trim()}
-                                  onClick={() => void applyCreate(ref)}
-                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                                >
-                                  {mappingId === ref.id ? 'Creating…' : 'Create service'}
-                                </button>
-                              </div>
-                              {(durationMissing || priceMissing) && (
-                                <p className="text-[11px] text-amber-800">
-                                  {durationMissing
-                                    ? 'Your file didn’t include a duration for this service — set one to continue. '
-                                    : ''}
-                                  {priceMissing
-                                    ? 'No price found — you can leave it blank and add it later under Services.'
-                                    : ''}
-                                </p>
-                              )}
-                            </>
-                          ) : (
-                            <div className="flex flex-wrap items-end gap-3">
-                              <label className="flex flex-col gap-0.5">
-                                <span className="text-[10px] uppercase tracking-wide text-slate-500">Name</span>
-                                <input
-                                  className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
-                                  value={draft.name}
-                                  onChange={(e) =>
-                                    setCreateDraftByRef((prev) => ({
-                                      ...prev,
-                                      [ref.id]: { ...draft, name: e.target.value },
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                disabled={mappingId === ref.id || !draft.name.trim()}
-                                onClick={() => void applyCreate(ref)}
-                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                              >
-                                {mappingId === ref.id ? 'Creating…' : createLabel}
-                              </button>
-                              <p className="basis-full text-[11px] text-slate-600">
-                                Creates a bookable calendar with default working hours — fine-tune it later under
-                                Staff &amp; Calendars.
-                              </p>
-                            </div>
-                          )}
+                          <div className="flex flex-wrap items-end gap-3">
+                            <label className="flex flex-col gap-0.5">
+                              <span className="text-[10px] uppercase tracking-wide text-slate-500">Name</span>
+                              <input
+                                className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
+                                value={draft.name}
+                                onChange={(e) =>
+                                  setCreateDraftByRef((prev) => ({
+                                    ...prev,
+                                    [ref.id]: { ...draft, name: e.target.value },
+                                  }))
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              disabled={mappingId === ref.id || !draft.name.trim()}
+                              onClick={() => void applyCreate(ref)}
+                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              {mappingId === ref.id ? 'Creating…' : createLabel}
+                            </button>
+                            <p className="basis-full text-[11px] text-slate-600">
+                              Creates a bookable calendar with default working hours — fine-tune it later under
+                              Staff &amp; Calendars.
+                            </p>
+                          </div>
                         </div>
                       )}
                     </li>
@@ -701,6 +733,29 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
+
+      {serviceModalRefId &&
+        svcContext &&
+        (() => {
+          const ref = refs.find((r) => r.id === serviceModalRefId);
+          if (!ref) return null;
+          return (
+            <AppointmentServiceModal
+              open
+              onClose={() => setServiceModalRefId(null)}
+              onSaved={(created) => void handleServiceCreated(ref, created)}
+              isAdmin
+              stripeConnected={svcContext.stripeConnected}
+              currencySymbol={svcContext.currencySymbol}
+              venueOpeningHours={svcContext.openingHours}
+              venueOpeningExceptions={svcContext.openingExceptions}
+              calendars={svcContext.calendars}
+              initialForm={initialServiceForm(ref)}
+              title="Add service"
+              saveLabel="Create service"
+            />
+          );
+        })()}
 
       <div className="flex flex-wrap justify-between gap-3">
         <Link

@@ -58,6 +58,28 @@ describe('applyMappingsToDataRow full-name fallback', () => {
     expect(targets.first_name).toBe('Mary');
     expect(targets.last_name).toBe('Smith');
   });
+
+  it('splits a combined guest name on a booking row into guest first/last', () => {
+    const { targets } = applyMappingsToDataRow(
+      { 'Client Name': 'Ken Ross' },
+      [map('Client Name', 'guest_full_name')],
+    );
+    expect(targets.guest_first_name).toBe('Ken');
+    expect(targets.guest_last_name).toBe('Ross');
+  });
+
+  it('does not overwrite explicitly mapped guest first/last columns', () => {
+    const { targets } = applyMappingsToDataRow(
+      { 'Client Name': 'Ken A Ross', First: 'Ken', Last: 'Ross' },
+      [
+        map('Client Name', 'guest_full_name'),
+        map('First', 'guest_first_name'),
+        map('Last', 'guest_last_name'),
+      ],
+    );
+    expect(targets.guest_first_name).toBe('Ken');
+    expect(targets.guest_last_name).toBe('Ross');
+  });
 });
 
 describe('applyMappingsToDataRow datetime recovery', () => {

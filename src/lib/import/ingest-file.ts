@@ -31,6 +31,13 @@ export interface IngestedDataset {
   /** 0-based index of the detected header row in the original grid. */
   headerRowIndex: number;
   duplicateHeaders: string[];
+  /**
+   * Content rows of the source grid (fully-empty rows removed) BEFORE header
+   * detection collapses them — i.e. still including any section-header rows,
+   * page markers, and repeated headers. The irregularity detector and AI
+   * reshape stage work off this.
+   */
+  rawGrid: string[][];
 }
 
 export interface IngestResult {
@@ -147,6 +154,7 @@ function gridToDataset(
     rowCount: rows.length,
     headerRowIndex,
     duplicateHeaders: duplicates,
+    rawGrid: trimmed,
   };
 }
 

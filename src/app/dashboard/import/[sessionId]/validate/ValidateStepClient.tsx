@@ -720,7 +720,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <span>
               <span className="font-medium text-slate-900">Send upcoming reminders for imported bookings</span>
               <span className="mt-1 block text-xs text-slate-600">
-                On by default. Reserve NI will not resend booking confirmations from import, but scheduled reminders
+                On by default. Booking confirmations are not resent for imported bookings, but scheduled reminders
                 (for example 24 hours and 2 hours before the appointment, per your Communications settings) will run for
                 future bookings when their send time is still ahead. Reminders whose window has already passed at import
                 are not sent.

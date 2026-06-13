@@ -1,6 +1,12 @@
 import { createClient } from '@/lib/supabase/browser';
 
 /**
+ * Best-effort budget for the client-side `signOut()` network call before we
+ * give up waiting and hard-navigate anyway. See the note in {@link signOutCleanly}.
+ */
+const CLIENT_SIGN_OUT_TIMEOUT_MS = 1500;
+
+/**
  * Sign out and tear the browser session down hard. Plain `signOut()` +
  * `router.push()` leaves three account-switch leak vectors behind:
  *
@@ -16,9 +22,22 @@ import { createClient } from '@/lib/supabase/browser';
  * `Clear-Site-Data: "cache", "storage"` for a spec-level flush in browsers
  * that support it, before redirecting to `next`.
  *
+ * **Mobile reliability.** `supabase.auth.signOut()` first makes a network
+ * request to revoke the session and only *then* clears the local cookies. On a
+ * flaky mobile connection that request can hang, and because the redirect used
+ * to sit behind `await signOut()`, the button appeared to do nothing until the
+ * user reloaded by hand (the revoke had usually still reached the server, so a
+ * manual refresh showed them logged out). The `/auth/signed-out` route is the
+ * authoritative teardown — it signs out server-side (revoking the session and
+ * clearing the auth cookies) and sends `Clear-Site-Data` — so the client call
+ * here is best effort only. We race it against a short timeout and ALWAYS
+ * hard-navigate, whether or not it finished.
+ *
  * @param next Internal path to land on afterwards (sanitised server-side).
  */
 export async function signOutCleanly(next = '/login'): Promise<void> {
+  const target = `/auth/signed-out?next=${encodeURIComponent(next)}`;
+
   try {
     if (typeof caches !== 'undefined') {
       const keys = await caches.keys();
@@ -30,10 +49,21 @@ export async function signOutCleanly(next = '/login'): Promise<void> {
 
   try {
     const supabase = createClient();
-    await supabase.auth.signOut();
+    // Best effort: revoke client-side, but never let a slow or dropped request
+    // (common on mobile) hold the redirect hostage. The /auth/signed-out route
+    // signs out server-side regardless, so move on once the timeout wins.
+    const clientSignOut = Promise.resolve(supabase.auth.signOut()).catch(() => {
+      /* The signed-out route signs out server-side as a fallback. */
+    });
+    await Promise.race([
+      clientSignOut,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, CLIENT_SIGN_OUT_TIMEOUT_MS);
+      }),
+    ]);
   } catch {
     /* The signed-out route signs out server-side as a fallback. */
   }
 
-  window.location.replace(`/auth/signed-out?next=${encodeURIComponent(next)}`);
+  window.location.replace(target);
 }

@@ -41,6 +41,10 @@
       "schedule": "0 5 * * *"
     },
     {
+      "path": "/api/cron/venue-hard-delete",
+      "schedule": "15 5 * * *"
+    },
+    {
       "path": "/api/cron/account-link-maintenance",
       "schedule": "30 4 * * *"
     },

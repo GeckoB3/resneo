@@ -288,6 +288,9 @@ export async function runImportExecuteBatch(
   });
   const bookingFiles = (files ?? []).filter((f) => (f as { file_type: string }).file_type === 'bookings');
 
+  // Keys (file_id:row_number) for the CSV-phase dedupe set and the phase decision below. The full
+  // staged rows are fetched lazily inside the staged_bookings phase, only when that phase runs,
+  // so client/CSV batches don't repeatedly load staged-row payloads they never use.
   const { data: stagedBookingRows } = await admin
     .from('import_booking_rows')
     .select('file_id, row_number')
@@ -796,7 +799,18 @@ export async function runImportExecuteBatch(
   while (st.phase === 'staged_bookings') {
     await loadDefaultsIntoState();
     const { defaultAreaId } = bookingDefaultsOrThrow();
-    const stagedRows = stagedBookingRows ?? [];
+    // Full staged rows for this phase only (booking_date/booking_time, every raw_*, every
+    // resolved_*). Ordered by (file_id, row_number) so the index-based resume across batch POSTs
+    // is deterministic. The shared keys query above only selects the dedupe key, which is why
+    // these field reads were previously undefined.
+    const { data: stagedRowsData } = await admin
+      .from('import_booking_rows')
+      .select('*')
+      .eq('session_id', sessionId)
+      .eq('is_future_booking', true)
+      .order('file_id', { ascending: true })
+      .order('row_number', { ascending: true });
+    const stagedRows = stagedRowsData ?? [];
 
     while (st.stagedRowIndex < stagedRows.length) {
       const row = stagedRows[st.stagedRowIndex]! as {
@@ -835,6 +849,22 @@ export async function runImportExecuteBatch(
 
       const issues = issueMap.get(issueKey(row.file_id, row.row_number));
       if (rowShouldSkip(issues)) {
+        skipped += 1;
+        st.stagedRowIndex += 1;
+        await bumpProgress();
+        continue;
+      }
+
+      // Defensive: a staged row carries a date and time (both NOT NULL in import_booking_rows).
+      // Skip rather than throw if one is somehow missing, so a single bad row never aborts the
+      // whole import batch.
+      if (!row.booking_date || !row.booking_time) {
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: row.file_id,
+          rowNumber: row.row_number,
+          code: 'missing_booking_datetime',
+          message: 'Staged booking row is missing a date or time; the row was skipped.',
+        });
         skipped += 1;
         st.stagedRowIndex += 1;
         await bumpProgress();

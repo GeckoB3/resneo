@@ -28,6 +28,7 @@ import { BookingTypesSection } from './sections/BookingTypesSection';
 import { RequireAccountLoginSection } from './sections/RequireAccountLoginSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { LinkedAccountsSection } from './sections/LinkedAccountsSection';
+import { DeleteVenueSection } from './sections/DeleteVenueSection';
 import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance, SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
@@ -1598,14 +1599,17 @@ function SettingsViewInner({
         ) : null}
 
         {visitedTabs.has('plan') && selectedTab === 'plan' ? (
-          <PlanSection
-            key={`plan-${venue.id}`}
-            venue={venue}
-            isAdmin={isAdmin}
-            smsCountUsesStripePeriod={smsCountUsesStripePeriod}
-            onVenueUpdate={onUpdate}
-            trialBreakdown={trialBreakdown}
-          />
+          <div className="space-y-8">
+            <PlanSection
+              key={`plan-${venue.id}`}
+              venue={venue}
+              isAdmin={isAdmin}
+              smsCountUsesStripePeriod={smsCountUsesStripePeriod}
+              onVenueUpdate={onUpdate}
+              trialBreakdown={trialBreakdown}
+            />
+            {isAdmin ? <DeleteVenueSection venueName={venue.name} /> : null}
+          </div>
         ) : null}
 
         {visitedTabs.has('payments') && selectedTab === 'payments' ? (

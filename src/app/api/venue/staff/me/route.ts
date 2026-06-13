@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
-import { createClient } from '@/lib/supabase/server';
 import {
   getVenueStaff,
   getLinkedPractitionerId,
@@ -55,7 +54,9 @@ export async function GET(request: NextRequest) {
 /** PATCH /api/venue/staff/me - update own display name, phone, and/or sign-in email. */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // Bearer (mobile app) + cookie (web) auth — mirrors the GET handler. Was
+    // cookie-only (createClient), which 401'd every mobile profile save.
+    const supabase = await createVenueRouteClient(request);
     const {
       data: { user },
     } = await supabase.auth.getUser();

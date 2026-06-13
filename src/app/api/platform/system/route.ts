@@ -14,6 +14,7 @@ const KNOWN_CRON_JOBS: Array<{ name: string; schedule: string }> = [
   { name: 'materialize-event-sessions', schedule: 'Daily 03:00' },
   { name: 'class-recurring-materialize', schedule: 'Daily 04:15' },
   { name: 'account-hard-delete', schedule: 'Daily 05:00' },
+  { name: 'venue-hard-delete', schedule: 'Daily 05:15' },
   { name: 'account-link-maintenance', schedule: 'Daily 04:30' },
   { name: 'class-credit-expiry', schedule: 'Daily 02:30' },
   { name: 'class-membership-period-reset', schedule: 'Daily 03:00' },

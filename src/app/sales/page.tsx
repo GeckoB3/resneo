@@ -1,7 +1,7 @@
 import { SalesDashboard } from './SalesDashboard';
 
 export const metadata = {
-  title: 'Sales dashboard | Resneo',
+  title: 'Sales dashboard | ResNeo',
 };
 
 export default function SalesPage() {

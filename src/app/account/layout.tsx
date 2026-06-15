@@ -36,7 +36,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <Link href="/" className="shrink-0 rounded-lg outline-none ring-brand-500/40 focus-visible:ring-2">
-              <img src="/Logo.png" alt="Resneo" className="h-9 w-auto sm:h-10" />
+              <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto sm:h-10" />
             </Link>
             <div className="hidden h-8 w-px bg-slate-200 sm:block" aria-hidden />
             <div className="min-w-0">
@@ -69,7 +69,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
             </Link>
             {' · '}
             <Link href="/" className="font-medium text-slate-600 hover:text-slate-900 hover:underline">
-              Resneo home
+              ResNeo home
             </Link>
           </p>
         </div>

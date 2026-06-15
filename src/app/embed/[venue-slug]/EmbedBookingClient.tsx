@@ -100,7 +100,7 @@ export function EmbedBookingClient({
           rel="noopener noreferrer"
           className="text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
         >
-          Resneo
+          ResNeo
         </a>
       </p>
     </main>

@@ -120,7 +120,7 @@ describe('import corpus — end-to-end row normalisation', () => {
     expect(parseTimeString(iso.booking_time!)).toBe('09:00:00');
   });
 
-  it('Phorest statuses map onto Resneo booking statuses', () => {
+  it('Phorest statuses map onto ResNeo booking statuses', () => {
     expect(mapImportBookingStatus({ rawStatus: 'BOOKED' })).toBe('Booked');
     expect(mapImportBookingStatus({ rawStatus: 'PAID' })).toBe('Completed');
     expect(mapImportBookingStatus({ rawStatus: 'BOOKED', activationState: 'CANCELED' })).toBe('Cancelled');

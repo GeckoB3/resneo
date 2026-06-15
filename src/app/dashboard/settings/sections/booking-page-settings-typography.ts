@@ -1,4 +1,4 @@
-/** Typography for /dashboard/settings?tab=booking-page — aligned with Resneo brand navy. */
+/** Typography for /dashboard/settings?tab=booking-page — aligned with ResNeo brand navy. */
 
 /** Primary card title (e.g. Your booking page) — below an eyebrow when used on SectionCard. */
 export const BOOKING_PAGE_PRIMARY_HEADING_CLASS =

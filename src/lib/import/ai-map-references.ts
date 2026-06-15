@@ -2,7 +2,7 @@ import { runImportAiJson } from '@/lib/import/openai-client';
 import { fuzzyNameScore } from '@/lib/import/fuzzy-match';
 
 const SYSTEM = `You are matching external booking export strings (service names, staff names, etc.)
-to a venue's existing catalogue entities on Resneo, a booking platform.`;
+to a venue's existing catalogue entities on ResNeo, a booking platform.`;
 
 export type AiRefSuggestion = {
   reference_id: string;

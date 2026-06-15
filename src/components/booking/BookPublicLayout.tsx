@@ -327,7 +327,7 @@ export function BookPublicLayout({
 
           <a href="https://www.resneo.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
 
-            Powered by Resneo
+            Powered by ResNeo
 
           </a>
 

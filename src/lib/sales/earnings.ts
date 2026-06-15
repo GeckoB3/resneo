@@ -79,11 +79,26 @@ export interface MonthlyStatementBreakdown {
   new_bonus_awards: Array<{ threshold: number; amount_pence: number }>;
 }
 
+/**
+ * `awardBonuses: false` is used when re-running an already-finalised past month for
+ * reconciliation (late invoices, refunds): lump-sum and revenue-share are recomputed from
+ * current data, but the bonus ladder is a one-time ratchet keyed to the month it was crossed,
+ * so we preserve the originally-recorded bonus + active-subscriber snapshot rather than
+ * re-deriving them from the (current) live counts.
+ */
+export interface ComputeStatementOptions {
+  awardBonuses?: boolean;
+  preservedBonusPence?: number;
+  preservedActiveSubscribers?: number;
+}
+
 export async function computeMonthlyStatement(
   input: ComputeStatementInput,
+  options?: ComputeStatementOptions,
 ): Promise<MonthlyStatementBreakdown> {
   const { admin, salesperson, periodMonth, bonusTiers } = input;
   const spId = salesperson.id;
+  const awardBonuses = options?.awardBonuses ?? true;
 
   const periodEndExclusive = addMonthsUtc(periodMonth, 1);
   const periodStartIso = `${periodMonth}T00:00:00.000Z`;
@@ -138,27 +153,36 @@ export async function computeMonthlyStatement(
         (sum, r) => sum + ((r as { amount_paid_pence: number }).amount_paid_pence ?? 0),
         0,
       );
-      revenueSharePence = Math.round((gross * sharePercent) / 100);
+      // Clamp at 0: refunds net against their original invoice's month, so a month is normally
+      // >= 0; the floor guards the rare period-boundary case from producing a negative payout.
+      revenueSharePence = Math.max(0, Math.round((gross * sharePercent) / 100));
     }
   }
 
-  const activeSubscribersEnd = await countActivePayingSubscribers(admin, spId);
-
-  const { data: existingAwards } = await admin
-    .from('sales_bonus_awards')
-    .select('threshold')
-    .eq('salesperson_id', spId);
-  const awardedThresholds = new Set(
-    (existingAwards ?? []).map((r) => (r as { threshold: number }).threshold),
-  );
-
-  const newBonusAwards: Array<{ threshold: number; amount_pence: number }> = [];
+  let activeSubscribersEnd: number;
   let bonusPence = 0;
-  for (const tier of bonusTiers) {
-    if (activeSubscribersEnd >= tier.threshold && !awardedThresholds.has(tier.threshold)) {
-      newBonusAwards.push({ threshold: tier.threshold, amount_pence: tier.amount_pence });
-      bonusPence += tier.amount_pence;
+  const newBonusAwards: Array<{ threshold: number; amount_pence: number }> = [];
+
+  if (awardBonuses) {
+    activeSubscribersEnd = await countActivePayingSubscribers(admin, spId);
+    const { data: existingAwards } = await admin
+      .from('sales_bonus_awards')
+      .select('threshold')
+      .eq('salesperson_id', spId);
+    const awardedThresholds = new Set(
+      (existingAwards ?? []).map((r) => (r as { threshold: number }).threshold),
+    );
+    for (const tier of bonusTiers) {
+      if (activeSubscribersEnd >= tier.threshold && !awardedThresholds.has(tier.threshold)) {
+        newBonusAwards.push({ threshold: tier.threshold, amount_pence: tier.amount_pence });
+        bonusPence += tier.amount_pence;
+      }
     }
+  } else {
+    // Reconciliation pass — preserve the snapshot recorded when this month was finalised.
+    bonusPence = options?.preservedBonusPence ?? 0;
+    activeSubscribersEnd =
+      options?.preservedActiveSubscribers ?? (await countActivePayingSubscribers(admin, spId));
   }
 
   const totalPence = lumpSumPence + revenueSharePence + bonusPence;
@@ -248,4 +272,59 @@ export async function runMonthlyStatementsForAll(
     processed += 1;
   }
   return { processed };
+}
+
+/**
+ * How many months back the daily cron re-derives already-finalised statements, so late or
+ * adjusted revenue (delayed first invoices, refunds/credit notes netted into the original
+ * month) is reflected. Covers the default 12-month revenue-share window plus a buffer.
+ */
+export const RECONCILE_STATEMENTS_MONTHS_BACK = 13;
+
+/**
+ * Re-derive existing statements in the trailing window (excluding `primaryMonth`, which the
+ * full run already handled) so lump-sum and revenue-share pick up late/adjusted data. Bonuses
+ * are preserved (ratchet), never re-awarded for a past month.
+ */
+export async function reconcileRecentStatements(
+  admin: SupabaseClient,
+  primaryMonth: string,
+  monthsBack: number = RECONCILE_STATEMENTS_MONTHS_BACK,
+): Promise<{ reconciled: number }> {
+  const cutoff = addMonthsUtc(primaryMonth, -monthsBack);
+
+  const { data: salespeople, error } = await admin
+    .from('salespeople')
+    .select('id, user_id, email, name, lump_sum_per_signup_pence, revenue_share_percent, revenue_share_months')
+    .is('revoked_at', null);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  let reconciled = 0;
+  for (const sp of salespeople ?? []) {
+    const salesperson = sp as SalespersonRow;
+    const { data: stmts } = await admin
+      .from('sales_monthly_statements')
+      .select('period_month, bonus_pence, active_subscribers_end')
+      .eq('salesperson_id', salesperson.id)
+      .gte('period_month', cutoff)
+      .lt('period_month', primaryMonth);
+
+    for (const s of stmts ?? []) {
+      const stmt = s as { period_month: string; bonus_pence: number; active_subscribers_end: number };
+      const periodMonth = String(stmt.period_month).slice(0, 10);
+      const breakdown = await computeMonthlyStatement(
+        { admin, salesperson, periodMonth, bonusTiers: [] },
+        {
+          awardBonuses: false,
+          preservedBonusPence: stmt.bonus_pence,
+          preservedActiveSubscribers: stmt.active_subscribers_end,
+        },
+      );
+      await persistMonthlyStatement(admin, salesperson.id, periodMonth, breakdown);
+      reconciled += 1;
+    }
+  }
+  return { reconciled };
 }

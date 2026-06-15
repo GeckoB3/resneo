@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       `&next=${encodeURIComponent(nextPath)}`;
 
     const text = [
-      'Here is your sign-in link for Resneo.',
+      'Here is your sign-in link for ResNeo.',
       '',
       'Open this link to sign in:',
       confirmUrl,
@@ -84,15 +84,15 @@ export async function POST(request: NextRequest) {
     ].join('\n');
 
     const html = `
-      <p>Here is your sign-in link for <strong>Resneo</strong>.</p>
-      <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to Resneo</a></p>
+      <p>Here is your sign-in link for <strong>ResNeo</strong>.</p>
+      <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to ResNeo</a></p>
       <p style="font-size:12px;color:#64748b;">This link expires in 1 hour. If you did not request this, you can ignore it.</p>
     `;
 
     try {
       await sendEmail({
         to: normalisedEmail,
-        subject: 'Sign in to Resneo',
+        subject: 'Sign in to ResNeo',
         html,
         text,
         disableTracking: true,

@@ -1,18 +1,16 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Booking Software by Business Type | Resneo Solutions",
+  title: "Booking Software by Business Type | ResNeo Solutions",
   description:
-    "See how Resneo works for your trade: salons and barbers, restaurants, and more verticals coming soon. Online booking, deposits, and automated reminders, with no booking commission. Link independent chairs into one booking page and break the link in a click, while everyone keeps separate, HMRC-friendly books.",
+    "See how ResNeo works for your trade: salons and barbers, restaurants, and more verticals coming soon. Online booking, deposits, and automated reminders, with no booking commission. Link independent chairs into one booking page and break the link in a click, while everyone keeps their own separate books.",
   keywords: [
     "booking software solutions",
     "booking system by business type",
@@ -22,7 +20,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: "/solutions" },
   openGraph: {
-    title: "Resneo Solutions: Booking Software for Your Business",
+    title: "ResNeo Solutions: Booking Software for Your Business",
     description:
       "Booking software tailored to your business type: salons, barbers, restaurants, and more. Cut no-shows, fill your diary, lose the admin, and link independent chairs while keeping separate books.",
     url: "/solutions",
@@ -83,7 +81,7 @@ const verticals: Vertical[] = [
   },
 ];
 
-/** Capabilities that come with every Resneo plan, regardless of trade. */
+/** Capabilities that come with every ResNeo plan, regardless of trade. */
 const capabilities: {
   title: string;
   description: string;
@@ -103,13 +101,13 @@ const capabilities: {
   {
     title: "Linked accounts: link & break",
     description:
-      "Link independent chairs or practitioners into one booking page, then break the link in a click. Separate books, kept clean for HMRC.",
+      "Link independent chairs or practitioners into one booking page, then break the link in a click. Separate books, with everyone keeping full control of their clients and revenue.",
     icon: LinkIcon,
   },
   {
     title: "No booking commission",
     description:
-      "One flat subscription. Resneo never takes a cut of your bookings or rents your clients out to a marketplace.",
+      "One flat subscription. ResNeo never takes a cut of your bookings or rents your clients out to a marketplace.",
     icon: TagIcon,
   },
   {
@@ -127,8 +125,8 @@ const capabilities: {
 ];
 
 const comparisons: { name: string; href?: string; status: "live" | "soon" }[] = [
-  { name: "Resneo vs marketplace booking apps", href: "/salon-booking-software#compare", status: "live" },
-  { name: "Resneo vs spreadsheets & paper diaries", status: "soon" },
+  { name: "ResNeo vs marketplace booking apps", href: "/salon-booking-software#compare", status: "live" },
+  { name: "ResNeo vs spreadsheets & paper diaries", status: "soon" },
   { name: "Switching booking systems: a checklist", status: "soon" },
 ];
 
@@ -139,7 +137,7 @@ export default function SolutionsHubPage() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex-shrink-0">
-            <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+            <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
           </Link>
           <div className="flex items-center gap-2 sm:gap-4">
             <Link
@@ -184,7 +182,7 @@ export default function SolutionsHubPage() {
             Booking software, tuned to your trade.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600">
-            Resneo is one platform that flexes to how you actually work: take bookings 24/7, cut no-shows,
+            ResNeo is one platform that flexes to how you actually work: take bookings 24/7, cut no-shows,
             and lose the admin. And when independent people share a roof, link them into one booking page and
             break the link in a click, without ever merging anyone&rsquo;s books.
           </p>
@@ -222,7 +220,7 @@ export default function SolutionsHubPage() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="mx-auto max-w-3xl text-center">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-accent-700">
-              On every Resneo plan
+              On every ResNeo plan
             </h2>
             <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               The same dependable toolkit, whatever you book.
@@ -320,7 +318,7 @@ export default function SolutionsHubPage() {
             </h2>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/80">
               Rent-a-chair salons, co-located clinics, multi-practitioner studios: when independent people work
-              side by side, Resneo links their calendars into one booking page and lets either side break the
+              side by side, ResNeo links their calendars into one booking page and lets either side break the
               link in a single click. Nothing is ever merged.
             </p>
             <ul className="mt-7 space-y-3">
@@ -355,18 +353,18 @@ export default function SolutionsHubPage() {
             </div>
           </div>
 
-          {/* HMRC callout card */}
+          {/* Separate-books callout card */}
           <div className="rounded-3xl border border-white/10 bg-white p-7 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-9">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
                 <ShieldCheckIcon />
               </span>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
               </div>
             </div>
-            <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
+            <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             <div className="mt-5 grid grid-cols-2 gap-3">
               {[
                 { label: "Books per person", value: "Separate" },
@@ -380,7 +378,6 @@ export default function SolutionsHubPage() {
                 </div>
               ))}
             </div>
-            <p className="mt-5 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
           </div>
         </div>
       </section>
@@ -389,10 +386,10 @@ export default function SolutionsHubPage() {
       <section className="bg-slate-50 py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-accent-700">
-            Resneo vs the alternatives
+            ResNeo vs the alternatives
           </h2>
           <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-600">
-            Weighing up your options? These guides lay out how Resneo compares, honestly.
+            Weighing up your options? These guides lay out how ResNeo compares, honestly.
           </p>
           <div className="mt-8 space-y-3">
             {comparisons.map((c) =>
@@ -457,7 +454,7 @@ export default function SolutionsHubPage() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+            &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/" className="transition-colors hover:text-slate-900">
@@ -481,6 +478,7 @@ export default function SolutionsHubPage() {
             <Link href="/privacy" className="transition-colors hover:text-slate-900">
               Privacy Policy
             </Link>
+            <SocialLinks />
           </div>
         </div>
       </footer>

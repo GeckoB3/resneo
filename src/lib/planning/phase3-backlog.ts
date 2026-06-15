@@ -1,6 +1,6 @@
 /**
  * Phase 3 product backlog (reference for prioritisation - not a commitment schedule).
- * Updated May 2026 after Phase 1a completion — see Docs/Resneo-Appointments-Review-And-Roadmap.md.
+ * Updated May 2026 after Phase 1a completion — see Docs/ResNeo-Appointments-Review-And-Roadmap.md.
  */
 export const PHASE_3_BACKLOG_COMPLETED = [
   'Any-available-practitioner appointment pooling (flag: any_available_practitioner)',

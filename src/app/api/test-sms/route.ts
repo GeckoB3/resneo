@@ -25,7 +25,7 @@ export async function POST() {
 
     const result = await sendSMS(
       TEST_RECIPIENT,
-      'Resneo test: SMS integration is working.'
+      'ResNeo test: SMS integration is working.'
     );
     return NextResponse.json({
       success: true,

@@ -172,7 +172,7 @@ export function ProfileClient({
       <section className={sectionClass}>
         <h2 className="text-lg font-semibold text-slate-900">Contact details</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          Your name and phone are stored on your Resneo profile and used when venues see your account. Email is your
+          Your name and phone are stored on your ResNeo profile and used when venues see your account. Email is your
           sign-in address; changing it may require confirmation from your new inbox.
         </p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
@@ -293,7 +293,7 @@ export function ProfileClient({
       <section className={sectionClass}>
         <h2 className="text-lg font-semibold text-slate-900">Notification preferences</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          These apply to your <span className="font-medium text-slate-800">Resneo account</span> (booking confirmations
+          These apply to your <span className="font-medium text-slate-800">ResNeo account</span> (booking confirmations
           from the platform, security notices, optional product updates). Use{' '}
           <span className="font-medium text-slate-800">Venue marketing</span> below for promotional email per venue you
           have booked with.
@@ -307,7 +307,7 @@ export function ProfileClient({
               className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span>
-              Operational emails: booking confirmations and reminders sent by Resneo, plus security notices for your
+              Operational emails: booking confirmations and reminders sent by ResNeo, plus security notices for your
               account.
             </span>
           </label>
@@ -318,7 +318,7 @@ export function ProfileClient({
               onChange={(e) => updateNotificationPreference('marketing_email', e.target.checked)}
               className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            <span>Resneo product updates and platform news (not venue-specific promotions).</span>
+            <span>ResNeo product updates and platform news (not venue-specific promotions).</span>
           </label>
         </div>
       </section>

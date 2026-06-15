@@ -13,7 +13,7 @@ describe('renderNewSignupNotificationEmail', () => {
       source: 'signup_complete',
     });
 
-    expect(subject).toBe('New Resneo signup: owner@example.com (appointments)');
+    expect(subject).toBe('New ResNeo signup: owner@example.com (appointments)');
     for (const value of ['owner@example.com', 'appointments', 'physiotherapist', 'trialing', 'v-123', 'FRIEND50']) {
       expect(html).toContain(value);
       expect(text).toContain(value);
@@ -49,7 +49,7 @@ describe('renderNewSignupNotificationEmail', () => {
       source: 'stripe_webhook',
     });
 
-    expect(subject).toBe('New Resneo signup: unknown (unknown)');
+    expect(subject).toBe('New ResNeo signup: unknown (unknown)');
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;script&gt;');
   });

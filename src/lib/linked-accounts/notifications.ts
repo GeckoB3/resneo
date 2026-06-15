@@ -124,7 +124,7 @@ export async function notifyLinkRequestReceived(
   await notifyVenue(admin, recipientVenueId, `${requesterVenueName} wants to link with you`, {
     heading: 'New linked-account request',
     paragraphs: [
-      `${requesterVenueName} has asked to link their Resneo venue with yours.`,
+      `${requesterVenueName} has asked to link their ResNeo venue with yours.`,
       'Linking lets you share calendar visibility and booking access while keeping all client and booking data separate. You can accept, adjust the permissions, or reject the request.',
     ],
     bullets: permissionBullets,
@@ -229,7 +229,7 @@ export async function notifyLinkTerminatedIneligible(
   return notifyVenue(admin, venueId, `Your link with ${otherVenueName} has ended`, {
     heading: 'Linked account ended',
     paragraphs: [
-      `The link between your venue and ${otherVenueName} has ended because one of the venues is no longer on a Resneo plan that supports linked accounts.`,
+      `The link between your venue and ${otherVenueName} has ended because one of the venues is no longer on a ResNeo plan that supports linked accounts.`,
       'All cross-venue calendar and booking access has stopped immediately. Your bookings and client data are unchanged — ending a link only removes access, never ownership. You can link again with a fresh request once both venues are on an eligible plan.',
     ],
     ctaLabel: 'View linked accounts',
@@ -258,7 +258,7 @@ export async function notifyLinkLapseExpired(
   });
 }
 
-/** §6.6 — a linked venue was removed from Resneo; the surviving partner is notified. */
+/** §6.6 — a linked venue was removed from ResNeo; the surviving partner is notified. */
 export async function notifyLinkPartnerVenueDeleted(
   admin: SupabaseClient,
   survivorVenueId: string,
@@ -267,11 +267,11 @@ export async function notifyLinkPartnerVenueDeleted(
   await notifyVenue(
     admin,
     survivorVenueId,
-    `${deletedVenueName} is no longer on Resneo`,
+    `${deletedVenueName} is no longer on ResNeo`,
     {
       heading: 'Linked venue removed',
       paragraphs: [
-        `${deletedVenueName} has been removed from Resneo. Your link with that venue has ended and all cross-venue calendar and booking access has stopped immediately.`,
+        `${deletedVenueName} has been removed from ResNeo. Your link with that venue has ended and all cross-venue calendar and booking access has stopped immediately.`,
         'Your bookings and client data are unchanged. You can view the historical audit log for past links in Linked Accounts settings.',
       ],
       ctaLabel: 'View linked accounts',
@@ -387,7 +387,7 @@ export async function notifyLinkLapseWarning(
   return notifyVenue(admin, venueId, 'A linked account may be suspended soon', {
     heading: 'Linked account at risk of suspension',
     paragraphs: [
-      `${lapsingVenueName}'s Resneo subscription is due to lapse on ${effectiveDateLabel}.`,
+      `${lapsingVenueName}'s ResNeo subscription is due to lapse on ${effectiveDateLabel}.`,
       `If it is not renewed, the link with your venue will be suspended and cross-venue calendar and booking access will pause. The link resumes automatically if ${lapsingVenueName}'s subscription is restored within 30 days.`,
     ],
     ctaLabel: 'View linked accounts',
@@ -403,7 +403,7 @@ export async function notifyLinkSuspended(
   return notifyVenue(admin, venueId, 'A linked account was suspended', {
     heading: 'Linked account suspended',
     paragraphs: [
-      `The link between your venue and ${lapsedVenueName} has been suspended because ${lapsedVenueName}'s Resneo subscription is inactive.`,
+      `The link between your venue and ${lapsedVenueName} has been suspended because ${lapsedVenueName}'s ResNeo subscription is inactive.`,
       'Cross-venue access is paused. If the subscription is restored within 30 days the link resumes automatically with its original permissions.',
     ],
     ctaLabel: 'View linked accounts',

@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
     try {
       const messageId = await sendEmail({
         to: normalisedEmail,
-        subject: `Your ${venueName} dashboard login - Resneo`,
+        subject: `Your ${venueName} dashboard login - ResNeo`,
         html,
         text,
       });

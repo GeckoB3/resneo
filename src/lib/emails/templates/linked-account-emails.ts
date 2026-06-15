@@ -42,7 +42,7 @@ export function renderLinkEmail(params: LinkEmailParams): { html: string; text: 
     mainContent,
     footerNote:
       params.footerNote ??
-      'You received this email because your venue uses Resneo Linked Accounts.',
+      'You received this email because your venue uses ResNeo Linked Accounts.',
   });
 
   const text = [

@@ -56,19 +56,41 @@ export function OpeningHoursSection({
     setError(null);
     setSaving(true);
     try {
-      const res = await fetch('/api/venue/opening-hours', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(local),
-      });
-      const body = await readResponseJson<{ error?: string; opening_hours?: OpeningHoursSettings }>(res);
-      if (!res.ok) {
-        throw new Error(body.error ?? 'Failed to save');
-      }
-      if (!body.opening_hours) {
-        throw new Error('Failed to save');
-      }
-      onUpdate({ opening_hours: body.opening_hours });
+      const doSave = async (acknowledge: boolean): Promise<void> => {
+        const res = await fetch(
+          acknowledge ? '/api/venue/opening-hours?acknowledge_affected_bookings=true' : '/api/venue/opening-hours',
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(local),
+          },
+        );
+        const body = await readResponseJson<{
+          error?: string;
+          opening_hours?: OpeningHoursSettings;
+          requires_confirmation?: boolean;
+          message?: string;
+        }>(res);
+        // Narrowing hours that leaves upcoming bookings outside the new hours is allowed,
+        // but confirmed first so the change is made knowingly (the bookings are kept).
+        if (res.status === 409 && body.requires_confirmation) {
+          if (
+            typeof window !== 'undefined' &&
+            window.confirm(`${body.message ?? 'Some upcoming bookings fall outside the new hours.'}\n\nSave these hours anyway?`)
+          ) {
+            await doSave(true);
+          }
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(body.error ?? 'Failed to save');
+        }
+        if (!body.opening_hours) {
+          throw new Error('Failed to save');
+        }
+        onUpdate({ opening_hours: body.opening_hours });
+      };
+      await doSave(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {

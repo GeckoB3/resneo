@@ -32,7 +32,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="mx-auto w-full max-w-xl">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">{children}</div>
-        <p className="mt-4 text-center text-xs text-slate-400">Powered by Resneo</p>
+        <p className="mt-4 text-center text-xs text-slate-400">Powered by ResNeo</p>
       </div>
     </main>
   );

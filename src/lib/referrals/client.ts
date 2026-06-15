@@ -63,6 +63,11 @@ export function loadReferralCodeFromCookieOrUrl(
   return null;
 }
 
+/** Network/server/rate-limit failure (vs a definitively-invalid code) — do not clear the cookie. */
+export function isTransientReferralValidationFailure(reason: string): boolean {
+  return reason === 'request_failed' || reason === 'network' || reason === 'rate_limited';
+}
+
 export async function validateReferralCodeClient(
   code: string,
 ): Promise<ReferralValidationClientResult> {

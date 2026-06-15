@@ -15,6 +15,8 @@ import { validateReferralCode } from '@/lib/referrals/lookup';
 import { referralProgrammeEnabled } from '@/lib/referrals/constants';
 import { validateSalesCode } from '@/lib/sales/lookup';
 import { salesProgrammeEnabled } from '@/lib/sales/constants';
+import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
+import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
@@ -148,6 +150,29 @@ export async function POST(request: Request) {
         );
       }
 
+      // Founding partners skip Stripe, so attribution must be attached here (no checkout
+      // session / webhook will). The trial bonus is moot — founding already gets 6 months free.
+      try {
+        if (salesProgrammeEnabled() && rawSalesCode) {
+          await attachSalesAttributionOnSignup({
+            admin,
+            salesCode: rawSalesCode,
+            referredVenueId: venue.id,
+            refereeEmail: ownerEmail,
+            refereeUserId: user.id,
+          });
+        } else if (referralProgrammeEnabled() && rawReferralCode) {
+          await attachReferralOnSignup({
+            admin,
+            referralCode: rawReferralCode,
+            referredVenueId: venue.id,
+            refereeEmail: ownerEmail,
+          });
+        }
+      } catch (e) {
+        console.error('[create-checkout] founding attribution failed (non-fatal):', e);
+      }
+
       await clearSignupPendingUserMetadata(admin, user.id);
 
       return NextResponse.json({ redirect_url: '/onboarding' });
@@ -278,6 +303,19 @@ export async function POST(request: Request) {
       : referralForSession
         ? buildSignupCheckoutSubscriptionDataWithReferral()
         : buildSignupCheckoutSubscriptionData();
+    // Mirror the code onto the subscription metadata (not just the session) so the first paid
+    // invoice can self-heal attribution if the checkout.session.completed webhook is missed.
+    if (salesForSession) {
+      subscriptionData.metadata = {
+        sales_code: salesForSession.code,
+        salesperson_id: salesForSession.salesperson_id,
+      };
+    } else if (referralForSession) {
+      subscriptionData.metadata = {
+        referral_code: referralForSession.code,
+        referrer_venue_id: referralForSession.referrer_venue_id,
+      };
+    }
 
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,

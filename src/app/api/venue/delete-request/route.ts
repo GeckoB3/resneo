@@ -131,26 +131,26 @@ export async function POST(request: NextRequest) {
           to: staff.email,
           subject: `Deletion scheduled for ${venue.name}`,
           text: [
-            `We have received a request to delete "${venue.name}" on Resneo.`,
+            `We have received a request to delete "${venue.name}" on ResNeo.`,
             '',
             `The venue and all of its data will be permanently deleted on ${scheduledDate}.`,
             note ?? 'Your subscription is set to cancel at the end of the current billing period.',
             '',
             'To cancel this and keep your venue, sign in before that date and use',
             '"Delete this venue" → "Cancel scheduled deletion" on Settings → Plan:',
-            manageUrl ?? '(sign in to your Resneo dashboard → Settings → Plan)',
+            manageUrl ?? '(sign in to your ResNeo dashboard → Settings → Plan)',
             '',
-            'If you did not request this, cancel it immediately and contact Resneo support.',
+            'If you did not request this, cancel it immediately and contact ResNeo support.',
           ].join('\n'),
           html: `
-            <p>We have received a request to delete <strong>${venue.name}</strong> on Resneo.</p>
+            <p>We have received a request to delete <strong>${venue.name}</strong> on ResNeo.</p>
             <p>The venue and all of its data will be permanently deleted on <strong>${scheduledDate}</strong>.</p>
             <p>${note ?? 'Your subscription is set to cancel at the end of the current billing period.'}</p>
             <p>To cancel this and keep your venue, sign in before that date and use
             <strong>"Delete this venue" → "Cancel scheduled deletion"</strong> on Settings → Plan${
               manageUrl ? `: <a href="${manageUrl}">${manageUrl}</a>` : '.'
             }</p>
-            <p>If you did not request this, cancel it immediately and contact Resneo support.</p>
+            <p>If you did not request this, cancel it immediately and contact ResNeo support.</p>
           `,
           disableTracking: true,
         });

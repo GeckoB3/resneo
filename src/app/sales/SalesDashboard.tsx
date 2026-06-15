@@ -166,13 +166,13 @@ export function SalesDashboard() {
       <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 p-6 text-white shadow-lg sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-blue-300">Resneo Sales</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-300">ResNeo Sales</p>
             <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
               {salesperson.name?.trim() || 'Sales dashboard'}
             </h1>
             <p className="mt-2 max-w-lg text-sm text-slate-300">
               Track your signups, revenue share, and bonuses. Figures are informational — payments are made
-              outside Resneo at the end of each month.
+              outside ResNeo at the end of each month.
             </p>
           </div>
           {primaryCode && (
@@ -314,7 +314,7 @@ export function SalesDashboard() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-6 py-4">
           <h2 className="text-sm font-semibold text-slate-900">Monthly statements</h2>
-          <p className="text-xs text-slate-500">Finalised on the 1st of each month (UTC). Payment follows outside Resneo.</p>
+          <p className="text-xs text-slate-500">Finalised on the 1st of each month (UTC). Payment follows outside ResNeo.</p>
         </div>
         {statements.length === 0 ? (
           <div className="px-6 py-10 text-center">

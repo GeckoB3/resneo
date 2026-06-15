@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -37,9 +35,9 @@ const PAGE_PATH = "/wellness-booking-software";
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Health & Wellbeing Booking Software for Clinics & Therapists | Resneo",
+  title: "Health & Wellbeing Booking Software for Clinics & Therapists | ResNeo",
   description:
-    "Resneo is booking software for health and wellbeing practices: physiotherapy, massage, osteopathy, counselling, and more. Take bookings 24/7, cut missed appointments with deposits and reminders, send intake forms and health questionnaires automatically, and see clients in clinic, online, or at home. No commission. Start a free 14-day trial.",
+    "ResNeo is booking software for health and wellbeing practices: physiotherapy, massage, osteopathy, counselling, and more. Take bookings 24/7, cut missed appointments with deposits and reminders, send intake forms and health questionnaires automatically, and see clients in clinic, online, or at home. No commission. Start a free 14-day trial.",
   keywords: [
     "health and wellbeing booking software",
     "physiotherapy booking software",
@@ -53,7 +51,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "Health & Wellbeing Booking Software | Resneo",
+    title: "Health & Wellbeing Booking Software | ResNeo",
     description:
       "Online booking, deposits, reminders, and automatic intake forms for physiotherapists, massage therapists, osteopaths, and counsellors. See clients in clinic, online, or at home.",
     url: PAGE_PATH,
@@ -61,7 +59,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Health & Wellbeing Booking Software | Resneo",
+    title: "Health & Wellbeing Booking Software | ResNeo",
     description:
       "Bookings, deposits, reminders, and intake forms for physio, massage, therapy, and more. In clinic, online, or at home.",
   },
@@ -76,7 +74,7 @@ const outcomes = [
     eyebrow: "Outcome 01",
     title: "Fewer missed appointments",
     promise:
-      "A did-not-attend is an empty hour you cannot get back, and a client who may not rebook. Resneo gets people to show, or to cancel in time for someone else to take the slot.",
+      "A did-not-attend is an empty hour you cannot get back, and a client who may not rebook. ResNeo gets people to show, or to cancel in time for someone else to take the slot.",
     accent: "rose" as const,
     features: [
       {
@@ -102,7 +100,7 @@ const outcomes = [
     eyebrow: "Outcome 02",
     title: "A fuller diary",
     promise:
-      "People book when it suits them, often outside clinic hours. Resneo captures that the moment they decide, and lets you see them however they need to be seen.",
+      "People book when it suits them, often outside clinic hours. ResNeo captures that the moment they decide, and lets you see them however they need to be seen.",
     accent: "brand" as const,
     features: [
       {
@@ -129,7 +127,7 @@ const outcomes = [
     eyebrow: "Outcome 03",
     title: "Less admin, more care",
     promise:
-      "Intake forms, reminders, and rebooking should not eat into your day or your evenings. Resneo runs the routine so you can focus on the person in front of you.",
+      "Intake forms, reminders, and rebooking should not eat into your day or your evenings. ResNeo runs the routine so you can focus on the person in front of you.",
     accent: "accent" as const,
     features: [
       {
@@ -190,7 +188,7 @@ const intakePoints = [
 
 const waysToWork = [
   { title: "1:1 appointments", description: "Assessments, treatments, and reviews with per-service duration, price, and buffer time.", icon: CalendarCheckIcon },
-  { title: "Online video sessions", description: "Mark a service as online and Resneo adds the join link to confirmations and reminders.", icon: VideoCameraIcon },
+  { title: "Online video sessions", description: "Mark a service as online and ResNeo adds the join link to confirmations and reminders.", icon: VideoCameraIcon },
   { title: "Home visits", description: "Capture the client address at booking for mobile physio, massage, and home therapy.", icon: MapPinIcon },
   { title: "Group classes", description: "Run yoga, pilates, rehab, or mindfulness classes with rosters, capacity, and waitlists.", icon: CalendarDaysIcon },
   { title: "Courses & memberships", description: "Sell a course of classes or a recurring membership, with enrolment tracked end to end.", icon: ArrowPathIcon },
@@ -227,24 +225,24 @@ const compareRows: { label: string; resneo: string; other: string }[] = [
 
 const faqs = [
   {
-    q: "Is Resneo good booking software for a physiotherapy or therapy clinic?",
-    a: "Yes. Resneo is built for appointment businesses, and health and wellbeing practices fit naturally: physiotherapists, massage therapists, osteopaths, chiropractors, counsellors, and more. Take bookings 24/7, reduce missed appointments with deposits and reminders, collect intake forms automatically, and see clients in clinic, online, or at home.",
+    q: "Is ResNeo good booking software for a physiotherapy or therapy clinic?",
+    a: "Yes. ResNeo is built for appointment businesses, and health and wellbeing practices fit naturally: physiotherapists, massage therapists, osteopaths, chiropractors, counsellors, and more. Take bookings 24/7, reduce missed appointments with deposits and reminders, collect intake forms automatically, and see clients in clinic, online, or at home.",
   },
   {
-    q: "Can Resneo send intake forms and health questionnaires before the first appointment?",
+    q: "Can ResNeo send intake forms and health questionnaires before the first appointment?",
     a: "Yes. With Compliance turned on, you choose which services need an intake form, health questionnaire, or consent. The form is sent automatically when the client books, they complete and sign it on their phone with no app, and it is stored on their confidential record. You can require it to be completed before a first appointment is allowed.",
   },
   {
-    q: "Does Resneo support online video sessions and home visits?",
-    a: "Yes. A service can be set as online, and Resneo adds a join link to the confirmation and reminders. It can also be set as a home visit, where the client address is captured at booking and saved to their record, all on the same diary as your in-clinic appointments.",
+    q: "Does ResNeo support online video sessions and home visits?",
+    a: "Yes. A service can be set as online, and ResNeo adds a join link to the confirmation and reminders. It can also be set as a home visit, where the client address is captured at booking and saved to their record, all on the same diary as your in-clinic appointments.",
   },
   {
     q: "Can I run group classes as well as one-to-one appointments?",
     a: "Yes. Alongside 1:1 appointments you can run group classes such as yoga, pilates, rehab, or mindfulness, with capacity, rosters, and waitlists. You can also sell a course of classes or a recurring membership, with enrolment tracked from payment to completion.",
   },
   {
-    q: "How does Resneo handle confidential client data?",
-    a: "Each client record, including notes and completed forms, is stored under your own account, and access to sensitive data is logged. You control marketing consent per client and can record only the information you need. Resneo helps you keep tidy records, but it is not a substitute for your own data-protection and clinical-governance obligations.",
+    q: "How does ResNeo handle confidential client data?",
+    a: "Each client record, including notes and completed forms, is stored under your own account, and access to sensitive data is logged. You control marketing consent per client and can record only the information you need. ResNeo helps you keep tidy records, but it is not a substitute for your own data-protection and clinical-governance obligations.",
   },
   {
     q: "Will it reduce did-not-attends?",
@@ -252,7 +250,7 @@ const faqs = [
   },
   {
     q: "I rent rooms to associate practitioners. Can each keep separate books?",
-    a: `Yes. Each associate runs their own Resneo with their own clients, calendar, and payouts, then you link accounts to share availability and a combined booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_HMRC_NOTE}`,
+    a: `Yes. Each associate runs their own ResNeo with their own clients, calendar, and payouts, then you link accounts to share availability and a combined booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}`,
   },
   {
     q: "How much does it cost?",
@@ -269,7 +267,7 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "Resneo: Health & Wellbeing Booking Software",
+      name: "ResNeo: Health & Wellbeing Booking Software",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description:
@@ -328,7 +326,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link href="/solutions" className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex">
@@ -386,7 +384,7 @@ function Hero() {
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
             Let clients book 24/7, reduce did-not-attends with deposits and reminders, and collect intake
             forms and health questionnaires automatically before the first session. See clients in clinic,
-            online, or at home. Resneo is the all-in-one booking platform for physiotherapy, massage,
+            online, or at home. ResNeo is the all-in-one booking platform for physiotherapy, massage,
             therapy, and wellbeing practices, with no booking commission.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -578,7 +576,7 @@ function IntakeSection() {
             The intake form is done before the first session.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Resneo&rsquo;s Compliance tools send the right intake form, health questionnaire, or consent the
+            ResNeo&rsquo;s Compliance tools send the right intake form, health questionnaire, or consent the
             moment a client books, chase it until it is complete, and can stop a first appointment going ahead
             without it. You start every session with the history already on file.
           </p>
@@ -666,10 +664,10 @@ function OutcomesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Outcomes first</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            What every practice wants, and how Resneo delivers it.
+            What every practice wants, and how ResNeo delivers it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Each promise below maps to the exact Resneo features that make it happen. No buzzwords, just the
+            Each promise below maps to the exact ResNeo features that make it happen. No buzzwords, just the
             tools doing the work.
           </p>
         </div>
@@ -931,7 +929,7 @@ function RecordsSection() {
               ))}
             </ul>
             <p className="mt-6 max-w-xl text-xs leading-relaxed text-white/50">
-              Resneo helps you keep tidy records. It is not a substitute for your own data-protection and
+              ResNeo helps you keep tidy records. It is not a substitute for your own data-protection and
               clinical-governance obligations.
             </p>
           </div>
@@ -1021,7 +1019,7 @@ function LinkedAccountsSection() {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 A multi-disciplinary clinic of self-employed associates, or rooms rented to visiting
-                practitioners? Each runs their own Resneo with their own clients, calendar, and payouts. Link
+                practitioners? Each runs their own ResNeo with their own clients, calendar, and payouts. Link
                 accounts to share availability and a combined booking page, and break the link in a click.
                 Nothing is ever merged.
               </p>
@@ -1043,12 +1041,11 @@ function LinkedAccountsSection() {
                   <ShieldCheckIcon />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
+              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             </div>
           </div>
         </div>
@@ -1070,7 +1067,7 @@ function BusinessTypesSection() {
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A solo therapist or a multi-disciplinary clinic, seeing clients in person, online, or at home. If
-            you take appointments and care about your records, Resneo fits.
+            you take appointments and care about your records, ResNeo fits.
           </p>
         </div>
         <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1096,19 +1093,19 @@ function CompareSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Resneo vs the rest</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Keep your clients. Keep your margin. Keep the records.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Marketplace apps list you next to your competitors and take a cut. Generic schedulers leave intake
-            and consent to you. Resneo does both, in one place.
+            and consent to you. ResNeo does both, in one place.
           </p>
         </div>
         <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
           <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">Resneo</div>
+            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
             <div className="border-l border-slate-200 p-4 text-center">Other apps</div>
           </div>
           {compareRows.map((row, i) => (
@@ -1222,7 +1219,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
@@ -1231,6 +1228,7 @@ function Footer() {
           <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
           <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
           <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

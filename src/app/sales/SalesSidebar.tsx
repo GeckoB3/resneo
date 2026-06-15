@@ -23,7 +23,7 @@ export function SalesSidebar({ email, name, showSwitch = false }: Props) {
   return (
     <>
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-slate-900 px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))]">
-        <span className="text-sm font-semibold text-white">Resneo Sales</span>
+        <span className="text-sm font-semibold text-white">ResNeo Sales</span>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-slate-300 hover:bg-slate-800"
@@ -54,7 +54,7 @@ export function SalesSidebar({ email, name, showSwitch = false }: Props) {
       `}
       >
         <div className="border-b border-slate-700 px-5 py-4">
-          <span className="text-sm font-bold tracking-tight text-white">Resneo</span>
+          <span className="text-sm font-bold tracking-tight text-white">ResNeo</span>
           <span className="ml-2 rounded bg-blue-500 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
             Sales
           </span>

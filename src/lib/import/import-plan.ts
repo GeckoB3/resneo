@@ -132,7 +132,7 @@ export function fallbackPlanNarrative(stats: ImportPlanStats): { headline: strin
   if (stats.total_booking_rows > 0) parts.push(`${stats.total_booking_rows.toLocaleString()} booking rows`);
   const headline = `Ready to import ${parts.join(' and ') || 'your data'}.`;
   const lines: string[] = [
-    `${stats.mappings.mapped} columns are mapped to Resneo fields (${stats.mappings.ignored} ignored, ${stats.mappings.custom} kept as custom fields).`,
+    `${stats.mappings.mapped} columns are mapped to ResNeo fields (${stats.mappings.ignored} ignored, ${stats.mappings.custom} kept as custom fields).`,
   ];
   if (stats.references.resolved > 0 || stats.references.skipped > 0) {
     lines.push(

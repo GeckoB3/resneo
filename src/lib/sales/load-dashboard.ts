@@ -69,29 +69,37 @@ export async function loadSalesDashboardForUser(
   const salesperson = spRow as SalespersonRow;
   const spId = salesperson.id;
 
-  const [{ data: codes }, { data: statements }, { data: attrs }, { data: tiers }, { data: awards }] =
-    await Promise.all([
-      db.from('sales_codes').select('code, active').eq('salesperson_id', spId).order('created_at'),
-      db
-        .from('sales_monthly_statements')
-        .select(
-          'period_month, signups_count, validated_count, lump_sum_pence, revenue_share_pence, bonus_pence, active_subscribers_end, total_pence',
-        )
-        .eq('salesperson_id', spId)
-        .order('period_month', { ascending: false })
-        .limit(24),
-      db
-        .from('sales_attributions')
-        .select('venue_id, signed_up_at, first_paid_at, status')
-        .eq('salesperson_id', spId)
-        .order('signed_up_at', { ascending: false }),
-      db
-        .from('sales_bonus_tiers')
-        .select('threshold, amount_pence')
-        .eq('salesperson_id', spId)
-        .order('threshold', { ascending: true }),
-      db.from('sales_bonus_awards').select('threshold').eq('salesperson_id', spId),
-    ]);
+  const [
+    { data: codes },
+    { data: statements },
+    { data: attrs },
+    { data: tiers },
+    { data: awards },
+    { data: allStatementTotals },
+  ] = await Promise.all([
+    db.from('sales_codes').select('code, active').eq('salesperson_id', spId).order('created_at'),
+    db
+      .from('sales_monthly_statements')
+      .select(
+        'period_month, signups_count, validated_count, lump_sum_pence, revenue_share_pence, bonus_pence, active_subscribers_end, total_pence',
+      )
+      .eq('salesperson_id', spId)
+      .order('period_month', { ascending: false })
+      .limit(24),
+    db
+      .from('sales_attributions')
+      .select('venue_id, signed_up_at, first_paid_at, status')
+      .eq('salesperson_id', spId)
+      .order('signed_up_at', { ascending: false }),
+    db
+      .from('sales_bonus_tiers')
+      .select('threshold, amount_pence')
+      .eq('salesperson_id', spId)
+      .order('threshold', { ascending: true }),
+    db.from('sales_bonus_awards').select('threshold').eq('salesperson_id', spId),
+    // Lifetime earnings sums every statement, not just the 24 most recent shown in the table.
+    db.from('sales_monthly_statements').select('total_pence').eq('salesperson_id', spId),
+  ]);
 
   const awardedSet = new Set((awards ?? []).map((a) => (a as { threshold: number }).threshold));
   const tierRows = (tiers ?? []) as BonusTierRow[];
@@ -178,7 +186,7 @@ export async function loadSalesDashboardForUser(
 
   const totalSignups = attributions.length;
   const validatedSignups = attributions.filter((a) => a.first_paid_at).length;
-  const lifetimeEarnings = (statements ?? []).reduce(
+  const lifetimeEarnings = (allStatementTotals ?? []).reduce(
     (sum, s) => sum + ((s as { total_pence: number }).total_pence ?? 0),
     0,
   );

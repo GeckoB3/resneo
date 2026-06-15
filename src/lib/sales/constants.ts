@@ -1,8 +1,12 @@
 /** Cookie persisted when a prospect follows a salesperson link. */
 export const SALES_CODE_COOKIE_NAME = 'reserveni_sales';
 
-/** Extend standard signup trial by this many days when a sales code is applied. */
-export const SALES_REFEREE_BONUS_DAYS = 14;
+/**
+ * Commissioned-sales signups get one month free instead of the standard 14-day trial
+ * (`SIGNUP_TRIAL_DAYS`). Applied as a flat Stripe `trial_period_days` on the sales-code
+ * checkout — it replaces the standard trial, it is not added on top of it.
+ */
+export const SALES_SIGNUP_TRIAL_DAYS = 30;
 
 /** Default revenue-share window (months from first paid invoice). */
 export const DEFAULT_REVENUE_SHARE_MONTHS = 12;

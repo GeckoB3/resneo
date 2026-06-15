@@ -202,7 +202,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   return (
     <div className="w-full min-w-0 max-w-lg">
       <div className="mb-6">
-        <img src="/Logo.png" alt="Resneo" className="h-8 w-auto" />
+        <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
       </div>
 
       <div className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -372,7 +372,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       </div>
 
       <p className="mt-4 text-center text-xs text-slate-400">
-        <Link href="/" className="hover:text-brand-600">Powered by Resneo</Link>
+        <Link href="/" className="hover:text-brand-600">Powered by ResNeo</Link>
       </p>
     </div>
   );

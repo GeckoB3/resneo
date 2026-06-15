@@ -30,7 +30,7 @@ export function PublicBookingAccountGateProvider({
     <PublicBookingAccountGateContext.Provider value={gate}>
       {gate.requireLogin && !gate.authChecking && !gate.sessionEmail ? (
         <div className="mb-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-950">
-          <p className="font-medium">Resneo account required to book</p>
+          <p className="font-medium">ResNeo account required to book</p>
           <button
             type="button"
             onClick={() => gate.setAuthOpen(true)}

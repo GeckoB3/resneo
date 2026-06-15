@@ -163,6 +163,13 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           console.error('[Subscription webhook] maybeCreditReferrerForInvoice failed:', e);
         }
+        // Self-heal: if the checkout.session.completed webhook was missed, recover the sales
+        // attribution from the subscription metadata before recording revenue (idempotent).
+        try {
+          await backfillSalesAttributionFromInvoice(supabase, invoice);
+        } catch (e) {
+          console.error('[Subscription webhook] backfillSalesAttributionFromInvoice failed:', e);
+        }
         try {
           await recordSalesInvoiceRevenue(supabase, invoice);
         } catch (e) {
@@ -186,6 +193,47 @@ export async function POST(request: NextRequest) {
     console.error('[Subscription webhook] Processing failed:', event.id, event.type, err);
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
+}
+
+/**
+ * Recover a sales attribution that was lost because the `checkout.session.completed` webhook
+ * (and the success-page fallback) were both missed. The sales code is mirrored onto the
+ * subscription metadata at checkout, so the first paid invoice can re-attach it. Idempotent —
+ * `attachSalesAttributionOnSignup` no-ops when an attribution already exists for the venue.
+ */
+async function backfillSalesAttributionFromInvoice(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  invoice: Stripe.Invoice,
+): Promise<void> {
+  const subId = getStripeInvoiceSubscriptionId(invoice);
+  if (!subId) return;
+  const sub = await stripe.subscriptions.retrieve(subId);
+  const salesCode = (sub.metadata?.sales_code ?? '').trim() || null;
+  if (!salesCode) return;
+  const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+  if (!customerId) return;
+  const { data: venue } = await supabase
+    .from('venues')
+    .select('id, email')
+    .eq('stripe_customer_id', customerId)
+    .maybeSingle();
+  if (!venue?.id) return;
+  const venueId = (venue as { id: string }).id;
+  // Resolve the venue's owner so the self-attribution guard can run by user id, not just email.
+  const { data: ownerStaff } = await supabase
+    .from('staff')
+    .select('user_id')
+    .eq('venue_id', venueId)
+    .eq('role', 'admin')
+    .not('user_id', 'is', null)
+    .limit(1);
+  await attachSalesAttributionOnSignup({
+    admin: supabase,
+    salesCode,
+    referredVenueId: venueId,
+    refereeEmail: invoice.customer_email ?? (venue as { email?: string | null }).email ?? null,
+    refereeUserId: (ownerStaff?.[0] as { user_id?: string | null } | undefined)?.user_id ?? null,
+  });
 }
 
 async function handleCheckoutCompleted(
@@ -367,6 +415,17 @@ async function handleCheckoutCompleted(
     .single();
 
   if (venueError || !venue) {
+    // The success-page POST (/api/signup/complete) won the provisioning race and already
+    // created this venue under the same Stripe customer; the partial unique index on
+    // venues.stripe_customer_id surfaces the duplicate as 23505. The winner also created the
+    // staff row, attribution, and signup notification, so there is nothing left to do here.
+    if (venueError?.code === '23505') {
+      console.log(
+        '[Subscription webhook] Venue already provisioned by success page (unique race) for',
+        customerId,
+      );
+      return;
+    }
     console.error('[Subscription webhook] Failed to create venue:', venueError);
     throw new Error('Venue creation failed');
   }
@@ -413,6 +472,8 @@ async function handleCheckoutCompleted(
         admin: supabase,
         salesCode,
         referredVenueId: venue.id,
+        refereeEmail: userEmail ?? null,
+        refereeUserId: (metadata.supabase_user_id ?? '').trim() || null,
       });
     } else {
       const referralCode = (metadata.referral_code ?? '').trim() || null;

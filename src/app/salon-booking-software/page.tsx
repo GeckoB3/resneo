@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 import { APPOINTMENTS_LIGHT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
 import { SMS_INCLUDED_PLUS } from "@/lib/billing/sms-allowance";
 
@@ -16,9 +14,9 @@ const PAGE_PATH = "/salon-booking-software";
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Salon Booking Software for Hair Salons & Barbers | Resneo",
+  title: "Salon Booking Software for Hair Salons & Barbers | ResNeo",
   description:
-    "Resneo is booking software for hair salons and barbers. Let clients book online 24/7, cut no-shows with deposits and automated reminders, and keep every chair full, with no commission and no marketplace. Rent-a-chair ready: link self-employed stylists into one booking page while everyone keeps separate, HMRC-friendly books. Start a free 14-day trial.",
+    "ResNeo is booking software for hair salons and barbers. Let clients book online 24/7, cut no-shows with deposits and automated reminders, and keep every chair full, with no commission and no marketplace. Rent-a-chair ready: link self-employed stylists into one booking page while everyone keeps their own separate books. Start a free 14-day trial.",
   keywords: [
     "salon booking software",
     "barber appointment software",
@@ -33,7 +31,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "Salon & Barber Booking Software | Resneo",
+    title: "Salon & Barber Booking Software | ResNeo",
     description:
       "Online booking, deposits, and automated reminders built for hair salons and barbershops. Fewer no-shows, fuller chairs, less admin.",
     url: PAGE_PATH,
@@ -41,7 +39,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Salon & Barber Booking Software | Resneo",
+    title: "Salon & Barber Booking Software | ResNeo",
     description:
       "Online booking, deposits, and automated reminders built for hair salons and barbershops.",
   },
@@ -57,7 +55,7 @@ const outcomes = [
     eyebrow: "Outcome 01",
     title: "Fewer no-shows",
     promise:
-      "Empty chairs from missed appointments are pure lost income you can never bill twice. Resneo gets clients to show up, or to cancel in time for you to refill the slot.",
+      "Empty chairs from missed appointments are pure lost income you can never bill twice. ResNeo gets clients to show up, or to cancel in time for you to refill the slot.",
     icon: ShieldPoundIcon,
     accent: "rose" as const,
     features: [
@@ -84,7 +82,7 @@ const outcomes = [
     eyebrow: "Outcome 02",
     title: "Fully booked chairs",
     promise:
-      "The busiest salons take bookings the moment a client decides: late at night, between meetings, mid-scroll. Resneo turns that intent into a confirmed appointment instead of a missed call.",
+      "The busiest salons take bookings the moment a client decides: late at night, between meetings, mid-scroll. ResNeo turns that intent into a confirmed appointment instead of a missed call.",
     icon: CalendarCheckIcon,
     accent: "brand" as const,
     features: [
@@ -112,7 +110,7 @@ const outcomes = [
     eyebrow: "Outcome 03",
     title: "Less admin",
     promise:
-      "Your time is best spent behind the chair, not buried in DMs and a paper diary. Resneo takes the back-and-forth off your plate so the day runs itself.",
+      "Your time is best spent behind the chair, not buried in DMs and a paper diary. ResNeo takes the back-and-forth off your plate so the day runs itself.",
     icon: ClockIcon,
     accent: "accent" as const,
     features: [
@@ -205,7 +203,7 @@ const features = [
   },
   {
     title: "No booking commission",
-    description: "One simple subscription. Resneo never takes a cut of your bookings or rents out your clients.",
+    description: "One simple subscription. ResNeo never takes a cut of your bookings or rents out your clients.",
   },
 ];
 
@@ -233,8 +231,8 @@ const compareRows: { label: string; resneo: string; marketplace: string }[] = [
 
 const faqs = [
   {
-    q: "Is Resneo good barber appointment software?",
-    a: "Yes. Resneo is built for appointment businesses, and barbershops are right at home. Give each barber their own bookable link and hours, take deposits on the chair-time you want to protect, and let clients book 24/7 from your website, Instagram, or Google profile.",
+    q: "Is ResNeo good barber appointment software?",
+    a: "Yes. ResNeo is built for appointment businesses, and barbershops are right at home. Give each barber their own bookable link and hours, take deposits on the chair-time you want to protect, and let clients book 24/7 from your website, Instagram, or Google profile.",
   },
   {
     q: "Can clients book a specific stylist or barber?",
@@ -253,12 +251,12 @@ const faqs = [
     a: "No. Clients book on a fast, mobile-friendly web page, with no app and no account wall. You manage everything from your phone or a tablet at the front desk.",
   },
   {
-    q: "Does Resneo work for rent-a-chair salons?",
-    a: "Yes. It is built for it. Each self-employed stylist runs their own Resneo with their own clients, calendar, and payouts. You then link accounts to share availability and present one combined booking page under your salon's brand. Either side can break the link in a click at any time.",
+    q: "Does ResNeo work for rent-a-chair salons?",
+    a: "Yes. It is built for it. Each self-employed stylist runs their own ResNeo with their own clients, calendar, and payouts. You then link accounts to share availability and present one combined booking page under your salon's brand. Either side can break the link in a click at any time.",
   },
   {
-    q: "How does Resneo help keep self-employed stylists compliant for HMRC?",
-    a: `${LINKED_ACCOUNTS_HMRC_NOTE} ${LINKED_ACCOUNTS_HMRC_DISCLAIMER}`,
+    q: "How does ResNeo help self-employed stylists keep control of their own clients and books?",
+    a: `${LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}`,
   },
   {
     q: "What happens to my data if I unlink from another chair?",
@@ -283,7 +281,7 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "Resneo: Salon & Barber Booking Software",
+      name: "ResNeo: Salon & Barber Booking Software",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description:
@@ -348,7 +346,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
@@ -414,7 +412,7 @@ function Hero() {
           </p>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
             Let clients book online 24/7, take deposits to protect your chair-time, and automate every
-            reminder. Resneo is the simple, all-in-one booking platform for barbershops and hair salons,
+            reminder. ResNeo is the simple, all-in-one booking platform for barbershops and hair salons,
             with no booking commission and no marketplace renting out your clients. Rent chairs to
             self-employed stylists? Link everyone into one booking page while each keeps their own clients,
             takings, and books, then unlink in a click.
@@ -630,10 +628,10 @@ function OutcomesSection() {
             Outcomes first
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Three things every owner wants. Here is how Resneo delivers them.
+            Three things every owner wants. Here is how ResNeo delivers them.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Software should earn its keep. Each promise below maps to the exact Resneo features that make it
+            Software should earn its keep. Each promise below maps to the exact ResNeo features that make it
             happen. No buzzwords, just the tools doing the work.
           </p>
         </div>
@@ -959,7 +957,7 @@ const linkedBenefits = [
   {
     title: "Separate books, by design",
     description:
-      "Every chair is its own Resneo. Each stylist owns their clients, calendar, and takings. Nothing is ever pooled or merged.",
+      "Every chair is its own ResNeo. Each stylist owns their clients, calendar, and takings. Nothing is ever pooled or merged.",
     icon: UserCardIcon,
   },
   {
@@ -1004,7 +1002,7 @@ function LinkedAccountsSection() {
             Share a salon. Keep separate books.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            If you rent chairs to self-employed stylists, Resneo links everyone into one booking page while
+            If you rent chairs to self-employed stylists, ResNeo links everyone into one booking page while
             each person stays the sole owner of their clients, takings, and records. Link to share a diary;
             break the link in a click. No merged data, no shared till.
           </p>
@@ -1131,7 +1129,7 @@ function LinkedAccountsSection() {
           ))}
         </div>
 
-        {/* HMRC compliance callout */}
+        {/* Separate-books callout */}
         <div className="mt-10 overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-sm">
           <div className="h-1.5 w-full bg-gradient-to-r from-brand-400 to-accent-400" />
           <div className="grid gap-6 p-7 sm:p-9 lg:grid-cols-[1.5fr_1fr] lg:items-center lg:gap-10">
@@ -1141,12 +1139,11 @@ function LinkedAccountsSection() {
                   <ShieldCheckIcon />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
+              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             </div>
             <div className="flex flex-col gap-3">
               <a
@@ -1225,7 +1222,7 @@ function BusinessTypesSection() {
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             One barber or a full team of stylists, a high-street salon or a mobile round. If you take
-            appointments, Resneo fits.
+            appointments, ResNeo fits.
           </p>
         </div>
 
@@ -1258,13 +1255,13 @@ function CompareSection() {
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
-            Resneo vs marketplace apps
+            ResNeo vs marketplace apps
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Keep your clients. Keep your margin.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Many salon booking apps list you in a shared marketplace and take a cut of every booking. Resneo
+            Many salon booking apps list you in a shared marketplace and take a cut of every booking. ResNeo
             is your booking system, not a middleman. Your page, your clients, your money.
           </p>
         </div>
@@ -1272,7 +1269,7 @@ function CompareSection() {
         <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
           <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">Resneo</div>
+            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
             <div className="border-l border-slate-200 p-4 text-center">Marketplace apps</div>
           </div>
           {compareRows.map((row, i) => (
@@ -1409,7 +1406,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">
@@ -1433,6 +1430,7 @@ function Footer() {
           <Link href="/privacy" className="transition-colors hover:text-slate-900">
             Privacy Policy
           </Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

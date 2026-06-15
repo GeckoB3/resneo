@@ -3,14 +3,26 @@ import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 /** Free trial length for new paid-plan signups only (not upgrades or resubscribes). */
 export const SIGNUP_TRIAL_DAYS = 14;
 
-export const SIGNUP_TRIAL_SHORT_LABEL = `${SIGNUP_TRIAL_DAYS}-day free trial`;
-
-export function signupTrialThenPrice(monthlyPrice: number): string {
-  return `${SIGNUP_TRIAL_SHORT_LABEL}, then £${monthlyPrice}/month`;
+/**
+ * Trial copy accepts an explicit day count so the commissioned-sales programme (1 month free)
+ * can reuse the exact wording with its longer trial. The default reproduces the standard
+ * 14-day copy, so every existing call site is unchanged.
+ */
+export function signupTrialShortLabel(trialDays: number = SIGNUP_TRIAL_DAYS): string {
+  return `${trialDays}-day free trial`;
 }
 
-export const SIGNUP_TRIAL_CARD_NOTICE =
-  'Add your card at checkout. Your subscription is free for 14 days; the first monthly charge is after the trial.';
+export const SIGNUP_TRIAL_SHORT_LABEL = signupTrialShortLabel();
+
+export function signupTrialThenPrice(monthlyPrice: number, trialDays: number = SIGNUP_TRIAL_DAYS): string {
+  return `${signupTrialShortLabel(trialDays)}, then £${monthlyPrice}/month`;
+}
+
+export function signupTrialCardNotice(trialDays: number = SIGNUP_TRIAL_DAYS): string {
+  return `Add your card at checkout. Your subscription is free for ${trialDays} days; the first monthly charge is after the trial.`;
+}
+
+export const SIGNUP_TRIAL_CARD_NOTICE = signupTrialCardNotice();
 
 export function signupTrialSmsDuringTrialNotice(): string {
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);

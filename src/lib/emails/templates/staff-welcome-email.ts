@@ -24,7 +24,7 @@ export function renderStaffWelcomeEmail(params: StaffWelcomeEmailParams): {
   const roleLabel = params.role === "admin" ? "Admin" : "Staff";
 
   const mainContent = [
-    '<p style="margin:0 0 12px">A dashboard account has been created for you on Resneo.</p>',
+    '<p style="margin:0 0 12px">A dashboard account has been created for you on ResNeo.</p>',
     `<p style="margin:0 0 8px"><strong>Sign-in email:</strong> ${escapeHtml(params.email)}</p>`,
     `<p style="margin:0 0 8px"><strong>Password:</strong> ${escapeHtml(params.password)}</p>`,
     `<p style="margin:0 0 16px"><strong>Access level:</strong> ${escapeHtml(roleLabel)}</p>`,
@@ -37,11 +37,11 @@ export function renderStaffWelcomeEmail(params: StaffWelcomeEmailParams): {
     heading: "Your dashboard login details",
     mainContent,
     footerNote:
-      "You received this email because a team member created a Resneo dashboard account for you.",
+      "You received this email because a team member created a ResNeo dashboard account for you.",
   });
 
   const text = [
-    `Your Resneo dashboard account for ${params.venueName}`,
+    `Your ResNeo dashboard account for ${params.venueName}`,
     "",
     `Sign-in email: ${params.email}`,
     `Password: ${params.password}`,

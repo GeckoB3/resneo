@@ -192,7 +192,7 @@ export function LoginForm({
     <div className="space-y-4">
       {isBookingFlow ? (
         <div className="rounded-xl border border-brand-100 bg-brand-50/80 px-3.5 py-3 text-sm text-brand-950">
-          <p className="font-medium">New to Resneo?</p>
+          <p className="font-medium">New to ResNeo?</p>
           <p className="mt-1 text-brand-900/90">
             Enter your Email to create a free account automatically. No separate signup and no password required.
           </p>
@@ -252,7 +252,7 @@ export function LoginForm({
       {mode === 'password' ? (
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           {isBookingFlow ? (
-            <p className="text-sm text-slate-600">Already set a password on Resneo? Sign in here.</p>
+            <p className="text-sm text-slate-600">Already set a password on ResNeo? Sign in here.</p>
           ) : null}
           <div>
             <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>

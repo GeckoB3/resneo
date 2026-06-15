@@ -260,7 +260,7 @@ export async function runImportValidation(
               issue_type: 'existing_client',
               column_name: 'email',
               raw_value: em,
-              message: 'This email already exists in Resneo',
+              message: 'This email already exists in ResNeo',
             });
             warningCount += 1;
           }
@@ -291,7 +291,7 @@ export async function runImportValidation(
             issue_type: 'existing_client',
             column_name: 'phone',
             raw_value: phMatchKey,
-            message: 'This phone already exists in Resneo',
+            message: 'This phone already exists in ResNeo',
           });
           warningCount += 1;
         }
@@ -323,7 +323,7 @@ export async function runImportValidation(
               issue_type: 'existing_client',
               column_name: 'external_client_id',
               raw_value: extCl,
-              message: 'This external client ID has already been imported into Resneo',
+              message: 'This external client ID has already been imported into ResNeo',
             });
             warningCount += 1;
           }
@@ -469,7 +469,7 @@ export async function runImportValidation(
               issue_type: 'duplicate_external_appointment_id',
               column_name: 'external_appointment_id',
               raw_value: apptId,
-              message: 'This appointment ID has already been imported into Resneo',
+              message: 'This appointment ID has already been imported into ResNeo',
             });
             errorCount += 1;
           }

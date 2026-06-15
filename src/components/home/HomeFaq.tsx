@@ -26,9 +26,9 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       heading: 'Switching & Getting Started',
       items: [
         {
-          question: 'I already use another booking system. Can I switch to Resneo without losing my data?',
+          question: 'I already use another booking system. Can I switch to ResNeo without losing my data?',
           answer:
-            'Yes. Download your client list and bookings from your current provider as a CSV file and upload it to Resneo. Our smart import tool automatically maps your data across, matching fields like client names, phone numbers, email addresses, and booking history. If anything needs attention, we will flag it for you before importing. Dedicated phone and email support is available if you need a hand.',
+            'Yes. Download your client list and bookings from your current provider as a CSV file and upload it to ResNeo. Our smart import tool automatically maps your data across, matching fields like client names, phone numbers, email addresses, and booking history. If anything needs attention, we will flag it for you before importing. Dedicated phone and email support is available if you need a hand.',
         },
         {
           question: 'How long does it take to get set up?',
@@ -36,9 +36,9 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
             'Most businesses are up and running within 15 minutes. Our setup wizard walks you through adding your services, setting your availability, and publishing your booking page. If you are a restaurant, allow a little longer to configure your floor plan and table layout. Either way, you can start accepting bookings on your first day.',
         },
         {
-          question: 'Do I need any technical knowledge to use Resneo?',
+          question: 'Do I need any technical knowledge to use ResNeo?',
           answer:
-            'None at all. If you can use a smartphone, you can use Resneo. The dashboard is designed for busy business owners, not IT specialists. Everything from setting up services to managing bookings works through a clean, simple interface with no coding, no complicated settings menus, and no jargon.',
+            'None at all. If you can use a smartphone, you can use ResNeo. The dashboard is designed for busy business owners, not IT specialists. Everything from setting up services to managing bookings works through a clean, simple interface with no coding, no complicated settings menus, and no jargon.',
         },
       ],
     },
@@ -46,7 +46,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       heading: 'Pricing & Costs',
       items: [
         {
-          question: 'What does Resneo cost?',
+          question: 'What does ResNeo cost?',
           answer: `New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan (card required at checkout; first subscription charge after 14 days). ${signupTrialSmsDuringTrialNotice()} Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS includes ${SMS_INCLUDED_LIGHT} messages per month, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
         },
         {
@@ -54,9 +54,9 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
           answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Appointments Light, Plus, Pro, and Restaurant each include a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
         },
         {
-          question: 'How does Resneo compare to competitors on price?',
+          question: 'How does ResNeo compare to competitors on price?',
           answer:
-            'Many competing platforms charge commission, per-staff pricing or higher monthly fees. Resneo uses simple monthly pricing with no booking commission.',
+            'Many competing platforms charge commission, per-staff pricing or higher monthly fees. ResNeo uses simple monthly pricing with no booking commission.',
         },
       ],
     },
@@ -64,17 +64,17 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       heading: 'Features & Functionality',
       items: [
         {
-          question: 'What types of business can use Resneo?',
+          question: 'What types of business can use ResNeo?',
           answer:
-            'Any business that takes bookings. Barbers, hairdressers, beauty salons, physiotherapists, personal trainers, yoga studios, escape rooms, sports facilities, tutors, dog groomers, restaurants, and many more. Resneo supports appointments, classes, events, and resource bookings, and you can offer any combination of these from a single account.',
+            'Any business that takes bookings. Barbers, hairdressers, beauty salons, physiotherapists, personal trainers, yoga studios, escape rooms, sports facilities, tutors, dog groomers, restaurants, and many more. ResNeo supports appointments, classes, events, and resource bookings, and you can offer any combination of these from a single account.',
         },
         {
           question: 'Can my customers book online without calling me?',
           answer:
-            'Yes. Every Resneo account gets a branded booking page that your clients can use 24 hours a day, 7 days a week. Share the link on your website, Instagram, Facebook, or WhatsApp. Clients choose their service, pick a time, and book instantly without needing to phone or message you.',
+            'Yes. Every ResNeo account gets a branded booking page that your clients can use 24 hours a day, 7 days a week. Share the link on your website, Instagram, Facebook, or WhatsApp. Clients choose their service, pick a time, and book instantly without needing to phone or message you.',
         },
         {
-          question: 'Does Resneo send booking reminders to my clients?',
+          question: 'Does ResNeo send booking reminders to my clients?',
           answer:
             'Yes. Automated email reminders are included on every plan. Appointments Light, Plus, Pro, and Restaurant also include SMS reminders within your monthly allowance (overage priced per message). Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
         },
@@ -89,8 +89,8 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
             'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login—upgrade to Plus or Pro when you need multiple staff with separate calendars.',
         },
         {
-          question: 'I run a restaurant. How does Resneo compare to other options?',
-          answer: `Resneo is built for restaurants with the tools most venues use every day: a visual timeline grid, an interactive floor plan editor, covers-based availability, deposit collection, SMS confirm-or-cancel, and automated reminders. Compared with many booking platforms, Resneo keeps pricing to a simple monthly subscription with no commission on bookings from any source, and your floor plan can be laid out visually instead of through long, fiddly configuration forms. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
+          question: 'I run a restaurant. How does ResNeo compare to other options?',
+          answer: `ResNeo is built for restaurants with the tools most venues use every day: a visual timeline grid, an interactive floor plan editor, covers-based availability, deposit collection, SMS confirm-or-cancel, and automated reminders. Compared with many booking platforms, ResNeo keeps pricing to a simple monthly subscription with no commission on bookings from any source, and your floor plan can be laid out visually instead of through long, fiddly configuration forms. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
         },
       ],
     },
@@ -103,7 +103,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
             'Yes. We use reputable cloud infrastructure providers, access controls, encryption in transit, and provider-level security measures. Payments are handled by Stripe, the world\'s most trusted payment processor. We never store card details on our servers.',
         },
         {
-          question: 'What happens if I want to leave Resneo?',
+          question: 'What happens if I want to leave ResNeo?',
           answer: `Your business records remain under your control. You can export your client data and booking history as a CSV file while your account is active. ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE} We do not lock you into contracts or make it difficult to leave.`,
         },
         {
@@ -112,8 +112,8 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
             'Appointments Light includes email support. Appointments Plus, Pro, and Restaurant include email and phone support, and Restaurant customers get priority response times. We are a small, founder-led team who understand independent businesses, so when you contact us you will reach someone who knows the product inside out, not a chatbot or an overseas call centre.',
         },
         {
-          question: 'Can I try Resneo before committing?',
-          answer: `Yes. New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan when they sign up online. ${SIGNUP_TRIAL_CARD_NOTICE} You can also contact us for a free demo tailored to your business—we will walk you through how Resneo fits your setup and answer questions before you sign up.`,
+          question: 'Can I try ResNeo before committing?',
+          answer: `Yes. New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan when they sign up online. ${SIGNUP_TRIAL_CARD_NOTICE} You can also contact us for a free demo tailored to your business—we will walk you through how ResNeo fits your setup and answer questions before you sign up.`,
         },
       ],
     },

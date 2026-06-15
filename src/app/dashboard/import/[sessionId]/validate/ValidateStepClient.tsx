@@ -391,7 +391,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     if (t === 'email_invalid') return 'Email addresses that look wrong';
     if (t === 'duplicate_email') return 'Duplicate email addresses in your file';
     if (t === 'duplicate_phone') return 'Duplicate phone numbers in your file';
-    if (t === 'existing_client') return 'Clients that already exist in Resneo';
+    if (t === 'existing_client') return 'Clients that already exist in ResNeo';
     if (t === 'date_format_ambiguous') return 'Dates that could be read two ways';
     if (t === 'duplicate_external_client_id') return 'Duplicate client IDs in your file';
     if (t === 'duplicate_external_appointment_id') return 'Duplicate appointment IDs';

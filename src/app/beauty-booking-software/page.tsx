@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -35,9 +33,9 @@ const PAGE_PATH = "/beauty-booking-software";
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Beauty & Aesthetic Clinic Booking Software | Resneo",
+  title: "Beauty & Aesthetic Clinic Booking Software | ResNeo",
   description:
-    "Resneo is booking and consent software for beauty salons and aesthetic clinics. Take bookings online 24/7, collect deposits, and automatically send consent forms, medical histories, and patch tests that must be completed before the appointment. No commission, no marketplace. Start a free 14-day trial.",
+    "ResNeo is booking and consent software for beauty salons and aesthetic clinics. Take bookings online 24/7, collect deposits, and automatically send consent forms, medical histories, and patch tests that must be completed before the appointment. No commission, no marketplace. Start a free 14-day trial.",
   keywords: [
     "beauty salon booking software",
     "aesthetic clinic booking software",
@@ -51,7 +49,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "Beauty & Aesthetic Clinic Booking Software | Resneo",
+    title: "Beauty & Aesthetic Clinic Booking Software | ResNeo",
     description:
       "Online booking, deposits, and automatic consent forms, medical histories, and patch tests for beauty and aesthetic clinics. Fewer no-shows, protected treatments, less paperwork.",
     url: PAGE_PATH,
@@ -59,7 +57,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Beauty & Aesthetic Clinic Booking Software | Resneo",
+    title: "Beauty & Aesthetic Clinic Booking Software | ResNeo",
     description:
       "Bookings, deposits, and consent forms and patch tests collected before the appointment, built for beauty and aesthetic clinics.",
   },
@@ -74,7 +72,7 @@ const outcomes = [
     eyebrow: "Outcome 01",
     title: "Fewer no-shows",
     promise:
-      "A missed aesthetics appointment is an hour of chair time and product prep you cannot rebill. Resneo gets clients to show, or to cancel early enough to refill the slot.",
+      "A missed aesthetics appointment is an hour of chair time and product prep you cannot rebill. ResNeo gets clients to show, or to cancel early enough to refill the slot.",
     accent: "rose" as const,
     features: [
       {
@@ -100,7 +98,7 @@ const outcomes = [
     eyebrow: "Outcome 02",
     title: "A fuller column",
     promise:
-      "Clients book the moment they decide, often late at night after scrolling your before-and-afters. Resneo turns that intent into a confirmed appointment instead of a missed DM.",
+      "Clients book the moment they decide, often late at night after scrolling your before-and-afters. ResNeo turns that intent into a confirmed appointment instead of a missed DM.",
     accent: "brand" as const,
     features: [
       {
@@ -127,7 +125,7 @@ const outcomes = [
     eyebrow: "Outcome 03",
     title: "Less paperwork",
     promise:
-      "Consent forms, patch tests, and medical histories should not eat your morning or pile up on the front desk. Resneo collects them automatically and keeps them on file.",
+      "Consent forms, patch tests, and medical histories should not eat your morning or pile up on the front desk. ResNeo collects them automatically and keeps them on file.",
     accent: "accent" as const,
     features: [
       {
@@ -241,16 +239,16 @@ const compareRows: { label: string; resneo: string; other: string }[] = [
 
 const faqs = [
   {
-    q: "Is Resneo good booking software for an aesthetic clinic?",
-    a: "Yes. Resneo is built for appointment businesses, and aesthetic and beauty clinics are a natural fit. Take bookings 24/7, protect high-value treatments with deposits, give each practitioner their own bookable link, and collect consent forms, medical histories, and patch tests automatically before every appointment.",
+    q: "Is ResNeo good booking software for an aesthetic clinic?",
+    a: "Yes. ResNeo is built for appointment businesses, and aesthetic and beauty clinics are a natural fit. Take bookings 24/7, protect high-value treatments with deposits, give each practitioner their own bookable link, and collect consent forms, medical histories, and patch tests automatically before every appointment.",
   },
   {
-    q: "Can Resneo collect consent forms and medical histories before an appointment?",
+    q: "Can ResNeo collect consent forms and medical histories before an appointment?",
     a: "Yes. With Compliance turned on, you choose which treatments need a consent form, medical history, or intake form. The form is sent automatically when the client books, they complete and sign it on their phone with no app, and the record is stored on their profile. You can require the form to be completed before the booking is allowed.",
   },
   {
-    q: "Does Resneo track patch tests and their expiry?",
-    a: "Yes. Patch tests can be set to stay valid for a fixed period, such as 180 days, and Resneo flags them as they approach expiry and sends a renewal request. You can also require a patch test to be completed a minimum time before the appointment, for example at least 48 hours ahead, and block bookings that do not meet it.",
+    q: "Does ResNeo track patch tests and their expiry?",
+    a: "Yes. Patch tests can be set to stay valid for a fixed period, such as 180 days, and ResNeo flags them as they approach expiry and sends a renewal request. You can also require a patch test to be completed a minimum time before the appointment, for example at least 48 hours ahead, and block bookings that do not meet it.",
   },
   {
     q: "How do deposits work for treatments?",
@@ -262,7 +260,7 @@ const faqs = [
   },
   {
     q: "I rent rooms to self-employed practitioners. Can each keep separate books?",
-    a: `Yes. Each practitioner runs their own Resneo with their own clients, calendar, and payouts, then you link accounts to share availability and a combined booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_HMRC_NOTE}`,
+    a: `Yes. Each practitioner runs their own ResNeo with their own clients, calendar, and payouts, then you link accounts to share availability and a combined booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}`,
   },
   {
     q: "Do my clients need to download an app?",
@@ -283,7 +281,7 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "Resneo: Beauty & Aesthetic Clinic Booking Software",
+      name: "ResNeo: Beauty & Aesthetic Clinic Booking Software",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description:
@@ -342,7 +340,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
@@ -408,7 +406,7 @@ function Hero() {
           </p>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
             Let clients book 24/7, take deposits on high-value treatments, and collect consent forms, medical
-            histories, and patch tests automatically before every appointment. Resneo is the all-in-one
+            histories, and patch tests automatically before every appointment. ResNeo is the all-in-one
             booking platform for beauty salons and aesthetic clinics, with no booking commission and no
             marketplace renting out your clients.
           </p>
@@ -620,7 +618,7 @@ function ComplianceSection() {
             The paperwork is done before they sit down.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Resneo&rsquo;s Compliance tools send the right consent form, medical history, or patch test the
+            ResNeo&rsquo;s Compliance tools send the right consent form, medical history, or patch test the
             moment a client books, chase it until it is complete, and can stop a treatment being booked
             without it. No clipboards, no day-of scramble, no missing records.
           </p>
@@ -719,10 +717,10 @@ function OutcomesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Outcomes first</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            What every clinic owner wants, and how Resneo delivers it.
+            What every clinic owner wants, and how ResNeo delivers it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Each promise below maps to the exact Resneo features that make it happen. No buzzwords, just the
+            Each promise below maps to the exact ResNeo features that make it happen. No buzzwords, just the
             tools doing the work.
           </p>
         </div>
@@ -878,7 +876,7 @@ function TreatmentMenuSection() {
               Price every treatment exactly how you work.
             </h2>
             <p className="mt-5 text-base leading-relaxed text-slate-600">
-              Real clinics are not one-price-fits-all. Resneo lets you build a menu with variants, add-ons,
+              Real clinics are not one-price-fits-all. ResNeo lets you build a menu with variants, add-ons,
               deposits, and the buffer and prep time each treatment needs, so the diary reflects reality.
             </p>
             <ul className="mt-7 space-y-4">
@@ -1050,7 +1048,7 @@ function LinkedAccountsSection() {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 Renting rooms to self-employed injectors, aestheticians, or therapists? Each runs their own
-                Resneo with their own clients, calendar, and payouts. Link accounts to share availability and
+                ResNeo with their own clients, calendar, and payouts. Link accounts to share availability and
                 a combined booking page, and break the link in a click. Nothing is ever merged.
               </p>
               <div className="mt-6 grid grid-cols-2 gap-3">
@@ -1071,12 +1069,11 @@ function LinkedAccountsSection() {
                   <ShieldCheckIcon />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
+              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             </div>
           </div>
         </div>
@@ -1098,7 +1095,7 @@ function BusinessTypesSection() {
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A solo facialist or a full aesthetics team, a high-street studio or a medical clinic. If you take
-            appointments and need the paperwork done right, Resneo fits.
+            appointments and need the paperwork done right, ResNeo fits.
           </p>
         </div>
         <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1124,19 +1121,19 @@ function CompareSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Resneo vs the rest</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Keep your clients. Keep your margin. Keep the records.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Marketplace apps list you alongside your competitors and take a cut. Generic schedulers leave
-            consent and patch tests to you. Resneo does both, in one place.
+            consent and patch tests to you. ResNeo does both, in one place.
           </p>
         </div>
         <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
           <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">Resneo</div>
+            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
             <div className="border-l border-slate-200 p-4 text-center">Other apps</div>
           </div>
           {compareRows.map((row, i) => (
@@ -1250,7 +1247,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
@@ -1259,6 +1256,7 @@ function Footer() {
           <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
           <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
           <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

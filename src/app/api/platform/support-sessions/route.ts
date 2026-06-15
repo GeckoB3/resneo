@@ -119,7 +119,7 @@ export async function POST(request: Request) {
       venueName,
       superuserDisplayName:
         started.session.superuser_display_name?.trim() ||
-        (user.email ?? 'Resneo support'),
+        (user.email ?? 'ResNeo support'),
       apparentStaffLabel: apparentLabel,
       reason: parsed.data.reason.trim(),
       expiresAtIso: started.session.expires_at,

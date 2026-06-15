@@ -4,6 +4,9 @@ export interface ValidatedSalesCode {
   code: string;
   salesperson_id: string;
   salesperson_name: string;
+  salesperson_email: string | null;
+  /** Auth user behind the salesperson — used to block self-attribution regardless of email. */
+  salesperson_user_id: string | null;
 }
 
 export type SalesCodeValidationFailure =
@@ -48,7 +51,7 @@ export async function validateSalesCode(
 
   const { data: spRow, error: spErr } = await admin
     .from('salespeople')
-    .select('id, name, active, revoked_at')
+    .select('id, name, email, user_id, active, revoked_at')
     .eq('id', codeRow.salesperson_id)
     .maybeSingle();
 
@@ -62,7 +65,9 @@ export async function validateSalesCode(
     value: {
       code: codeRow.code,
       salesperson_id: spRow.id,
-      salesperson_name: (spRow.name ?? '').trim() || 'Resneo sales',
+      salesperson_name: (spRow.name ?? '').trim() || 'ResNeo sales',
+      salesperson_email: ((spRow as { email?: string | null }).email ?? '').trim().toLowerCase() || null,
+      salesperson_user_id: (spRow as { user_id?: string | null }).user_id ?? null,
     },
   };
 }

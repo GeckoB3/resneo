@@ -419,7 +419,7 @@ export function DashboardSidebar({
             >
               {mobileOpen ? <XIcon /> : <MenuIcon />}
             </button>
-            <img src="/Logo.png" alt="Resneo" className="h-7 w-auto shrink-0" />
+            <img src="/Logo.png" alt="ResNeo" className="h-7 w-auto shrink-0" />
             {venueName ? (
               <span
                 className="min-w-0 truncate pl-1 text-sm font-semibold text-slate-800"

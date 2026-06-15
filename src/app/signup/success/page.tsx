@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { clearReferralCodeCookie } from '@/lib/referrals/client';
+import { clearSalesCodeCookie } from '@/lib/sales/client';
 
 export default function SignupSuccessPage() {
   const router = useRouter();
@@ -32,9 +33,10 @@ export default function SignupSuccessPage() {
           return;
         }
 
-        // Signup complete — clear the referral cookie so it doesn't bleed into
-        // another person's signup on a shared computer.
+        // Signup complete — clear the referral and sales cookies so they don't bleed
+        // into another person's signup on a shared computer (mis-attribution + wrong trial).
         clearReferralCodeCookie();
+        clearSalesCodeCookie();
 
         if (data.redirect_url) {
           router.push(data.redirect_url);

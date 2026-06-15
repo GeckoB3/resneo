@@ -367,7 +367,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
             </svg>
           </button>
           <h3 className="pr-8 text-base font-bold tracking-tight text-slate-900">
-            Work alongside another Resneo venue
+            Work alongside another ResNeo venue
           </h3>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
             Linking lets two venues see each other’s calendars and (if you choose) manage each
@@ -463,7 +463,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
           ) : null}
           {activeLinks.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No active links yet. Send a request to link with another Resneo venue.
+              No active links yet. Send a request to link with another ResNeo venue.
             </p>
           ) : (
             activeLinks.map((link) => (

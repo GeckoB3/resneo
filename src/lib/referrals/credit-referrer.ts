@@ -207,7 +207,7 @@ export async function maybeCreditReferrerForInvoice(
       {
         amount: -rewardPence,
         currency: 'gbp',
-        description: `Referral reward — referred ${refereeVenue.name ?? 'a Resneo venue'}`,
+        description: `Referral reward — referred ${refereeVenue.name ?? 'a ResNeo venue'}`,
         metadata: {
           referral_id: referralRow.id,
           referred_venue_id: refereeVenue.id,
@@ -256,7 +256,7 @@ export async function maybeCreditReferrerForInvoice(
   // 10) Notify the referrer.
   await sendReferrerCreditedEmail({
     referrerVenue,
-    refereeName: refereeVenue.name ?? 'a Resneo venue',
+    refereeName: refereeVenue.name ?? 'a ResNeo venue',
     rewardPence,
   });
 
@@ -276,7 +276,7 @@ async function sendReferrerCreditedEmail(params: {
   const origin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   const dashboardUrl = `${origin}/dashboard/settings?tab=refer-earn`;
   const { html, text } = renderReferralCreditedEmail({
-    referrerVenueName: params.referrerVenue.name?.trim() || 'Resneo',
+    referrerVenueName: params.referrerVenue.name?.trim() || 'ResNeo',
     refereeVenueName: params.refereeName,
     rewardDisplay: formatGbpPence(params.rewardPence),
     dashboardUrl,
@@ -287,7 +287,7 @@ async function sendReferrerCreditedEmail(params: {
       subject: `Your referral signed up — ${formatGbpPence(params.rewardPence)} credit applied`,
       html,
       text,
-      fromDisplayName: 'Resneo',
+      fromDisplayName: 'ResNeo',
     });
   } catch (e) {
     console.error('[referrals/credit] sendEmail failed', { referrerVenueId: params.referrerVenue.id, e });

@@ -22,6 +22,7 @@ import {
   persistReferralCodeCookie,
   clearReferralCodeCookie,
   validateReferralCodeClient,
+  isTransientReferralValidationFailure,
   type ReferralValidationOk,
 } from '@/lib/referrals/client';
 import {
@@ -30,9 +31,10 @@ import {
   clearReferralCodeCookieForSalesPrecedence,
   persistSalesCodeCookie,
   validateSalesCodeClient,
+  isTransientSalesValidationFailure,
   type SalesValidationOk,
 } from '@/lib/sales/client';
-import { SALES_REFEREE_BONUS_DAYS } from '@/lib/sales/constants';
+import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -66,6 +68,12 @@ export default function ChoosePlanPage() {
           setReferralLoading(false);
           return;
         }
+        if (isTransientSalesValidationFailure(salesResult.reason)) {
+          // Network/server/rate-limit blip — keep the cookie (server re-validates at checkout),
+          // don't downgrade to the referral path or the standard trial.
+          setReferralLoading(false);
+          return;
+        }
         // Stale/invalid sales code: drop it so the referral path (or nothing) applies.
         clearSalesCodeCookie();
       }
@@ -81,7 +89,7 @@ export default function ChoosePlanPage() {
       if (result.ok) {
         setReferralValid(result);
         persistReferralCodeCookie(result.code);
-      } else {
+      } else if (!isTransientReferralValidationFailure(result.reason)) {
         setReferralValid(null);
         clearReferralCodeCookie();
       }
@@ -129,7 +137,7 @@ export default function ChoosePlanPage() {
         <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
           <p className="font-medium">Sales offer applied ({salesValid.code})</p>
           <p className="mt-1 text-blue-800">
-            Your trial includes an extra {SALES_REFEREE_BONUS_DAYS} days on any plan you choose below.
+            You get 1 month free — a {SALES_SIGNUP_TRIAL_DAYS}-day free trial on any plan you choose below.
           </p>
         </div>
       )}

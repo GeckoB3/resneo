@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { validateReferralCode } from '@/lib/referrals/lookup';
 import { referralProgrammeEnabled } from '@/lib/referrals/constants';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -16,6 +17,14 @@ export const revalidate = 0;
 export async function GET(request: Request) {
   if (!referralProgrammeEnabled()) {
     return NextResponse.json({ ok: false, reason: 'disabled' });
+  }
+  // Public, unauthenticated endpoint — rate-limit per IP to prevent code enumeration.
+  const rl = checkRateLimit(getClientIp(request), 'referral-validate', 20, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, reason: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    );
   }
   const url = new URL(request.url);
   const code = url.searchParams.get('code');

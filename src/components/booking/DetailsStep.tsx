@@ -142,7 +142,7 @@ interface DetailsStepProps {
    */
   collectClientAddress?: boolean;
   initialDetails?: Partial<GuestDetails>;
-  /** Lock email when booking under a signed-in Resneo account. */
+  /** Lock email when booking under a signed-in ResNeo account. */
   emailReadOnly?: boolean;
   /** Staff bootstrap from guest-history “Rebook” (session). */
   initialAppointmentComments?: string;
@@ -489,7 +489,7 @@ export function DetailsStep({
                 placeholder="you@example.com"
               />
               {emailReadOnly ? (
-                <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in Resneo email.</p>
+                <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ResNeo email.</p>
               ) : null}
             </FormField>
 

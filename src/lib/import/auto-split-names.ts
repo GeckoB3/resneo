@@ -1,7 +1,7 @@
 /**
  * Auto-split combined name columns at mapping time.
  *
- * Resneo stores names as separate first + surname columns. When a column maps
+ * ResNeo stores names as separate first + surname columns. When a column maps
  * to a combined name field (`full_name` / `guest_full_name`), turn that mapping
  * into a `split` into the two name parts up front, so the Map step shows the
  * column already split into First name + Surname for the user to confirm —

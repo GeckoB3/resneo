@@ -7,7 +7,7 @@ const SECTION_ORDER = ['gs-start-here', 'gs-know-the-app', 'gs-configure-venue',
 const SECTION_META: Record<(typeof SECTION_ORDER)[number], { title: string; subtitle: string }> = {
   'gs-start-here': {
     title: 'Start here',
-    subtitle: 'What Resneo is, how it fits your day, and where to go first.',
+    subtitle: 'What ResNeo is, how it fits your day, and where to go first.',
   },
   'gs-know-the-app': {
     title: 'Know the app',

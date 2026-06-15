@@ -2,8 +2,8 @@ import type { SchemaField } from '@/lib/import/constants';
 import type { ColumnProfile } from '@/lib/import/column-profile';
 import { runImportAiJson } from '@/lib/import/openai-client';
 
-const SYSTEM = `You are a data mapping assistant for Resneo, a booking platform.
-Your job is to map columns from a CSV export of another booking platform to Resneo's data schema.`;
+const SYSTEM = `You are a data mapping assistant for ResNeo, a booking platform.
+Your job is to map columns from a CSV export of another booking platform to ResNeo's data schema.`;
 
 export type AiMappingRow = {
   source_column: string;
@@ -34,7 +34,7 @@ const MAPPING_SCHEMA: Record<string, unknown> = {
           action: { type: 'string', enum: ['map', 'ignore', 'split'] },
           target_field: {
             type: ['string', 'null'],
-            description: 'Resneo field key when action is "map", else null.',
+            description: 'ResNeo field key when action is "map", else null.',
           },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
           reasoning: { type: 'string', description: 'Brief plain-English explanation.' },
@@ -118,7 +118,7 @@ ${JSON.stringify(headers)}
 Sample data (first rows):
 ${JSON.stringify(sampleRows.slice(0, 8), null, 1)}
 ${profileSection}
-Resneo target fields:
+ResNeo target fields:
 ${JSON.stringify(
     targetFields.map((f) => ({ key: f.key, label: f.label, required: f.required, type: f.type })),
     null,
@@ -132,7 +132,7 @@ Rules:
 - A target field can only be the destination of ONE source column. If two columns could map to the same field, pick the better one and ignore the other.
 - Be thorough: map every column that plausibly corresponds to a target field. Required fields matter most — if any column could satisfy a required field, map it rather than ignoring it.
 - For client files, map columns called First Name, Forename, Given Name, or similar to "first_name"; Surname, Last Name, Family Name, or similar to "last_name".
-- If a client file only has one combined Name / Full Name / Client Name / Customer Name column, map it to "full_name" (preferred — Resneo splits it into first/last automatically, handling "Surname, First" and compound surnames).
+- If a client file only has one combined Name / Full Name / Client Name / Customer Name column, map it to "full_name" (preferred — ResNeo splits it into first/last automatically, handling "Surname, First" and compound surnames).
 - For booking files, map guest/client first-name columns to "guest_first_name" and surname columns to "guest_last_name"; a single combined name column maps to "guest_full_name".
 - Booking exports usually contain the client's details too (name, email, phone) — map those to the guest_*/client_* booking fields; they are used to create or match client records.
 - A column whose values combine date AND time (e.g. "2026-03-14 14:30" or "14/03/2026 2:30 PM") can be mapped directly to "booking_date" — the time component is recovered automatically. Use action "split" into booking_date + booking_time only when the user asks for it.

@@ -73,7 +73,7 @@ export default async function HelpCategoryPage({ params }: { params: Promise<{ c
           <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-200/25 blur-3xl" aria-hidden />
           <div className="pointer-events-none absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-sky-200/20 blur-3xl" aria-hidden />
           <div className="relative max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-900">New to Resneo</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-900">New to ResNeo</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{cat.title}</h1>
             <p className="mt-3 text-base leading-relaxed text-slate-700 sm:text-lg">{cat.description}</p>
             <p className="mt-4 text-sm text-slate-600">

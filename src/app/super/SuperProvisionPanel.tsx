@@ -89,7 +89,7 @@ export function SuperProvisionPanel({ onCreated }: { onCreated?: () => void }) {
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Create venue (free access)</h2>
           <p className="text-xs text-slate-500">
-            Comped Resneo billing ({BILLING_ACCESS_SOURCE_SUPERUSER_FREE}). No subscription checkout. Appointment-plan owners start at booking model selection, then complete onboarding (and Stripe Connect for guest payments when needed).
+            Comped ResNeo billing ({BILLING_ACCESS_SOURCE_SUPERUSER_FREE}). No subscription checkout. Appointment-plan owners start at booking model selection, then complete onboarding (and Stripe Connect for guest payments when needed).
           </p>
         </div>
         <button

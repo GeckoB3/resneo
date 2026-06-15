@@ -8,16 +8,23 @@ import { SMS_INCLUDED_LIGHT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import {
-  SIGNUP_TRIAL_CARD_NOTICE,
+  SIGNUP_TRIAL_DAYS,
   SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE,
+  signupTrialCardNotice,
   signupTrialThenPrice,
   signupTrialSmsDuringTrialNotice,
 } from '@/lib/signup-trial-copy';
+import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
+import { useSalesTrial } from '@/lib/sales/use-sales-trial';
 
 export default function AppointmentsLightIntroPage() {
   const router = useRouter();
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // A validated commissioned-sales code (persisted as a cookie upstream) earns 1 month free, so
+  // the trial copy matches the offer payment validates and Stripe charges.
+  const salesTrial = useSalesTrial();
+  const trialDays = salesTrial ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS;
 
   useEffect(() => {
     sessionStorage.removeItem('signup_business_type');
@@ -34,8 +41,8 @@ export default function AppointmentsLightIntroPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Appointments Light</h1>
         <p className="mt-2 text-sm text-slate-500">
-          {signupTrialThenPrice(APPOINTMENTS_LIGHT_PRICE)} with card at checkout. Built for sole traders who need one
-          bookable calendar and a clear client booking page.
+          {signupTrialThenPrice(APPOINTMENTS_LIGHT_PRICE, trialDays)} with card at checkout. Built for sole traders who
+          need one bookable calendar and a clear client booking page.
         </p>
       </div>
 
@@ -51,7 +58,7 @@ export default function AppointmentsLightIntroPage() {
           <SummaryItem text="Email support" />
         </ul>
         <p className="mt-5 text-xs text-slate-500">
-          {SIGNUP_TRIAL_CARD_NOTICE} {signupTrialSmsDuringTrialNotice()} {SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE}
+          {signupTrialCardNotice(trialDays)} {signupTrialSmsDuringTrialNotice()} {SIGNUP_TRIAL_PAYMENT_FAILURE_NOTICE}
         </p>
         <p className="mt-3 text-xs text-slate-500">
           After checkout you will choose which booking models to use for your venue, then onboarding will guide you

@@ -17,7 +17,9 @@ import {
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
-import { SIGNUP_TRIAL_SHORT_LABEL } from '@/lib/signup-trial-copy';
+import { SIGNUP_TRIAL_DAYS, signupTrialShortLabel } from '@/lib/signup-trial-copy';
+import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
+import { useSalesTrial } from '@/lib/sales/use-sales-trial';
 import { LegalAcceptanceCheckbox } from '@/components/signup/LegalAcceptanceCheckbox';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
@@ -29,6 +31,9 @@ export default function PlanPage() {
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [foundingRemaining, setFoundingRemaining] = useState<number | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // A validated commissioned-sales code (persisted as a cookie upstream) earns 1 month free, so
+  // the trial copy on this interstitial matches the offer payment validates and Stripe charges.
+  const salesTrial = useSalesTrial();
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +143,7 @@ export default function PlanPage() {
   }
 
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
+  const trialLabel = signupTrialShortLabel(salesTrial ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS);
 
   if (plan === 'founding') {
     if (foundingRemaining === null) {
@@ -214,7 +220,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
-          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{trialLabel}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Table management with timeline grid and floor plan" />
@@ -264,7 +270,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PLUS_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
-          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{trialLabel}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Up to 5 bookable calendars and 5 team members" />
@@ -313,7 +319,7 @@ export default function PlanPage() {
             <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRO_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
-          <p className="mt-1 text-sm font-semibold text-brand-600">{SIGNUP_TRIAL_SHORT_LABEL}</p>
+          <p className="mt-1 text-sm font-semibold text-brand-600">{trialLabel}</p>
           <p className="mt-2 text-xs text-slate-500">Single venue only. For teams of any size.</p>
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
             <FeatureItem text="Unlimited calendars and team members" />

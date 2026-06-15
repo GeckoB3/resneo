@@ -415,6 +415,17 @@ async function handleCheckoutCompleted(
     .single();
 
   if (venueError || !venue) {
+    // The success-page POST (/api/signup/complete) won the provisioning race and already
+    // created this venue under the same Stripe customer; the partial unique index on
+    // venues.stripe_customer_id surfaces the duplicate as 23505. The winner also created the
+    // staff row, attribution, and signup notification, so there is nothing left to do here.
+    if (venueError?.code === '23505') {
+      console.log(
+        '[Subscription webhook] Venue already provisioned by success page (unique race) for',
+        customerId,
+      );
+      return;
+    }
     console.error('[Subscription webhook] Failed to create venue:', venueError);
     throw new Error('Venue creation failed');
   }

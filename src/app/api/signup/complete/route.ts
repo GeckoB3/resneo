@@ -128,6 +128,7 @@ export async function POST(request: Request) {
     // When the column exists (migration applied), NOT NULL DEFAULT '[]'::jsonb matches
     // appointments post-payment (choose models next) and resolves correctly for restaurant via booking_model.
     const ownerEmail = (user.email ?? '').trim().toLowerCase() || null;
+    const stripeCustomerId = session.customer as string;
 
     const { data: venue, error: venueError } = await admin
       .from('venues')
@@ -140,7 +141,7 @@ export async function POST(request: Request) {
         terminology: config.terms,
         pricing_tier: plan,
         plan_status: planStatus,
-        stripe_customer_id: session.customer as string,
+        stripe_customer_id: stripeCustomerId,
         stripe_subscription_id: subscriptionId,
         stripe_subscription_item_id: mainSubscriptionItemId,
         stripe_sms_subscription_item_id: smsSubscriptionItemId,
@@ -158,6 +159,19 @@ export async function POST(request: Request) {
       .single();
 
     if (venueError || !venue) {
+      // A concurrent provisioning path (the subscription webhook) won the race and already
+      // created this venue under the same Stripe customer — the partial unique index on
+      // venues.stripe_customer_id surfaces that as 23505. Re-read the winner and resume the
+      // funnel rather than erroring; the webhook also created the staff row + attribution.
+      if (venueError?.code === '23505') {
+        const { data: racedVenue } = await admin
+          .from('venues')
+          .select('pricing_tier, active_booking_models, onboarding_completed')
+          .eq('stripe_customer_id', stripeCustomerId)
+          .maybeSingle();
+        await clearSignupPendingUserMetadata(admin, user.id);
+        return NextResponse.json({ redirect_url: resolvePostSignupRedirectUrl(racedVenue) });
+      }
       console.error('[signup/complete] Venue creation failed:', venueError);
       return NextResponse.json({ error: 'Failed to complete signup. Please contact support.' }, { status: 500 });
     }
@@ -243,4 +257,28 @@ export async function POST(request: Request) {
     console.error('[signup/complete] Error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+/**
+ * Where to send the user once their venue is provisioned (or found already-provisioned).
+ * Appointment-plan venues that haven't picked booking models yet go to the model picker;
+ * everything else goes to onboarding. Pure function of the venue row so the fresh-insert,
+ * already-exists, and race-lost branches stay in lockstep.
+ */
+function resolvePostSignupRedirectUrl(
+  venue: {
+    pricing_tier?: string | null;
+    active_booking_models?: unknown;
+    onboarding_completed?: boolean | null;
+  } | null,
+): string {
+  const activeModels = Array.isArray(venue?.active_booking_models) ? venue.active_booking_models : [];
+  if (
+    isAppointmentPlanTier(venue?.pricing_tier) &&
+    activeModels.length === 0 &&
+    venue?.onboarding_completed !== true
+  ) {
+    return '/signup/booking-models';
+  }
+  return '/onboarding';
 }

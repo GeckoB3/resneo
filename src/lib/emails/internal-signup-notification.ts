@@ -45,7 +45,7 @@ export function renderNewSignupNotificationEmail(params: NewSignupNotificationPa
 } {
   const email = params.signupEmail?.trim() || 'unknown';
   const plan = params.plan?.trim() || 'unknown';
-  const subject = `New Resneo signup: ${email} (${plan})`;
+  const subject = `New ResNeo signup: ${email} (${plan})`;
 
   const rows: Array<[string, string]> = [
     ['Email', email],
@@ -72,13 +72,13 @@ export function renderNewSignupNotificationEmail(params: NewSignupNotificationPa
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f8fafc">
 <tr><td style="padding:24px 16px">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
-<tr><td style="padding:24px;border-bottom:3px solid #003B6F"><h1 style="margin:0;font-size:20px;color:#1e293b">New Resneo signup</h1></td></tr>
+<tr><td style="padding:24px;border-bottom:3px solid #003B6F"><h1 style="margin:0;font-size:20px;color:#1e293b">New ResNeo signup</h1></td></tr>
 <tr><td style="padding:24px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${tds}</table></td></tr>
 </table>
 </td></tr></table>
 </body></html>`;
 
-  const text = ['New Resneo signup', '', ...rows.map(([label, value]) => `${label}: ${value}`)].join('\n');
+  const text = ['New ResNeo signup', '', ...rows.map(([label, value]) => `${label}: ${value}`)].join('\n');
 
   return { subject, html, text };
 }
@@ -98,7 +98,7 @@ export async function sendNewSignupNotification(params: NewSignupNotificationPar
       subject,
       html,
       text,
-      fromDisplayName: 'Resneo Signups',
+      fromDisplayName: 'ResNeo Signups',
     });
   } catch (err) {
     console.error('[sendNewSignupNotification] failed (non-fatal):', err);

@@ -86,7 +86,7 @@ export function HelpLayoutShell({
             )}
           </button>
           <Link href="/help" className="shrink-0 text-base font-bold text-slate-900">
-            Resneo <span className="font-semibold text-brand-700">Help</span>
+            ResNeo <span className="font-semibold text-brand-700">Help</span>
           </Link>
           <div className="hidden min-w-0 flex-1 lg:block">
             <HelpSearch className="max-w-xl" searchDocs={searchDocs} />

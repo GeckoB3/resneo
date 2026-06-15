@@ -58,7 +58,7 @@ export async function sendOwnerBookingNotification(
         lane,
         messageType: 'owner_booking_notification_email',
         recipient,
-        emailFromDisplayName: 'Resneo',
+        emailFromDisplayName: 'ResNeo',
         // Owner replies go straight to the guest.
         emailReplyTo: booking.guest_email?.trim() || null,
       },
@@ -109,7 +109,7 @@ export function renderOwnerBookingNotificationEmail(
     groupAppointments: booking.group_appointments,
     addonLines: booking.addon_lines,
     footerNote:
-      'You are receiving this because new booking alerts are switched on in your Resneo communication settings.',
+      'You are receiving this because new booking alerts are switched on in your ResNeo communication settings.',
   });
 
   const textLines = [
@@ -125,7 +125,7 @@ export function renderOwnerBookingNotificationEmail(
     ...(contactLines.length ? [`Guest contact: ${contactLines.join(' / ')}`] : []),
     ...(booking.special_requests?.trim() ? [`Notes: ${booking.special_requests.trim()}`] : []),
     '',
-    'You are receiving this because new booking alerts are switched on in your Resneo communication settings.',
+    'You are receiving this because new booking alerts are switched on in your ResNeo communication settings.',
   ];
 
   return { subject, html, text: textLines.join('\n') };

@@ -2385,7 +2385,7 @@ export default function OnboardingPage() {
               {RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
             </p>
             <p className="mb-4 text-sm text-slate-600">
-              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">Resneo subscription</strong>{' '}
+              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">ResNeo subscription</strong>{' '}
               is billed separately. Manage your plan and payment method under{' '}
               <Link
                 href="/dashboard/settings?tab=plan"

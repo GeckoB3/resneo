@@ -709,16 +709,38 @@ export function AppointmentAvailabilitySettings({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedPrac.id, working_hours: hours }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      flash('Working hours saved');
-      await fetchData();
-    } catch {
-      setError('Failed to save working hours');
+      const doSave = async (acknowledge: boolean): Promise<void> => {
+        const res = await fetch(
+          acknowledge ? '/api/venue/practitioners?acknowledge_affected_bookings=true' : '/api/venue/practitioners',
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: selectedPrac.id, working_hours: hours }),
+          },
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          requires_confirmation?: boolean;
+          message?: string;
+        };
+        // Narrowing hours that leaves upcoming bookings outside them is allowed, but confirmed
+        // first so the change is made knowingly (the existing bookings are kept).
+        if (res.status === 409 && body.requires_confirmation) {
+          if (
+            typeof window !== 'undefined' &&
+            window.confirm(`${body.message ?? 'Some upcoming bookings fall outside the new hours.'}\n\nSave these hours anyway?`)
+          ) {
+            await doSave(true);
+          }
+          return;
+        }
+        if (!res.ok) throw new Error(body.error ?? 'Failed to save');
+        flash('Working hours saved');
+        await fetchData();
+      };
+      await doSave(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save working hours');
     } finally {
       setSaving(false);
     }

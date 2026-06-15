@@ -68,6 +68,15 @@ export function loadSalesCodeFromCookieOrUrl(fromUrl: string | null): string | n
   return null;
 }
 
+/**
+ * A network/server/rate-limit failure (vs a definitively-invalid code). On these, callers must
+ * NOT clear the cookie or downgrade the offer — the code may be valid and the server re-validates
+ * authoritatively at checkout.
+ */
+export function isTransientSalesValidationFailure(reason: string): boolean {
+  return reason === 'request_failed' || reason === 'network' || reason === 'rate_limited';
+}
+
 export async function validateSalesCodeClient(
   code: string,
 ): Promise<SalesValidationClientResult> {

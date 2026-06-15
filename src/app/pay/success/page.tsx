@@ -25,7 +25,7 @@ function SuccessContent() {
         {/* Logo */}
         <div className="mb-8 flex justify-center">
           <Link href="/">
-            <Image src="/Logo.png" alt="Resneo" width={140} height={42} className="h-10 w-auto" />
+            <Image src="/Logo.png" alt="ResNeo" width={140} height={42} className="h-10 w-auto" />
           </Link>
         </div>
 
@@ -83,7 +83,7 @@ function SuccessContent() {
 
         <p className="mt-6 text-center text-xs text-slate-400">
           Powered by{' '}
-          <a href="https://www.resneo.com" className="hover:text-brand-600">Resneo</a>
+          <a href="https://www.resneo.com" className="hover:text-brand-600">ResNeo</a>
         </p>
       </div>
     </div>

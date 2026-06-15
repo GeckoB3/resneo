@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.resneo.com"),
-  title: "Resneo - Booking Management Software for Every Business",
+  title: "ResNeo - Booking Management Software for Every Business",
   description:
     "Manage bookings, reduce no-shows, collect deposits, and automate client communications. Booking software for salons, studios, clinics, and every business that takes bookings.",
 };

@@ -91,7 +91,7 @@ export class EmailChannel implements MessageChannel {
       await sgMail.send({
         to: email,
         from: fromEmail,
-        subject: template.subject ?? 'Resneo',
+        subject: template.subject ?? 'ResNeo',
         text: template.body,
         html: template.html ?? textToHtml(template.body),
       });

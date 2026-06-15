@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -33,9 +31,9 @@ const PAGE_PATH = "/facility-booking-software";
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | Resneo",
+  title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | ResNeo",
   description:
-    "Resneo is facility and court booking software for sports clubs, courts, studios, and venues for hire. Let customers book any space by the hour 24/7, set peak and off-peak pricing, take recurring and block bookings, sell memberships, and get paid online. No commission, no marketplace. Start a free 14-day trial.",
+    "ResNeo is facility and court booking software for sports clubs, courts, studios, and venues for hire. Let customers book any space by the hour 24/7, set peak and off-peak pricing, take recurring and block bookings, sell memberships, and get paid online. No commission, no marketplace. Start a free 14-day trial.",
   keywords: [
     "facility booking software",
     "court booking software",
@@ -50,7 +48,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | Resneo",
+    title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | ResNeo",
     description:
       "Book any court, room, or space by the hour. Peak and off-peak pricing, recurring and block bookings, memberships, and online payment. Fill every slot, get paid up front.",
     url: PAGE_PATH,
@@ -58,7 +56,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | Resneo",
+    title: "Facility Booking Software for Courts, Rooms & Hireable Spaces | ResNeo",
     description:
       "Hourly slot and resource booking with peak pricing, recurring bookings, and pay-to-book, built for courts, sports halls, and venues for hire.",
   },
@@ -73,7 +71,7 @@ const outcomes = [
     eyebrow: "Outcome 01",
     title: "Every slot, filled",
     promise:
-      "An empty court or room is income you cannot rebill. Resneo puts your live availability in front of customers around the clock and makes booking a slot effortless.",
+      "An empty court or room is income you cannot rebill. ResNeo puts your live availability in front of customers around the clock and makes booking a slot effortless.",
     accent: "brand" as const,
     features: [
       {
@@ -100,7 +98,7 @@ const outcomes = [
     eyebrow: "Outcome 02",
     title: "Paid before they play",
     promise:
-      "Chasing payment and no-shows on the day is a drain. Resneo collects payment when the booking is made and prices each slot exactly how you run the venue.",
+      "Chasing payment and no-shows on the day is a drain. ResNeo collects payment when the booking is made and prices each slot exactly how you run the venue.",
     accent: "accent" as const,
     features: [
       {
@@ -126,7 +124,7 @@ const outcomes = [
     eyebrow: "Outcome 03",
     title: "Run it from anywhere",
     promise:
-      "Self-serve booking means fewer phone calls and no double-bookings. Resneo keeps every resource in one grid and the day running without you tied to the desk.",
+      "Self-serve booking means fewer phone calls and no double-bookings. ResNeo keeps every resource in one grid and the day running without you tied to the desk.",
     accent: "rose" as const,
     features: [
       {
@@ -247,15 +245,15 @@ const compareRows: { label: string; resneo: string; other: string }[] = [
 
 const faqs = [
   {
-    q: "Is Resneo good booking software for a tennis or padel club?",
-    a: "Yes. Resneo books courts by the hour around the clock, sets peak, off-peak, and member pricing, takes payment online, and supports recurring bookings for regulars and leagues. It works just as well for squash, badminton, 5-a-side, and sports halls.",
+    q: "Is ResNeo good booking software for a tennis or padel club?",
+    a: "Yes. ResNeo books courts by the hour around the clock, sets peak, off-peak, and member pricing, takes payment online, and supports recurring bookings for regulars and leagues. It works just as well for squash, badminton, 5-a-side, and sports halls.",
   },
   {
     q: "Can customers book a space by the hour?",
     a: "Yes. Every court, room, or space has its own hourly availability. Offer 30, 60, or 90 minute slots, build in turnaround time between bookings, and set a minimum or maximum duration.",
   },
   {
-    q: "Does Resneo handle recurring or block bookings?",
+    q: "Does ResNeo handle recurring or block bookings?",
     a: "Yes. Regulars, clubs, and leagues can book the same slot every week, and you can take a block of dates in a single booking. Recurring bookings hold the slot automatically so a regular keeps their place.",
   },
   {
@@ -272,10 +270,10 @@ const faqs = [
   },
   {
     q: "I have coaches or clubs that take their own bookings. Can each keep separate books?",
-    a: `Yes. Each coach, club, or operator can run their own Resneo with their own customers, calendar, and payouts, then link accounts to share the booking calendar. Either side can break the link in a click. ${LINKED_ACCOUNTS_HMRC_NOTE}`,
+    a: `Yes. Each coach, club, or operator can run their own ResNeo with their own customers, calendar, and payouts, then link accounts to share the booking calendar. Either side can break the link in a click. ${LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}`,
   },
   {
-    q: "Does Resneo take commission, and how much does it cost?",
+    q: "Does ResNeo take commission, and how much does it cost?",
     a: `There is never any commission on your bookings. Plans start from £${APPOINTMENTS_LIGHT_PRICE}/month with a 14-day free trial on every paid plan. Connect Stripe and ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE.toLowerCase()} ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
   },
 ];
@@ -289,7 +287,7 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "Resneo: Facility & Court Booking Software",
+      name: "ResNeo: Facility & Court Booking Software",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description:
@@ -348,7 +346,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
@@ -414,7 +412,7 @@ function Hero() {
           </p>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
             Let customers book any court, room, or space by the hour 24/7, set peak and off-peak pricing, take
-            recurring and block bookings, and get paid online before they arrive. Resneo is the all-in-one booking
+            recurring and block bookings, and get paid online before they arrive. ResNeo is the all-in-one booking
             platform for sports facilities and venues for hire, with no booking commission and no marketplace.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -619,7 +617,7 @@ function SlotGridSection() {
             Every court, room, and space in one grid.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Resneo books any resource by the hour, prices it by time and membership, and takes payment up front.
+            ResNeo books any resource by the hour, prices it by time and membership, and takes payment up front.
             Recurring and block bookings keep your regulars locked in, and one live grid shows the whole venue at a
             glance.
           </p>
@@ -717,10 +715,10 @@ function OutcomesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Outcomes first</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            What every venue manager wants, and how Resneo delivers it.
+            What every venue manager wants, and how ResNeo delivers it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Each promise below maps to the exact Resneo features that make it happen. No buzzwords, just the tools
+            Each promise below maps to the exact ResNeo features that make it happen. No buzzwords, just the tools
             doing the work.
           </p>
         </div>
@@ -874,7 +872,7 @@ function PricingRulesSection() {
               Price every space the way you run it.
             </h2>
             <p className="mt-5 text-base leading-relaxed text-slate-600">
-              No venue charges one flat rate all week. Resneo lets you set the prices, slot lengths, and rules each
+              No venue charges one flat rate all week. ResNeo lets you set the prices, slot lengths, and rules each
               resource needs, so peak hours earn more and quiet ones still fill.
             </p>
             <ul className="mt-7 space-y-4">
@@ -1047,7 +1045,7 @@ function LinkedAccountsSection() {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 Resident coaches, clubs, and operators who run their own sessions at your venue can each have their
-                own Resneo, with their own customers, calendar, and payouts. Link accounts to share the booking
+                own ResNeo, with their own customers, calendar, and payouts. Link accounts to share the booking
                 calendar, and break the link in a click. Nothing is ever merged.
               </p>
               <div className="mt-6 grid grid-cols-2 gap-3">
@@ -1068,12 +1066,11 @@ function LinkedAccountsSection() {
                   <ShieldCheckIcon />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
+              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             </div>
           </div>
         </div>
@@ -1095,7 +1092,7 @@ function BusinessTypesSection() {
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A single court or a multi-site sports centre, a rehearsal room or a community hall. If you rent space by
-            the hour and want it filled, Resneo fits.
+            the hour and want it filled, ResNeo fits.
           </p>
         </div>
         <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1121,19 +1118,19 @@ function CompareSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Resneo vs the rest</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Keep your customers. Keep your margin.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Aggregator sites list your venue next to every other and take a cut. Generic schedulers were never built
-            for by-the-hour slots or peak pricing. Resneo does both, under your brand.
+            for by-the-hour slots or peak pricing. ResNeo does both, under your brand.
           </p>
         </div>
         <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
           <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">Resneo</div>
+            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
             <div className="border-l border-slate-200 p-4 text-center">Other apps</div>
           </div>
           {compareRows.map((row, i) => (
@@ -1247,7 +1244,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
@@ -1256,6 +1253,7 @@ function Footer() {
           <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
           <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
           <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

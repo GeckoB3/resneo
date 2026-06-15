@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { SMS_INCLUDED_LIGHT } from "@/lib/billing/sms-allowance";
 import { SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
@@ -11,11 +12,11 @@ import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fe
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 
 export const metadata: Metadata = {
-  title: "Resneo for Appointments | Online Booking Software for Every Business",
+  title: "ResNeo for Appointments | Online Booking Software for Every Business",
   description:
-    "Stop losing bookings. Let clients book online 24/7, collect deposits to cut no-shows, and automate every reminder. Resneo is the all-in-one booking platform for businesses that take bookings.",
+    "Stop losing bookings. Let clients book online 24/7, collect deposits to cut no-shows, and automate every reminder. ResNeo is the all-in-one booking platform for businesses that take bookings.",
   openGraph: {
-    title: "Resneo for Appointments",
+    title: "ResNeo for Appointments",
     description:
       "Let clients book online 24/7, cut no-shows with deposits, and automate every reminder. Booking software for every business.",
     type: "website",
@@ -131,7 +132,7 @@ const howItWorks = [
     step: "3",
     title: "Watch the diary fill itself",
     description:
-      "New bookings appear instantly. Reminders go out automatically. You focus on the work. Resneo runs the rest.",
+      "New bookings appear instantly. Reminders go out automatically. You focus on the work. ResNeo runs the rest.",
   },
 ];
 
@@ -157,7 +158,7 @@ const useCases = [
 const features = [
   {
     title: "Embed on your website",
-    description: "Drop the Resneo widget into your existing site in 30 seconds. Your branding, your colours.",
+    description: "Drop the ResNeo widget into your existing site in 30 seconds. Your branding, your colours.",
   },
   {
     title: "Online booking page",
@@ -212,11 +213,11 @@ const faqs = [
   },
   {
     q: "Do I need a website already?",
-    a: "No. Resneo gives you a beautiful booking page on your own link (like resneo.com/book/your-business). Share it on Instagram, Facebook, your Google listing or a flyer, and you're ready to take bookings without a website. If you do have a website, you can embed the widget there too.",
+    a: "No. ResNeo gives you a beautiful booking page on your own link (like resneo.com/book/your-business). Share it on Instagram, Facebook, your Google listing or a flyer, and you're ready to take bookings without a website. If you do have a website, you can embed the widget there too.",
   },
   {
-    q: "Can I add Resneo to my existing website?",
-    a: "Yes. Add the booking widget to your current website in around 30 seconds. Clients can book without leaving your site, and every booking flows straight into your Resneo diary.",
+    q: "Can I add ResNeo to my existing website?",
+    a: "Yes. Add the booking widget to your current website in around 30 seconds. Clients can book without leaving your site, and every booking flows straight into your ResNeo diary.",
   },
   {
     q: "How do deposits actually work?",
@@ -240,7 +241,7 @@ const faqs = [
   },
   {
     q: "Can I still take phone bookings?",
-    a: "Absolutely. Add phone bookings manually in seconds, and keep all clients in one diary with full history. Resneo supports your existing relationships while moving more bookings online.",
+    a: "Absolutely. Add phone bookings manually in seconds, and keep all clients in one diary with full history. ResNeo supports your existing relationships while moving more bookings online.",
   },
 ];
 
@@ -271,7 +272,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <a
@@ -327,7 +328,7 @@ function Hero() {
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            Every empty slot is money you will not get back. Resneo takes bookings 24/7, collects a
+            Every empty slot is money you will not get back. ResNeo takes bookings 24/7, collects a
             deposit when clients book, and sends the reminders that make them show up. Fewer no-shows.
             More revenue where it belongs.
           </p>
@@ -506,7 +507,7 @@ function ProblemSection() {
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             People want to book at 10pm, on a Sunday, or in the five minutes between meetings. If they
             can&apos;t lock in a time in that moment, the booking and the revenue go to whoever is
-            open online. Resneo turns after-hours interest into real slots, without you manning the
+            open online. ResNeo turns after-hours interest into real slots, without you manning the
             phone.
           </p>
         </div>
@@ -542,13 +543,13 @@ function SolutionIntro() {
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
-          Meet Resneo
+          Meet ResNeo
         </span>
         <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
           One platform. Every booking. Zero chaos.
         </h2>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
-          Resneo replaces the paper diary, the missed calls, the WhatsApp booking threads, the
+          ResNeo replaces the paper diary, the missed calls, the WhatsApp booking threads, the
           spreadsheet of clients, and the evenings spent sending reminders. It&apos;s the booking
           system you&apos;d build yourself, if you had six months and a software team.
         </p>
@@ -581,7 +582,7 @@ function OwnerBenefitsSection() {
             For the business owner
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            No-shows cost real money. Resneo helps you keep it.
+            No-shows cost real money. ResNeo helps you keep it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Deposits, reminders, and confirm-or-cancel messages work together to protect your diary and
@@ -812,7 +813,7 @@ function ClientBenefitsSection() {
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
               The way a client books shapes how they feel about your business before they even walk in.
-              Resneo gives them a fast, confident experience. No phone tag, no forms, no friction.
+              ResNeo gives them a fast, confident experience. No phone tag, no forms, no friction.
             </p>
             <ul className="mt-8 space-y-3">
               {clientBenefits.map((c) => (
@@ -1001,7 +1002,7 @@ function BookingChannelsSection() {
           <ChannelCard
             label="Embed on your website"
             title="Add booking to your existing website"
-            description="Drop the Resneo widget into your existing website in 30 seconds. Clients book without ever leaving your site, with your branding all the way through."
+            description="Drop the ResNeo widget into your existing website in 30 seconds. Clients book without ever leaving your site, with your branding all the way through."
             visual={<EmbedVisual />}
             featured
           />
@@ -1188,7 +1189,7 @@ function UseCasesSection() {
             If it&apos;s bookable, we handle it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            One-to-ones, group classes, multi-day courses, resources, shared equipment. Resneo
+            One-to-ones, group classes, multi-day courses, resources, shared equipment. ResNeo
             flexes to fit the way your business actually works.
           </p>
         </div>
@@ -1318,7 +1319,7 @@ function ClosingCta() {
               <div className="mt-6 grid max-w-xl grid-cols-1 gap-3 text-xs text-white/85 sm:grid-cols-2">
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Set up in under 30 minutes</div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 leading-snug">
-                  No commission or booking fees on Resneo.
+                  No commission or booking fees on ResNeo.
                   <span className="mt-1 block text-white/75">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</span>
                 </div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 sm:col-span-2">
@@ -1348,7 +1349,7 @@ function ClosingCta() {
               <div className="mt-10 grid grid-cols-2 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
                 <div>
                   <p className="text-2xl font-bold text-white">0%</p>
-                  <p className="text-xs">Resneo commission on bookings</p>
+                  <p className="text-xs">ResNeo commission on bookings</p>
                   <p className="mt-1 text-[10px] leading-snug text-white/60">{STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}</p>
                 </div>
                 <div>
@@ -1379,7 +1380,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">
@@ -1400,6 +1401,7 @@ function Footer() {
           <Link href="/privacy" className="transition-colors hover:text-slate-900">
             Privacy Policy
           </Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

@@ -10,6 +10,12 @@ import {
   OUTSIDE_ASSIGNED_CALENDARS_ERROR,
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
+import {
+  describeHoursChangeOrphans,
+  findBookingsOrphanedByHoursChange,
+  calendarWorkingMinutesForDate,
+} from '@/lib/calendar/hours-change-orphans';
 import { checkCalendarLimit, isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
@@ -541,6 +547,95 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+
+    // Narrowing a calendar's working hours can leave existing upcoming bookings outside the
+    // new hours. Warn (don't block) unless the caller acknowledged the affected bookings.
+    if (
+      rest.working_hours !== undefined &&
+      rest.working_hours !== null &&
+      typeof rest.working_hours === 'object' &&
+      !Array.isArray(rest.working_hours) &&
+      request.nextUrl.searchParams.get('acknowledge_affected_bookings') !== 'true'
+    ) {
+      let found = false;
+      let oldWorking: Record<string, Array<{ start: string; end: string }>> = {};
+      let calName: string | null = null;
+      const { data: pracRow } = await admin
+        .from('practitioners')
+        .select('working_hours, name')
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (pracRow) {
+        found = true;
+        oldWorking = (pracRow.working_hours as Record<string, Array<{ start: string; end: string }>>) ?? {};
+        calName = (pracRow.name as string | null) ?? null;
+      } else {
+        const { data: ucRow } = await admin
+          .from('unified_calendars')
+          .select('working_hours, name')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (ucRow) {
+          found = true;
+          oldWorking = (ucRow.working_hours as Record<string, Array<{ start: string; end: string }>>) ?? {};
+          calName = (ucRow.name as string | null) ?? null;
+        }
+      }
+      if (found) {
+        if (staff.role !== 'admin') {
+          const access = await requireManagedCalendarAccess(
+            admin,
+            staff.venue_id,
+            staff,
+            id,
+            OUTSIDE_ASSIGNED_CALENDARS_ERROR,
+          );
+          if (!access.ok) {
+            return NextResponse.json({ error: access.error }, { status: 403 });
+          }
+        }
+        try {
+          const { data: venueRow } = await admin
+            .from('venues')
+            .select('timezone')
+            .eq('id', staff.venue_id)
+            .single();
+          const tz =
+            typeof venueRow?.timezone === 'string' && venueRow.timezone.trim()
+              ? venueRow.timezone.trim()
+              : 'Europe/London';
+          const fromDate = getVenueLocalDateAndMinutes(tz, new Date()).dateYmd;
+          const orphans = await findBookingsOrphanedByHoursChange(admin, {
+            venueId: staff.venue_id,
+            fromDate,
+            calendarColumnId: id,
+            oldPeriodsForDate: calendarWorkingMinutesForDate(oldWorking),
+            newPeriodsForDate: calendarWorkingMinutesForDate(
+              rest.working_hours as Record<string, Array<{ start: string; end: string }>>,
+            ),
+          });
+          if (orphans.total > 0) {
+            return NextResponse.json(
+              {
+                requires_confirmation: true,
+                affected_count: orphans.total,
+                affected_bookings: orphans.sample,
+                message: describeHoursChangeOrphans(orphans, { scope: 'calendar', calendarName: calName }),
+              },
+              { status: 409 },
+            );
+          }
+        } catch (e) {
+          console.error('PATCH /api/venue/practitioners orphan check:', e);
+          return NextResponse.json(
+            { error: 'Could not verify existing bookings. Please try again.' },
+            { status: 500 },
+          );
+        }
+      }
+    }
 
     if (staff.role !== 'admin') {
       const keys = Object.keys(rest);

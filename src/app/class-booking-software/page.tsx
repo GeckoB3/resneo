@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
-import {
-  LINKED_ACCOUNTS_HMRC_DISCLAIMER,
-  LINKED_ACCOUNTS_HMRC_NOTE,
-} from "@/lib/linked-accounts-marketing-copy";
+import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -35,9 +33,9 @@ const PAGE_PATH = "/class-booking-software";
 const SIGNUP = "/#pricing";
 
 export const metadata: Metadata = {
-  title: "Class Booking Software for Studios, Gyms & Clubs | Resneo",
+  title: "Class Booking Software for Studios, Gyms & Clubs | ResNeo",
   description:
-    "Resneo is class and course booking software for yoga, pilates, dance, and fitness studios, gyms, and clubs. Let clients book classes 24/7, sell memberships and class packs, run waitlists and registers, and take payment online. No commission, no marketplace. Start a free 14-day trial.",
+    "ResNeo is class and course booking software for yoga, pilates, dance, and fitness studios, gyms, and clubs. Let clients book classes 24/7, sell memberships and class packs, run waitlists and registers, and take payment online. No commission, no marketplace. Start a free 14-day trial.",
   keywords: [
     "class booking software",
     "studio booking software",
@@ -52,7 +50,7 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "Class Booking Software for Studios, Gyms & Clubs | Resneo",
+    title: "Class Booking Software for Studios, Gyms & Clubs | ResNeo",
     description:
       "Online class and course booking, memberships and class packs, waitlists, and registers for studios, gyms, and clubs. Full classes, recurring revenue, less admin.",
     url: PAGE_PATH,
@@ -60,7 +58,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Class Booking Software for Studios, Gyms & Clubs | Resneo",
+    title: "Class Booking Software for Studios, Gyms & Clubs | ResNeo",
     description:
       "Bookings, memberships, class packs, waitlists, and registers, built for yoga, pilates, dance, and fitness studios.",
   },
@@ -75,7 +73,7 @@ const outcomes = [
     eyebrow: "Outcome 01",
     title: "Full classes, every time",
     promise:
-      "An empty mat is revenue you cannot get back. Resneo keeps your timetable in front of clients around the clock and fills cancellations from the waitlist automatically.",
+      "An empty mat is revenue you cannot get back. ResNeo keeps your timetable in front of clients around the clock and fills cancellations from the waitlist automatically.",
     accent: "brand" as const,
     features: [
       {
@@ -102,7 +100,7 @@ const outcomes = [
     eyebrow: "Outcome 02",
     title: "Members who keep coming back",
     promise:
-      "The studios that thrive sell more than single classes. Resneo turns one-off visitors into members and pass holders, and renews them on autopilot.",
+      "The studios that thrive sell more than single classes. ResNeo turns one-off visitors into members and pass holders, and renews them on autopilot.",
     accent: "accent" as const,
     features: [
       {
@@ -129,7 +127,7 @@ const outcomes = [
     eyebrow: "Outcome 03",
     title: "Run it without the spreadsheet",
     promise:
-      "Your time belongs in the room, not in a paper diary and a group chat. Resneo runs the timetable, registers, and reminders so the admin takes care of itself.",
+      "Your time belongs in the room, not in a paper diary and a group chat. ResNeo runs the timetable, registers, and reminders so the admin takes care of itself.",
     accent: "rose" as const,
     features: [
       {
@@ -244,15 +242,15 @@ const compareRows: { label: string; resneo: string; other: string }[] = [
 
 const faqs = [
   {
-    q: "Is Resneo good booking software for a yoga or fitness studio?",
-    a: "Yes. Resneo is built for class-based businesses, from yoga, pilates, and dance studios to gyms, clubs, and swim schools. Publish a 24/7 timetable, sell memberships and class packs, run waitlists and registers, and take payment online, with no booking commission.",
+    q: "Is ResNeo good booking software for a yoga or fitness studio?",
+    a: "Yes. ResNeo is built for class-based businesses, from yoga, pilates, and dance studios to gyms, clubs, and swim schools. Publish a 24/7 timetable, sell memberships and class packs, run waitlists and registers, and take payment online, with no booking commission.",
   },
   {
     q: "Can clients buy memberships and class packs?",
     a: "Yes. Sell recurring memberships (unlimited or capped), class packs and credits, and multi-week courses. Memberships renew automatically, clients book straight against their balance, and every payment goes directly to your account.",
   },
   {
-    q: "Does Resneo handle recurring class schedules and courses?",
+    q: "Does ResNeo handle recurring class schedules and courses?",
     a: "Yes. Build your weekly timetable once and let it repeat, run fixed-term courses where a client enrols once and keeps their place for every session, and add one-off workshops alongside. Changes update the live timetable instantly.",
   },
   {
@@ -265,11 +263,11 @@ const faqs = [
   },
   {
     q: "I have self-employed instructors. Can each keep separate books?",
-    a: `Yes. Each instructor can run their own Resneo with their own clients, timetable, and payouts, then link accounts to share one combined timetable and booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_HMRC_NOTE}`,
+    a: `Yes. Each instructor can run their own ResNeo with their own clients, timetable, and payouts, then link accounts to share one combined timetable and booking page. Either side can break the link in a click. ${LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}`,
   },
   {
-    q: "Does Resneo take commission on class bookings?",
-    a: `No. Resneo is one flat subscription with no commission on your bookings, ever. Connect Stripe and ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE.toLowerCase()} ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}`,
+    q: "Does ResNeo take commission on class bookings?",
+    a: `No. ResNeo is one flat subscription with no commission on your bookings, ever. Connect Stripe and ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE.toLowerCase()} ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}`,
   },
   {
     q: "How much does it cost?",
@@ -286,7 +284,7 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "Resneo: Class & Studio Booking Software",
+      name: "ResNeo: Class & Studio Booking Software",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description:
@@ -345,7 +343,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
@@ -411,7 +409,7 @@ function Hero() {
           </p>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
             Let clients book classes and courses 24/7, sell memberships and class packs that renew on autopilot,
-            and run waitlists and registers without the spreadsheet. Resneo is the all-in-one booking platform for
+            and run waitlists and registers without the spreadsheet. ResNeo is the all-in-one booking platform for
             studios, gyms, and clubs, with no booking commission and no marketplace renting out your members.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -622,7 +620,7 @@ function TimetableSection() {
             Your whole timetable, booked out.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Resneo runs your weekly schedule, recurring series, and multi-week courses, sells the memberships and
+            ResNeo runs your weekly schedule, recurring series, and multi-week courses, sells the memberships and
             class packs that pay for them, and fills cancellations from the waitlist automatically. One timetable,
             always up to date.
           </p>
@@ -720,10 +718,10 @@ function OutcomesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Outcomes first</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            What every studio owner wants, and how Resneo delivers it.
+            What every studio owner wants, and how ResNeo delivers it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Each promise below maps to the exact Resneo features that make it happen. No buzzwords, just the tools
+            Each promise below maps to the exact ResNeo features that make it happen. No buzzwords, just the tools
             doing the work.
           </p>
         </div>
@@ -1048,7 +1046,7 @@ function LinkedAccountsSection() {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 Freelance instructors teaching across your studios, or renting your space for their own classes? Each
-                runs their own Resneo with their own clients, timetable, and payouts. Link accounts to share one
+                runs their own ResNeo with their own clients, timetable, and payouts. Link accounts to share one
                 timetable and a combined booking page, and break the link in a click. Nothing is ever merged.
               </p>
               <div className="mt-6 grid grid-cols-2 gap-3">
@@ -1069,12 +1067,11 @@ function LinkedAccountsSection() {
                   <ShieldCheckIcon />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built to stay compliant</p>
-                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for HMRC</h3>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-accent-700">Built for independents</p>
+                  <h3 className="text-xl font-bold text-slate-900">Clean, separate books for everyone</h3>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_HMRC_NOTE}</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">{LINKED_ACCOUNTS_HMRC_DISCLAIMER}</p>
+              <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
             </div>
           </div>
         </div>
@@ -1096,7 +1093,7 @@ function BusinessTypesSection() {
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A solo instructor or a multi-room studio, a weekly drop-in or a multi-week course. If you teach groups
-            and sell memberships or passes, Resneo fits.
+            and sell memberships or passes, ResNeo fits.
           </p>
         </div>
         <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1122,19 +1119,19 @@ function CompareSection() {
     <section className="bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Resneo vs the rest</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
             Keep your members. Keep your margin.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Marketplace class apps list you next to every other studio and take a cut. Generic schedulers cannot sell
-            a membership or run a waitlist. Resneo does both, under your brand.
+            a membership or run a waitlist. ResNeo does both, under your brand.
           </p>
         </div>
         <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
           <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">Resneo</div>
+            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
             <div className="border-l border-slate-200 p-4 text-center">Other apps</div>
           </div>
           {compareRows.map((row, i) => (
@@ -1248,7 +1245,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
@@ -1257,6 +1254,7 @@ function Footer() {
           <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
           <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
           <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
+          <SocialLinks />
         </div>
       </div>
     </footer>

@@ -16,7 +16,7 @@ export function LegalAcceptanceCheckbox({
         className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
       />
       <span className="text-xs leading-relaxed text-slate-600">
-        By signing up, I confirm I have authority to act for this business and agree to the Resneo{' '}
+        By signing up, I confirm I have authority to act for this business and agree to the ResNeo{' '}
         <a
           href="/terms/customer"
           target="_blank"

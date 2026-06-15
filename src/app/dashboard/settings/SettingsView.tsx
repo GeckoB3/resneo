@@ -155,7 +155,7 @@ const TABS = [
     key: 'linked-accounts',
     label: 'Linked Accounts',
     description:
-      'Link with other Resneo venues to share calendar visibility and booking access.',
+      'Link with other ResNeo venues to share calendar visibility and booking access.',
   },
 ] as const;
 
@@ -714,12 +714,12 @@ function PlanSection({
       <p className="text-sm text-slate-600 leading-relaxed">
         {isFreeAccess ? (
           <>
-            This venue has <strong className="font-medium text-slate-800">complimentary Resneo access</strong> (no
+            This venue has <strong className="font-medium text-slate-800">complimentary ResNeo access</strong> (no
             subscription billing). Plan limits and SMS caps still apply.
           </>
         ) : (
           <>
-            Manage plan changes here in Resneo. For billing administration (card details, invoices, receipts, billing
+            Manage plan changes here in ResNeo. For billing administration (card details, invoices, receipts, billing
             address, and cancellation), use Stripe Customer Portal.
           </>
         )}
@@ -768,13 +768,13 @@ function PlanSection({
           <p className="mt-1 leading-relaxed">
             {periodEndLabel ? (
               <>
-                You will keep access to your current Resneo plan until{' '}
+                You will keep access to your current ResNeo plan until{' '}
                 <span className="font-semibold">{periodEndLabel}</span>. Stripe will not charge again after that date
                 unless the subscription is restarted before the billing period ends.
               </>
             ) : (
               <>
-                You will keep access to your current Resneo plan until the end of the current billing period. Stripe
+                You will keep access to your current ResNeo plan until the end of the current billing period. Stripe
                 will not charge again unless the subscription is restarted before then.
               </>
             )}
@@ -1722,7 +1722,7 @@ function TrialBreakdownBanner({ breakdown }: { breakdown: VenueTrialBreakdown | 
 
   const hasReferralBonus = breakdown.referralBonusDays > 0;
   const totalDays = breakdown.totalDays;
-  const referrerLabel = breakdown.referrerVenueName ?? 'a Resneo customer';
+  const referrerLabel = breakdown.referrerVenueName ?? 'a ResNeo customer';
 
   return (
     <div

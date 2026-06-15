@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, OUTSIDE_ASSIGNED_CALENDARS_ERROR, staffManagesCalendar } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { findClosureBookingConflicts, describeClosureBookingConflict } from '@/lib/calendar/closure-booking-conflicts';
 import { z } from 'zod';
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
@@ -141,6 +143,34 @@ export async function POST(request: NextRequest) {
     }
 
     const { practitioner_id: columnId, block_date, start_time, end_time, reason } = parsed.data;
+
+    if (end_time <= start_time) {
+      return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 });
+    }
+
+    // A blocked-time window cannot be inserted over existing bookings on the column.
+    try {
+      const conflict = await findClosureBookingConflicts(getSupabaseAdminClient(), {
+        venueId: staff.venue_id,
+        calendarColumnIds: [columnId],
+        startDate: block_date,
+        endDate: block_date,
+        startTime: start_time,
+        endTime: end_time,
+      });
+      if (conflict) {
+        return NextResponse.json(
+          { error: describeClosureBookingConflict(conflict, { scope: 'time' }) },
+          { status: 409 },
+        );
+      }
+    } catch (e) {
+      console.error('POST practitioner-calendar-blocks conflict check:', e);
+      return NextResponse.json(
+        { error: 'Could not verify existing bookings for this time. Please try again.' },
+        { status: 500 },
+      );
+    }
 
     const { data: prac } = await staff.db
       .from('practitioners')

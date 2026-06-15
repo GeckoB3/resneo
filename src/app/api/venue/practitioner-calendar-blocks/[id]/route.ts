@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, OUTSIDE_ASSIGNED_CALENDARS_ERROR, staffManagesCalendar } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { findClosureBookingConflicts, describeClosureBookingConflict } from '@/lib/calendar/closure-booking-conflicts';
 import { z } from 'zod';
 
 const patchBodySchema = z.object({
@@ -158,6 +160,40 @@ export async function PATCH(
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
+
+    // Moving/resizing/reassigning a block must not drop it onto existing bookings.
+    const positionChanged =
+      parsed.data.start_time !== undefined ||
+      parsed.data.end_time !== undefined ||
+      parsed.data.block_date !== undefined ||
+      parsed.data.practitioner_id !== undefined;
+    if (positionChanged) {
+      const targetColumn = existingPrac
+        ? ((updates.practitioner_id as string | undefined) ?? (existingPrac.practitioner_id as string))
+        : ((updates.calendar_id as string | undefined) ?? (existingCal!.calendar_id as string));
+      try {
+        const conflict = await findClosureBookingConflicts(getSupabaseAdminClient(), {
+          venueId: staff.venue_id,
+          calendarColumnIds: [targetColumn],
+          startDate: nextDate,
+          endDate: nextDate,
+          startTime: nextStartNorm,
+          endTime: nextEndNorm,
+        });
+        if (conflict) {
+          return NextResponse.json(
+            { error: describeClosureBookingConflict(conflict, { scope: 'time' }) },
+            { status: 409 },
+          );
+        }
+      } catch (e) {
+        console.error('PATCH practitioner-calendar-blocks conflict check:', e);
+        return NextResponse.json(
+          { error: 'Could not verify existing bookings for this time. Please try again.' },
+          { status: 500 },
+        );
+      }
     }
 
     const table = existingPrac ? 'practitioner_calendar_blocks' : 'calendar_blocks';

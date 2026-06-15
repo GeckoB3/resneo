@@ -2,9 +2,9 @@
  * Marketing copy for the Linked Accounts feature: the "link and break" capability
  * that lets independent chairs share one booking page while keeping fully separate books.
  *
- * Centralised so the salon (`/salon-booking-software`) and solutions (`/solutions`)
- * pages describe it consistently. The HMRC line is deliberately framed as record-keeping
- * help, not tax advice, so keep the disclaimer wherever the compliance angle appears.
+ * Centralised so the salon (`/salon-booking-software`), solutions (`/solutions`) and the
+ * vertical pages describe it consistently. The copy is framed around each person keeping
+ * their own clients, bookings, and revenue — it makes no tax or compliance promise.
  */
 
 /** One-line summary of the feature for hero / card copy. */
@@ -15,10 +15,6 @@ export const LINKED_ACCOUNTS_ONE_LINER =
 export const LINKED_ACCOUNTS_SEPARATION_NOTE =
   'Linking shares a calendar, not your data. Each chair keeps its own clients, bookings, and takings, and unlinking changes only access, never ownership.';
 
-/** Why the clean separation matters for self-employed / rent-a-chair tax records. */
-export const LINKED_ACCOUNTS_HMRC_NOTE =
-  'Every chair’s clients, calendar, and takings stay in their own set of books, and payments go straight to each person’s own account, so a genuine rent-a-chair arrangement stays cleanly separated and each stylist’s records are ready at year end for Self Assessment.';
-
-/** Honest disclaimer to pair with any HMRC / compliance messaging. */
-export const LINKED_ACCOUNTS_HMRC_DISCLAIMER =
-  'Resneo keeps your records cleanly separated; it is not tax or legal advice. Check your own arrangement with your accountant or HMRC.';
+/** Why the clean separation matters for self-employed / rent-a-chair arrangements. */
+export const LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE =
+  'Each person keeps their own clients, calendar, and takings in a separate set of books, and payments go straight to their own account, so independent professionals keep full control of their clients, bookings, and revenue even when they share a booking page.';

@@ -300,7 +300,7 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
 
     // Footer
     `<tr><td style="padding:20px 24px;border-top:1px solid #e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;color:${FOOTER_TEXT}">`,
-    `<p style="margin:0 0 8px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">Resneo</a></p>`,
+    `<p style="margin:0 0 8px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">ResNeo</a></p>`,
     `<p style="margin:0;color:#aaa">${escapeHtml(footer)}</p>`,
     "</td></tr>",
 

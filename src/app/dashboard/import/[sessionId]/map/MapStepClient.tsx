@@ -379,7 +379,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Map columns</h1>
         <p className="mt-1 text-sm text-slate-500">
-          We matched your columns to Resneo fields automatically — your job is just to check the result. Drag a column
+          We matched your columns to ResNeo fields automatically — your job is just to check the result. Drag a column
           onto a field to change it, use the dropdowns, or split a combined column (like a full name) into parts.
         </p>
       </div>

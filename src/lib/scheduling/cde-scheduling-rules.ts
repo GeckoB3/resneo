@@ -1,5 +1,5 @@
 /**
- * C/D/E scheduling product rules (Resneo).
+ * C/D/E scheduling product rules (ResNeo).
  *
  * Events: recurring and custom schedules are materialised as separate `experience_events` rows so each
  * occurrence has its own id for `bookings.experience_event_id` and ticket capacity.

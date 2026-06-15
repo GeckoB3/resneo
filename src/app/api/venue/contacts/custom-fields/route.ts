@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { fieldKeyFromName } from '@/lib/guests/custom-field-validation';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
@@ -14,9 +15,9 @@ const postSchema = z.object({
  * GET /api/venue/contacts/custom-fields — list venue definitions.
  * POST — create definition (field_key derived from name).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

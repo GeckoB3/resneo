@@ -1,5 +1,5 @@
 /**
- * Deterministic column-name → Resneo field aliases.
+ * Deterministic column-name → ResNeo field aliases.
  *
  * Most real exports use predictable header names ("Start Time", "Mobile",
  * "Stylist"…). Matching them deterministically — before/independent of the AI —

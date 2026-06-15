@@ -38,7 +38,7 @@ export default async function LoginPage({
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center">
           <Link href="/">
-            <img src="/Logo.png" alt="Resneo" className="h-12 w-auto" />
+            <img src="/Logo.png" alt="ResNeo" className="h-12 w-auto" />
           </Link>
         </div>
 

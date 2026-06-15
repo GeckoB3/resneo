@@ -16,6 +16,7 @@ import { fulfillClassCreditPurchaseFromPaymentIntent } from '@/lib/class-commerc
 import { fulfillCourseEnrollmentFromPaymentIntent } from '@/lib/class-commerce/fulfill-course-enrollment';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 import { syncClassMembershipFromStripeSubscription } from '@/lib/class-commerce/sync-membership-from-stripe';
+import { recordSalesRevenueRefund } from '@/lib/sales/invoice-revenue';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -259,6 +260,14 @@ export async function POST(request: NextRequest) {
       if (event.type === 'charge.refunded') {
         const charge = event.data.object as Stripe.Charge;
         paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
+        // Net subscription-invoice refunds out of any salesperson's revenue share. This lives
+        // here because `charge.refunded` is delivered to this endpoint; it no-ops for connected
+        // deposit charges (no invoice) and for non-sales invoices.
+        try {
+          await recordSalesRevenueRefund(supabase, charge);
+        } catch (e) {
+          console.error('[Stripe webhook] recordSalesRevenueRefund failed:', e);
+        }
       } else {
         const refund = event.data.object as Stripe.Refund;
         const accountId = connectedAccountId;

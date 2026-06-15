@@ -191,7 +191,7 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     id: 'staff-welcome',
     title: 'Staff welcome',
     subtitle: 'Dashboard credentials',
-    subject: 'Your Resneo dashboard login details',
+    subject: 'Your ResNeo dashboard login details',
     html: staff.html,
   });
 

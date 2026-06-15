@@ -288,7 +288,7 @@ export function TableCombinationsPage({
           Control how tables can be joined to seat larger parties.
         </p>
         <p className="mt-2 text-sm text-slate-500">
-          Resneo automatically detects which tables can combine based on their position in your floor plan. Use this page
+          ResNeo automatically detects which tables can combine based on their position in your floor plan. Use this page
           to adjust auto-detected combinations, or add custom combinations.
         </p>
         <button

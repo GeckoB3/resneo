@@ -12,8 +12,19 @@ import {
   persistReferralCodeCookie,
   clearReferralCodeCookie,
   validateReferralCodeClient,
+  isTransientReferralValidationFailure,
   type ReferralValidationOk,
 } from '@/lib/referrals/client';
+import {
+  loadSalesCodeFromCookieOrUrl,
+  persistSalesCodeCookie,
+  clearSalesCodeCookie,
+  clearReferralCodeCookieForSalesPrecedence,
+  validateSalesCodeClient,
+  isTransientSalesValidationFailure,
+  type SalesValidationOk,
+} from '@/lib/sales/client';
+import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -26,6 +37,8 @@ export default function SignupPage() {
   // Referral state — loaded from ?ref= or the reserveni_ref cookie.
   const [referralCodeInput, setReferralCodeInput] = useState('');
   const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
+  // A salesperson's code shares the same input box; sales codes take precedence over referral.
+  const [salesValid, setSalesValid] = useState<SalesValidationOk | null>(null);
   const [referralCheckedAt, setReferralCheckedAt] = useState(0);
   const [showReferralInput, setShowReferralInput] = useState(false);
   const router = useRouter();
@@ -101,6 +114,33 @@ export default function SignupPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      // Sales code (?sales= or the reserveni_sales cookie) takes precedence over referral.
+      const salesFromUrl = searchParams?.get('sales') ?? null;
+      const initialSales = loadSalesCodeFromCookieOrUrl(salesFromUrl);
+      if (initialSales) {
+        if (!cancelled) {
+          setReferralCodeInput(initialSales);
+          setShowReferralInput(true);
+        }
+        const sres = await validateSalesCodeClient(initialSales);
+        if (cancelled) return;
+        if (sres.ok) {
+          setSalesValid(sres);
+          setReferralValid(null);
+          persistSalesCodeCookie(sres.code);
+          clearReferralCodeCookieForSalesPrecedence();
+          setReferralCheckedAt(Date.now());
+          return;
+        }
+        if (isTransientSalesValidationFailure(sres.reason)) {
+          // Network/server/rate-limit blip — keep the cookie; the server re-validates at checkout.
+          if (!cancelled) setReferralCheckedAt(Date.now());
+          return;
+        }
+        // Sales code invalid/stale — drop it and fall through to the referral programme.
+        clearSalesCodeCookie();
+      }
+
       const fromUrl = searchParams?.get('ref') ?? null;
       const initial = loadReferralCodeFromCookieOrUrl(fromUrl);
       if (!initial) {
@@ -115,7 +155,7 @@ export default function SignupPage() {
       if (result.ok) {
         setReferralValid(result);
         persistReferralCodeCookie(result.code);
-      } else {
+      } else if (!isTransientReferralValidationFailure(result.reason)) {
         setReferralValid(null);
         clearReferralCodeCookie();
       }
@@ -133,24 +173,44 @@ export default function SignupPage() {
       // Schedule async so setState does not fire synchronously in the effect body.
       const t = setTimeout(() => {
         setReferralValid(null);
+        setSalesValid(null);
         clearReferralCodeCookie();
+        clearSalesCodeCookie();
       }, 0);
       return () => clearTimeout(t);
     }
-    if (referralValid && referralValid.code === code.toUpperCase()) return;
+    const upper = code.toUpperCase();
+    if ((salesValid && salesValid.code === upper) || (referralValid && referralValid.code === upper)) return;
     const t = setTimeout(async () => {
+      // Sales codes take precedence over the venue referral programme.
+      const sales = await validateSalesCodeClient(code);
+      if (sales.ok) {
+        setSalesValid(sales);
+        setReferralValid(null);
+        persistSalesCodeCookie(sales.code);
+        clearReferralCodeCookieForSalesPrecedence();
+        setReferralCheckedAt(Date.now());
+        return;
+      }
+      if (isTransientSalesValidationFailure(sales.reason)) {
+        // Transient — leave any existing sales cookie/banner intact, don't downgrade.
+        setReferralCheckedAt(Date.now());
+        return;
+      }
+      setSalesValid(null);
+      clearSalesCodeCookie();
       const result = await validateReferralCodeClient(code);
       if (result.ok) {
         setReferralValid(result);
         persistReferralCodeCookie(result.code);
-      } else {
+      } else if (!isTransientReferralValidationFailure(result.reason)) {
         setReferralValid(null);
         clearReferralCodeCookie();
       }
       setReferralCheckedAt(Date.now());
     }, 400);
     return () => clearTimeout(t);
-  }, [referralCodeInput, referralValid]);
+  }, [referralCodeInput, referralValid, salesValid]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,10 +309,18 @@ export default function SignupPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Create your account</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Get started with Resneo in minutes.
+          Get started with ResNeo in minutes.
         </p>
       </div>
-      {referralValid && (
+      {salesValid && (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p className="font-medium">Sales offer applied ({salesValid.code})</p>
+          <p className="mt-1 text-blue-800">
+            You get 1 month free — a {SALES_SIGNUP_TRIAL_DAYS}-day free trial.
+          </p>
+        </div>
+      )}
+      {referralValid && !salesValid && (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <p className="font-medium">Referred by {referralValid.referrer_venue_name}</p>
           <p className="mt-1 text-emerald-800">
@@ -306,7 +374,7 @@ export default function SignupPage() {
               className={inputClass}
             />
           </div>
-          {!referralValid && (
+          {!referralValid && !salesValid && (
             <div>
               {!showReferralInput ? (
                 <button
@@ -314,12 +382,12 @@ export default function SignupPage() {
                   onClick={() => setShowReferralInput(true)}
                   className="text-sm font-medium text-brand-600 hover:text-brand-700"
                 >
-                  Have a referral code?
+                  Have a referral or sales code?
                 </button>
               ) : (
                 <div>
                   <label htmlFor="referral-code" className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Referral code
+                    Referral or sales code
                   </label>
                   <input
                     id="referral-code"

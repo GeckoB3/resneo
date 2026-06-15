@@ -200,7 +200,7 @@ export function AnnouncementsPageClient() {
               onChange={(e) => setBody(e.target.value)}
               maxLength={2000}
               rows={3}
-              placeholder="Resneo will be briefly unavailable on Sunday between 02:00 and 02:30 for planned maintenance."
+              placeholder="ResNeo will be briefly unavailable on Sunday between 02:00 and 02:30 for planned maintenance."
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </div>

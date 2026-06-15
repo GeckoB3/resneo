@@ -27,7 +27,7 @@ export async function buildImportReportCsv(
   const s = session as Record<string, unknown>;
   const lines: string[][] = [];
 
-  lines.push(['Resneo Import Report']);
+  lines.push(['ResNeo Import Report']);
   lines.push([]);
   lines.push(['Session ID', String(s.id ?? '')]);
   lines.push(['Status', String(s.status ?? '')]);

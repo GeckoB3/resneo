@@ -1,11 +1,12 @@
 import Link from 'next/link';
+import { SocialLinks } from '@/components/marketing/SocialLinks';
 import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'About Resneo - The team behind the booking software',
+  title: 'About ResNeo - The team behind the booking software',
   description:
-    'Resneo is booking management software built by three founders. No commissions, no per-booking fees, total data ownership, and honest support straight from the people who build it.',
+    'ResNeo is booking management software built by three founders. No commissions, no per-booking fees, total data ownership, and honest support straight from the people who build it.',
 };
 
 const principles = [
@@ -52,7 +53,7 @@ const fixes = [
     eyebrow: 'Secured revenue',
     title: 'Wipe out no-shows with upfront payments',
     description:
-      'Built-in Stripe integration lets you take deposits or full payments at the point of booking. Funds go directly to your Stripe account. Resneo never holds your money.',
+      'Built-in Stripe integration lets you take deposits or full payments at the point of booking. Funds go directly to your Stripe account. ResNeo never holds your money.',
   },
   {
     eyebrow: 'Predictable overheads',
@@ -76,14 +77,14 @@ const founders = [
     accentClass: 'from-brand-500 to-brand-700',
     summary: 'The operational and strategic backbone of the company.',
     body:
-      'John oversees the strategic and operational side of Resneo, ensuring our platform runs seamlessly every single day. With a strong background in business operations and compliance, he manages the behind-the-scenes structures, from payment security partnerships to long-term scaling. His focus is on building a stable, sustainable company that businesses can rely on for years to come.',
+      'John oversees the strategic and operational side of ResNeo, ensuring our platform runs seamlessly every single day. With a strong background in business operations and compliance, he manages the behind-the-scenes structures, from payment security partnerships to long-term scaling. His focus is on building a stable, sustainable company that businesses can rely on for years to come.',
   },
   {
     name: 'Andrew',
     initials: 'A',
     role: 'Co-Founder & Chief Technology Officer',
     accentClass: 'from-brand-500 to-brand-700',
-    summary: 'The technical architect behind Resneo, building from our Holywood office.',
+    summary: 'The technical architect behind ResNeo, building from our Holywood office.',
     body:
       'A seasoned software engineer, Andrew builds and maintains our entire platform infrastructure right here in Holywood. He believes business software should be incredibly powerful on the inside but beautifully simple on the outside. Because Andrew owns the code, we don\u2019t rely on third-party developers, so we roll out updates, integrations, and features faster than global corporate alternatives.',
   },
@@ -105,7 +106,7 @@ export default function AboutPage() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex-shrink-0">
-            <Image src="/Logo.png" alt="Resneo" width={144} height={40} className="h-9 w-auto" priority />
+            <Image src="/Logo.png" alt="ResNeo" width={144} height={40} className="h-9 w-auto" priority />
           </Link>
           <div className="flex items-center gap-3">
             <Link
@@ -138,7 +139,7 @@ export default function AboutPage() {
           <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-brand-200/60 bg-white/90 px-4 py-1.5 shadow-sm shadow-slate-200/40 backdrop-blur-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500 shadow-sm shadow-brand-600/40" />
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
-              About Resneo
+              About ResNeo
             </p>
           </div>
           <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
@@ -148,7 +149,7 @@ export default function AboutPage() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
-            Resneo was born from a simple frustration: watching hard-working salons, clinics,
+            ResNeo was born from a simple frustration: watching hard-working salons, clinics,
             studios and independent businesses lose time to admin and margin to global software
             giants.
           </p>
@@ -175,7 +176,7 @@ export default function AboutPage() {
               actually operates.
             </p>
             <p className="font-medium text-slate-900">
-              Resneo is different. We are building booking management specifically for independent
+              ResNeo is different. We are building booking management specifically for independent
               businesses: simple to set up, straightforward to use, and priced fairly.
             </p>
           </div>
@@ -201,7 +202,7 @@ export default function AboutPage() {
           </h2>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
             Whether you run a hair studio, a busy clinic, a fitness studio, or a venue with a large
-            team, Resneo gives you the exact tools you need to stay in control of your time and your
+            team, ResNeo gives you the exact tools you need to stay in control of your time and your
             money.
           </p>
           <blockquote className="mx-auto mt-10 max-w-2xl rounded-2xl border border-brand-200/60 bg-white px-6 py-6 text-left shadow-sm">
@@ -219,7 +220,7 @@ export default function AboutPage() {
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
-              Why we built Resneo
+              Why we built ResNeo
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
               The problems we set out to fix
@@ -271,7 +272,7 @@ export default function AboutPage() {
               in Holywood, just a phone call or an email away when you need us.
             </p>
             <p>
-              Resneo is designed around the way independent businesses actually work: lean teams,
+              ResNeo is designed around the way independent businesses actually work: lean teams,
               busy days, loyal customers, and absolutely no patience for software that gets in the
               way.
             </p>
@@ -291,7 +292,7 @@ export default function AboutPage() {
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
               If your business depends on people booking a time, a service, a table or a space,
-              Resneo is built for you.
+              ResNeo is built for you.
             </p>
           </div>
 
@@ -341,7 +342,7 @@ export default function AboutPage() {
           </div>
 
           <p className="mx-auto mt-12 max-w-2xl text-center text-base leading-relaxed text-slate-600">
-            Resneo isn&rsquo;t trying to be a generic global directory. We&rsquo;re a practical,
+            ResNeo isn&rsquo;t trying to be a generic global directory. We&rsquo;re a practical,
             independent platform built to help businesses grow entirely on their own terms.
             We&rsquo;re proud of what we&rsquo;re building, and we&rsquo;re only getting started.
           </p>
@@ -356,10 +357,10 @@ export default function AboutPage() {
               Meet the founders
             </p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              The team behind Resneo
+              The team behind ResNeo
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
-              Resneo was founded by three entrepreneurs who combined their backgrounds in
+              ResNeo was founded by three entrepreneurs who combined their backgrounds in
               business, technology and operations to build a better alternative for independent
               businesses.
             </p>
@@ -434,7 +435,7 @@ export default function AboutPage() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 Resneo &middot; JAR 26 LTD (NI740269) &middot; 100a Main Street, Bangor,
+            &copy; 2026 ResNeo &middot; JAR 26 LTD (NI740269) &middot; 100a Main Street, Bangor,
             BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
@@ -456,6 +457,7 @@ export default function AboutPage() {
             <Link href="/privacy" className="transition-colors hover:text-slate-900">
               Privacy Policy
             </Link>
+            <SocialLinks />
           </div>
         </div>
       </footer>

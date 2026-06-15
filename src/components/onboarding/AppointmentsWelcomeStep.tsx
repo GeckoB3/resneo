@@ -160,7 +160,7 @@ export function AppointmentsWelcomeStep({
           </svg>
         </div>
         <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900">Welcome to Resneo</h2>
+          <h2 className="text-lg font-bold text-slate-900">Welcome to ResNeo</h2>
           <p className="mt-1 text-sm text-slate-500">
             {isLightPlan
               ? 'Let’s get your diary ready in about 10 minutes. Every step is skippable, so you can always finish later from your dashboard.'

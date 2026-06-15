@@ -15,8 +15,8 @@ export function renderReferralCreditedEmail(
   const safeReward = escapeHtml(params.rewardDisplay);
 
   const mainContent = [
-    `<p style="margin:0 0 12px">Great news — <strong>${safeReferee}</strong> just signed up to Resneo using your referral code, and their first month has been paid.</p>`,
-    `<p style="margin:0 0 12px">As a thank-you, we&rsquo;ve added a <strong>${safeReward} credit</strong> to your Resneo account. It will be applied automatically to your next invoice.</p>`,
+    `<p style="margin:0 0 12px">Great news — <strong>${safeReferee}</strong> just signed up to ResNeo using your referral code, and their first month has been paid.</p>`,
+    `<p style="margin:0 0 12px">As a thank-you, we&rsquo;ve added a <strong>${safeReward} credit</strong> to your ResNeo account. It will be applied automatically to your next invoice.</p>`,
     '<p style="margin:0 0 8px;font-size:14px;color:#64748b">Keep sharing your code &mdash; each new venue you refer earns another month free.</p>',
   ].join('\n');
 
@@ -27,13 +27,13 @@ export function renderReferralCreditedEmail(
     ctaLabel: 'View Refer & Earn',
     ctaUrl: params.dashboardUrl,
     footerNote:
-      'You received this email because someone signed up to Resneo using your referral code.',
+      'You received this email because someone signed up to ResNeo using your referral code.',
   });
 
   const text = [
-    `Great news — ${params.refereeVenueName} just signed up to Resneo using your referral code, and their first month has been paid.`,
+    `Great news — ${params.refereeVenueName} just signed up to ResNeo using your referral code, and their first month has been paid.`,
     '',
-    `As a thank-you, we've added a ${params.rewardDisplay} credit to your Resneo account. It will be applied automatically to your next invoice.`,
+    `As a thank-you, we've added a ${params.rewardDisplay} credit to your ResNeo account. It will be applied automatically to your next invoice.`,
     '',
     `Refer & Earn: ${params.dashboardUrl}`,
     '',

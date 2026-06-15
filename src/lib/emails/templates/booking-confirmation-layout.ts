@@ -85,7 +85,7 @@ const ACCOUNT_CALLOUT_BORDER = '#d6e3ef';
 /** Wraps the provided account-link HTML in a centred, brand-tinted end-of-email callout. */
 function buildAccountCalloutInner(linkHtml: string): string {
   return (
-    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${ACCENT};font-family:${FONT};text-align:center">Your Resneo account</p>` +
+    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${ACCENT};font-family:${FONT};text-align:center">Your ResNeo account</p>` +
     `<div style="text-align:center;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${linkHtml}</div>`
   );
 }
@@ -615,7 +615,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   // ── Assemble page ──────────────────────────────────────────────────────────
 
   const base = baseUrl();
-  const footerText = `You received this email because you made a booking with ${escapeHtml(venue.name)} via Resneo.`;
+  const footerText = `You received this email because you made a booking with ${escapeHtml(venue.name)} via ResNeo.`;
 
   const cardRows = [
     `<tr><td style="padding-bottom:0">${card(heroInner)}</td></tr>`,
@@ -643,7 +643,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<tr><td style="padding:20px 8px 32px;text-align:center">`,
     `<p style="margin:0 0 8px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.55">${footerText}</p>`,
     `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT}">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">Resneo</a></p>`,
+      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">ResNeo</a></p>`,
     `</td></tr>`,
     `</table>`,
     `</td></tr>`,
@@ -924,7 +924,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
     `<tr><td style="padding:20px 8px 32px;text-align:center">`,
     `<p style="margin:0 0 8px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.55">${escapeHtml(footerText)}</p>`,
     `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT}">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">Resneo</a></p>`,
+      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">ResNeo</a></p>`,
     `</td></tr>`,
     `</table>`,
     `</td></tr>`,

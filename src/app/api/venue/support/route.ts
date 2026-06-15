@@ -10,7 +10,7 @@ if (apiKey) {
 }
 
 const SUPPORT_TO = 'support@resneo.com';
-const FROM = { email: 'hello@resneo.com', name: 'Resneo' };
+const FROM = { email: 'hello@resneo.com', name: 'ResNeo' };
 
 const supportSchema = z
   .object({

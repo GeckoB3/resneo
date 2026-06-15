@@ -996,16 +996,24 @@ export async function POST(request: NextRequest) {
       if (!svc) {
         return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
       }
-      if (staffWalkIn && parsed.data.duration_minutes != null) {
+      if (staffWalkIn) {
+        // Walk-ins are deliberately allowed past opening hours (e.g. a walk-in taken
+        // after closing) and may double-book (allowBookingOverlap), but they must still
+        // respect breaks and blocked time (breaks, scheduled classes/events, leave).
+        // Validate even when no explicit duration override is supplied — otherwise the
+        // booking would be created with no break/block check at all. The catalogue
+        // duration already folds in any add-on extension applied to the engine input.
+        const walkInEndMinutes =
+          parsed.data.duration_minutes != null
+            ? parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes
+            : svc.duration_minutes;
         const intervalCheck = validateAppointmentCustomInterval(
           appointmentInput,
           practitioner_id,
           appointment_service_id,
           timeStr,
-          endHHmmFromDuration(timeStr, parsed.data.duration_minutes),
+          endHHmmFromDuration(timeStr, walkInEndMinutes),
           undefined,
-          // Walk-ins are deliberately allowed past opening hours (e.g. a walk-in
-          // taken after closing). Keep the overlap/duration checks, drop the hours gate.
           { allowBookingOverlap: true, allowOutsideHours: true },
         );
         if (!intervalCheck.ok) {

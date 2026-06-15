@@ -3,9 +3,9 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Customer Terms - Resneo',
+  title: 'Customer Terms - ResNeo',
   description:
-    'Customer subscription terms governing your use of the Resneo platform as a business customer, operated by JAR 26 LTD trading as Resneo.',
+    'Customer subscription terms governing your use of the ResNeo platform as a business customer, operated by JAR 26 LTD trading as ResNeo.',
 };
 
 const LAST_UPDATED = '18 May 2026';
@@ -16,7 +16,7 @@ export default function CustomerTermsPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
           <Link href="/">
-            <Image src="/Logo.png" alt="Resneo" width={120} height={36} className="h-8 w-auto" />
+            <Image src="/Logo.png" alt="ResNeo" width={120} height={36} className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -26,7 +26,7 @@ export default function CustomerTermsPage() {
           <h1 className="mb-2 text-3xl font-bold text-slate-900">Customer Terms</h1>
           <p className="mb-2 text-sm text-slate-500">Last updated: {LAST_UPDATED}</p>
           <p className="mb-8 text-sm text-slate-500">
-            These terms apply to business customers who subscribe to and use the Resneo platform.
+            These terms apply to business customers who subscribe to and use the ResNeo platform.
           </p>
 
           <div className="space-y-8 text-sm leading-relaxed text-slate-700">
@@ -35,12 +35,12 @@ export default function CustomerTermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">1. Who these terms apply to</h2>
               <p>
                 These Customer Terms (&ldquo;Terms&rdquo;) apply to you (&ldquo;Customer&rdquo;, &ldquo;you&rdquo;,
-                &ldquo;your&rdquo;) when you sign up for, subscribe to, or use the Resneo platform as a
-                business customer. They form a binding contract between you and JAR 26 LTD trading as Resneo
-                (&ldquo;Resneo&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;).
+                &ldquo;your&rdquo;) when you sign up for, subscribe to, or use the ResNeo platform as a
+                business customer. They form a binding contract between you and JAR 26 LTD trading as ResNeo
+                (&ldquo;ResNeo&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;).
               </p>
               <p className="mt-3">
-                By completing sign-up, ticking the acceptance checkbox, or accessing the Resneo platform, you
+                By completing sign-up, ticking the acceptance checkbox, or accessing the ResNeo platform, you
                 confirm that you have read, understood, and agreed to these Terms, and that you have the authority to
                 enter into this agreement on behalf of the business you are registering.
               </p>
@@ -58,15 +58,15 @@ export default function CustomerTermsPage() {
                   Data Processing Agreement
                 </Link>
                 . Where there is a conflict between these Customer Terms and the Website Terms of Use, these
-                Customer Terms take priority for your use of the paid Resneo platform.
+                Customer Terms take priority for your use of the paid ResNeo platform.
               </p>
             </section>
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">2. Who we are</h2>
               <p>
-                Resneo is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
-                NI740269, trading as Resneo.
+                ResNeo is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
+                NI740269, trading as ResNeo.
               </p>
               <p className="mt-3">Our registered office is 100a Main Street, Bangor, Northern Ireland, BT20 4AG.</p>
               <p className="mt-3">Our trading address is 5 Church Road, Holywood, Northern Ireland, BT18 9BU.</p>
@@ -82,7 +82,7 @@ export default function CustomerTermsPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">3. Your subscription</h2>
               <p>
-                Your subscription gives you access to the Resneo platform features included in the plan you
+                Your subscription gives you access to the ResNeo platform features included in the plan you
                 selected at sign-up (&ldquo;Plan&rdquo;). Your Plan, pricing, and included features are confirmed
                 in the order summary shown before checkout and in the confirmation provided by us or our payment
                 processor following successful payment.
@@ -163,7 +163,7 @@ export default function CustomerTermsPage() {
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">6. Acceptable use</h2>
-              <p>You must use the Resneo platform only for lawful purposes. You must not:</p>
+              <p>You must use the ResNeo platform only for lawful purposes. You must not:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>use the platform for any unlawful, fraudulent, or deceptive purpose;</li>
                 <li>
@@ -197,7 +197,7 @@ export default function CustomerTermsPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">7. Your data</h2>
               <p>
-                You retain ownership of all data you upload to or generate through the Resneo platform,
+                You retain ownership of all data you upload to or generate through the ResNeo platform,
                 including guest records, booking data, and business information (&ldquo;Customer Data&rdquo;). We
                 do not claim any ownership rights over Customer Data.
               </p>
@@ -221,8 +221,8 @@ export default function CustomerTermsPage() {
               </p>
               <h3 className="mb-2 mt-6 text-base font-semibold text-slate-900">Linked Accounts</h3>
               <p>
-                Resneo may offer an optional &ldquo;Linked Accounts&rdquo; feature for eligible appointment-based
-                venues. This lets two or more independent venues that each hold their own Resneo subscription
+                ResNeo may offer an optional &ldquo;Linked Accounts&rdquo; feature for eligible appointment-based
+                venues. This lets two or more independent venues that each hold their own ResNeo subscription
                 grant each other controlled visibility into calendars and (where agreed) limited booking actions.
                 Linking does not merge your data: each venue remains the owner of its own guest records and bookings.
               </p>
@@ -236,14 +236,14 @@ export default function CustomerTermsPage() {
               <p className="mt-3">
                 Cross-venue actions taken under a link may be recorded in an audit log visible to both venues. If a
                 linked venue ends its subscription or is removed from the platform, cross-venue access ends
-                automatically. Resneo is not responsible for how a linked venue uses access you grant.
+                automatically. ResNeo is not responsible for how a linked venue uses access you grant.
               </p>
             </section>
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">8. Intellectual property</h2>
               <p>
-                The Resneo platform, software, branding, trade names, logos, designs, documentation, and all
+                The ResNeo platform, software, branding, trade names, logos, designs, documentation, and all
                 associated intellectual property rights are owned by or licensed to JAR 26 LTD. These Terms do not
                 grant you any rights in or to our intellectual property other than the limited right to access and
                 use the platform in accordance with these Terms during the term of your subscription.
@@ -347,7 +347,7 @@ export default function CustomerTermsPage() {
               <p>These Customer Terms are governed by the law of Northern Ireland.</p>
               <p className="mt-3">
                 The courts of Northern Ireland will have exclusive jurisdiction over any dispute arising out of or
-                in connection with these Terms or your use of the Resneo platform.
+                in connection with these Terms or your use of the ResNeo platform.
               </p>
               <p className="mt-3">
                 Before commencing formal proceedings, the parties agree to attempt to resolve disputes informally
@@ -359,7 +359,7 @@ export default function CustomerTermsPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">15. General</h2>
               <p>
                 <strong>Entire agreement.</strong> These Customer Terms, together with the Website Terms of Use,
-                Privacy Policy, and Data Processing Agreement, form the entire agreement between you and Resneo
+                Privacy Policy, and Data Processing Agreement, form the entire agreement between you and ResNeo
                 in relation to your use of the platform, and supersede any prior representations, agreements, or
                 discussions.
               </p>
@@ -404,7 +404,7 @@ export default function CustomerTermsPage() {
           </Link>
           {' · '}
           <Link href="/" className="hover:text-brand-600">
-            Back to Resneo
+            Back to ResNeo
           </Link>
         </div>
       </main>

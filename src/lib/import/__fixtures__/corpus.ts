@@ -13,7 +13,7 @@ export interface CorpusFixture {
   csv: string;
   /** Expected platform from detectPlatform (null = unknown). */
   expectedPlatform: string | null;
-  /** Golden column → Resneo field expectations for AI/template mapping evals. */
+  /** Golden column → ResNeo field expectations for AI/template mapping evals. */
   expectedMappings: Record<string, string>;
 }
 

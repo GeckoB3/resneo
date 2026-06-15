@@ -24,7 +24,7 @@ function mapStripeSubscriptionStatus(status: Stripe.Subscription.Status): string
 }
 
 /**
- * Upserts `class_memberships` when a Connect-account subscription carries Resneo metadata.
+ * Upserts `class_memberships` when a Connect-account subscription carries ResNeo metadata.
  */
 export async function syncClassMembershipFromStripeSubscription(
   admin: SupabaseClient,

@@ -17,7 +17,7 @@ export default async function SignupLayout({ children }: { children: React.React
       <nav className="border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
           <Link href="/" className="flex-shrink-0">
-            <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+            <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
           </Link>
           <SignupNavAuth />
         </div>

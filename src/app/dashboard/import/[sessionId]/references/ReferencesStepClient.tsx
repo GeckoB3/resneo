@@ -492,7 +492,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Set up services &amp; staff</h1>
         <p className="mt-1 text-sm text-slate-600">
-          The services and staff named in your files are matched to what you already have on Resneo. Anything we
+          The services and staff named in your files are matched to what you already have on ResNeo. Anything we
           couldn&apos;t match can be added as new right here — services just need a duration and price. Complete this
           step before validation.
         </p>
@@ -587,7 +587,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-slate-600">
-                  For each item: <strong>Map</strong> it to something you already have on Resneo,{' '}
+                  For each item: <strong>Map</strong> it to something you already have on ResNeo,{' '}
                   <strong>Add as new</strong> to set it up now (services ask for duration and price), or{' '}
                   <strong>Skip</strong> to leave those booking rows out of the import.
                 </p>

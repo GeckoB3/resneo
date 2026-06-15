@@ -507,6 +507,79 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
   });
 });
 
+describe('validateAppointmentCustomInterval: breaks and blocked ranges', () => {
+  const date = '2030-06-03';
+  const dk = workingHoursDayKey(date);
+  function inputWith(opts: {
+    breaks?: Array<{ start: string; end: string }>;
+    blocked?: import('@/lib/availability/appointment-engine').PractitionerCalendarBlockedRange[];
+  }): AppointmentEngineInput {
+    return {
+      date,
+      skipPastSlotFilter: true,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: opts.breaks ?? [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's90',
+          name: 'Tint',
+          duration_minutes: 90,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          processing_time_blocks: [],
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's90', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: [],
+      practitionerBlockedRanges: opts.blocked ?? [],
+    };
+  }
+
+  it('rejects a booking overlapping a break', () => {
+    const r = validateAppointmentCustomInterval(
+      inputWith({ breaks: [{ start: '13:00', end: '13:30' }] }),
+      'p1', 's90', '13:15', '14:45', undefined, { allowOutsideHours: true },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('Conflicts with a break');
+  });
+
+  it('allows a booking that starts exactly when the break ends (half-open boundary)', () => {
+    const r = validateAppointmentCustomInterval(
+      inputWith({ breaks: [{ start: '13:00', end: '13:30' }] }),
+      'p1', 's90', '13:30', '15:00', undefined, { allowOutsideHours: true },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('names a scheduled class/event conflict distinctly from a generic blocked time', () => {
+    const session = validateAppointmentCustomInterval(
+      inputWith({ blocked: [{ practitioner_id: 'p1', start: 14 * 60, end: 15 * 60, kind: 'scheduled_session' }] }),
+      'p1', 's90', '13:30', '15:00', undefined, { allowOutsideHours: true },
+    );
+    expect(session.ok).toBe(false);
+    expect(session.reason).toBe('Overlaps a scheduled class or event');
+
+    const generic = validateAppointmentCustomInterval(
+      inputWith({ blocked: [{ practitioner_id: 'p1', start: 14 * 60, end: 15 * 60 }] }),
+      'p1', 's90', '13:30', '15:00', undefined, { allowOutsideHours: true },
+    );
+    expect(generic.ok).toBe(false);
+    expect(generic.reason).toBe('Blocked time');
+  });
+});
+
 // ── Add-ons: validating the engine sees the EXTENDED duration ─────────────────
 // The plan (§6.1) says callers must apply add-on minutes to the service input
 // BEFORE invoking the engine. These tests fixture the supported pattern: callers

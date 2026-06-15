@@ -12,11 +12,11 @@ import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fe
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 
 export const metadata: Metadata = {
-  title: "Resneo for Restaurants | Table Booking & Deposit Protection",
+  title: "ResNeo for Restaurants | Table Booking & Deposit Protection",
   description:
     "Fill more covers with 24/7 online booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan.",
   openGraph: {
-    title: "Resneo for Restaurants",
+    title: "ResNeo for Restaurants",
     description:
       "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan.",
     type: "website",
@@ -121,7 +121,7 @@ const howItWorks = [
     step: "1",
     title: "Shape your venue",
     description:
-      "Services, openings, seating, deposit rules: set the guardrails once. Bring your menus and policies; Resneo adapts.",
+      "Services, openings, seating, deposit rules: set the guardrails once. Bring your menus and policies; ResNeo adapts.",
   },
   {
     step: "2",
@@ -169,12 +169,12 @@ const features = [
   {
     title: "Online booking page + widget embed",
     description:
-      "Branded journeys on Resneo-hosted pages or tucked into your own site without redirect fatigue.",
+      "Branded journeys on ResNeo-hosted pages or tucked into your own site without redirect fatigue.",
   },
   {
     title: "Deposits and pre-payments via Stripe Connect",
     description:
-      "Charge per-booking or per-head; payouts route to your connected account. Resneo never holds booking money.",
+      "Charge per-booking or per-head; payouts route to your connected account. ResNeo never holds booking money.",
   },
   {
     title: "Confirm-or-cancel by SMS",
@@ -210,7 +210,7 @@ const faqs = [
   },
   {
     q: "We already pay for another booking stack. Why switch?",
-    a: "Resneo is built for independent operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack, without per-cover commission.",
+    a: "ResNeo is built for independent operators who want transparent pricing, direct Stripe payouts, and tooling that matches how you actually run service: day sheet, tables, floor plan, deposits, and comms in one stack, without per-cover commission.",
   },
   {
     q: "How do deposits work for restaurants?",
@@ -226,7 +226,7 @@ const faqs = [
   },
   {
     q: "Do you cover cafés and pubs with food?",
-    a: "Yes. If you take timed reservations, covers, or mixed service models, Resneo flexes to match: single venue today, built for the founders we know best.",
+    a: "Yes. If you take timed reservations, covers, or mixed service models, ResNeo flexes to match: single venue today, built for the founders we know best.",
   },
   {
     q: "How fast can we go live?",
@@ -261,7 +261,7 @@ function Nav() {
     <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="Resneo" className="h-9 w-auto" />
+          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <a
@@ -479,7 +479,7 @@ function ProblemSection() {
             <span className="text-slate-500">Busy service still needs perfect information.</span>
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            You are choreographing heat, timing, and guest emotion in real time. Resneo keeps booking, money, and guest
+            You are choreographing heat, timing, and guest emotion in real time. ResNeo keeps booking, money, and guest
             context off your mental load so the team can focus on the room.
           </p>
         </div>
@@ -515,7 +515,7 @@ function SolutionIntro() {
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
-          Resneo for Restaurants
+          ResNeo for Restaurants
         </span>
         <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">One backbone for bookings, money and service.</h2>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
@@ -763,7 +763,7 @@ function ClientBenefitsSection() {
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
               Modern diners expect concierge-level certainty: instant confirmations, humane reminders, respectful deposit
-              language. Resneo makes your digital handshake as warm as your welcome at the door.
+              language. ResNeo makes your digital handshake as warm as your welcome at the door.
             </p>
             <ul className="mt-8 space-y-3">
               {clientBenefits.map((c) => (
@@ -943,7 +943,7 @@ function BookingChannelsSection() {
             Guests book wherever they discover you. One live diary absorbs it all.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Instagram stories, QR on menus, concierge links inside hotel confirmation emails: all route into Resneo without
+            Instagram stories, QR on menus, concierge links inside hotel confirmation emails: all route into ResNeo without
             copy-pasting details into a rogue spreadsheet tonight at midnight.
           </p>
         </div>
@@ -952,7 +952,7 @@ function BookingChannelsSection() {
           <ChannelCard
             label="Embed"
             title="Keep traffic on your own site"
-            description="Resneo disappears into your branded pages: fast load, cohesive story, bookings still sync centrally."
+            description="ResNeo disappears into your branded pages: fast load, cohesive story, bookings still sync centrally."
             visual={<EmbedRestaurantVisual />}
             featured
           />
@@ -1120,7 +1120,7 @@ function VenueTypesSection() {
             Independent rooms with something to prove.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            From coastal tasting menus to city brunch institutions, Resneo aligns with operators who obsess over vibe,
+            From coastal tasting menus to city brunch institutions, ResNeo aligns with operators who obsess over vibe,
             pacing, plates, people.
           </p>
         </div>
@@ -1302,7 +1302,7 @@ function Footer() {
     <footer className="border-t border-slate-100 bg-slate-50 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
         <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
           <Link href="/" className="transition-colors hover:text-slate-900">

@@ -1,5 +1,5 @@
 /**
- * Shared line-icon set for Resneo marketing/solution pages (e.g. /beauty-booking-software,
+ * Shared line-icon set for ResNeo marketing/solution pages (e.g. /beauty-booking-software,
  * /wellness-booking-software). Heroicons-style 24×24 outline glyphs. Every icon takes an
  * optional `className` (default `h-5 w-5`) so callers control size and colour via Tailwind.
  */

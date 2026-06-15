@@ -127,7 +127,7 @@ export const BOOKING_THEME_PRESETS: Array<{
   primary: string;
   accent: string;
 }> = [
-  { key: 'navy', label: 'Resneo Navy', primary: '#003b6f', accent: '#00c2c7' },
+  { key: 'navy', label: 'ResNeo Navy', primary: '#003b6f', accent: '#00c2c7' },
   { key: 'forest', label: 'Forest', primary: '#14532d', accent: '#65a30d' },
   { key: 'plum', label: 'Plum', primary: '#6b21a8', accent: '#db2777' },
   { key: 'charcoal', label: 'Charcoal', primary: '#1f2937', accent: '#f59e0b' },
@@ -254,7 +254,7 @@ export function primaryNeedsDarkText(primaryHex: string): boolean {
 
 /**
  * CSS custom properties that override the brand ramp for the booking page. Returns an
- * empty object when no primary is configured (page keeps the default Resneo theme).
+ * empty object when no primary is configured (page keeps the default ResNeo theme).
  */
 export function bookingPageThemeVars(
   config: BookingPageConfig | null | undefined,

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SocialLinks } from "@/components/marketing/SocialLinks";
 import Script from "next/script";
 import ContactForm from "@/components/ContactForm";
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from "@/lib/embed/widget-frame";
@@ -17,7 +18,7 @@ import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy"
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 
 /**
- * "Book a demo" embed: the Resneo Demo venue (resneodemo@resneo.com) booking widget,
+ * "Book a demo" embed: the ResNeo Demo venue (resneodemo@resneo.com) booking widget,
  * same origin as the dashboard embed snippet — on production this is the live venue.
  */
 const demoPublicOrigin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
@@ -50,7 +51,7 @@ const platformFeatures = [
   },
   {
     title: "Any bookable business",
-    description: "Barbers, salons, studios, clinics, courts, escape rooms, and restaurants. If it's bookable, Resneo handles it.",
+    description: "Barbers, salons, studios, clinics, courts, escape rooms, and restaurants. If it's bookable, ResNeo handles it.",
     icon: GridIcon,
   },
   {
@@ -101,7 +102,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <Link href="/" className="flex-shrink-0">
-            <img src="/Logo.png" alt="Resneo" className="h-8 w-auto" />
+            <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
           </Link>
           <div className="hidden items-center gap-8 md:flex">
             <a href="#features" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Features</a>
@@ -147,7 +148,7 @@ export default function Home() {
             </HomeReveal>
             <HomeReveal delay={150}>
               <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
-                Resneo is the simple, all-in-one booking platform for busy businesses. Fill your diary, automate every reminder, and take deposits or payments if needed, all without the admin.
+                ResNeo is the simple, all-in-one booking platform for busy businesses. Fill your diary, automate every reminder, and take deposits or payments if needed, all without the admin.
               </p>
             </HomeReveal>
             <HomeReveal delay={220}>
@@ -336,9 +337,9 @@ export default function Home() {
       <section id="video" className="scroll-mt-16 bg-white py-20 sm:py-24">
         <div className="mx-auto max-w-4xl px-6">
           <HomeReveal className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">See Resneo in action</h2>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">See ResNeo in action</h2>
             <p className="mx-auto mt-4 max-w-2xl text-slate-500">
-              A quick look at how Resneo helps you take bookings, cut no-shows, and get hours back every week.
+              A quick look at how ResNeo helps you take bookings, cut no-shows, and get hours back every week.
             </p>
           </HomeReveal>
           <HomeReveal delay={100}>
@@ -347,7 +348,7 @@ export default function Home() {
                 <iframe
                   className="h-full w-full"
                   src="https://www.youtube-nocookie.com/embed/o6QeXkH0q-0?rel=0&vq=hd720"
-                  title="Resneo promo video"
+                  title="ResNeo promo video"
                   loading="lazy"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
@@ -389,14 +390,14 @@ export default function Home() {
                     Three founders on a mission to help your business thrive
                   </h2>
                   <p className="mt-3 text-sm leading-relaxed text-slate-600 sm:text-base">
-                    We are a small, independent team who build the product, answer the phone, and genuinely care that Resneo works for you. Meet us and see what we stand for.
+                    We are a small, independent team who build the product, answer the phone, and genuinely care that ResNeo works for you. Meet us and see what we stand for.
                   </p>
                 </div>
                 <Link
                   href="/about"
                   className="group inline-flex h-12 flex-shrink-0 items-center rounded-xl bg-brand-600 px-7 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:text-base"
                 >
-                  About Resneo
+                  About ResNeo
                   <svg className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
                   </svg>
@@ -489,7 +490,7 @@ export default function Home() {
             <HomeReveal>
               <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Book a demo</h2>
               <p className="mt-4 max-w-md text-slate-500">
-                Pick a time that suits you and one of the team will give you a personal walkthrough of Resneo.
+                Pick a time that suits you and one of the team will give you a personal walkthrough of ResNeo.
               </p>
               <ul className="mt-8 space-y-4">
                 {[
@@ -508,7 +509,7 @@ export default function Home() {
                 ))}
               </ul>
               <p className="mt-8 text-sm text-slate-500">
-                And here&rsquo;s the best part: the booking form on the right <em>is</em> Resneo, the same widget your
+                And here&rsquo;s the best part: the booking form on the right <em>is</em> ResNeo, the same widget your
                 customers would use on your website.
               </p>
             </HomeReveal>
@@ -521,7 +522,7 @@ export default function Home() {
                   style={{ border: "none", overflow: "hidden" }}
                   scrolling="no"
                   id="reserveni-widget"
-                  title="Book a Resneo demo"
+                  title="Book a ResNeo demo"
                 />
               </div>
             </HomeReveal>
@@ -533,7 +534,7 @@ export default function Home() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 Resneo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+            &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/solutions" className="transition-colors hover:text-slate-900">Solutions</Link>
@@ -543,6 +544,7 @@ export default function Home() {
             <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">Contact</a>
             <Link href="/terms" className="transition-colors hover:text-slate-900">Website Terms of Use</Link>
             <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
+            <SocialLinks />
           </div>
         </div>
       </footer>

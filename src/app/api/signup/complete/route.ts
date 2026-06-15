@@ -204,6 +204,8 @@ export async function POST(request: Request) {
           admin,
           salesCode: salesCodeFromSession,
           referredVenueId: venue.id,
+          refereeEmail: ownerEmail,
+          refereeUserId: user.id,
         });
       } else {
         const referralCodeFromSession = session.metadata?.referral_code?.trim() || null;

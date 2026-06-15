@@ -538,7 +538,7 @@ A **membership** is a Stripe-billed subscription that gives the member ongoing c
 
 Two ways to attach a Stripe price:
 
-1. **Recurring price + interval** (recommended) — Resneo creates a Stripe Product and a recurring Price on your connected account when you save the plan. Change the price or interval later and a new Price is generated; the old one is archived automatically.
+1. **Recurring price + interval** (recommended) — ResNeo creates a Stripe Product and a recurring Price on your connected account when you save the plan. Change the price or interval later and a new Price is generated; the old one is archived automatically.
 2. **Paste an existing Stripe Price ID** — useful if you already manage subscriptions externally.
 
 Active plans must have a Stripe price attached so guests can subscribe.
@@ -547,7 +547,7 @@ Active plans must have a Stripe price attached so guests can subscribe.
 
 1. From the public **Classes** tab they click **Start membership** on the plan.
 2. They're sent to Stripe-hosted Checkout (on your connected account) to enter card details.
-3. The webhook syncs the subscription to Resneo and sends a **Membership started** welcome email.
+3. The webhook syncs the subscription to ResNeo and sends a **Membership started** welcome email.
 
 ## Period boundaries and allowance reset
 
@@ -570,7 +570,7 @@ When a guest books a class with a paid line and they hold a membership covering 
 
 ## Archiving
 
-When you archive a membership product, Resneo automatically archives the Stripe Product and Price on the connected account. Existing members keep their subscription until they cancel — the plan just stops being offered to new buyers.
+When you archive a membership product, ResNeo automatically archives the Stripe Product and Price on the connected account. Existing members keep their subscription until they cancel — the plan just stops being offered to new buyers.
 
 ## Tips
 
@@ -728,7 +728,7 @@ If a staff member is stuck, they can still use **Support** from the sidebar foot
       content: `
 # Get paid the way you promise
 
-Resneo never holds your funds—card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
+ResNeo never holds your funds—card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
 
 **What this covers:** a short go-live checklist, staff-created bookings when payment is required, and keeping messages aligned with your policy.
 
@@ -872,7 +872,7 @@ Exports contain personal data—store them securely and delete local copies when
 
 1. **Start** a new import session.
 2. **Upload** the CSV export from your previous system (any platform is fine as long as columns are consistent).
-3. **Map** columns to Resneo fields—save mapping presets when you expect repeat uploads.
+3. **Map** columns to ResNeo fields—save mapping presets when you expect repeat uploads.
 4. **Validate** to catch missing emails, impossible dates, or duplicates.
 5. **Review** counts: new clients, new bookings, skipped rows, updates to existing profiles.
 6. **Execute** when you are confident.
@@ -928,7 +928,7 @@ Legacy menu entries redirect here automatically.
 
 ## iframe snippet checklist
 
-- Copy the **iframe** HTML Resneo generates for you.
+- Copy the **iframe** HTML ResNeo generates for you.
 - Optional query params:
   - \`?accent=RRGGBB\` (hex **without** the hash) to tint buttons to match your brand.
   - \`?tab=appointments\` | \`tables\` | \`events\` | \`classes\` | \`resources\` to open a specific tab when the venue exposes that model.
@@ -945,7 +945,7 @@ Widget bookings record **source = widget** so **Reports** can compare marketing 
 ## Marketing ideas
 
 - Drop the hosted link in Instagram bios or Google Business Profiles.
-- Embed the iframe on your “Book now” page to keep traffic on your domain while checkout still runs securely inside Resneo.
+- Embed the iframe on your “Book now” page to keep traffic on your domain while checkout still runs securely inside ResNeo.
 
 ## Related articles
 

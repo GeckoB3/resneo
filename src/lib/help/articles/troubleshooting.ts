@@ -19,7 +19,7 @@ export const troubleshootingCategory: HelpCategory = {
 
 ## Guest card payments (Stripe Connect)
 
-Guest money is charged on your **Stripe Connect** account (direct charges). Resneo never holds the deposit.
+Guest money is charged on your **Stripe Connect** account (direct charges). ResNeo never holds the deposit.
 
 1. Open **Settings → Payments** and finish every Connect step (business details, bank account, then identity where Stripe asks).
 2. If Stripe shows **restricted** or **pending requirements**, open the **Stripe Dashboard** from the links in app and clear every task.
@@ -35,11 +35,11 @@ Guest money is charged on your **Stripe Connect** account (direct charges). Resn
 
 Connect the **venue** that should receive funds. Changing entity later means going through Stripe disconnect and reconnect flows. Talk to **Support** (\`/dashboard/support\`) before doing that on a live venue with history.
 
-## Resneo subscription vs Stripe Connect
+## ResNeo subscription vs Stripe Connect
 
 These are separate:
 
-- **Settings → Plan** is your **Resneo** subscription (Light, Plus, Pro, Restaurant, Founding Partner). If that is **past due** or fully ended, **dashboard writes** can be blocked and **public online booking** may be paused depending on tier (see the availability troubleshooting article).
+- **Settings → Plan** is your **ResNeo** subscription (Light, Plus, Pro, Restaurant, Founding Partner). If that is **past due** or fully ended, **dashboard writes** can be blocked and **public online booking** may be paused depending on tier (see the availability troubleshooting article).
 - **Settings → Payments** is **Connect** for **guest** card charges.
 
 Fix the side that matches the banner you see, then retest guest payment in a clean browser session.
@@ -51,7 +51,7 @@ Fix the side that matches the banner you see, then retest guest payment in a cle
 
 On Appointments SKUs you still take guest card payments through **Stripe Connect** at **Settings → Payments**. The section walks through the same two step pattern (business and bank, then representative verification when required).
 
-Until Connect reaches the **active** state shown in app, assume guests cannot complete card steps even if your **Resneo** subscription is healthy.
+Until Connect reaches the **active** state shown in app, assume guests cannot complete card steps even if your **ResNeo** subscription is healthy.
 
 ## Appointments Light and SMS meter (not Connect)
 
@@ -90,7 +90,7 @@ A **503** style response from \`/api/booking/availability\` with text about **no
 
 ## Subscription vs Connect
 
-**Settings → Plan** covers your **Resneo** subscription. **Past due** blocks **dashboard mutations** for all tiers. **Public** booking is paused when the subscription has **fully ended** (and for **Appointments Light** combined with **past due**, which is not your tier, but listed here so you understand mixed documentation if you ever downgrade test venues).
+**Settings → Plan** covers your **ResNeo** subscription. **Past due** blocks **dashboard mutations** for all tiers. **Public** booking is paused when the subscription has **fully ended** (and for **Appointments Light** combined with **past due**, which is not your tier, but listed here so you understand mixed documentation if you ever downgrade test venues).
 
 ## Wrong account or reconnect
 
@@ -315,7 +315,7 @@ Open **Settings → Data import** (\`/dashboard/import\`), run **Validate** on y
 
 ## Column mapping
 
-Map each source column to the correct Resneo field. Double check **timezone** interpretation for datetime columns if your export was generated in UTC.
+Map each source column to the correct ResNeo field. Double check **timezone** interpretation for datetime columns if your export was generated in UTC.
 
 ## Execute and partial success
 
@@ -334,7 +334,7 @@ Attach the import **report CSV** and a small redacted sample of the source file,
 
 ## Same importer, schedule heavy CSVs
 
-Appointments venues often import **clients** and **bookings** that reference services or calendars. Validation will fail if practitioner or service ids from the old system do not map cleanly to Resneo ids. Use the mapper UI carefully.
+Appointments venues often import **clients** and **bookings** that reference services or calendars. Validation will fail if practitioner or service ids from the old system do not map cleanly to ResNeo ids. Use the mapper UI carefully.
 
 ## Validate before execute
 

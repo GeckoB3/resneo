@@ -3,9 +3,9 @@ import Image from 'next/image';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy - Resneo',
+  title: 'Privacy Policy - ResNeo',
   description:
-    'How JAR 26 LTD trading as Resneo collects, uses, and protects personal data when you use our website, platform and booking features.',
+    'How JAR 26 LTD trading as ResNeo collects, uses, and protects personal data when you use our website, platform and booking features.',
 };
 
 const LAST_UPDATED = '01 May 2026';
@@ -16,7 +16,7 @@ export default function PrivacyPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
           <Link href="/">
-            <Image src="/Logo.png" alt="Resneo" width={120} height={36} className="h-8 w-auto" />
+            <Image src="/Logo.png" alt="ResNeo" width={120} height={36} className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -28,18 +28,18 @@ export default function PrivacyPage() {
 
           <div className="prose prose-slate max-w-none space-y-8 text-sm leading-relaxed text-slate-700">
             <p>
-              This Privacy Policy explains how JAR 26 LTD trading as Resneo collects, uses and protects personal
-              data when you use our website, contact us, enquire about our services, sign up for Resneo, or interact
-              with booking pages or platform features operated using Resneo.
+              This Privacy Policy explains how JAR 26 LTD trading as ResNeo collects, uses and protects personal
+              data when you use our website, contact us, enquire about our services, sign up for ResNeo, or interact
+              with booking pages or platform features operated using ResNeo.
             </p>
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">1. Who we are</h2>
               <p>
-                Resneo is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
+                ResNeo is operated by JAR 26 LTD, a company registered in Northern Ireland under company number
                 NI740269.
               </p>
-              <p className="mt-3">We trade as Resneo.</p>
+              <p className="mt-3">We trade as ResNeo.</p>
               <p className="mt-3">
                 Our registered office is 100a Main Street, Bangor, Northern Ireland, BT20 4AG.
               </p>
@@ -71,15 +71,15 @@ export default function PrivacyPage() {
                 <li>visits to our public website;</li>
                 <li>enquiries, contact forms and demo requests;</li>
                 <li>sales, onboarding and customer communications;</li>
-                <li>Resneo business customer accounts;</li>
+                <li>ResNeo business customer accounts;</li>
                 <li>support requests;</li>
                 <li>platform administration, security and billing;</li>
                 <li>
-                  guest or client bookings made through Resneo-powered booking pages, where applicable.
+                  guest or client bookings made through ResNeo-powered booking pages, where applicable.
                 </li>
               </ul>
               <p className="mt-3">
-                Business customers who use the Resneo platform may receive additional contractual data-protection
+                Business customers who use the ResNeo platform may receive additional contractual data-protection
                 terms during onboarding, including a data processing addendum. Those terms govern our processing of
                 venue-controlled guest/client data in more detail.
               </p>
@@ -92,16 +92,16 @@ export default function PrivacyPage() {
               <p>
                 For personal data collected through our website, sales enquiries, customer accounts, billing, support,
                 security, legal compliance, business administration and our own marketing, JAR 26 LTD trading as
-                Resneo is usually the controller.
+                ResNeo is usually the controller.
               </p>
               <p className="mt-3">
                 For personal data about guests, clients or end users that venues or business customers enter into or
-                collect through the Resneo platform, the venue or business customer is usually the controller and
-                Resneo acts as processor on that venue&apos;s behalf.
+                collect through the ResNeo platform, the venue or business customer is usually the controller and
+                ResNeo acts as processor on that venue&apos;s behalf.
               </p>
               <p className="mt-3">
                 Venue customers are responsible for ensuring they have an appropriate lawful basis, privacy notice and
-                any required consents for the personal data they collect and use through Resneo.
+                any required consents for the personal data they collect and use through ResNeo.
               </p>
               <p className="mt-3">
                 If you are a guest or client of a venue and your request relates to a booking, service, cancellation,
@@ -113,7 +113,7 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">4. Personal data we collect</h2>
-              <p>Depending on how you use Resneo, we may collect and process the following types of personal data:</p>
+              <p>Depending on how you use ResNeo, we may collect and process the following types of personal data:</p>
 
               <p className="mt-4 font-semibold text-slate-900">Website visitors and enquirers</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -145,7 +145,7 @@ export default function PrivacyPage() {
                 <li>audit logs, security logs and usage records.</li>
               </ul>
 
-              <p className="mt-4 font-semibold text-slate-900">Guests or clients using Resneo-powered booking pages</p>
+              <p className="mt-4 font-semibold text-slate-900">Guests or clients using ResNeo-powered booking pages</p>
               <p className="mt-2">Depending on the venue&apos;s configuration, booking pages may collect:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>name;</li>
@@ -169,12 +169,12 @@ export default function PrivacyPage() {
               </p>
               <p className="mt-3">
                 Venues should not collect health, disability, accessibility, dietary or other sensitive information
-                through Resneo unless it is necessary for the booking or service and they have a lawful basis for
+                through ResNeo unless it is necessary for the booking or service and they have a lawful basis for
                 doing so. Where a venue collects this information, the venue is responsible for explaining this to the
                 individual and complying with applicable data-protection law.
               </p>
               <p className="mt-3">
-                Resneo does not require venues to collect special-category data unless a specific platform feature or
+                ResNeo does not require venues to collect special-category data unless a specific platform feature or
                 venue configuration makes that necessary.
               </p>
             </section>
@@ -187,10 +187,10 @@ export default function PrivacyPage() {
                   directly from you when you use the website, submit a form, contact us, sign up or use the platform;
                 </li>
                 <li>from business customers who configure the platform or upload/import information;</li>
-                <li>from guests or clients who make bookings through Resneo-powered booking pages;</li>
+                <li>from guests or clients who make bookings through ResNeo-powered booking pages;</li>
                 <li>from payment providers, where payments or deposits are processed;</li>
                 <li>automatically through website, platform, security and server logs;</li>
-                <li>from third-party service providers used to operate, secure, support and improve Resneo.</li>
+                <li>from third-party service providers used to operate, secure, support and improve ResNeo.</li>
               </ul>
             </section>
 
@@ -200,9 +200,9 @@ export default function PrivacyPage() {
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>to operate and secure our website;</li>
                 <li>to respond to enquiries and demo requests;</li>
-                <li>to provide information about Resneo;</li>
+                <li>to provide information about ResNeo;</li>
                 <li>to create and manage business customer accounts;</li>
-                <li>to provide, maintain and improve the Resneo platform;</li>
+                <li>to provide, maintain and improve the ResNeo platform;</li>
                 <li>to support booking pages and booking workflows configured by venues;</li>
                 <li>to send transactional emails, confirmations, reminders, notices and service messages;</li>
                 <li>to process subscriptions, billing records and payment-provider references;</li>
@@ -217,7 +217,7 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">7. Lawful bases</h2>
-              <p>Where Resneo acts as controller, we rely on one or more of the following lawful bases:</p>
+              <p>Where ResNeo acts as controller, we rely on one or more of the following lawful bases:</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
                   <strong>Contract:</strong> where processing is necessary to provide website functions, respond to
@@ -243,7 +243,7 @@ export default function PrivacyPage() {
                 </li>
               </ul>
               <p className="mt-3">
-                Where Resneo acts as processor for venue-controlled guest/client data, we process that data on the
+                Where ResNeo acts as processor for venue-controlled guest/client data, we process that data on the
                 instructions of the relevant venue customer, subject to our customer terms and data processing terms.
               </p>
             </section>
@@ -251,11 +251,11 @@ export default function PrivacyPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">8. Guest bookings and venue-controlled data</h2>
               <p>
-                Where you make a booking with a venue through a Resneo-powered booking page, the venue is usually
+                Where you make a booking with a venue through a ResNeo-powered booking page, the venue is usually
                 responsible for deciding why and how your booking data is used.
               </p>
               <p className="mt-3">
-                Resneo provides the software and technical infrastructure that allows the venue to manage bookings,
+                ResNeo provides the software and technical infrastructure that allows the venue to manage bookings,
                 reminders, customer records, deposits and related communications.
               </p>
               <p className="mt-3">
@@ -271,11 +271,11 @@ export default function PrivacyPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">9. Payments and deposits</h2>
               <p>
-                Where payments, deposits or subscription payments are made in connection with Resneo, they are
+                Where payments, deposits or subscription payments are made in connection with ResNeo, they are
                 processed by third-party payment providers such as Stripe.
               </p>
               <p className="mt-3">
-                Resneo does not hold booking money. Booking deposits and venue payments are
+                ResNeo does not hold booking money. Booking deposits and venue payments are
                 processed and managed through the venue and/or the relevant payment provider.
               </p>
               <p className="mt-3">
@@ -291,7 +291,7 @@ export default function PrivacyPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">10. Emails, SMS and service messages</h2>
               <p>
-                Resneo and venues using Resneo may send transactional or service messages, such as booking
+                ResNeo and venues using ResNeo may send transactional or service messages, such as booking
                 confirmations, reminders, cancellation notices, deposit requests, account emails, security messages and
                 support communications.
               </p>
@@ -301,13 +301,13 @@ export default function PrivacyPage() {
               </p>
               <p className="mt-3">
                 Marketing emails, promotional SMS messages, newsletters, offers, rebooking campaigns or similar
-                marketing communications will only be sent where permitted by law. You can opt out of Resneo
+                marketing communications will only be sent where permitted by law. You can opt out of ResNeo
                 marketing communications at any time by using the unsubscribe option where provided or by contacting
                 us.
               </p>
               <p className="mt-3">
                 Venues are responsible for ensuring they have the correct permissions to send their own marketing
-                communications through or in connection with Resneo.
+                communications through or in connection with ResNeo.
               </p>
             </section>
 
@@ -336,7 +336,7 @@ export default function PrivacyPage() {
               <h2 className="mb-3 text-lg font-semibold text-slate-900">12. Who we share personal data with</h2>
               <p>
                 We may share personal data with trusted third-party providers who help us operate, secure and support
-                Resneo. These may include:
+                ResNeo. These may include:
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>hosting and infrastructure providers;</li>
@@ -457,9 +457,9 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">17. Children and minors</h2>
-              <p>Resneo is not intended for children to create business accounts or manage venue services.</p>
+              <p>ResNeo is not intended for children to create business accounts or manage venue services.</p>
               <p className="mt-3">
-                Some venues may use Resneo to manage bookings made by adults on behalf of children or young people. In
+                Some venues may use ResNeo to manage bookings made by adults on behalf of children or young people. In
                 those cases, the venue is responsible for ensuring it has appropriate privacy information, permissions
                 and safeguards for the booking and service provided.
               </p>
@@ -513,7 +513,7 @@ export default function PrivacyPage() {
           </Link>
           {' · '}
           <Link href="/" className="hover:text-brand-600">
-            Back to Resneo
+            Back to ResNeo
           </Link>
         </div>
       </main>

@@ -616,7 +616,7 @@ export function ImportMapDndView({
         </div>
 
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-slate-800">Resneo fields</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-800">ResNeo fields</h3>
           <div className="space-y-3">
             {targetFields.map((field) => {
               const mapped = targetByFieldKey.get(field.key) ?? null;

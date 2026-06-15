@@ -60,6 +60,12 @@ export interface PractitionerCalendarBlockedRange {
   practitioner_id: string;
   start: number;
   end: number;
+  /**
+   * Source of the block, used to give a specific conflict reason. Defaults to a generic
+   * "Blocked time" when omitted. `scheduled_session` = a class/event on this calendar column;
+   * `leave` = a partial staff-leave window.
+   */
+  kind?: 'blocked_time' | 'scheduled_session' | 'leave';
 }
 
 export interface AppointmentEngineInput {
@@ -216,6 +222,13 @@ export function getBreakRanges(practitioner: Practitioner, dateStr: string): Arr
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
   return startA < endB && startB < endA;
+}
+
+/** Specific conflict reason for a blocked-range hit, by source kind (defaults to generic blocked time). */
+function blockedRangeReason(kind?: PractitionerCalendarBlockedRange['kind']): string {
+  if (kind === 'scheduled_session') return 'Overlaps a scheduled class or event';
+  if (kind === 'leave') return 'Staff is on leave at this time';
+  return 'Blocked time';
 }
 
 function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
@@ -683,8 +696,9 @@ export function validateExactAppointmentStart(
   }
 
   const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
-  if (dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end))) {
-    return { ok: false, reason: 'Blocked time' };
+  const blockHitExact = dayBlocks.find((b) => overlaps(t, slotEnd, b.start, b.end));
+  if (blockHitExact) {
+    return { ok: false, reason: blockedRangeReason(blockHitExact.kind) };
   }
 
   const practitionerBookings = existingBookings.filter(
@@ -841,8 +855,9 @@ export function validateAppointmentCustomInterval(
   }
 
   const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
-  if (dayBlocks.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
-    return { ok: false, reason: 'Blocked time' };
+  const blockHit = dayBlocks.find((b) => overlaps(t, busyEnd, b.start, b.end));
+  if (blockHit) {
+    return { ok: false, reason: blockedRangeReason(blockHit.kind) };
   }
 
   if (!options?.allowBookingOverlap) {
@@ -1102,7 +1117,7 @@ export async function fetchAppointmentInput(params: {
             end: timeToMinutes(String(row.end_time).slice(0, 5)),
           }))
           .filter((b) => b.end > b.start)),
-    ...leavePartialBlocks,
+    ...leavePartialBlocks.map((b) => ({ ...b, kind: 'leave' as const })),
   ];
 
   /**
@@ -1124,6 +1139,7 @@ export async function fetchAppointmentInput(params: {
         practitioner_id: entry.practitioner_id,
         start: r.start,
         end: r.end,
+        kind: 'scheduled_session',
       });
     }
   }
@@ -1448,6 +1464,7 @@ export async function fetchCalendarAppointmentInput(params: {
     practitioner_id: calendarId,
     start: r.start,
     end: r.end,
+    kind: 'scheduled_session' as const,
   }));
 
   const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
@@ -1455,7 +1472,7 @@ export async function fetchCalendarAppointmentInput(params: {
     ...unifiedCalBlockRanges,
     ...resourceHostBlockRanges,
     ...scheduledSessionBlockRanges,
-    ...leavePartialForCalendar,
+    ...leavePartialForCalendar.map((b) => ({ ...b, kind: 'leave' as const })),
   ];
 
   if (blocksRes.error) {

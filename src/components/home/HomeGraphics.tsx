@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 
 /* ────────────────────────────────────────────────────────────────────────
    Marketing product mockups (server components, no client JS).
-   Adapted from the Resneo marketing reel into the app's brand tokens so the
+   Adapted from the ResNeo marketing reel into the app's brand tokens so the
    homepage shows the real product surfaces — calendar, booking flow, reminders,
    deposits — as polished, dimensional graphics.
    ──────────────────────────────────────────────────────────────────────── */
@@ -245,7 +245,7 @@ export function ReminderMock({ className }: { className?: string }) {
     <div className={`space-y-2 ${className ?? ''}`}>
       <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3.5 py-2.5 shadow-sm">
         <p className="text-[11px] leading-snug text-slate-700 sm:text-xs">
-          Hi Maria, a reminder for your <span className="font-semibold text-slate-900">Colour</span> with Resneo Salon tomorrow at <span className="font-semibold text-slate-900">11:30</span>. Reply <span className="font-semibold">Y</span> to confirm or <span className="font-semibold">N</span> to cancel.
+          Hi Maria, a reminder for your <span className="font-semibold text-slate-900">Colour</span> with ResNeo Salon tomorrow at <span className="font-semibold text-slate-900">11:30</span>. Reply <span className="font-semibold">Y</span> to confirm or <span className="font-semibold">N</span> to cancel.
         </p>
         <p className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Sent automatically · 24h before</p>
       </div>

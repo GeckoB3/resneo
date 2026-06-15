@@ -64,6 +64,14 @@ async function insertSalesCodeWithRetry(
 ): Promise<string> {
   for (let attempt = 0; attempt < 10; attempt++) {
     const candidate = buildCandidateSalesCode(displayName);
+    // Sales and referral codes share one namespace on the signup page, so a new sales code must
+    // not collide (case-insensitively) with an existing referral code — regenerate if it does.
+    const { data: refClash } = await admin
+      .from('referral_codes')
+      .select('id')
+      .ilike('code', candidate)
+      .limit(1);
+    if (refClash && refClash.length > 0) continue;
     const { data, error } = await admin
       .from('sales_codes')
       .insert({ salesperson_id: salespersonId, code: candidate })
@@ -305,9 +313,9 @@ export async function createSalespersonWithMagicLink(params: {
       `&type=magiclink` +
       `&next=${encodeURIComponent(nextPath)}`;
 
-    const subject = 'Resneo sales dashboard access';
+    const subject = 'ResNeo sales dashboard access';
     const text = [
-      'You have been granted access to the Resneo sales dashboard.',
+      'You have been granted access to the ResNeo sales dashboard.',
       '',
       'Open this link to sign in:',
       confirmUrl,
@@ -316,7 +324,7 @@ export async function createSalespersonWithMagicLink(params: {
     ].join('\n');
 
     const html = `
-      <p>You have been granted access to the <strong>Resneo</strong> sales dashboard.</p>
+      <p>You have been granted access to the <strong>ResNeo</strong> sales dashboard.</p>
       <p><a href="${escapeHtml(confirmUrl)}">Sign in to your sales dashboard</a></p>
       <p style="font-size:12px;color:#64748b;">If you did not expect this email, contact your administrator.</p>
     `;

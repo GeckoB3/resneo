@@ -180,7 +180,7 @@ export function StaffGuestContactFields({
           className={`${inputClassName}${emailReadOnly ? ' cursor-not-allowed bg-slate-50 text-slate-600' : ''}`}
         />
         {emailReadOnly ? (
-          <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in Resneo email.</p>
+          <p className="mt-1 text-xs text-slate-500">Bookings use your signed-in ResNeo email.</p>
         ) : null}
       </div>
 

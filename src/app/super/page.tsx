@@ -11,7 +11,7 @@ export default function SuperDashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Platform Overview</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Monitor all Resneo subscriptions and venues. KPIs cover live venues only — test venues sit
+            Monitor all ResNeo subscriptions and venues. KPIs cover live venues only — test venues sit
             under the &quot;Test venues&quot; tab below.
           </p>
         </div>

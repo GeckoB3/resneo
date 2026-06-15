@@ -6,12 +6,16 @@ interface AttachSalesAttributionParams {
   admin: SupabaseClient;
   salesCode: string | null | undefined;
   referredVenueId: string;
+  /** New venue owner's email — used to block a salesperson self-attributing their own signups. */
+  refereeEmail?: string | null;
+  /** New venue owner's auth user id — the strongest self-attribution signal (email-independent). */
+  refereeUserId?: string | null;
 }
 
 export async function attachSalesAttributionOnSignup(
   params: AttachSalesAttributionParams,
 ): Promise<void> {
-  const { admin, salesCode, referredVenueId } = params;
+  const { admin, salesCode, referredVenueId, refereeEmail, refereeUserId } = params;
   if (!salesCode) return;
   if (!salesProgrammeEnabled()) return;
 
@@ -33,6 +37,25 @@ export async function attachSalesAttributionOnSignup(
     console.warn('[sales/attach] sales code failed validation at venue creation', {
       referredVenueId,
       reason: validation.reason,
+    });
+    return;
+  }
+
+  // Anti-abuse: a salesperson must not earn commission by signing up with their own code.
+  // The auth-user check is email-independent (a salesperson can't dodge it with a +alias);
+  // the email check is a fallback for paths where the user id isn't available.
+  if (refereeUserId && validation.value.salesperson_user_id === refereeUserId) {
+    console.warn('[sales/attach] self-attribution blocked (referee is the salesperson account)', {
+      referredVenueId,
+      salespersonId: validation.value.salesperson_id,
+    });
+    return;
+  }
+  const refereeEmailNorm = (refereeEmail ?? '').trim().toLowerCase();
+  if (refereeEmailNorm && validation.value.salesperson_email === refereeEmailNorm) {
+    console.warn('[sales/attach] self-attribution blocked (referee email matches salesperson)', {
+      referredVenueId,
+      salespersonId: validation.value.salesperson_id,
     });
     return;
   }

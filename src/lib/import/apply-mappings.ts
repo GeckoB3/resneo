@@ -118,7 +118,7 @@ export function applyMappingsToDataRow(
     }
   }
 
-  // Resneo stores names as separate first + surname columns, so a single
+  // ResNeo stores names as separate first + surname columns, so a single
   // combined name column is always split. `splitFullName` handles "Surname,
   // First" and compound surnames ("Anna van der Berg"). Explicit first/last
   // mappings win — we only fill what's missing.

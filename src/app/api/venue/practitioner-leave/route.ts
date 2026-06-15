@@ -8,6 +8,7 @@ import {
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { listActiveHostCalendarIds, requireVenueHostCalendarId } from '@/lib/venue-calendar-resolve';
+import { findClosureBookingConflicts, describeClosureBookingConflict } from '@/lib/calendar/closure-booking-conflicts';
 import { z } from 'zod';
 
 const LEAVE_SELECT =
@@ -239,6 +240,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: timeNorm.error }, { status: 400 });
     }
 
+    // Unavailability cannot be inserted over existing bookings on the affected calendar(s).
+    // Full-day (no times) conflicts with any booking on a covered date; a partial window
+    // conflicts only where it overlaps. Returns a 409 response to send, or null when clear.
+    const closureScope: 'time' | 'day' = timeNorm.start ? 'time' : 'day';
+    const bookingConflictResponse = async (columnIds: string[]): Promise<NextResponse | null> => {
+      try {
+        const conflict = await findClosureBookingConflicts(admin, {
+          venueId: staff.venue_id,
+          calendarColumnIds: columnIds,
+          startDate: start_date,
+          endDate: end_date,
+          startTime: timeNorm.start,
+          endTime: timeNorm.end,
+        });
+        if (!conflict) return null;
+        const names = await calendarNamesById(admin, staff.venue_id, [conflict.calendarColumnId]);
+        return NextResponse.json(
+          {
+            error: describeClosureBookingConflict(conflict, {
+              scope: closureScope,
+              calendarName: names.get(conflict.calendarColumnId) ?? null,
+            }),
+          },
+          { status: 409 },
+        );
+      } catch (e) {
+        console.error('POST /api/venue/practitioner-leave conflict check:', e);
+        return NextResponse.json(
+          { error: 'Could not verify existing bookings for this calendar. Please try again.' },
+          { status: 500 },
+        );
+      }
+    };
+
     if (staff.role !== 'admin') {
       const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
       if (!scope.ok) {
@@ -263,6 +298,9 @@ export async function POST(request: NextRequest) {
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
       }
+      const staffConflictResp = await bookingConflictResponse(practitioner_id ? [practitioner_id] : []);
+      if (staffConflictResp) return staffConflictResp;
+
       const rows = [
         {
           venue_id: staff.venue_id,
@@ -301,6 +339,9 @@ export async function POST(request: NextRequest) {
       }
       practitionerIds = [cal.id];
     }
+
+    const adminConflictResp = await bookingConflictResponse(practitionerIds);
+    if (adminConflictResp) return adminConflictResp;
 
     const rows = practitionerIds.map((pid) => ({
       venue_id: staff.venue_id,
@@ -411,7 +452,7 @@ export async function PATCH(request: NextRequest) {
 
     const { data: existing, error: exErr } = await admin
       .from('practitioner_leave_periods')
-      .select('id, start_date, end_date')
+      .select('id, practitioner_id, start_date, end_date, unavailable_start_time, unavailable_end_time')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
@@ -424,6 +465,52 @@ export async function PATCH(request: NextRequest) {
     const nextEnd = (updates.end_date as string | undefined) ?? (existing as { end_date: string }).end_date;
     if (nextEnd < nextStart) {
       return NextResponse.json({ error: 'End date must be on or after start date' }, { status: 400 });
+    }
+
+    // Editing the dates/times of an existing closure must not extend it over bookings.
+    const datesOrTimesChanged =
+      updates.start_date !== undefined ||
+      updates.end_date !== undefined ||
+      'unavailable_start_time' in updates;
+    if (datesOrTimesChanged) {
+      const toHHmm = (v: unknown): string | null =>
+        typeof v === 'string' ? v.slice(0, 5) : v instanceof Date ? v.toISOString().slice(11, 16) : null;
+      const nextStartTime =
+        'unavailable_start_time' in updates
+          ? (updates.unavailable_start_time as string | null)
+          : toHHmm((existing as { unavailable_start_time?: unknown }).unavailable_start_time);
+      const nextEndTime =
+        'unavailable_end_time' in updates
+          ? (updates.unavailable_end_time as string | null)
+          : toHHmm((existing as { unavailable_end_time?: unknown }).unavailable_end_time);
+      try {
+        const conflict = await findClosureBookingConflicts(admin, {
+          venueId: staff.venue_id,
+          calendarColumnIds: [(existing as { practitioner_id: string }).practitioner_id],
+          startDate: nextStart,
+          endDate: nextEnd,
+          startTime: nextStartTime,
+          endTime: nextEndTime,
+        });
+        if (conflict) {
+          const names = await calendarNamesById(admin, staff.venue_id, [conflict.calendarColumnId]);
+          return NextResponse.json(
+            {
+              error: describeClosureBookingConflict(conflict, {
+                scope: nextStartTime ? 'time' : 'day',
+                calendarName: names.get(conflict.calendarColumnId) ?? null,
+              }),
+            },
+            { status: 409 },
+          );
+        }
+      } catch (e) {
+        console.error('PATCH /api/venue/practitioner-leave conflict check:', e);
+        return NextResponse.json(
+          { error: 'Could not verify existing bookings for this calendar. Please try again.' },
+          { status: 500 },
+        );
+      }
     }
 
     const { data, error } = await admin

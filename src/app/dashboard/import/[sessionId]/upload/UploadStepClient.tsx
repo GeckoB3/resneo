@@ -392,7 +392,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           <p className="mt-2">
             Excel workbooks (.xlsx, .xls) and CSV exports from existing salon, clinic, or restaurant booking systems
             all work — including files with title rows, multiple sheets, or unusual characters. On the next step your
-            columns are matched to Resneo fields automatically; you just review the result, so the source platform
+            columns are matched to ResNeo fields automatically; you just review the result, so the source platform
             does not need to be recognised.
           </p>
         </div>

@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
-import { previousMonthStartUtc, runMonthlyStatementsForAll } from '@/lib/sales/earnings';
+import {
+  previousMonthStartUtc,
+  reconcileRecentStatements,
+  runMonthlyStatementsForAll,
+} from '@/lib/sales/earnings';
 
 /**
  * POST /api/cron/sales-monthly
@@ -22,7 +26,10 @@ async function handlePost(request: NextRequest) {
     const periodMonth = previousMonthStartUtc();
     const admin = getSupabaseAdminClient();
     const { processed } = await runMonthlyStatementsForAll(admin, periodMonth);
-    return NextResponse.json({ ok: true, period_month: periodMonth, processed });
+    // Re-derive recent finalised statements so late/adjusted revenue (delayed first invoices,
+    // refunds netted into their original month) is reflected without re-awarding bonuses.
+    const { reconciled } = await reconcileRecentStatements(admin, periodMonth);
+    return NextResponse.json({ ok: true, period_month: periodMonth, processed, reconciled });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unexpected error';
     console.error('[cron sales-monthly]', msg);

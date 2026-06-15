@@ -1,7 +1,7 @@
 import { SalespeoplePageClient } from './SalespeoplePageClient';
 
 export const metadata = {
-  title: 'Salespeople | Resneo Platform',
+  title: 'Salespeople | ResNeo Platform',
 };
 
 export default function SuperSalespeoplePage() {

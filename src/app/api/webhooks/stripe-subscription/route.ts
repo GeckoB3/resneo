@@ -419,12 +419,22 @@ async function handleCheckoutCompleted(
     // created this venue under the same Stripe customer; the partial unique index on
     // venues.stripe_customer_id surfaces the duplicate as 23505. The winner also created the
     // staff row, attribution, and signup notification, so there is nothing left to do here.
-    if (venueError?.code === '23505') {
-      console.log(
-        '[Subscription webhook] Venue already provisioned by success page (unique race) for',
-        customerId,
-      );
-      return;
+    // Confirm a venue actually exists under this customer before swallowing: venues.slug is
+    // also UNIQUE, so a same-millisecond signup by a different customer can raise 23505 on the
+    // slug — that must re-throw so Stripe retries this event with a fresh `Date.now()` slug.
+    if (venueError?.code === '23505' && customerId) {
+      const { data: racedVenue } = await supabase
+        .from('venues')
+        .select('id')
+        .eq('stripe_customer_id', customerId)
+        .maybeSingle();
+      if (racedVenue) {
+        console.log(
+          '[Subscription webhook] Venue already provisioned by success page (unique race) for',
+          customerId,
+        );
+        return;
+      }
     }
     console.error('[Subscription webhook] Failed to create venue:', venueError);
     throw new Error('Venue creation failed');

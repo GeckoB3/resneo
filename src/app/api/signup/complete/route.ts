@@ -163,14 +163,19 @@ export async function POST(request: Request) {
       // created this venue under the same Stripe customer — the partial unique index on
       // venues.stripe_customer_id surfaces that as 23505. Re-read the winner and resume the
       // funnel rather than erroring; the webhook also created the staff row + attribution.
+      // Guard on the venue actually existing under our customer id: venues.slug is also UNIQUE,
+      // so a same-millisecond signup by a different customer can raise 23505 on the slug — that
+      // is not our race, and must fall through to the error (the user retries with a fresh slug).
       if (venueError?.code === '23505') {
         const { data: racedVenue } = await admin
           .from('venues')
           .select('pricing_tier, active_booking_models, onboarding_completed')
           .eq('stripe_customer_id', stripeCustomerId)
           .maybeSingle();
-        await clearSignupPendingUserMetadata(admin, user.id);
-        return NextResponse.json({ redirect_url: resolvePostSignupRedirectUrl(racedVenue) });
+        if (racedVenue) {
+          await clearSignupPendingUserMetadata(admin, user.id);
+          return NextResponse.json({ redirect_url: resolvePostSignupRedirectUrl(racedVenue) });
+        }
       }
       console.error('[signup/complete] Venue creation failed:', venueError);
       return NextResponse.json({ error: 'Failed to complete signup. Please contact support.' }, { status: 500 });

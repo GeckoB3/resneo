@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { AnalyticsGate } from "@/components/analytics/AnalyticsGate";
+import { CookieConsentBanner } from "@/components/analytics/CookieConsentBanner";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -40,6 +42,8 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {children}
+        <CookieConsentBanner />
+        <AnalyticsGate />
       </body>
     </html>
   );

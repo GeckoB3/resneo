@@ -87,7 +87,9 @@ export async function PATCH(
         );
       }
       // §7.2.1 — a renamed collective must also respect the 30-day cooldown on
-      // names of recently-dissolved collectives (same rule as create).
+      // names of recently-dissolved collectives (same rule as create), with the
+      // same exception: the hold only applies to names ANOTHER venue recently
+      // released, so a venue can reuse a name from a collective it hosted itself.
       const cooldownCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const { data: recentlyDissolved } = await ctx.admin
         .from('venue_collectives')
@@ -96,6 +98,7 @@ export async function PATCH(
         .eq('status', 'dissolved')
         .gte('updated_at', cooldownCutoff)
         .neq('id', id)
+        .neq('host_venue_id', ctx.venueId)
         .maybeSingle();
       if (recentlyDissolved) {
         return NextResponse.json(

@@ -155,6 +155,22 @@ export function VenueCollectivesPanel({
         {error ? (
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
         ) : null}
+        {/* Why the "Create venue collective" button is disabled. The button itself
+            only carries a hover tooltip, and the explanatory empty-state below is
+            hidden whenever any row is listed — including a *dissolved* one — so a
+            venue that dissolved a collective and relinked would otherwise see a
+            greyed-out button with no on-screen reason. Shown whenever the button is
+            visible (no live collective) but disabled (no full create/edit/cancel link). */}
+        {!loading && !hasLiveCollective && eligibleLinks.length === 0 ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            To create a combined page you need a link granting{' '}
+            <span className="font-medium">create, edit &amp; cancel</span> access in{' '}
+            <span className="font-medium">both directions</span> (full calendar detail, no
+            calendar limits). In <span className="font-medium">Active links</span> above, open the
+            link, choose <span className="font-medium">Edit permissions</span>, and set both
+            directions to create/edit/cancel.
+          </p>
+        ) : null}
         {loading ? (
           <div className="space-y-2" aria-busy="true">
             <span className="sr-only">Loading collectives…</span>
@@ -162,11 +178,12 @@ export function VenueCollectivesPanel({
             <div className="skeleton h-16 rounded-xl" />
           </div>
         ) : collectives.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            {eligibleLinks.length === 0
-              ? 'A combined page needs a link granting create/edit/cancel access in both directions. Create one above first.'
-              : 'No venue collectives yet. Create one to offer a combined booking page.'}
-          </p>
+          // The amber note above already explains the no-eligible-link case.
+          eligibleLinks.length === 0 ? null : (
+            <p className="text-sm text-slate-500">
+              No venue collectives yet. Create one to offer a combined booking page.
+            </p>
+          )
         ) : (
           collectives.map((c) => (
             <CollectiveRow

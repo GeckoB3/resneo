@@ -4,6 +4,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ensureComplianceFormLinksForBooking } from '@/lib/compliance/auto-send';
 import { sendOwnerBookingNotification } from './owner-booking-notification';
+import { sendStaffPush } from './staff-push-notification';
 import { sendPolicyMessage } from './outbound';
 
 /**
@@ -116,6 +117,8 @@ export async function sendBookingConfirmationNotifications(
   // New booking alert to the business owner — venue-level setting, independent of the
   // guest confirmation policy above. Deduped per booking inside the sender.
   await sendOwnerBookingNotification(enriched, venue, venueId);
+  // Push the new booking to staff devices (per-user prefs honoured in the sender).
+  await sendStaffPush(enriched, venue, venueId, 'new_booking');
   return { email, sms };
 }
 
@@ -218,6 +221,7 @@ export async function sendBookingModificationNotification(
       mode: 'upsert',
     }),
   ]);
+  await sendStaffPush(booking, venue, venueId, 'reschedule');
   return { email, sms };
 }
 
@@ -254,5 +258,6 @@ export async function sendCancellationNotification(
       rebookLink: venue.booking_page_url ?? null,
     }),
   ]);
+  await sendStaffPush(booking, venue, venueId, 'cancellation');
   return { email, sms };
 }

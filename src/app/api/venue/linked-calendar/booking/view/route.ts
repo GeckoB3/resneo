@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
@@ -13,7 +13,7 @@ import { recordReadAudit } from '@/lib/linked-accounts/audit';
  * UI, which has already shown the detail from data it was permitted to load.
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
+  const supabase = await createRouteHandlerClientFromHeaders();
   const {
     data: { user },
   } = await supabase.auth.getUser();

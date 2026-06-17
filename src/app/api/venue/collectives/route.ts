@@ -106,6 +106,12 @@ export async function POST(request: NextRequest) {
     // §7.2.1 — a dissolved collective's name is held for 30 days before reuse.
     // `updated_at` is bumped when a collective is dissolved, so it stands in for
     // the dissolution time. The message doesn't disclose which collective held it.
+    //
+    // Exception: a venue may immediately reuse the name of a collective IT hosted.
+    // The hold exists to stop one venue grabbing the name another just released
+    // (and to keep the rejection non-disclosing) — neither concern applies to your
+    // own collective, so `.neq('host_venue_id', …)` lets a host recreate the one it
+    // just dissolved without waiting out the cooldown.
     const cooldownCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentlyDissolved } = await ctx.admin
       .from('venue_collectives')
@@ -113,6 +119,7 @@ export async function POST(request: NextRequest) {
       .ilike('name', trimmedName)
       .eq('status', 'dissolved')
       .gte('updated_at', cooldownCutoff)
+      .neq('host_venue_id', ctx.venueId)
       .maybeSingle();
     if (recentlyDissolved) {
       return NextResponse.json(

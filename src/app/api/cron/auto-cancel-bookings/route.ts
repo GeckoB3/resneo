@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { sendStaffPush } from '@/lib/communications/staff-push-notification';
 import { applyBookingLifecycleStatusEffects, validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
@@ -106,6 +107,21 @@ async function handlePost(request: NextRequest) {
           party_size: b.party_size,
         },
       });
+      try {
+        await sendStaffPush(
+          {
+            id: b.id,
+            guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name),
+            booking_date: b.booking_date,
+            booking_time: b.booking_time,
+          },
+          { name: venue?.name ?? null },
+          b.venue_id,
+          'payment_failed',
+        );
+      } catch (pushErr) {
+        console.error('auto-cancel staff push failed:', pushErr);
+      }
     }
 
     // ---------------------------------------------------------------------

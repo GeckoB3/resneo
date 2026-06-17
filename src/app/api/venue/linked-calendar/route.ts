@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
@@ -160,7 +160,7 @@ const LINKED_CALENDAR_BOOKING_SELECT =
  * links return full detail (PII only when granted).
  */
 export async function GET(request: NextRequest) {
-  const supabase = await createClient();
+  const supabase = await createRouteHandlerClientFromHeaders();
   const {
     data: { user },
   } = await supabase.auth.getUser();

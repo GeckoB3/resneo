@@ -1,5 +1,5 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 function cookieAdapter(cookieStore: Awaited<ReturnType<typeof cookies>>) {
   return {
@@ -53,6 +53,25 @@ export async function createClient() {
 export async function createRouteHandlerClient(request: Request) {
   const cookieStore = await cookies();
   const bearer = request.headers.get('authorization')?.match(/^Bearer\s+(\S+)/i)?.[1]?.trim();
+  const { supabaseUrl, supabasePublishableKey } = getSupabaseServerEnv();
+
+  return createServerClient(supabaseUrl, supabasePublishableKey, {
+    cookies: cookieAdapter(cookieStore),
+    global: bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : undefined,
+  });
+}
+
+/**
+ * Like {@link createRouteHandlerClient}, but reads the `Authorization: Bearer`
+ * token from the ambient request via `next/headers` instead of an explicit
+ * `request` argument. Lets shared helpers (e.g. resolveLinkAdmin) and no-arg
+ * `GET()` handlers honour mobile Bearer auth without threading `request`
+ * through every signature. Falls back to cookies (web dashboard) exactly as
+ * `createClient`, so existing cookie sessions are unaffected.
+ */
+export async function createRouteHandlerClientFromHeaders() {
+  const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
+  const bearer = headerStore.get('authorization')?.match(/^Bearer\s+(\S+)/i)?.[1]?.trim();
   const { supabaseUrl, supabasePublishableKey } = getSupabaseServerEnv();
 
   return createServerClient(supabaseUrl, supabasePublishableKey, {

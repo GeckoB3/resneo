@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
 
@@ -10,7 +10,7 @@ import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-lis
  * (non-resource) for appointments-family venues, `practitioners` for legacy.
  */
 export async function GET() {
-  const supabase = await createClient();
+  const supabase = await createRouteHandlerClientFromHeaders();
   const staff = await getVenueStaff(supabase);
   if (!staff) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });

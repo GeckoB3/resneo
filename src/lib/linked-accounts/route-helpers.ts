@@ -2,7 +2,7 @@
 
 import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff, type VenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -53,7 +53,7 @@ export function enforceLinkRateLimit(
  * management is restricted to Admin staff (§3.1).
  */
 export async function resolveLinkAdmin(): Promise<Resolution> {
-  const supabase = await createClient();
+  const supabase = await createRouteHandlerClientFromHeaders();
   const {
     data: { user },
   } = await supabase.auth.getUser();

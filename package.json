@@ -43,6 +43,7 @@
     "@supabase/ssr": "^0.8.0",
     "@types/sanitize-html": "^2.16.1",
     "date-fns": "^4.1.0",
+    "expo-server-sdk": "^6.1.0",
     "fuse.js": "^7.3.0",
     "import-in-the-middle": "^3.0.1",
     "konva": "^10.2.0",

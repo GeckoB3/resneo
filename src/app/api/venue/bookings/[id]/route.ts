@@ -870,6 +870,34 @@ export async function PATCH(
             }
           });
         }
+
+        // Staff push — independent of guest contact: alert staff to the no-show.
+        {
+          const bookingTimeNsStaff =
+            typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+          const venueNameNs = venueNoShow?.name ?? null;
+          after(async () => {
+            try {
+              const { sendStaffPush } = await import('@/lib/communications/staff-push-notification');
+              await sendStaffPush(
+                {
+                  id,
+                  guest_name: formatGuestDisplayName(
+                    guestNoShow?.first_name ?? null,
+                    guestNoShow?.last_name ?? null,
+                  ),
+                  booking_date: booking.booking_date as string,
+                  booking_time: bookingTimeNsStaff,
+                },
+                { name: venueNameNs },
+                scopeVenueId,
+                'no_show',
+              );
+            } catch (noShowPushErr) {
+              console.error('No-show staff push failed:', noShowPushErr);
+            }
+          });
+        }
       } else {
         const groupBookingId = booking.group_booking_id as string | null | undefined;
         let statusLifecycleHandled = false;

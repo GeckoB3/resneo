@@ -441,7 +441,9 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         opts.booking.deposit_status === 'Paid' && Boolean(opts.booking.deposit_amount_pence);
       const policyText = hasPaidDeposit ? (opts.cancellationPolicy ?? null) : null;
       return {
-        subject: `Are you still coming to ${opts.venue.name}?`,
+        subject: appointment
+          ? `Can you still attend ${opts.venue.name}?`
+          : `Are you still coming to ${opts.venue.name}?`,
         heading: appointment ? 'Can you still make your appointment?' : 'Are you still coming?',
         mainContent: [
           htmlParagraph(`Hi ${guestName},`),

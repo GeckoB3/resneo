@@ -997,12 +997,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
       }
       if (staffWalkIn) {
-        // Walk-ins are deliberately allowed past opening hours (e.g. a walk-in taken
-        // after closing) and may double-book (allowBookingOverlap), but they must still
-        // respect breaks and blocked time (breaks, scheduled classes/events, leave).
-        // Validate even when no explicit duration override is supplied — otherwise the
-        // booking would be created with no break/block check at all. The catalogue
-        // duration already folds in any add-on extension applied to the engine input.
+        // Walk-ins are taken "regardless": once the front desk hits Start Appointment
+        // Now, the decision is final. So they may be booked past opening hours / outside
+        // calendar availability (allowOutsideHours), double-book another booking
+        // (allowBookingOverlap), be taken inside the service's minimum-notice window
+        // (allowInsideNoticeWindow — a walk-in is "now") and run over a staff break
+        // (allowDuringBreaks). We still run the interval check for duration sanity/limits
+        // and to honour hard calendar blocks (leave, scheduled classes/events). The
+        // catalogue duration already folds in any add-on extension applied to the engine input.
         const walkInEndMinutes =
           parsed.data.duration_minutes != null
             ? parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes
@@ -1014,7 +1016,12 @@ export async function POST(request: NextRequest) {
           timeStr,
           endHHmmFromDuration(timeStr, walkInEndMinutes),
           undefined,
-          { allowBookingOverlap: true, allowOutsideHours: true },
+          {
+            allowBookingOverlap: true,
+            allowOutsideHours: true,
+            allowInsideNoticeWindow: true,
+            allowDuringBreaks: true,
+          },
         );
         if (!intervalCheck.ok) {
           return NextResponse.json(

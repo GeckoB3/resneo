@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -87,6 +88,43 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
   return dt.toISOString();
 }
 
+/**
+ * Resolve the staff/calendar display name for a booking. The bookings row carries
+ * only `calendar_id` / `practitioner_id`, and neither it nor the detail RPC
+ * includes a name — so the detail panel's "with {staff}" line was always blank.
+ * Mirrors the list route's `calendar_name` (from `unified_calendars`), falling
+ * back to the legacy `practitioners` table. Returns null when neither resolves.
+ */
+async function resolveBookingStaffName(
+  db: SupabaseClient,
+  booking: { calendar_id?: string | null; practitioner_id?: string | null },
+  venueId: string,
+): Promise<string | null> {
+  const calId = typeof booking.calendar_id === 'string' ? booking.calendar_id.trim() : '';
+  if (calId) {
+    const { data } = await db
+      .from('unified_calendars')
+      .select('name')
+      .eq('id', calId)
+      .eq('venue_id', venueId)
+      .maybeSingle();
+    const name = typeof data?.name === 'string' ? data.name.trim() : '';
+    if (name) return name;
+  }
+  const pracId = typeof booking.practitioner_id === 'string' ? booking.practitioner_id.trim() : '';
+  if (pracId) {
+    const { data } = await db
+      .from('practitioners')
+      .select('name')
+      .eq('id', pracId)
+      .eq('venue_id', venueId)
+      .maybeSingle();
+    const name = typeof data?.name === 'string' ? data.name.trim() : '';
+    if (name) return name;
+  }
+  return null;
+}
+
 /** GET /api/venue/bookings/[id] - full booking detail with guest and events timeline. */
 export async function GET(
   request: NextRequest,
@@ -112,9 +150,14 @@ export async function GET(
       ? booking.booking_time.slice(0, 5)
       : '';
 
-    const [detailBundle, cde_context] = await Promise.all([
+    const [detailBundle, cde_context, practitioner_name] = await Promise.all([
       loadStaffBookingDetailBundle(scopeDb, id, scopeVenueId, { includeTimeline: true }),
       resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
+      resolveBookingStaffName(
+        scopeDb,
+        booking as { calendar_id?: string | null; practitioner_id?: string | null },
+        scopeVenueId,
+      ),
     ]);
 
     if (!detailBundle) {
@@ -214,6 +257,7 @@ export async function GET(
       ...booking,
       area_name,
       booking_time: bookingTimeStr,
+      practitioner_name,
       guest: guest ?? null,
       events: events ?? [],
       communications: communications ?? [],

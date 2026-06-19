@@ -578,6 +578,104 @@ describe('validateAppointmentCustomInterval: breaks and blocked ranges', () => {
     expect(generic.ok).toBe(false);
     expect(generic.reason).toBe('Blocked time');
   });
+
+  // Staff walk-in ("Start Appointment Now"): the front desk has decided to take
+  // the walk-in regardless, so a configured break must not block it.
+  it('lets a staff walk-in be taken over a break (allowDuringBreaks)', () => {
+    const respected = validateAppointmentCustomInterval(
+      inputWith({ breaks: [{ start: '13:00', end: '13:30' }] }),
+      'p1', 's90', '13:15', '14:45', undefined,
+      { allowOutsideHours: true, allowBookingOverlap: true },
+    );
+    expect(respected.ok).toBe(false);
+    expect(respected.reason).toBe('Conflicts with a break');
+
+    const waived = validateAppointmentCustomInterval(
+      inputWith({ breaks: [{ start: '13:00', end: '13:30' }] }),
+      'p1', 's90', '13:15', '14:45', undefined,
+      {
+        allowOutsideHours: true,
+        allowBookingOverlap: true,
+        allowInsideNoticeWindow: true,
+        allowDuringBreaks: true,
+      },
+    );
+    expect(waived.ok).toBe(true);
+  });
+
+  // Hard calendar blocks (leave / scheduled classes / events) are NOT waived by
+  // the walk-in overrides — they represent the practitioner genuinely being
+  // absent or occupied, unlike a break the staff chooses to work through.
+  it('still blocks a staff walk-in over a scheduled class/leave even with all override flags', () => {
+    const r = validateAppointmentCustomInterval(
+      inputWith({ blocked: [{ practitioner_id: 'p1', start: 14 * 60, end: 15 * 60, kind: 'scheduled_session' }] }),
+      'p1', 's90', '13:30', '15:00', undefined,
+      {
+        allowOutsideHours: true,
+        allowBookingOverlap: true,
+        allowInsideNoticeWindow: true,
+        allowDuringBreaks: true,
+      },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('Overlaps a scheduled class or event');
+  });
+});
+
+describe('validateAppointmentCustomInterval: staff walk-in minimum-notice override', () => {
+  // "Today" with a wide notice window so the gate fires for any wall-clock time:
+  // 24h notice ⇒ every time-of-day today is inside the window, so the test is
+  // deterministic regardless of when it runs.
+  function todayNoticeInput(minNoticeHours: number): AppointmentEngineInput {
+    const date = todayYmd();
+    const dk = workingHoursDayKey(date);
+    return {
+      date,
+      // No skipPastSlotFilter → the minimum-notice gate is live for "today".
+      minNoticeHours,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's15',
+          name: 'Quick',
+          duration_minutes: 15,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          processing_time_blocks: [],
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's15', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: [],
+    };
+  }
+
+  it('rejects a same-day booking inside the notice window by default', () => {
+    const r = validateAppointmentCustomInterval(
+      todayNoticeInput(24), 'p1', 's15', '10:00', '10:15', undefined, { allowOutsideHours: true },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('Past minimum notice window');
+  });
+
+  it('waives the notice window for a staff walk-in (allowInsideNoticeWindow)', () => {
+    const r = validateAppointmentCustomInterval(
+      todayNoticeInput(24), 'p1', 's15', '10:00', '10:15', undefined,
+      { allowOutsideHours: true, allowInsideNoticeWindow: true },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 // ── Add-ons: validating the engine sees the EXTENDED duration ─────────────────

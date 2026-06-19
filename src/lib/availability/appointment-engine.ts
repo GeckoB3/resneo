@@ -737,10 +737,21 @@ export function validateAppointmentCustomInterval(
      * Skip the opening-hours / working-hours / "not working this day" gates.
      * Used for staff-initiated walk-ins, moves and resizes, which are deliberately
      * allowed to run outside the business's / calendar's opening hours (the staff
-     * accepts a warning in the UI). Breaks, blocks, overlap and duration limits
-     * still apply.
+     * accepts a warning in the UI). Breaks, blocks, overlap, minimum-notice and
+     * duration limits are unaffected by this flag — relax those separately.
      */
     allowOutsideHours?: boolean;
+    /**
+     * Skip the minimum-booking-notice ("booked too soon" / past-slot) gate.
+     * A staff walk-in taken on the spot is immediate by definition, so the
+     * service's min-booking-notice window does not apply — the slot is "now".
+     */
+    allowInsideNoticeWindow?: boolean;
+    /**
+     * Skip the staff-break overlap gate. A staff walk-in is taken regardless of
+     * the practitioner's configured breaks — the front desk has chosen to take it.
+     */
+    allowDuringBreaks?: boolean;
     /** Snapshot blocks for this booking; when omitted, uses service template. */
     processingTimeBlocks?: ProcessingTimeBlock[] | null;
   },
@@ -845,13 +856,20 @@ export function validateAppointmentCustomInterval(
     }
   }
 
-  if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {
+  if (
+    !options?.allowInsideNoticeWindow &&
+    isToday &&
+    !skipPastSlotFilter &&
+    t < currentMinute + minNoticeMinutes
+  ) {
     return { ok: false, reason: 'Past minimum notice window' };
   }
 
-  const breakRanges = getBreakRanges(practitioner, date);
-  if (breakRanges.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
-    return { ok: false, reason: 'Conflicts with a break' };
+  if (!options?.allowDuringBreaks) {
+    const breakRanges = getBreakRanges(practitioner, date);
+    if (breakRanges.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
+      return { ok: false, reason: 'Conflicts with a break' };
+    }
   }
 
   const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);

@@ -122,7 +122,9 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'private, max-age=45, stale-while-revalidate=120',
+          // Authenticated dashboard route: a slot change must be visible immediately.
+          // max-age caching here produces stale-after-edit lag (see venue-catalog-cache memory).
+          'Cache-Control': 'no-store',
         },
       },
     );

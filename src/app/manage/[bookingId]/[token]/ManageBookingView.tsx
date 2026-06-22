@@ -7,6 +7,12 @@ import type { BookingModel } from '@/types/booking-models';
 import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { GuestResourceModifySlotPicker } from '@/components/booking/GuestResourceModifySlotPicker';
+import {
+  GuestClassModifyInstancePicker,
+  type GuestClassInstanceOption,
+} from '@/components/booking/GuestClassModifyInstancePicker';
+import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 
 interface BookingDetails {
   booking_id: string;
@@ -28,6 +34,11 @@ interface BookingDetails {
   appointment_service_name?: string | null;
   event_name?: string | null;
   class_summary?: string | null;
+  class_type_name?: string | null;
+  /** CDE self-reschedule identity (manage link picker). */
+  resource_id?: string | null;
+  class_instance_id?: string | null;
+  class_type_id?: string | null;
   resource_name?: string | null;
   booking_end_time?: string | null;
   /** Outstanding compliance forms the guest should complete before their visit. */
@@ -47,6 +58,76 @@ function isCdeModel(m: BookingModel): boolean {
   return m === 'event_ticket' || m === 'class_session' || m === 'resource_booking';
 }
 
+type LinkErrorKind = 'expired' | 'used' | 'cancelled' | 'notFound' | 'invalid';
+
+/**
+ * Map the /api/confirm failure (status + message) to a clearer link-state card.
+ * The confirm route currently emits generic messages for several cases, so we
+ * key off the HTTP status first and fall back to message keywords — staying
+ * forward-compatible if the API later distinguishes expired/cancelled.
+ */
+function classifyLinkError(linkError: { status: number; message: string } | null): {
+  kind: LinkErrorKind;
+  title: string;
+  description: string;
+  showReRequest: boolean;
+} {
+  const msg = (linkError?.message ?? '').toLowerCase();
+  const status = linkError?.status ?? 0;
+
+  let kind: LinkErrorKind = 'invalid';
+  if (status === 410 || msg.includes('already been used') || msg.includes('already used')) {
+    kind = 'used';
+  } else if (msg.includes('expired')) {
+    kind = 'expired';
+  } else if (msg.includes('cancel')) {
+    kind = 'cancelled';
+  } else if (status === 404 || msg.includes('not found')) {
+    kind = 'notFound';
+  }
+
+  switch (kind) {
+    case 'used':
+      return {
+        kind,
+        title: 'Link already used',
+        description: 'This booking link has already been used and is no longer active.',
+        showReRequest: true,
+      };
+    case 'expired':
+      return {
+        kind,
+        title: 'Link expired',
+        description: 'This booking link has expired for your security.',
+        showReRequest: true,
+      };
+    case 'cancelled':
+      return {
+        kind,
+        title: 'Booking cancelled',
+        description: 'This booking has already been cancelled.',
+        showReRequest: false,
+      };
+    case 'notFound':
+      return {
+        kind,
+        title: 'Booking not found',
+        description: "We couldn't find a booking for this link. It may have been removed.",
+        showReRequest: false,
+      };
+    default:
+      return {
+        kind,
+        title: 'Invalid link',
+        description:
+          linkError?.message && linkError.message !== 'Invalid link'
+            ? linkError.message
+            : "This booking link isn't valid. Please check the link or request a new one.",
+        showReRequest: true,
+      };
+  }
+}
+
 interface Slot {
   key: string;
   label: string;
@@ -58,6 +139,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const [details, setDetails] = useState<BookingDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<{ status: number; message: string } | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -74,8 +156,11 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
     const res = await fetch(`${base}/api/confirm?booking_id=${encodeURIComponent(bookingId)}&${authParam}`);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      throw new Error(j.error ?? 'Invalid link');
+      const message = (j as { error?: string }).error ?? 'Invalid link';
+      setLinkError({ status: res.status, message });
+      throw new Error(message);
     }
+    setLinkError(null);
     setDetails(await res.json());
   }, [bookingId, authParam]);
 
@@ -124,13 +209,20 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   }
 
   if (error && !details) {
+    const info = classifyLinkError(linkError);
     return (
       <div className="w-full max-w-md text-center">
         <div className="rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
             <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
           </div>
-          <p className="text-sm text-red-600">{error}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{info.title}</h2>
+          <p className="mt-1 text-sm text-slate-500">{info.description}</p>
+          {info.showReRequest && (
+            <p className="mt-2 text-xs text-slate-400">
+              Check your inbox for a more recent email, or contact the venue to resend your booking link.
+            </p>
+          )}
           <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
         </div>
       </div>
@@ -177,7 +269,8 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const bookingModel: BookingModel = details.booking_model ?? 'table_reservation';
   const isCde = isCdeModel(bookingModel);
   const isTableBooking = bookingModel === 'table_reservation';
-  const refundHours = details.refund_notice_hours ?? 48;
+  const isResourceBooking = bookingModel === 'resource_booking';
+  const isClassBooking = bookingModel === 'class_session';
 
   const cdeSummary =
     details.event_name ??
@@ -191,13 +284,40 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const guestSelfRescheduleEnabled = Boolean(
     details.feature_flags?.resolved?.guest_self_reschedule,
   );
+  // Resource bookings move to another slot for the same resource; class bookings
+  // move to another future instance of the same class type. Both reuse the
+  // appointment-style `guest_self_reschedule` gate (the only modify gate the
+  // platform encodes). Events stay cancel+rebook (see copy below).
+  const canGuestModifyResource =
+    isResourceBooking && guestSelfRescheduleEnabled && Boolean(details.resource_id);
+  const canGuestModifyClass =
+    isClassBooking &&
+    guestSelfRescheduleEnabled &&
+    Boolean(details.class_instance_id) &&
+    Boolean(details.class_type_id);
   const showGuestModify =
     canModify &&
-    !isCde &&
-    (isTableBooking || (isAppointment && guestSelfRescheduleEnabled));
-  const modifyButtonLabel = isAppointment ? 'Change appointment' : 'Modify booking';
+    (isTableBooking ||
+      (isAppointment && guestSelfRescheduleEnabled) ||
+      canGuestModifyResource ||
+      canGuestModifyClass);
+  const modifyButtonLabel = isAppointment
+    ? 'Change appointment'
+    : isClassBooking
+      ? 'Change session'
+      : isResourceBooking
+        ? 'Change slot'
+        : 'Modify booking';
   const cancelButtonLabel = isCde ? 'Cancel booking' : isAppointment ? 'Cancel appointment' : 'Cancel reservation';
   const keepButtonLabel = isCde ? 'Keep booking' : isAppointment ? 'Keep appointment' : 'Keep booking';
+
+  // Model-aware noun + policy-aware refund copy (use "booking" for CDE, not "reservation").
+  const bookingNoun = isCde ? 'booking' : isAppointment ? 'appointment' : 'reservation';
+  const rawRefundHours = details.refund_notice_hours;
+  const refundPolicyCopy =
+    rawRefundHours == null || rawRefundHours <= 0
+      ? `This ${bookingNoun} is non-refundable.`
+      : `Full refund if cancelled ${rawRefundHours}+ hours before your ${bookingNoun}. No refund within ${rawRefundHours} hours or for no-shows.`;
 
   return (
     <div className="w-full min-w-0 max-w-lg">
@@ -319,7 +439,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             )
           )}
 
-          {canModify && showModify && !isAppointment && (
+          {canModify && showModify && isTableBooking && (
             <ModifyTableBookingSection
               bookingId={bookingId}
               venueId={details.venue_id}
@@ -331,6 +451,59 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
               onSaved={handleModifySaved}
               onCancel={() => setShowModify(false)}
             />
+          )}
+
+          {showGuestModify && showModify && canGuestModifyResource && details.resource_id && (
+            <ModifyResourceBookingSection
+              bookingId={bookingId}
+              venueId={details.venue_id}
+              resourceId={details.resource_id}
+              currentDate={details.booking_date}
+              currentTime={details.booking_time}
+              currentEndTime={details.booking_end_time ?? null}
+              authPayload={hmac ? { hmac } : { token }}
+              onSaved={handleModifySaved}
+              onCancel={() => setShowModify(false)}
+            />
+          )}
+
+          {showGuestModify &&
+            showModify &&
+            canGuestModifyClass &&
+            details.class_type_id &&
+            details.class_instance_id && (
+              <ModifyClassBookingSection
+                bookingId={bookingId}
+                venueId={details.venue_id}
+                classTypeId={details.class_type_id}
+                currentInstanceId={details.class_instance_id}
+                className={details.class_type_name ?? null}
+                authPayload={hmac ? { hmac } : { token }}
+                onSaved={handleModifySaved}
+                onCancel={() => setShowModify(false)}
+              />
+            )}
+
+          {/* Events: no online slot-move (ticketed/multi-tier moves are out of v1).
+              Show how to change instead of a (non-functional) modify button. */}
+          {canModify && bookingModel === 'event_ticket' && !showCancelConfirm && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1.5">
+              <p className="text-sm font-medium text-slate-800">Need to change this event booking?</p>
+              <p className="text-xs text-slate-600">
+                Event tickets can&rsquo;t be moved to another date online. To change your
+                booking, cancel it below (if the cancellation policy allows a refund) and
+                book the new date, or contact the venue
+                {details.venue_phone ? (
+                  <>
+                    {' '}at{' '}
+                    <a href={`tel:${details.venue_phone}`} className="font-semibold text-brand-700 underline">
+                      {details.venue_phone}
+                    </a>
+                  </>
+                ) : null}
+                .
+              </p>
+            </div>
           )}
 
           {canCancel && !showCancelConfirm && !showModify && (
@@ -347,14 +520,10 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
               <p className="text-sm font-medium text-red-800">Are you sure?</p>
               {details.deposit_paid && details.deposit_amount_pence ? (
-                <p className="text-xs text-red-700">
-                  {isAppointment
-                    ? `Full refund if cancelled ${refundHours}+ hours before your appointment. No refund within ${refundHours} hours or for no-shows.`
-                    : `Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.`}
-                </p>
+                <p className="text-xs text-red-700">{refundPolicyCopy}</p>
               ) : (
                 <p className="text-xs text-red-700">
-                  {isAppointment ? 'Are you sure you want to cancel this appointment?' : 'Are you sure you want to cancel your booking?'}
+                  {`Are you sure you want to cancel this ${bookingNoun}?`}
                 </p>
               )}
               {error && <p className="text-xs text-red-600">{error}</p>}
@@ -600,6 +769,229 @@ function ModifyTableBookingSection({
           className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save changes'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function deriveResourceDurationMinutes(currentTime: string, currentEndTime: string | null): number {
+  const start = currentTime.slice(0, 5);
+  if (currentEndTime && currentEndTime.length >= 5) {
+    const mins = minutesBetweenStartAndEndHM(start, currentEndTime.slice(0, 5));
+    if (mins >= 5) return mins;
+  }
+  return 60;
+}
+
+function ModifyResourceBookingSection({
+  bookingId,
+  venueId,
+  resourceId,
+  currentDate,
+  currentTime,
+  currentEndTime,
+  authPayload,
+  onSaved,
+  onCancel,
+}: {
+  bookingId: string;
+  venueId: string;
+  resourceId: string;
+  currentDate: string;
+  currentTime: string;
+  currentEndTime: string | null;
+  authPayload: { hmac?: string; token?: string };
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const initialDuration = deriveResourceDurationMinutes(currentTime, currentEndTime);
+  const [date, setDate] = useState(currentDate);
+  const [time, setTime] = useState(currentTime.slice(0, 5));
+  const [duration, setDuration] = useState(initialDuration);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasChanges =
+    date !== currentDate ||
+    time !== currentTime.slice(0, 5) ||
+    duration !== initialDuration;
+
+  const handleSave = useCallback(async () => {
+    if (!hasChanges) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const base = typeof window !== 'undefined' ? window.location.origin : '';
+      const res = await fetch(`${base}/api/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_id: bookingId,
+          ...authPayload,
+          action: 'modify',
+          booking_date: date,
+          booking_time: time,
+          duration_minutes: duration,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const msg =
+          res.status === 412
+            ? 'This booking was updated elsewhere. Refresh the page and try again.'
+            : ((j as { error?: string }).error ?? 'Failed to update booking.');
+        setError(msg);
+        return;
+      }
+      onSaved();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [bookingId, authPayload, date, time, duration, hasChanges, onCancel, onSaved]);
+
+  return (
+    <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
+      <p className="text-sm font-semibold text-slate-800">Choose a new slot</p>
+
+      <GuestResourceModifySlotPicker
+        venueId={venueId}
+        bookingId={bookingId}
+        resourceId={resourceId}
+        initialBookingDate={currentDate}
+        initialBookingTime={currentTime.slice(0, 5)}
+        initialDurationMinutes={initialDuration}
+        bookingDate={date}
+        bookingTime={time}
+        durationMinutes={duration}
+        onBookingDateChange={setDate}
+        onBookingTimeChange={setTime}
+        onDurationChange={setDuration}
+        disabled={saving}
+      />
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || !hasChanges || !time}
+          className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save changes'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModifyClassBookingSection({
+  bookingId,
+  venueId,
+  classTypeId,
+  currentInstanceId,
+  className,
+  authPayload,
+  onSaved,
+  onCancel,
+}: {
+  bookingId: string;
+  venueId: string;
+  classTypeId: string;
+  currentInstanceId: string;
+  className: string | null;
+  authPayload: { hmac?: string; token?: string };
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<GuestClassInstanceOption | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = useCallback(async () => {
+    if (!selected) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const base = typeof window !== 'undefined' ? window.location.origin : '';
+      const res = await fetch(`${base}/api/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_id: bookingId,
+          ...authPayload,
+          action: 'modify',
+          target_class_instance_id: selected.instance_id,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const msg =
+          res.status === 412
+            ? 'This booking was updated elsewhere. Refresh the page and try again.'
+            : ((j as { error?: string }).error ?? 'Failed to update booking.');
+        setError(msg);
+        return;
+      }
+      onSaved();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [bookingId, authPayload, selected, onSaved]);
+
+  return (
+    <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
+      <p className="text-sm font-semibold text-slate-800">
+        Move {className ? `your ${className} booking` : 'your class booking'} to another session
+      </p>
+
+      <GuestClassModifyInstancePicker
+        venueId={venueId}
+        classTypeId={classTypeId}
+        currentInstanceId={currentInstanceId}
+        selectedInstanceId={selected?.instance_id ?? null}
+        onSelect={setSelected}
+        disabled={saving}
+      />
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || !selected}
+          className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Move booking'}
         </button>
         <button
           type="button"

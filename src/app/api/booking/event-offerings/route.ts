@@ -28,8 +28,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Missing venue_id' }, { status: 400 });
     }
 
+    // Events may be created up to 365 days out (`max_advance_booking_days` ≤ 365),
+    // and each event's own booking window is enforced downstream by
+    // `computeEventAvailability` → `isGuestBookingDateAllowed`. The previous horizon
+    // capped the fetch at 120 days (and the default caller only asks for 90), so
+    // events 121–365 days out were never loaded and never appeared publicly even
+    // when their own window allowed them (CDE review §5.3, finding 15).
+    //
+    // Fix: decouple the *fetch* horizon from the requested `days`. We always scan
+    // out to the maximum advance window an event could permit; the per-event
+    // window check then drops anything a given event doesn't yet allow. The
+    // requested `days` only raises the floor (a caller may ask for more, never less
+    // than the full window), so distant events surface as soon as they're bookable.
+    const MAX_EVENT_ADVANCE_DAYS = 365;
     const daysRaw = searchParams.get('days');
-    const days = Math.min(120, Math.max(7, parseInt(daysRaw ?? '90', 10) || 90));
+    const requestedDays = Math.max(7, parseInt(daysRaw ?? '90', 10) || 90);
+    // Always scan the full advance window so distant-but-bookable events appear;
+    // honour a caller asking for more, but never less than the full window.
+    const days = Math.max(MAX_EVENT_ADVANCE_DAYS, requestedDays);
     const fromParam = searchParams.get('from');
     const from =
       fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : new Date().toISOString().slice(0, 10);

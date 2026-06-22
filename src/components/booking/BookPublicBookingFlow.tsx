@@ -18,6 +18,7 @@ import {
   APPOINTMENT_PUBLIC_TAB_INACTIVE,
 } from '@/components/booking/appointment-public-ui';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isCdeBookingModel } from '@/lib/booking/cde-booking';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -126,9 +127,16 @@ export function BookPublicBookingFlow({
   const appointmentTabs =
     activeModel === 'practitioner_appointment' || activeModel === 'unified_scheduling';
 
-  const usesPublicAppointmentColumn = !embed && isUnifiedSchedulingVenue(venue.booking_model);
+  /**
+   * Wide storefront shell for the non-embed public page. Appointment-primary venues have always
+   * had it; C/D/E-primary venues (A2) get the same roomy two-column-width shell instead of the
+   * cramped `max-w-lg` so their booking + marketing tabs match the appointment storefront.
+   */
+  const usesPublicStorefrontColumn =
+    !embed &&
+    (isUnifiedSchedulingVenue(venue.booking_model) || isCdeBookingModel(venue.booking_model));
 
-  const rootWidthClass = usesPublicAppointmentColumn
+  const rootWidthClass = usesPublicStorefrontColumn
     ? `mx-auto w-full ${APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS}`
     : embed
       ? 'w-full'
@@ -141,7 +149,8 @@ export function BookPublicBookingFlow({
     >
       {tabs.length > 1 && (
         <div className={`border-b border-slate-200 pb-2 ${embed ? 'space-y-2' : ''}`} aria-busy={tabPending}>
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* A5: scroll horizontally on narrow screens instead of wrapping to ragged centered rows. */}
+          <div className="flex flex-nowrap items-center justify-center gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch]">
             {tabs.map((t) => {
               const isActive = t.slug === activeSlug;
               return (
@@ -149,7 +158,7 @@ export function BookPublicBookingFlow({
                   key={t.slug}
                   type="button"
                   onClick={() => replaceTabInUrl(t.slug)}
-                  className={`min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                  className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                     isActive
                       ? appointmentTabs
                         ? 'ap-tab-active shadow-sm'

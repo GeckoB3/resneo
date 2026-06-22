@@ -86,6 +86,22 @@ export async function validateResourceBookingModification(
       reason: `Booking duration must be between ${resRow.min_booking_minutes} and ${resRow.max_booking_minutes} minutes`,
     };
   }
+  // Staff reschedule must land on a slot-interval multiple, matching the public
+  // booking path (which only ever offers durations from
+  // resourceDurationCandidatesMinutes — multiples of slot_interval_minutes).
+  // Without this, a 35-min reschedule on a 15-min resource would pass min/max
+  // yet never be a real public slot length.
+  const slotInterval = resRow.slot_interval_minutes;
+  if (
+    typeof slotInterval === 'number' &&
+    slotInterval > 0 &&
+    (resolved.durationMinutes <= 0 || resolved.durationMinutes % slotInterval !== 0)
+  ) {
+    return {
+      ok: false,
+      reason: `Booking duration must be a multiple of ${slotInterval} minutes`,
+    };
+  }
   const slotAvailable = resRow.slots.some((s) => s.start_time === startHm);
   if (!slotAvailable) {
     return { ok: false, reason: 'This resource slot is no longer available' };

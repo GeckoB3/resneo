@@ -62,19 +62,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Enrollment has closed' }, { status: 400 });
     }
 
+    // Mirror the stale-pending cutoff used by the cleanup cron (C9): count active
+    // enrollments plus only *fresh* pending holds so abandoned paid checkouts don't
+    // block a new enrollee before the cron releases them.
+    const pendingCutoffIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const maxE = (product as { max_enrollments: number | null }).max_enrollments;
     if (maxE != null && maxE > 0) {
-      const { count, error: cErr } = await admin
+      const { count: activeCount, error: aErr } = await admin
         .from('class_course_enrollments')
         .select('id', { count: 'exact', head: true })
         .eq('course_product_id', product_id)
-        .in('status', ['pending_payment', 'active']);
+        .eq('status', 'active');
+      const { count: pendingCount, error: pCountErr } = await admin
+        .from('class_course_enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('course_product_id', product_id)
+        .eq('status', 'pending_payment')
+        .gte('created_at', pendingCutoffIso);
 
-      if (cErr) {
-        console.error('[account/courses/enroll] count', cErr);
+      if (aErr || pCountErr) {
+        console.error('[account/courses/enroll] count', aErr ?? pCountErr);
         return NextResponse.json({ error: 'Could not verify capacity' }, { status: 500 });
       }
-      if ((count ?? 0) >= maxE) {
+      if ((activeCount ?? 0) + (pendingCount ?? 0) >= maxE) {
         return NextResponse.json({ error: 'This course is full' }, { status: 409 });
       }
     }

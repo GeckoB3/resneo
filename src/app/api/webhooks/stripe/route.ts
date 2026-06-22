@@ -17,10 +17,105 @@ import { fulfillCourseEnrollmentFromPaymentIntent } from '@/lib/class-commerce/f
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 import { syncClassMembershipFromStripeSubscription } from '@/lib/class-commerce/sync-membership-from-stripe';
 import { recordSalesRevenueRefund } from '@/lib/sales/invoice-revenue';
+import { restoreClassCreditsForBooking } from '@/lib/class-commerce/restore-class-credits';
+import { restoreMembershipAllowanceForBooking } from '@/lib/class-commerce/restore-membership-allowance';
+import {
+  bookingWasCreditPaid,
+  bookingWasMembershipPaid,
+} from '@/lib/class-commerce/booking-was-credit-paid';
+import { applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
   console.warn('STRIPE_WEBHOOK_SECRET is not set; webhook verification will fail');
+}
+
+type AdminClient = ReturnType<typeof getSupabaseAdminClient>;
+
+const REVERSIBLE_BOOKING_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
+
+/**
+ * M7 (§5.2) — when a class booking paid with credits or membership allowance is
+ * refunded/failed at Stripe, the deposit-status flip alone leaves the consumed
+ * credits/allowance spent and the seat occupied. For each such booking: restore the
+ * credits/allowance (idempotent) AND cancel the booking so class capacity is freed.
+ *
+ * Stripe refunds are money-only; a credit/membership booking carries no Stripe
+ * charge, so without this the value and the seat both leak. Safe to call for any
+ * booking — non-credit/non-membership bookings restore nothing, and a booking that
+ * is already in a terminal state is left untouched.
+ */
+async function restoreAndReleaseClassBookings(
+  admin: AdminClient,
+  rows: Array<{ id: string; venue_id: string; guest_id: string | null; status: string }>,
+  source: 'stripe_refund' | 'stripe_payment_failed',
+): Promise<void> {
+  for (const b of rows) {
+    try {
+      let restoredAnything = false;
+
+      if (await bookingWasCreditPaid(admin, b.id)) {
+        const res = await restoreClassCreditsForBooking(admin, {
+          bookingId: b.id,
+          idempotencyPrefix: `${source}:${b.id}`,
+        });
+        if (res.ok && res.restoredCredits > 0) {
+          restoredAnything = true;
+          await admin.from('events').insert({
+            venue_id: b.venue_id,
+            booking_id: b.id,
+            event_type: 'class_credit_restored',
+            payload: { restored_credits: res.restoredCredits, source },
+          });
+        }
+      }
+
+      if (await bookingWasMembershipPaid(admin, b.id)) {
+        const res = await restoreMembershipAllowanceForBooking({
+          admin,
+          bookingId: b.id,
+          idempotencyPrefix: `${source}:${b.id}`,
+        });
+        if (res.restoredSessions > 0) {
+          restoredAnything = true;
+          await admin.from('events').insert({
+            venue_id: b.venue_id,
+            booking_id: b.id,
+            event_type: 'class_membership_allowance_restored',
+            payload: { restored_sessions: res.restoredSessions, source },
+          });
+        }
+      }
+
+      // Only credit/membership-paid bookings need the seat freeing here — a
+      // card-paid booking's capacity is managed by its own cancel flow. Cancel
+      // (freeing capacity) when we restored entitlement and the row is still live.
+      if (restoredAnything && REVERSIBLE_BOOKING_STATUSES.includes(b.status)) {
+        const { error: cancelErr } = await admin
+          .from('bookings')
+          .update({
+            status: 'Cancelled',
+            cancellation_actor_type: 'system',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', b.id)
+          .in('status', REVERSIBLE_BOOKING_STATUSES);
+        if (cancelErr) {
+          console.error('[Stripe webhook] release cancel failed:', cancelErr, { bookingId: b.id });
+        } else {
+          await applyBookingLifecycleStatusEffects(admin, {
+            bookingId: b.id,
+            guestId: b.guest_id ?? '',
+            previousStatus: b.status,
+            nextStatus: 'Cancelled',
+            actorId: null,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Stripe webhook] restore/release failed', err, { bookingId: b.id });
+    }
+  }
 }
 
 /**
@@ -169,7 +264,7 @@ export async function POST(request: NextRequest) {
       // mark them all Failed, not just the primary.
       const { data: failedRows, error: failedSelErr } = await supabase
         .from('bookings')
-        .select('id, venue_id')
+        .select('id, venue_id, guest_id, status')
         .eq('stripe_payment_intent_id', pi.id)
         .eq('deposit_status', 'Pending');
 
@@ -178,7 +273,12 @@ export async function POST(request: NextRequest) {
         throw failedSelErr;
       }
 
-      const rowsToFail = (failedRows ?? []) as Array<{ id: string; venue_id: string }>;
+      const rowsToFail = (failedRows ?? []) as Array<{
+        id: string;
+        venue_id: string;
+        guest_id: string | null;
+        status: string;
+      }>;
       if (rowsToFail.length > 0) {
         const { error: failUpdateErr } = await supabase
           .from('bookings')
@@ -196,6 +296,10 @@ export async function POST(request: NextRequest) {
           });
           throw failUpdateErr;
         }
+
+        // M7 — a failed payment on a credit/membership-paid line must hand back the
+        // consumed entitlement and free the seat too. No-op for card-only bookings.
+        await restoreAndReleaseClassBookings(supabase, rowsToFail, 'stripe_payment_failed');
 
         // One kitchen alert per venue.
         const venuesSeen = new Set<string>();
@@ -286,7 +390,7 @@ export async function POST(request: NextRequest) {
       if (paymentIntentId) {
         const { data: bookings, error: bookingsErr } = await supabase
           .from('bookings')
-          .select('id, deposit_status')
+          .select('id, deposit_status, venue_id, guest_id, status')
           .eq('stripe_payment_intent_id', paymentIntentId)
           .limit(200);
 
@@ -294,9 +398,13 @@ export async function POST(request: NextRequest) {
           console.error('[Stripe webhook] Failed to load bookings for refunded payment intent:', bookingsErr);
         }
 
-        const refundableIds = (bookings ?? [])
-          .filter((b) => b.deposit_status !== 'Refunded')
-          .map((b) => b.id);
+        const refundable = (bookings ?? []).filter((b) => b.deposit_status !== 'Refunded') as Array<{
+          id: string;
+          venue_id: string;
+          guest_id: string | null;
+          status: string;
+        }>;
+        const refundableIds = refundable.map((b) => b.id);
 
         if (refundableIds.length > 0) {
           const { error: refundUpdateErr } = await supabase
@@ -314,6 +422,10 @@ export async function POST(request: NextRequest) {
             });
             throw refundUpdateErr;
           }
+
+          // M7 — restore any class credits/allowance consumed by these bookings and
+          // free their capacity (cancel). No-op for card-only bookings.
+          await restoreAndReleaseClassBookings(supabase, refundable, 'stripe_refund');
         }
       }
     }

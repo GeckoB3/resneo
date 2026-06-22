@@ -61,6 +61,9 @@ interface Resource {
   id: string;
   name: string;
   resource_type: string | null;
+  description: string | null;
+  /** Public-facing photo for the booking picker; column is unified_calendars.photo_url. */
+  photo_url: string | null;
   /** Host unified calendar column (non-resource) where this resource appears on the staff calendar. */
   display_on_calendar_id: string | null;
   slot_interval_minutes: number;
@@ -97,7 +100,9 @@ interface ResourceBooking {
   resource_id?: string | null;
 }
 
-type DayHours = { enabled: boolean; start: string; end: string };
+type HoursRange = { start: string; end: string };
+/** A day can hold multiple open ranges (e.g. 09:00–12:00 and 14:00–18:00). */
+type DayHours = { enabled: boolean; ranges: HoursRange[] };
 type WeekHours = Record<string, DayHours>;
 type HostCalendar = { id: string; name: string; working_hours: WorkingHours };
 
@@ -150,8 +155,8 @@ function defaultWeekHours(): WeekHours {
   const h: WeekHours = {};
   for (const d of DAY_LABELS) {
     h[d.key] = d.key === '0' || d.key === '6'
-      ? { enabled: false, start: '09:00', end: '17:00' }
-      : { enabled: true, start: '09:00', end: '17:00' };
+      ? { enabled: false, ranges: [{ start: '09:00', end: '17:00' }] }
+      : { enabled: true, ranges: [{ start: '09:00', end: '17:00' }] };
   }
   return h;
 }
@@ -162,7 +167,8 @@ function weekHoursFromJSON(hours: Record<string, Array<{ start: string; end: str
   for (const d of DAY_LABELS) {
     const ranges = hours[d.key];
     if (ranges && ranges.length > 0) {
-      result[d.key] = { enabled: true, start: ranges[0].start, end: ranges[0].end };
+      // Preserve every range so split hours (e.g. 09–12 + 14–18) survive an edit round-trip.
+      result[d.key] = { enabled: true, ranges: ranges.map((r) => ({ start: r.start, end: r.end })) };
     } else {
       result[d.key] = { ...result[d.key]!, enabled: false };
     }
@@ -174,8 +180,13 @@ function weekHoursToJSON(wh: WeekHours): Record<string, Array<{ start: string; e
   const result: Record<string, Array<{ start: string; end: string }>> = {};
   for (const d of DAY_LABELS) {
     const day = wh[d.key]!;
-    if (day.enabled) {
-      result[d.key] = [{ start: day.start, end: day.end }];
+    if (!day.enabled) continue;
+    // Drop empty/inverted ranges; emit all the valid ones (sorted by start).
+    const ranges = day.ranges
+      .filter((r) => r.start && r.end && timeToMinutes(r.end) > timeToMinutes(r.start))
+      .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    if (ranges.length > 0) {
+      result[d.key] = ranges.map((r) => ({ start: r.start, end: r.end }));
     }
   }
   return result;
@@ -221,13 +232,15 @@ function resourceHoursOutsideCalendar(resourceHours: WeekHours, calendarHours: W
   for (const d of DAY_LABELS) {
     const day = resourceHours[d.key]!;
     if (!day.enabled) continue;
-    const resourceStart = timeToMinutes(day.start);
-    const resourceEnd = timeToMinutes(day.end);
-    if (!Number.isFinite(resourceStart) || !Number.isFinite(resourceEnd) || resourceEnd <= resourceStart) continue;
     const calendarRanges = mergedCalendarRangesForDay(calendarHours, Number(d.key));
-    if (calendarRanges.length === 0) return true;
-    const fullyCovered = calendarRanges.some((range) => range.start <= resourceStart && resourceEnd <= range.end);
-    if (!fullyCovered) return true;
+    for (const range of day.ranges) {
+      const resourceStart = timeToMinutes(range.start);
+      const resourceEnd = timeToMinutes(range.end);
+      if (!Number.isFinite(resourceStart) || !Number.isFinite(resourceEnd) || resourceEnd <= resourceStart) continue;
+      if (calendarRanges.length === 0) return true;
+      const fullyCovered = calendarRanges.some((cal) => cal.start <= resourceStart && resourceEnd <= cal.end);
+      if (!fullyCovered) return true;
+    }
   }
   return false;
 }
@@ -321,6 +334,8 @@ export function ResourceTimelineView({
   // Form state
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formPhotoUrl, setFormPhotoUrl] = useState('');
   const [formSlotStr, setFormSlotStr] = useState(String(DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES));
   const [formMinStr, setFormMinStr] = useState(String(DEFAULT_RESOURCE_MIN_BOOKING_MINUTES));
   const [formMaxStr, setFormMaxStr] = useState('180');
@@ -655,6 +670,8 @@ export function ResourceTimelineView({
     setEditingId(null);
     setFormName('');
     setFormType('');
+    setFormDescription('');
+    setFormPhotoUrl('');
     setFormSlotStr(String(DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES));
     setFormMinStr(String(DEFAULT_RESOURCE_MIN_BOOKING_MINUTES));
     setFormMaxStr('180');
@@ -687,6 +704,8 @@ export function ResourceTimelineView({
     setEditingId(r.id);
     setFormName(r.name);
     setFormType(r.resource_type ?? '');
+    setFormDescription(r.description ?? '');
+    setFormPhotoUrl(r.photo_url ?? '');
     setFormSlotStr(String(r.slot_interval_minutes));
     setFormMinStr(String(r.min_booking_minutes));
     setFormMaxStr(String(r.max_booking_minutes));
@@ -890,6 +909,8 @@ export function ResourceTimelineView({
       const payload = {
         name: formName.trim(),
         ...(formType.trim() && { resource_type: formType.trim() }),
+        description: formDescription.trim() || null,
+        photo_url: formPhotoUrl.trim() || null,
         display_on_calendar_id: formDisplayCalendarId,
         slot_interval_minutes: formSlot,
         min_booking_minutes: effectiveFormMin,
@@ -1218,7 +1239,7 @@ export function ResourceTimelineView({
             <ResourceFormSection
               step={1}
               title="Basics"
-              description="Name and type shown to guests and staff."
+              description="Name, type, and an optional photo and description shown to guests."
             >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="min-w-0">
@@ -1260,6 +1281,44 @@ export function ResourceTimelineView({
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+            <div className="mt-4 space-y-4">
+              <div className="min-w-0">
+                <label className={fieldLabelClass}>Description</label>
+                <textarea
+                  rows={3}
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="Shown to guests on the booking page — e.g. what this resource includes."
+                  className={`${fieldInputClass} resize-y`}
+                />
+                <p className={fieldHintClass}>Optional. Appears under the resource name when guests choose it.</p>
+              </div>
+              <div className="min-w-0">
+                <label className={fieldLabelClass}>Photo URL</label>
+                <input
+                  type="url"
+                  value={formPhotoUrl}
+                  onChange={(e) => setFormPhotoUrl(e.target.value)}
+                  placeholder="https://…"
+                  autoComplete="off"
+                  className={fieldInputClass}
+                />
+                <p className={fieldHintClass}>Optional. Paste a link to a photo of this resource.</p>
+                {/^https?:\/\//i.test(formPhotoUrl.trim()) && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-[11px] text-slate-500">Preview</p>
+                    <img
+                      src={formPhotoUrl.trim()}
+                      alt=""
+                      className="max-h-40 max-w-full rounded-xl border border-slate-200 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
             </ResourceFormSection>
@@ -1578,9 +1637,9 @@ export function ResourceTimelineView({
                   setFormHours(weekHoursFromJSON(selectedHostCalendar.working_hours));
                 }
               }}
-              onChange={(key, patch) => {
+              onChange={(key, nextDay) => {
                 setFormMatchCalendarHours(false);
-                setFormHours((h) => ({ ...h, [key]: { ...h[key]!, ...patch } }));
+                setFormHours((h) => ({ ...h, [key]: nextDay }));
               }}
             />
             </ResourceFormSection>
@@ -1843,7 +1902,7 @@ export function ResourceTimelineView({
                       <span className="w-12 shrink-0 font-medium text-slate-600 sm:w-20">{d.label.slice(0, 3)}</span>
                       {open ? (
                         <span className="text-slate-900">
-                          {ranges![0].start} &ndash; {ranges![0].end}
+                          {ranges!.map((r) => `${r.start} – ${r.end}`).join(', ')}
                         </span>
                       ) : (
                         <span className="text-slate-400">Closed</span>
@@ -1962,58 +2021,50 @@ export function ResourceTimelineView({
       </div>
       </div>
 
-      {resourceToDelete && (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
-          onClick={() => {
-            if (!deleteResourceBusy) setResourceToDelete(null);
+      {resourceToDelete ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !deleteResourceBusy) setResourceToDelete(null);
           }}
+          title="Delete this resource?"
+          size="md"
         >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-resource-title"
-            aria-describedby="delete-resource-desc"
-            className="max-h-[min(90dvh,90vh)] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="delete-resource-title" className="text-base font-semibold text-slate-900">
-              Delete this resource?
-            </h3>
-            <p id="delete-resource-desc" className="mt-2 text-sm text-slate-600">
-              <span className="font-medium text-slate-800">{resourceToDelete.name}</span> will be removed from your
-              venue. Upcoming bookings linked to this resource cannot be deleted this way; resolve them first if
-              removal is blocked. This cannot be undone.
-            </p>
-            {deleteResourceModalError ? (
-              <div
-                role="alert"
-                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              >
-                {deleteResourceModalError}
-              </div>
-            ) : null}
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setResourceToDelete(null)}
-                disabled={deleteResourceBusy}
-                className="min-h-10 w-full rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void confirmDeleteResource()}
-                disabled={deleteResourceBusy}
-                className="min-h-10 w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50 sm:w-auto"
-              >
-                {deleteResourceBusy ? 'Deleting…' : 'Delete resource'}
-              </button>
+          <p className="text-sm text-slate-600">
+            <span className="font-medium text-slate-800">{resourceToDelete.name}</span> will be removed from your
+            venue. Upcoming bookings linked to this resource cannot be deleted this way; resolve them first if
+            removal is blocked. This cannot be undone.
+          </p>
+          {deleteResourceModalError ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {deleteResourceModalError}
             </div>
+          ) : null}
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full sm:w-auto"
+              onClick={() => setResourceToDelete(null)}
+              disabled={deleteResourceBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              className="w-full sm:w-auto"
+              loading={deleteResourceBusy}
+              onClick={() => void confirmDeleteResource()}
+            >
+              {deleteResourceBusy ? 'Deleting…' : 'Delete resource'}
+            </Button>
           </div>
-        </div>
-      )}
+        </Dialog>
+      ) : null}
 
       {detailBookingId ? (
         <BookingDetailPanel

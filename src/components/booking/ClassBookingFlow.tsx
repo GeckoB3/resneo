@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { VenuePublic, GuestDetails } from './types';
@@ -164,6 +164,10 @@ function mapInstanceToSlot(row: Record<string, unknown>): ClassSlot {
 export interface ClassBookingFlowProps {
   venue: VenuePublic;
   cancellationPolicy?: string;
+  /** Embed only: drops outer card chrome (parent iframe provides the container). */
+  embed?: boolean;
+  /** Embed only: notifies parent iframe to remeasure after step changes / async layout. */
+  onHeightChange?: () => void;
   bookingAudience?: BookingFlowAudience;
   staffBookingSource?: 'phone' | 'walk-in';
   onBookingCreated?: () => void;
@@ -173,6 +177,8 @@ export interface ClassBookingFlowProps {
 export function ClassBookingFlow({
   venue,
   cancellationPolicy,
+  embed,
+  onHeightChange,
   bookingAudience = 'public',
   staffBookingSource = 'phone',
   onBookingCreated,
@@ -193,6 +199,25 @@ export function ClassBookingFlow({
   const sym = symForCurrency(currency);
 
   const [step, setStep] = useState<Step>('pick-class');
+
+  // Embed: keep the host iframe sized to content. A ResizeObserver covers async
+  // layout (loading -> list, calendar popovers); the step effect covers
+  // immediate transitions so date-picker/dropdown popovers are never clipped.
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!onHeightChange || !containerRef.current) return;
+    const ro = new ResizeObserver(() => {
+      onHeightChange();
+    });
+    ro.observe(containerRef.current);
+    onHeightChange();
+    return () => ro.disconnect();
+  }, [onHeightChange]);
+  useEffect(() => {
+    if (!onHeightChange) return;
+    onHeightChange();
+  }, [step, onHeightChange]);
+
   const advanceToGuestDetails = useCallback(async () => {
     if (isPublicGuest && !(await accountGate.ensureSignedIn())) return;
     setStep('details');
@@ -583,7 +608,7 @@ export function ClassBookingFlow({
   }
 
   return (
-    <div className={isPublicGuest ? 'w-full' : 'mx-auto w-full max-w-lg'}>
+    <div ref={containerRef} className={embed || isPublicGuest ? 'w-full' : 'mx-auto w-full max-w-lg'}>
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}

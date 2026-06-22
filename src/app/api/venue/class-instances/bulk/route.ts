@@ -130,15 +130,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ignoreDuplicates: the unique index (class_type_id, instance_date, start_time)
+    // makes concurrent double-submits skip cleanly instead of erroring; .select()
+    // returns only the rows actually inserted.
     const { data: inserted, error: insertErr } = await admin
       .from('class_instances')
-      .insert(toInsert)
+      .upsert(toInsert, {
+        onConflict: 'class_type_id,instance_date,start_time',
+        ignoreDuplicates: true,
+      })
       .select('id, class_type_id, instance_date, start_time');
 
     if (insertErr) {
       console.error('POST class-instances/bulk insert failed:', insertErr);
       return NextResponse.json({ error: 'Failed to create instances' }, { status: 500 });
     }
+
+    const created = inserted?.length ?? 0;
 
     const venueId = staff.venue_id;
     await Promise.all(
@@ -155,7 +163,7 @@ export async function POST(request: NextRequest) {
       ),
     );
 
-    return NextResponse.json({ created: inserted?.length ?? 0, skipped });
+    return NextResponse.json({ created, skipped: normalized.length - created });
   } catch (err) {
     console.error('POST /api/venue/class-instances/bulk failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

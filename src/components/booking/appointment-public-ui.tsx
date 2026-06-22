@@ -191,23 +191,41 @@ export function AppointmentBackLink({
 export function AppointmentChoiceCard({
   onClick,
   icon,
+  image,
   title,
   description,
+  subtext,
 }: {
   onClick: () => void;
   icon: ReactNode;
+  /** Optional thumbnail (e.g. a resource photo) shown in place of the icon when it loads. */
+  image?: string | null;
   title: string;
-  description: string;
+  description: ReactNode;
+  /** Optional second muted line, e.g. a free-text description. Clamped to two lines. */
+  subtext?: ReactNode;
 }) {
+  const hasImage = typeof image === 'string' && /^https?:\/\//i.test(image.trim());
   return (
     <button type="button" onClick={onClick} className="ap-choice-card group w-full text-left">
       <div className="flex items-center gap-4">
-        <div className="ap-choice-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl">
+        <div className="ap-choice-icon relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl">
+          {hasImage ? (
+            <img
+              src={image!.trim()}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : null}
           {icon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900">{title}</div>
           <div className="mt-0.5 text-sm text-slate-500">{description}</div>
+          {subtext ? <div className="mt-0.5 line-clamp-2 text-sm text-slate-500">{subtext}</div> : null}
         </div>
         <svg
           className={APPOINTMENT_PUBLIC_CHEVRON}

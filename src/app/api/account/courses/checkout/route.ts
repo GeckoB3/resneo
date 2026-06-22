@@ -74,19 +74,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Enrollment has closed' }, { status: 400 });
     }
 
+    // Stale `pending_payment` holds are released by the
+    // `expire-pending-course-enrollments` cron after 2h. Mirror that cutoff here so
+    // an abandoned checkout never blocks a new buyer in the window before the cron
+    // runs: count active enrollments plus only *fresh* pending holds (C9).
+    const pendingCutoffIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const maxE = (product as { max_enrollments: number | null }).max_enrollments;
     if (maxE != null && maxE > 0) {
-      const { count, error: cErr } = await admin
+      const { count: activeCount, error: aErr } = await admin
         .from('class_course_enrollments')
         .select('id', { count: 'exact', head: true })
         .eq('course_product_id', product_id)
-        .in('status', ['pending_payment', 'active']);
+        .eq('status', 'active');
+      const { count: pendingCount, error: pCountErr } = await admin
+        .from('class_course_enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('course_product_id', product_id)
+        .eq('status', 'pending_payment')
+        .gte('created_at', pendingCutoffIso);
 
-      if (cErr) {
-        console.error('[account/courses/checkout] count', cErr);
+      if (aErr || pCountErr) {
+        console.error('[account/courses/checkout] count', aErr ?? pCountErr);
         return NextResponse.json({ error: 'Could not verify capacity' }, { status: 500 });
       }
-      if ((count ?? 0) >= maxE) {
+      if ((activeCount ?? 0) + (pendingCount ?? 0) >= maxE) {
         return NextResponse.json({ error: 'This course is full' }, { status: 409 });
       }
     }
@@ -120,7 +131,11 @@ export async function POST(request: NextRequest) {
         if (pi.status === 'succeeded') {
           return NextResponse.json({ error: 'Payment already completed' }, { status: 409 });
         }
-        if (pi.client_secret) {
+        // The PI may have been cancelled by the stale-pending cleanup cron (C9).
+        // Don't hand back a dead client_secret — drop the row and mint a fresh one.
+        if (pi.status === 'canceled') {
+          await admin.from('class_course_enrollments').delete().eq('id', row.id);
+        } else if (pi.client_secret) {
           return NextResponse.json({
             enrollment_id: row.id,
             client_secret: pi.client_secret,

@@ -8,6 +8,8 @@ import {
   assertExperienceEventDeletable,
   resolveExperienceEventPatch,
 } from '@/lib/experience-events/experience-event-guards';
+import { validateEventCalendarPlacement } from '@/lib/experience-events/validate-event-calendar-placement';
+import { syncEventTicketTypes } from '@/lib/experience-events/sync-event-ticket-types';
 import { buildEntityNotFoundMessage } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
 import { zExperienceEventDescription, zExperienceEventHhMm } from '@/lib/experience-events/experience-event-zod';
@@ -115,6 +117,48 @@ export async function PATCH(
       }
     }
 
+    // Re-validate the (possibly edited) window against venue/calendar hours and existing events.
+    // Previously this admin-only path SKIPPED this check, so an overlapping/closed-hours event could
+    // be placed here while the collection PATCH rejected it (CDE review §5.3). Both now share one helper.
+    const { data: existingRow } = await admin
+      .from('experience_events')
+      .select('event_date, start_time, end_time, calendar_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (!existingRow) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    const ex = existingRow as {
+      event_date: string;
+      start_time: string;
+      end_time: string;
+      calendar_id: string | null;
+    };
+    const mergedDate = (resolved.payload.event_date as string | undefined) ?? ex.event_date;
+    const mergedStart = (resolved.payload.start_time as string | undefined) ?? ex.start_time;
+    const mergedEnd = (resolved.payload.end_time as string | undefined) ?? ex.end_time;
+    const mergedCalendarId =
+      resolved.payload.calendar_id !== undefined
+        ? (resolved.payload.calendar_id as string | null)
+        : ex.calendar_id;
+
+    if (mergedCalendarId) {
+      const placement = await validateEventCalendarPlacement(admin, {
+        venueId: staff.venue_id,
+        calendarId: mergedCalendarId,
+        eventDate: mergedDate,
+        startTime: mergedStart,
+        endTime: mergedEnd,
+        excludeExperienceEventId: id,
+      });
+      if (!placement.ok) {
+        return NextResponse.json({ error: placement.error }, { status: placement.status });
+      }
+    }
+
     if (Object.keys(resolved.payload).length > 0) {
       const { error } = await admin
         .from('experience_events')
@@ -128,22 +172,11 @@ export async function PATCH(
       }
     }
 
+    // Upsert ticket types by id (never delete tiers that have sales) — CDE review C3.
     if (Array.isArray(ticket_types)) {
-      await admin.from('event_ticket_types').delete().eq('event_id', id);
-      if (ticket_types.length > 0) {
-        const ttRows = ticket_types.map(
-          (
-            tt: { name: string; price_pence: number; capacity?: number; sort_order?: number },
-            i: number,
-          ) => ({
-            event_id: id,
-            name: tt.name,
-            price_pence: tt.price_pence,
-            capacity: tt.capacity ?? null,
-            sort_order: tt.sort_order ?? i,
-          }),
-        );
-        await admin.from('event_ticket_types').insert(ttRows);
+      const sync = await syncEventTicketTypes(admin, id, ticket_types);
+      if (!sync.ok) {
+        return NextResponse.json({ error: sync.error ?? 'Failed to update ticket types' }, { status: 500 });
       }
     }
 

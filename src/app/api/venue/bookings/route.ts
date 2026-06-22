@@ -29,6 +29,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { createOrGetBookingShortLink, createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
+import { validateEventTicketBooking } from '@/lib/experience-events/validate-event-ticket-booking';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -290,14 +291,7 @@ export async function POST(request: NextRequest) {
       if (!phoneE164 && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required for event bookings' }, { status: 400 });
       }
-      const ticketLines = parsed.data.ticket_lines ?? [];
-      if (ticketLines.length === 0) {
-        return NextResponse.json({ error: 'ticket_lines is required for event bookings' }, { status: 400 });
-      }
-      const totalQty = ticketLines.reduce((s, t) => s + t.quantity, 0);
-      if (totalQty !== party_size) {
-        return NextResponse.json({ error: 'party_size must match total ticket quantity' }, { status: 400 });
-      }
+      const ticketLinesInput = parsed.data.ticket_lines ?? [];
 
       const tz =
         typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
@@ -306,39 +300,26 @@ export async function POST(request: NextRequest) {
       const eventInput = await fetchEventInput({ supabase: admin, venueId, date: booking_date });
       const eventSlots = computeEventAvailability(eventInput, { venueTimezone: tz });
       const evSlot = eventSlots.find((e) => e.event_id === parsed.data.experience_event_id);
-      if (!evSlot || evSlot.remaining_capacity < party_size) {
+      if (!evSlot) {
         return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
       }
-      const startStr = String(evSlot.start_time).slice(0, 5);
-      if (startStr !== timeStr) {
-        return NextResponse.json({ error: 'Booking time does not match the event start time' }, { status: 400 });
+      const eventValidation = validateEventTicketBooking({
+        slot: evSlot,
+        ticketLines: ticketLinesInput,
+        partySize: party_size,
+        requestedStartTime: timeStr,
+      });
+      if (!eventValidation.ok) {
+        return NextResponse.json({ error: eventValidation.error }, { status: eventValidation.status });
       }
-
-      for (const line of ticketLines) {
-        const tt = evSlot.ticket_types.find((t) => t.id === line.ticket_type_id);
-        if (!tt) {
-          return NextResponse.json({ error: 'Invalid ticket type for this event' }, { status: 400 });
-        }
-        if (line.quantity > tt.remaining) {
-          return NextResponse.json({ error: 'Not enough tickets remaining for one or more ticket types' }, { status: 409 });
-        }
-        if (line.unit_price_pence !== tt.price_pence) {
-          return NextResponse.json({ error: 'Ticket price does not match the current event price' }, { status: 400 });
-        }
-      }
-
-      const ticketTotal = ticketLines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
-      const eventPayReq = evSlot.payment_requirement ?? 'none';
-      const eventDepPerPerson = evSlot.deposit_amount_pence ?? 0;
-
-      let depositAmountPence = 0;
-      let requiresDeposit = false;
-      if (!staffWalkIn && eventPayReq === 'full_payment' && ticketTotal > 0) {
-        requiresDeposit = true;
-        depositAmountPence = ticketTotal;
-      } else if (!staffWalkIn && eventPayReq === 'deposit' && eventDepPerPerson > 0) {
-        requiresDeposit = true;
-        depositAmountPence = eventDepPerPerson * party_size;
+      const ticketLines = eventValidation.value.ticketLines;
+      const ticketTotal = eventValidation.value.ticketTotalPence;
+      let requiresDeposit = eventValidation.value.requiresDeposit;
+      let depositAmountPence = eventValidation.value.depositAmountPence;
+      // Staff walk-ins never collect online payment.
+      if (staffWalkIn) {
+        requiresDeposit = false;
+        depositAmountPence = 0;
       }
 
       const ticketTotalDisplay = ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
@@ -413,6 +394,13 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (evBookErr) {
+        // enforce_cde_capacity trigger raised on an oversell race (SQLSTATE 23P01).
+        if (evBookErr.code === '23P01' || evBookErr.message?.includes('CDE_CAPACITY')) {
+          return NextResponse.json(
+            { error: 'This event is now fully booked — the last tickets were just taken.' },
+            { status: 409 },
+          );
+        }
         console.error('Staff event booking insert failed:', evBookErr);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
@@ -588,6 +576,13 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (classBookErr) {
+        // enforce_cde_capacity trigger raised on an oversell race (SQLSTATE 23P01).
+        if (classBookErr.code === '23P01' || classBookErr.message?.includes('CDE_CAPACITY')) {
+          return NextResponse.json(
+            { error: 'This class is now full — the last space was just booked.' },
+            { status: 409 },
+          );
+        }
         console.error('Staff class booking insert failed:', classBookErr);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
@@ -794,6 +789,13 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (resBookErr) {
+        // enforce_cde_capacity trigger raised on an overlap race (SQLSTATE 23P01).
+        if (resBookErr.code === '23P01' || resBookErr.message?.includes('CDE_CAPACITY')) {
+          return NextResponse.json(
+            { error: 'That slot is no longer available — it was just booked.' },
+            { status: 409 },
+          );
+        }
         console.error('Staff resource booking insert failed:', resBookErr);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }

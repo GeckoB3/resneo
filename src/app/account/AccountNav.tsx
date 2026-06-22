@@ -6,7 +6,9 @@ import { usePathname } from 'next/navigation';
 const PRIMARY_NAV: Array<{ href: string; label: string }> = [
   { href: '/account', label: 'Overview' },
   { href: '/account/bookings', label: 'Bookings' },
+  { href: '/account/events', label: 'Events' },
   { href: '/account/classes', label: 'Classes' },
+  { href: '/account/resources', label: 'Resources' },
   { href: '/account/profile', label: 'Profile' },
   { href: '/account/credits', label: 'Credits' },
   { href: '/account/courses', label: 'Courses' },

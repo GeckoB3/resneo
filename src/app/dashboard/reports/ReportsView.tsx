@@ -89,6 +89,23 @@ interface ReportByBookingModelRow {
   deposit_pence_collected: number;
 }
 
+interface EventTicketTierRow {
+  ticket_type_key: string;
+  ticket_type_label: string;
+  tickets_sold: number;
+  revenue_pence: number;
+  booking_count: number;
+}
+
+interface ResourceUtilisationRow {
+  resource_id: string;
+  resource_name: string;
+  booking_count: number;
+  occupied_hours: number;
+  available_hours: number;
+  utilisation_pct: number;
+}
+
 interface ReportsData {
   from: string;
   to: string;
@@ -118,6 +135,10 @@ interface ReportsData {
   } | null;
   /** Inferred from booking row FKs - same labels as full export (plan §4.3). */
   report_by_booking_model?: ReportByBookingModelRow[];
+  /** D2: tickets sold + revenue per event ticket tier (events venues only). */
+  report_event_ticket_tiers?: EventTicketTierRow[];
+  /** D2: booked vs available slot-hours per resource (resource venues only). */
+  report_resource_utilisation?: ResourceUtilisationRow[];
   client_summary?: ClientSummary | null;
   booking_log_email_config?: BookingLogEmailConfig | null;
   default_booking_log_email?: string | null;
@@ -471,6 +492,49 @@ export function ReportsView({
     ]);
   }, [data, terminology]);
 
+  const exportBookingModelBreakdown = useCallback(() => {
+    if (!data?.report_by_booking_model?.length) return;
+    downloadCsv(`report-by-booking-type-${data.from}-${data.to}.csv`, [
+      ['Booking type', 'Bookings', 'Covers / guests', 'Completed', 'Cancelled', 'Checked in', 'Deposits collected (£)'],
+      ...data.report_by_booking_model.map((row) => [
+        row.label,
+        String(row.booking_count),
+        String(row.covers),
+        String(row.completed_count),
+        String(row.cancelled_count),
+        String(row.checked_in_count),
+        (row.deposit_pence_collected / 100).toFixed(2),
+      ]),
+    ]);
+  }, [data]);
+
+  const exportEventTiers = useCallback(() => {
+    if (!data?.report_event_ticket_tiers?.length) return;
+    downloadCsv(`report-event-ticket-tiers-${data.from}-${data.to}.csv`, [
+      ['Ticket type', 'Tickets sold', 'Bookings', 'Revenue (£)'],
+      ...data.report_event_ticket_tiers.map((row) => [
+        row.ticket_type_label,
+        String(row.tickets_sold),
+        String(row.booking_count),
+        (row.revenue_pence / 100).toFixed(2),
+      ]),
+    ]);
+  }, [data]);
+
+  const exportResourceUtilisation = useCallback(() => {
+    if (!data?.report_resource_utilisation?.length) return;
+    downloadCsv(`report-resource-utilisation-${data.from}-${data.to}.csv`, [
+      ['Resource', 'Bookings', 'Utilisation %', 'Booked hours', 'Available hours'],
+      ...data.report_resource_utilisation.map((row) => [
+        row.resource_name,
+        String(row.booking_count),
+        String(row.utilisation_pct),
+        String(row.occupied_hours),
+        String(row.available_hours),
+      ]),
+    ]);
+  }, [data]);
+
   const reportTabs = useMemo(
     () =>
       [
@@ -508,6 +572,12 @@ export function ReportsView({
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
   const r7 = data?.report7_appointment_insights;
+  const byModel = data?.report_by_booking_model ?? [];
+  const eventTiers = data?.report_event_ticket_tiers ?? [];
+  const resourceUtilisation = data?.report_resource_utilisation ?? [];
+  // F1: only meaningful when more than one model has activity in range (otherwise the
+  // single-row table just restates the headline booking summary).
+  const showBookingModelBreakdown = byModel.length > 1;
 
   const client = terminology.client;
   const clientLower = client.toLowerCase();
@@ -737,6 +807,55 @@ export function ReportsView({
           </div>
         ) : null}
       </ReportSection>
+
+      {/* By booking type — multi-model split (F1) */}
+      {showBookingModelBreakdown && (
+        <ReportSection
+          title="By booking type"
+          onExport={exportBookingModelBreakdown}
+          exportBlocked={byModel.length === 0}
+          exportBlockedMessage="There is no booking-type breakdown to export for this period."
+          onExportSuccess={() => notifyExport('success', 'By booking type CSV download started - check your downloads folder.')}
+          onExportBlocked={(msg) => notifyExport('notice', msg)}
+        >
+          <p className="mb-4 text-sm text-slate-500">
+            How this period&apos;s {bookingWord.toLowerCase()}s split across your active booking types, inferred from each{' '}
+            {bookingWord.toLowerCase()}. Covers / guests is the total headcount; deposits is the amount marked collected.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 font-semibold">Type</th>
+                  <th className="px-3 py-2 text-right font-semibold">{bookingWord}s</th>
+                  <th className="px-3 py-2 text-right font-semibold">Covers / guests</th>
+                  <th className="px-3 py-2 text-right font-semibold">Completed</th>
+                  <th className="px-3 py-2 text-right font-semibold">Cancelled</th>
+                  <th className="px-3 py-2 text-right font-semibold">Checked in</th>
+                  <th className="px-3 py-2 text-right font-semibold">Deposits</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byModel.map((row) => (
+                  <tr key={row.booking_model} className="border-b border-slate-100 last:border-0">
+                    <td className="px-3 py-2">
+                      <Pill variant="neutral" size="sm">{row.label}</Pill>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">{row.booking_count}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.covers}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{row.completed_count}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-amber-700">{row.cancelled_count}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.checked_in_count}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">
+                      £{(row.deposit_pence_collected / 100).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ReportSection>
+      )}
 
       {appointmentDashboardExperience ? (
         <BaselineMetricsSection
@@ -1062,6 +1181,106 @@ export function ReportsView({
           ) : (
             <p className="text-sm text-slate-400">No table utilisation data for this range.</p>
           )}
+        </ReportSection>
+      )}
+
+      {/* Event ticket-tier sales (D2a) */}
+      {eventTiers.length > 0 && (
+        <ReportSection
+          title="Event ticket sales by tier"
+          onExport={exportEventTiers}
+          exportBlocked={eventTiers.length === 0}
+          exportBlockedMessage="There is no event ticket data to export for this period."
+          onExportSuccess={() => notifyExport('success', 'Event ticket sales CSV download started - check your downloads folder.')}
+          onExportBlocked={(msg) => notifyExport('notice', msg)}
+        >
+          <p className="mb-4 text-sm text-slate-500">
+            Tickets sold and revenue per ticket type for events in this date range. Figures use the price captured when
+            each ticket was booked, so they stay accurate even after a tier is edited. Cancelled bookings are excluded.
+          </p>
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <StatTile
+              label="Tickets sold"
+              value={String(eventTiers.reduce((a, t) => a + t.tickets_sold, 0))}
+              color={reportMetricColor('teal')}
+            />
+            <StatTile
+              label="Ticket revenue"
+              value={`£${(eventTiers.reduce((a, t) => a + t.revenue_pence, 0) / 100).toFixed(2)}`}
+              color={reportMetricColor('emerald')}
+            />
+            <StatTile
+              label="Ticket tiers sold"
+              value={String(eventTiers.length)}
+              color={reportMetricColor()}
+            />
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 font-semibold">Ticket type</th>
+                  <th className="px-3 py-2 text-right font-semibold">Tickets sold</th>
+                  <th className="px-3 py-2 text-right font-semibold">{bookingWord}s</th>
+                  <th className="px-3 py-2 text-right font-semibold">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {eventTiers.map((row) => (
+                  <tr key={row.ticket_type_key} className="border-b border-slate-100 last:border-0">
+                    <td className="px-3 py-2 text-slate-800">{row.ticket_type_label}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.tickets_sold}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.booking_count}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">
+                      £{(row.revenue_pence / 100).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ReportSection>
+      )}
+
+      {/* Resource utilisation (D2b) */}
+      {resourceUtilisation.length > 0 && (
+        <ReportSection
+          title="Resource utilisation"
+          onExport={exportResourceUtilisation}
+          exportBlocked={resourceUtilisation.length === 0}
+          exportBlockedMessage="There is no resource utilisation data to export for this period."
+          onExportSuccess={() => notifyExport('success', 'Resource utilisation CSV download started - check your downloads folder.')}
+          onExportBlocked={(msg) => notifyExport('notice', msg)}
+        >
+          <p className="mb-4 text-sm text-slate-500">
+            Booked hours against each resource&apos;s open hours for this date range, plus the number of bookings. Only
+            active bookings (not cancelled) count toward booked hours.
+          </p>
+          <div className="space-y-2">
+            {resourceUtilisation.map((row) => (
+              <div key={row.resource_id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-slate-800">{row.resource_name}</p>
+                  <p className={`text-sm font-semibold ${
+                    row.utilisation_pct < 50 ? 'text-amber-700' : row.utilisation_pct > 90 ? 'text-emerald-700' : 'text-slate-700'
+                  }`}>
+                    {row.utilisation_pct}%
+                  </p>
+                </div>
+                <div className="h-2 rounded-full bg-slate-200">
+                  <div
+                    className={`h-2 rounded-full ${
+                      row.utilisation_pct < 50 ? 'bg-amber-500' : row.utilisation_pct > 90 ? 'bg-emerald-500' : 'bg-brand-500'
+                    }`}
+                    style={{ width: `${Math.min(100, row.utilisation_pct)}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {row.booking_count} {row.booking_count === 1 ? 'booking' : 'bookings'} · {row.occupied_hours}h booked / {row.available_hours}h open
+                </p>
+              </div>
+            ))}
+          </div>
         </ReportSection>
       )}
 

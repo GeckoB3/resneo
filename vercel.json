@@ -65,6 +65,14 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/reconcile-class-memberships",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/expire-pending-course-enrollments",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/cron/compliance-expiry",
       "schedule": "0 2 * * *"
     },

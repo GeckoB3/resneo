@@ -296,6 +296,45 @@ export function defaultCommunicationPolicies(): VenueCommunicationPolicies {
   return { table, appointments_other };
 }
 
+/**
+ * C1: distinct reminder offsets for class/event/resource (C/D/E) venues. CDE attendees expect a
+ * day-ahead reminder rather than the appointment 2-hour lane, so these offsets default further out.
+ * They remain independently overridable per-message via the normal communication-policy editor —
+ * this only seeds different starting `hoursBefore` values for CDE-primary venues.
+ */
+function buildDefaultCdeLanePolicies(): LaneCommunicationPolicies {
+  const lane = buildDefaultLanePolicies();
+  // Day-ahead "confirm or cancel" instead of 24h, day-ahead pre-visit instead of 2h,
+  // and a day-ahead (rather than 2h) deposit-payment nudge.
+  lane.confirm_or_cancel_prompt = { ...lane.confirm_or_cancel_prompt, hoursBefore: 48 };
+  lane.pre_visit_reminder = { ...lane.pre_visit_reminder, hoursBefore: 24 };
+  lane.deposit_payment_reminder = { ...lane.deposit_payment_reminder, hoursBefore: 24 };
+  return lane;
+}
+
+/** Default CDE reminder offsets used when seeding a fresh CDE-primary venue's `appointments_other` lane. */
+export const CDE_DEFAULT_REMINDER_HOURS_BEFORE: Readonly<
+  Partial<Record<CommunicationMessageKey, number>>
+> = {
+  confirm_or_cancel_prompt: 48,
+  pre_visit_reminder: 24,
+  deposit_payment_reminder: 24,
+} as const;
+
+/**
+ * Default communication policies for a venue, model-aware (C1). C/D/E-primary venues get the
+ * CDE reminder offsets in the `appointments_other` lane; everything else uses the shared defaults.
+ */
+export function defaultCommunicationPoliciesForVenue(opts: {
+  bookingModel?: BookingModel | string | null;
+}): VenueCommunicationPolicies {
+  const base = defaultCommunicationPolicies();
+  if (!isCdeBookingModel(opts.bookingModel)) return base;
+  const appointments_other = buildDefaultCdeLanePolicies();
+  appointments_other.appointment_waitlist_offer = defaultWaitlistOfferMessagePolicy();
+  return { table: base.table, appointments_other };
+}
+
 /** Email-only waitlist invite defaults applied when appointment waitlist is first enabled. */
 export function defaultWaitlistOfferMessagePolicy(): LaneMessagePolicy {
   return {

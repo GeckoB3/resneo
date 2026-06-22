@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isCdeBookingModel } from '@/lib/booking/cde-booking';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -12,6 +13,52 @@ export interface BookingImportDefaults {
   defaultServiceItemId: string | null;
   defaultPractitionerId: string | null;
   defaultAppointmentServiceId: string | null;
+  /**
+   * Pre-flight catalogue size for C/D/E venues: number of mappable catalogue entries
+   * (event sessions / class types / resource calendars). `null` for non-CDE models. `0` means
+   * the references step would have nothing to map to, so CDE rows would skip at execute time.
+   */
+  cdeCatalogueCount: number | null;
+}
+
+/** Per-CDE-model catalogue wording for the empty-catalogue pre-flight message. */
+const CDE_CATALOGUE_LABEL: Partial<Record<BookingModel, { thing: string; where: string }>> = {
+  event_ticket: { thing: 'event session', where: 'the Events manager' },
+  class_session: { thing: 'class', where: 'the Class timetable' },
+  resource_booking: { thing: 'bookable resource', where: 'the Resources manager' },
+};
+
+/** Counts the mappable catalogue for a CDE venue (event sessions / class types / resource calendars). */
+async function countCdeCatalogue(
+  admin: SupabaseClient,
+  venueId: string,
+  bookingModel: BookingModel,
+): Promise<number> {
+  if (bookingModel === 'event_ticket') {
+    const { count } = await admin
+      .from('event_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueId)
+      .eq('is_cancelled', false);
+    return count ?? 0;
+  }
+  if (bookingModel === 'class_session') {
+    const { count } = await admin
+      .from('class_types')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueId);
+    return count ?? 0;
+  }
+  if (bookingModel === 'resource_booking') {
+    const { count } = await admin
+      .from('unified_calendars')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .eq('calendar_type', 'resource');
+    return count ?? 0;
+  }
+  return 0;
 }
 
 /**
@@ -91,6 +138,10 @@ export async function resolveBookingImportDefaults(
     defaultAppointmentServiceId = (s as { id: string } | null)?.id ?? null;
   }
 
+  const cdeCatalogueCount = isCdeBookingModel(bookingModel)
+    ? await countCdeCatalogue(admin, venueId, bookingModel)
+    : null;
+
   return {
     bookingModel,
     unified,
@@ -99,6 +150,7 @@ export async function resolveBookingImportDefaults(
     defaultServiceItemId,
     defaultPractitionerId,
     defaultAppointmentServiceId,
+    cdeCatalogueCount,
   };
 }
 
@@ -159,16 +211,20 @@ export function evaluateBookingDefaultsForImport(
     }
     return null;
   }
-  if (
-    bookingModel === 'event_ticket' ||
-    bookingModel === 'class_session' ||
-    bookingModel === 'resource_booking'
-  ) {
-    return {
-      bookingModel,
-      message:
-        'Bookings can only be imported for restaurant, salon, or unified-scheduling venues. This venue uses a model that requires per-row resolution that the importer does not yet support.',
-    };
+  if (isCdeBookingModel(bookingModel)) {
+    // CDE rows resolve per-row against the catalogue on the references step. If the catalogue is
+    // empty there is nothing to map to, so every CDE row would silently skip at execute time —
+    // surface that up-front as a blocking pre-flight error instead.
+    if (defaults.cdeCatalogueCount != null && defaults.cdeCatalogueCount === 0) {
+      const label = CDE_CATALOGUE_LABEL[bookingModel];
+      const thing = label?.thing ?? 'catalogue entry';
+      const where = label?.where ?? 'the relevant manager';
+      return {
+        bookingModel,
+        message: `No ${thing} exists yet for this venue, so imported bookings would have nothing to attach to and would be skipped. Add at least one ${thing} in ${where} before importing.`,
+      };
+    }
+    return null;
   }
   return null;
 }

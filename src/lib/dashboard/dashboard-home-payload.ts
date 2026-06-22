@@ -148,6 +148,34 @@ export interface DashboardHomePayload {
     >;
     forecast: DashboardHomePayload['forecast'];
   };
+  /**
+   * At-a-glance cards for class/event/resource venues (today only). Present when the venue has any
+   * C/D/E model active; each sub-block is present only for the models that are active.
+   */
+  cde_today?: {
+    classes?: {
+      /** Booking rows tied to a class instance today. */
+      bookings: number;
+      /** Total attendees booked (Σ party_size). */
+      attendees: number;
+      /** Combined capacity of the distinct class instances booked today (null if unknown). */
+      capacity: number | null;
+      /** attendees / capacity, 0-100 (null when capacity unknown). */
+      fill_percent: number | null;
+    };
+    events?: {
+      /** Event ticket booking rows today. */
+      bookings: number;
+      /** Tickets sold today (Σ party_size). */
+      tickets: number;
+      /** Deposit/prepayment taken today, in major currency units. */
+      revenue: number;
+    };
+    resources?: {
+      /** Resource booking rows today. */
+      bookings: number;
+    };
+  };
 }
 
 type DashboardBookingOpsRow = {
@@ -405,6 +433,82 @@ function computeRestaurantTableLoadSlice(input: {
 }
 
 /**
+ * At-a-glance CDE cards for today (classes fill %, event ticket sales, resource bookings).
+ * Only computes sub-blocks for the models the venue actually has active. Class fill % needs the
+ * booked instances' capacities, so it issues one extra query when there are class bookings today.
+ */
+async function computeCdeTodaySummary(
+  admin: SupabaseClient,
+  todayBookings: DashboardBookingOpsRow[],
+  activeModels: Set<BookingModel>,
+): Promise<DashboardHomePayload['cde_today']> {
+  const wantClasses = activeModels.has('class_session');
+  const wantEvents = activeModels.has('event_ticket');
+  const wantResources = activeModels.has('resource_booking');
+  if (!wantClasses && !wantEvents && !wantResources) return undefined;
+
+  const out: NonNullable<DashboardHomePayload['cde_today']> = {};
+
+  if (wantClasses) {
+    const classRows = todayBookings.filter(
+      (b) => inferBookingRowModelFromFetchedRow(b) === 'class_session',
+    );
+    const attendees = classRows.reduce((sum, b) => sum + (b.party_size ?? 0), 0);
+    const instanceIds = [
+      ...new Set(
+        classRows
+          .map((b) => (b.class_instance_id as string | null | undefined) ?? null)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
+    let capacity: number | null = null;
+    if (instanceIds.length > 0) {
+      // Effective capacity = instance override ?? parent class type capacity (matches the engine).
+      const { data: caps } = await admin
+        .from('class_instances')
+        .select('id, capacity_override, class_types(capacity)')
+        .in('id', instanceIds);
+      if (caps && caps.length > 0) {
+        capacity = caps.reduce((sum, r) => {
+          const row = r as {
+            capacity_override?: number | null;
+            class_types?: { capacity?: number | null } | { capacity?: number | null }[] | null;
+          };
+          const typeCap = Array.isArray(row.class_types)
+            ? row.class_types[0]?.capacity
+            : row.class_types?.capacity;
+          const eff = row.capacity_override ?? typeCap ?? 0;
+          return sum + (Number(eff) || 0);
+        }, 0);
+        if (capacity <= 0) capacity = null;
+      }
+    }
+    const fillPercent =
+      capacity != null && capacity > 0 ? Math.min(100, Math.round((attendees / capacity) * 100)) : null;
+    out.classes = { bookings: classRows.length, attendees, capacity, fill_percent: fillPercent };
+  }
+
+  if (wantEvents) {
+    const eventRows = todayBookings.filter(
+      (b) => inferBookingRowModelFromFetchedRow(b) === 'event_ticket',
+    );
+    const tickets = eventRows.reduce((sum, b) => sum + (b.party_size ?? 0), 0);
+    const revenue =
+      eventRows.reduce((sum, b) => sum + (b.deposit_amount_pence ?? 0), 0) / 100;
+    out.events = { bookings: eventRows.length, tickets, revenue };
+  }
+
+  if (wantResources) {
+    const resourceRows = todayBookings.filter(
+      (b) => inferBookingRowModelFromFetchedRow(b) === 'resource_booking',
+    );
+    out.resources = { bookings: resourceRows.length };
+  }
+
+  return out;
+}
+
+/**
  * Build dashboard home summary for an authenticated venue staff member.
  * Caller must use the service-role client from `VenueStaff` (same as API routes).
  */
@@ -638,6 +742,14 @@ export async function buildDashboardHomePayload(
 
   const todayByModelMerged = mergeTodayByModelWithActiveModels(todayByModel, venueBookingModel, enabledModelsNorm);
 
+  // CDE at-a-glance cards (today). Active set = primary + enabled secondaries.
+  const activeModelSet = new Set<BookingModel>([venueBookingModel, ...enabledModelsNorm]);
+  const cdeToday = await computeCdeTodaySummary(
+    admin,
+    todayBookings.map((b) => b as DashboardBookingOpsRow),
+    activeModelSet,
+  );
+
   return {
     booking_model: venueMode.bookingModel,
     pricing_tier: pricingTier ?? null,
@@ -646,6 +758,7 @@ export async function buildDashboardHomePayload(
     today_by_booking_model: todayByModelMerged,
     table_focus_secondaries_enabled: tableFocusSecondariesEnabled || undefined,
     secondary_booking_activity: secondaryBookingActivity,
+    cde_today: cdeToday,
     today,
     forecast,
     heatmap,

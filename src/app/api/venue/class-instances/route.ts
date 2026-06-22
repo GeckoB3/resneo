@@ -79,6 +79,14 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
+      // Unique index (class_type_id, instance_date, start_time): a session already
+      // exists at this slot — surface as a friendly conflict, not a 500.
+      if ((error as { code?: string }).code === '23505') {
+        return NextResponse.json(
+          { error: 'A session already exists at this date and time.' },
+          { status: 409 },
+        );
+      }
       console.error('POST /api/venue/class-instances failed:', error);
       return NextResponse.json({ error: 'Failed to create class instance' }, { status: 500 });
     }

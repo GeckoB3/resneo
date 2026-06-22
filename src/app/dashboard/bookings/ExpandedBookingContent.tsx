@@ -211,6 +211,11 @@ export interface BookingDetailLite {
     inferred_model: BookingModel;
     title: string;
     subtitle?: string | null;
+    /** Optional enrichment from resolveCdeBookingContext (event tickets / class roster / resource duration). */
+    ticket_summary?: string | null;
+    ticket_total_quantity?: number | null;
+    roster_summary?: string | null;
+    duration_minutes?: number | null;
   } | null;
   inferred_booking_model?: BookingModel;
   service_variant_name?: string | null;
@@ -763,12 +768,24 @@ export function ExpandedBookingContent({
     activeDetail,
   );
   const showGlobalExtras = bookingAddons.length > 0 && multiServiceVisitSegments.length === 0;
-  const cdeContextForCard =
-    activeDetail?.cde_context &&
-    !BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel) &&
-    (!serviceLine || activeDetail.cde_context.title.trim() !== serviceLine)
-      ? activeDetail.cde_context
-      : null;
+  // CDE context card. The omit-set models (class/event/resource/appointment) normally
+  // suppress the card because the offering title is denormalised into the header
+  // serviceLine. But if the list API did NOT denormalise a name, serviceLine is empty
+  // and suppressing the card would hide the event/class/resource name everywhere (F11).
+  // So: when the title is already in the header (serviceLine present) we keep suppressing;
+  // when serviceLine is missing we always render the card so the CDE name + subtitle show.
+  const cdeContextForCard = (() => {
+    const cde = activeDetail?.cde_context;
+    if (!cde) return null;
+    const headerHasTitle = Boolean(serviceLine);
+    const titleMatchesHeader =
+      headerHasTitle && cde.title.trim() === serviceLine;
+    if (BOOKING_MODELS_OMITTING_CDE_CONTEXT_CARD.has(inferredBookingModel)) {
+      // Only suppress when the header actually carries the offering name.
+      return headerHasTitle ? null : cde;
+    }
+    return titleMatchesHeader ? null : cde;
+  })();
   const guestProfileAndNotesCount = [
     ...(activeDetail?.guest?.tags ?? []),
     activeDetail?.guest?.customer_profile_notes,
@@ -1909,6 +1926,17 @@ export function ExpandedBookingContent({
                 {cdeContextForCard.subtitle ? (
                   <p className="mt-0.5 text-xs text-slate-600">{cdeContextForCard.subtitle}</p>
                 ) : null}
+                {(() => {
+                  const detailLine =
+                    cdeContextForCard.ticket_summary ??
+                    cdeContextForCard.roster_summary ??
+                    (cdeContextForCard.duration_minutes != null
+                      ? formatDurationMinutesLabel(cdeContextForCard.duration_minutes)
+                      : null);
+                  return detailLine ? (
+                    <p className="mt-0.5 text-[11px] font-medium text-emerald-700">{detailLine}</p>
+                  ) : null;
+                })()}
               </div>
             </div>
           </SectionCard.Body>

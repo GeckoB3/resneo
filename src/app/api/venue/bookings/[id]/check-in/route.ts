@@ -29,13 +29,28 @@ export async function POST(
 
     const { data: row, error: fetchErr } = await staff.db
       .from('bookings')
-      .select('id, venue_id, calendar_id, practitioner_id, resource_id, experience_event_id, class_instance_id')
+      .select('id, venue_id, calendar_id, practitioner_id, resource_id, experience_event_id, class_instance_id, status')
       .eq('id', bookingId)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
 
     if (fetchErr || !row) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    // Only active bookings can be checked in. A Cancelled / No-Show / Completed
+    // booking must not be revivable via the check-in API (mirrors the
+    // `client_arrived` PATCH guard in bookings/[id]/route.ts). Clearing a
+    // check-in (checked_in === false) stays allowed regardless of status so a
+    // mistaken check-in can always be undone.
+    if (checkedIn) {
+      const currentStatus = (row as { status?: string | null }).status as string;
+      if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(currentStatus)) {
+        return NextResponse.json(
+          { error: 'Check-in is only available while the booking is pending, booked, confirmed, or seated.' },
+          { status: 409 },
+        );
+      }
     }
 
     if (staff.role !== 'admin') {

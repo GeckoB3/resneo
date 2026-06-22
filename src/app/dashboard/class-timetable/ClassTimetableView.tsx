@@ -20,6 +20,11 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
+import { Input, Textarea } from '@/components/ui/primitives/Input';
+import { FormField } from '@/components/ui/primitives/FormField';
+import { formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
 
 interface PractitionerOption {
   id: string;
@@ -49,19 +54,6 @@ interface ClassType {
   allow_same_day_booking?: boolean;
 }
 
-interface TimetableEntry {
-  id: string;
-  class_type_id: string;
-  day_of_week: number;
-  start_time: string;
-  is_active: boolean;
-  interval_weeks?: number;
-  created_at?: string;
-  recurrence_type?: string;
-  recurrence_end_date?: string | null;
-  total_occurrences?: number | null;
-}
-
 interface ClassInstance {
   id: string;
   class_type_id: string;
@@ -75,8 +67,6 @@ interface ClassInstance {
 }
 
 type Notice = { kind: 'success' | 'error'; message: string };
-
-const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function paymentRuleSummary(ct: ClassType, formatPrice: (pence: number) => string): string {
   const req = ct.payment_requirement ?? 'none';
@@ -104,15 +94,6 @@ const BLANK_CT = {
   min_booking_notice_hours: 1,
   cancellation_notice_hours: 48,
   allow_same_day_booking: true,
-};
-
-const INITIAL_TIMETABLE_FORM = {
-  day_of_week: 1,
-  start_time: '09:00',
-  interval_weeks: 1,
-  end_condition: 'never' as 'never' | 'until' | 'count',
-  recurrence_end_date: '',
-  total_occurrences: '',
 };
 
 function addMinutesToTimeHm(startHm: string, addMinutes: number): string {
@@ -151,6 +132,7 @@ export function ClassTimetableView({
   isAdmin,
   linkedPractitionerIds = [],
   currency = 'GBP',
+  venueTimeZone = 'Europe/London',
   stripeConnected = false,
   classCommerceEnabled = false,
 }: {
@@ -158,16 +140,19 @@ export function ClassTimetableView({
   isAdmin: boolean;
   linkedPractitionerIds?: string[];
   currency?: string;
+  /** Venue IANA timezone (e.g. Europe/London) so "today" never comes from the browser clock. */
+  venueTimeZone?: string;
   stripeConnected?: boolean;
   classCommerceEnabled?: boolean;
 }) {
   const sym = currencySymbolFromCode(currency);
+  /** Single source of truth for "today" across stats, agenda and the calendar — venue-local, never UTC/browser. */
+  const venueToday = useMemo(() => formatYmdInTimezone(Date.now(), venueTimeZone), [venueTimeZone]);
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
 
   const [classTypes, setClassTypes] = useState<ClassType[]>([]);
-  const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [instances, setInstances] = useState<ClassInstance[]>([]);
   const [practitioners, setPractitioners] = useState<PractitionerOption[]>([]);
   /** Bookable calendars (USE); names usually match staff for class instructor selection. */
@@ -187,11 +172,9 @@ export function ClassTimetableView({
   const [classTypeForm, setClassTypeForm] = useState({ ...BLANK_CT });
   const [classTypeSaving, setClassTypeSaving] = useState(false);
   const [classTypeError, setClassTypeError] = useState<string | null>(null);
-  const [timetableForm, setTimetableForm] = useState({ ...INITIAL_TIMETABLE_FORM });
 
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
-  const [editingTimetable, setEditingTimetable] = useState<TimetableEntry | null>(null);
   const [editingInstance, setEditingInstance] = useState<ClassInstance | null>(null);
   const [editInstanceForm, setEditInstanceForm] = useState({ date: '', time: '', capacity: '' });
   const [patchSaving, setPatchSaving] = useState(false);
@@ -199,7 +182,6 @@ export function ClassTimetableView({
   const [classDeleteDialog, setClassDeleteDialog] = useState<
     | null
     | { kind: 'class_type'; id: string }
-    | { kind: 'timetable'; id: string }
     | { kind: 'instance'; inst: ClassInstance }
   >(null);
   const [classDeleteBusy, setClassDeleteBusy] = useState(false);
@@ -230,7 +212,6 @@ export function ClassTimetableView({
       const res = await fetch('/api/venue/classes', { cache: 'no-store' });
       const data = await res.json();
       setClassTypes(data.class_types ?? []);
-      setTimetable(data.timetable ?? []);
       setInstances(data.instances ?? []);
       setPractitioners(data.practitioners ?? []);
       setUnifiedCalendars(
@@ -264,7 +245,6 @@ export function ClassTimetableView({
     subscriptions: [
       { table: 'class_types', filter: `venue_id=eq.${venueId}` },
       { table: 'class_instances' },
-      { table: 'class_timetable' },
       { table: 'bookings', filter: `venue_id=eq.${venueId}` },
     ],
   });
@@ -343,28 +323,6 @@ export function ClassTimetableView({
     setClassInstanceSheet((s) => (s?.instanceId === id ? null : s));
   }, []);
 
-  useEffect(() => {
-    if (!showClassTypeForm) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !showAddCalendarModal) {
-        setShowClassTypeForm(false);
-        setEditingClassTypeId(null);
-        setClassTypeError(null);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [showClassTypeForm, showAddCalendarModal]);
-
-  useEffect(() => {
-    if (!showClassTypeForm) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [showClassTypeForm]);
-
   const typeMap = useMemo(() => new Map(classTypes.map((ct) => [ct.id, ct])), [classTypes]);
 
   const filteredInstances = useMemo(() => {
@@ -406,20 +364,16 @@ export function ClassTimetableView({
 
   const stats = useMemo(() => {
     const activeClassTypes = classTypes.filter((c) => c.is_active).length;
-    const todayLocal = (() => {
-      const n = new Date();
-      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-    })();
-    const end7 = new Date();
-    end7.setDate(end7.getDate() + 6);
-    const weekEndLocal = `${end7.getFullYear()}-${String(end7.getMonth() + 1).padStart(2, '0')}-${String(end7.getDate()).padStart(2, '0')}`;
+    // "Today" and the 7-day window are both venue-local so stats never disagree
+    // with the agenda/calendar for guests/staff in a different browser timezone.
+    const weekEnd = addDaysToYmd(venueToday, 6);
     const sessionsNext7Days = instances.filter(
-      (i) => !i.is_cancelled && i.instance_date >= todayLocal && i.instance_date <= weekEndLocal,
+      (i) => !i.is_cancelled && i.instance_date >= venueToday && i.instance_date <= weekEnd,
     ).length;
     const upcomingSessions = instances.filter((i) => !i.is_cancelled).length;
     const totalBookedSpots = instances.reduce((sum, i) => sum + (i.booked_spots ?? 0), 0);
     return { activeClassTypes, sessionsNext7Days, upcomingSessions, totalBookedSpots };
-  }, [classTypes, instances]);
+  }, [classTypes, instances, venueToday]);
 
   const resolveCalendarColumnLabel = useCallback(
     (ct: ClassType): string => {
@@ -435,9 +389,8 @@ export function ClassTimetableView({
   );
 
   const groupedAgendaInstances = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     const sorted = [...filteredInstances]
-      .filter((i) => i.instance_date >= today)
+      .filter((i) => i.instance_date >= venueToday)
       .sort(
         (a, b) =>
           a.instance_date.localeCompare(b.instance_date) ||
@@ -455,7 +408,7 @@ export function ClassTimetableView({
       }
     }
     return groups;
-  }, [filteredInstances]);
+  }, [filteredInstances, venueToday]);
 
   /** Instructor id no longer in calendar/practitioner lists (deleted); keep selectable in the dropdown. */
   const orphanInstructorOption = useMemo(() => {
@@ -510,26 +463,6 @@ export function ClassTimetableView({
       min_booking_notice_hours: classTypeForm.min_booking_notice_hours,
       cancellation_notice_hours: classTypeForm.cancellation_notice_hours,
       allow_same_day_booking: classTypeForm.allow_same_day_booking,
-    };
-  };
-
-  const buildTimetableRecurrencePayload = () => {
-    let recurrence_end_date: string | null = null;
-    let total_occurrences: number | null = null;
-    if (timetableForm.end_condition === 'until' && timetableForm.recurrence_end_date.trim() !== '') {
-      recurrence_end_date = timetableForm.recurrence_end_date.trim();
-    }
-    if (timetableForm.end_condition === 'count' && timetableForm.total_occurrences.trim() !== '') {
-      const n = parseInt(timetableForm.total_occurrences, 10);
-      if (!Number.isNaN(n) && n > 0) total_occurrences = n;
-    }
-    return {
-      day_of_week: timetableForm.day_of_week,
-      start_time: timetableForm.start_time,
-      interval_weeks: timetableForm.interval_weeks,
-      recurrence_type: 'weekly',
-      recurrence_end_date,
-      total_occurrences,
     };
   };
 
@@ -608,11 +541,6 @@ export function ClassTimetableView({
     setClassDeleteDialog({ kind: 'class_type', id });
   };
 
-  const requestDeleteTimetableEntry = (id: string) => {
-    setClassDeleteDialogError(null);
-    setClassDeleteDialog({ kind: 'timetable', id });
-  };
-
   const requestDeleteInstance = (inst: ClassInstance) => {
     setClassDeleteDialogError(null);
     setClassDeleteDialog({ kind: 'instance', inst });
@@ -630,9 +558,7 @@ export function ClassTimetableView({
       const body =
         target.kind === 'class_type'
           ? { id: target.id, entity_type: 'class_type' as const }
-          : target.kind === 'timetable'
-            ? { id: target.id, entity_type: 'timetable' as const }
-            : { id: target.inst.id, entity_type: 'instance' as const };
+          : { id: target.inst.id, entity_type: 'instance' as const };
       const res = await fetch('/api/venue/classes', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -651,10 +577,8 @@ export function ClassTimetableView({
           setClassInstanceSheet(null);
         }
         setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
-      } else if (target.kind === 'class_type') {
-        setNotice({ kind: 'success', message: 'Class type deleted.' });
       } else {
-        setNotice({ kind: 'success', message: 'Schedule entry removed.' });
+        setNotice({ kind: 'success', message: 'Class type deleted.' });
       }
       await fetchData({ silent: true });
     } catch {
@@ -662,36 +586,6 @@ export function ClassTimetableView({
     } finally {
       setClassDeleteBusy(false);
       setInstanceDeletingId(null);
-    }
-  };
-
-  const handleSaveTimetableEdit = async () => {
-    if (!editingTimetable) return;
-    setPatchSaving(true);
-    try {
-      const recurrence = buildTimetableRecurrencePayload();
-      const res = await fetch('/api/venue/classes', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: editingTimetable.id,
-          entity_type: 'timetable',
-          ...recurrence,
-          is_active: true,
-        }),
-      });
-      if (!res.ok) {
-        const json = await res.json();
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Update failed' });
-        return;
-      }
-      setEditingTimetable(null);
-      setNotice({ kind: 'success', message: 'Schedule updated.' });
-      await fetchData({ silent: true });
-    } catch {
-      setNotice({ kind: 'error', message: 'Update failed' });
-    } finally {
-      setPatchSaving(false);
     }
   };
 
@@ -729,20 +623,6 @@ export function ClassTimetableView({
     } finally {
       setPatchSaving(false);
     }
-  };
-
-  const openEditTimetable = (e: TimetableEntry) => {
-    setEditingTimetable(e);
-    const hasEnd = e.recurrence_end_date != null && String(e.recurrence_end_date).trim() !== '';
-    const hasCount = e.total_occurrences != null && e.total_occurrences > 0;
-    setTimetableForm({
-      day_of_week: e.day_of_week,
-      start_time: e.start_time.slice(0, 5),
-      interval_weeks: e.interval_weeks ?? 1,
-      end_condition: hasEnd ? 'until' : hasCount ? 'count' : 'never',
-      recurrence_end_date: hasEnd ? String(e.recurrence_end_date).slice(0, 10) : '',
-      total_occurrences: hasCount ? String(e.total_occurrences) : '',
-    });
   };
 
   const openEditInstance = (inst: ClassInstance) => {
@@ -907,7 +787,6 @@ export function ClassTimetableView({
           ) : (
             <div className="space-y-1.5 p-2 sm:p-3">
               {classTypes.map((ct) => {
-                const entries = timetable.filter((e) => e.class_type_id === ct.id && e.is_active);
                 const calLabel = resolveCalendarColumnLabel(ct);
                 return (
                   <div
@@ -961,50 +840,6 @@ export function ClassTimetableView({
                             {ct.description}
                           </p>
                         ) : null}
-                        {entries.length > 0 && (
-                          <div className="flex gap-1 overflow-x-auto pt-0.5">
-                            {entries.map((e) => (
-                              <span
-                                key={e.id}
-                                className="flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] leading-4 text-slate-600 sm:text-xs"
-                              >
-                                {DAY_LABELS_FULL[e.day_of_week]} {e.start_time.slice(0, 5)}
-                                {(e.interval_weeks ?? 1) > 1 && (
-                                  <span className="text-slate-400"> · every {e.interval_weeks} wks</span>
-                                )}
-                                {e.recurrence_end_date && (
-                                  <span className="text-slate-400" title="Recurrence end date">
-                                    {' '}
-                                    · until {String(e.recurrence_end_date).slice(0, 10)}
-                                  </span>
-                                )}
-                                {e.total_occurrences != null && e.total_occurrences > 0 && (
-                                  <span className="text-slate-400"> · max {e.total_occurrences} sessions</span>
-                                )}
-                                {(isAdmin || staffManagesClassType(ct)) && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => openEditTimetable(e)}
-                                      className="text-slate-500 hover:text-brand-600"
-                                      aria-label="Edit schedule entry"
-                                    >
-                                      edit
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => requestDeleteTimetableEntry(e.id)}
-                                      className="text-slate-400 hover:text-red-500"
-                                      aria-label="Remove schedule entry"
-                                    >
-                                      ×
-                                    </button>
-                                  </>
-                                )}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
                       {(isAdmin || staffManagesClassType(ct)) && (
                         <DashboardEntityRowActions
@@ -1069,6 +904,7 @@ export function ClassTimetableView({
               return isAdmin || staffManagesClassType(ct);
             }}
             onOpenSchedule={canOpenScheduleModal ? () => setScheduleModalOpen(true) : undefined}
+            todayIso={venueToday}
           />
 
           <section>
@@ -1196,30 +1032,31 @@ export function ClassTimetableView({
       )}
 
       {showClassTypeForm && (isAdmin || linkedPractitionerIds.length > 0) && (
-        <div
-          className="fixed inset-0 z-[55] flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8 sm:items-center sm:py-10"
-          onClick={(e) => {
-            if (e.target !== e.currentTarget || classTypeSaving) return;
-            setShowClassTypeForm(false);
-            setEditingClassTypeId(null);
-            setClassTypeError(null);
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !classTypeSaving) {
+              setShowClassTypeForm(false);
+              setEditingClassTypeId(null);
+              setClassTypeError(null);
+            }
           }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="class-type-form-title"
-            className="my-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
-              <h2 id="class-type-form-title" className="text-lg font-semibold text-slate-900">
-                {editingClassTypeId ? 'Edit class type' : 'New class type'}
-              </h2>
-              <button
+          size="lg"
+          contentClassName="max-w-2xl"
+          title={editingClassTypeId ? 'Edit class type' : 'New class type'}
+          footer={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="submit"
+                form="class-type-form"
+                loading={classTypeSaving}
+                disabled={classTypeSaving}
+              >
+                {classTypeSaving ? 'Saving…' : 'Save class type'}
+              </Button>
+              <Button
                 type="button"
-                className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                aria-label="Close"
+                variant="secondary"
                 disabled={classTypeSaving}
                 onClick={() => {
                   setShowClassTypeForm(false);
@@ -1227,46 +1064,49 @@ export function ClassTimetableView({
                   setClassTypeError(null);
                 }}
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+                Cancel
+              </Button>
             </div>
+          }
+        >
             <form
+              id="class-type-form"
               onSubmit={(e) => {
                 e.preventDefault();
                 void handleSaveClassType();
               }}
-              className="max-h-[min(78vh,calc(100vh-5rem))] overflow-y-auto px-5 pb-5 pt-1 sm:px-6"
             >
               <div className="space-y-6 pb-2">
                 <section className="space-y-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Basics</h3>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
-                      <input
-                        type="text"
-                        value={classTypeForm.name}
-                        onChange={(e) => setClassTypeForm((f) => ({ ...f, name: e.target.value }))}
-                        placeholder="e.g. Beginner session, Open studio"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                      />
+                      <FormField label="Name" htmlFor="ct-name" required>
+                        <Input
+                          id="ct-name"
+                          type="text"
+                          value={classTypeForm.name}
+                          onChange={(e) => setClassTypeForm((f) => ({ ...f, name: e.target.value }))}
+                          placeholder="e.g. Beginner session, Open studio"
+                        />
+                      </FormField>
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
-                      <textarea
-                        value={classTypeForm.description}
-                        onChange={(e) => setClassTypeForm((f) => ({ ...f, description: e.target.value }))}
-                        rows={3}
-                        placeholder="Shown to guests on the booking page."
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                      />
+                      <FormField label="Description" htmlFor="ct-description">
+                        <Textarea
+                          id="ct-description"
+                          value={classTypeForm.description}
+                          onChange={(e) => setClassTypeForm((f) => ({ ...f, description: e.target.value }))}
+                          rows={3}
+                          placeholder="Shown to guests on the booking page."
+                        />
+                      </FormField>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
+                      <label htmlFor="ct-colour" className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
                       <div className="flex items-center gap-2">
                         <input
+                          id="ct-colour"
                           type="color"
                           value={classTypeForm.colour}
                           onChange={(e) => setClassTypeForm((f) => ({ ...f, colour: e.target.value }))}
@@ -1294,8 +1134,9 @@ export function ClassTimetableView({
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session defaults</h3>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
+                      <label htmlFor="ct-duration" className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
                       <NumericInput
+                        id="ct-duration"
                         min={5}
                         max={480}
                         value={classTypeForm.duration_minutes}
@@ -1304,8 +1145,9 @@ export function ClassTimetableView({
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
+                      <label htmlFor="ct-capacity" className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
                       <NumericInput
+                        id="ct-capacity"
                         min={1}
                         value={classTypeForm.capacity}
                         onChange={(v) => setClassTypeForm((f) => ({ ...f, capacity: v }))}
@@ -1313,12 +1155,13 @@ export function ClassTimetableView({
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Calendar column *</label>
+                      <label htmlFor="ct-calendar-column" className="mb-1 block text-xs font-medium text-slate-600">Calendar column *</label>
                       <p className="mb-2 text-xs text-slate-500">
                         Pick the team calendar column this class occupies in the schedule.
                       </p>
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                         <select
+                          id="ct-calendar-column"
                           value={classTypeForm.instructor_staff_id}
                           onChange={(e) =>
                             setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value }))
@@ -1343,10 +1186,11 @@ export function ClassTimetableView({
                           )}
                         </select>
                         <div className="min-w-0 flex-1">
-                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                          <label htmlFor="ct-instructor-label" className="mb-1 block text-xs font-medium text-slate-600">
                             Instructor label (optional)
                           </label>
                           <input
+                            id="ct-instructor-label"
                             type="text"
                             value={classTypeForm.instructor_custom_name}
                             onChange={(e) =>
@@ -1404,8 +1248,9 @@ export function ClassTimetableView({
                   <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                        <label htmlFor="ct-max-advance" className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
                         <NumericInput
+                          id="ct-max-advance"
                           min={1}
                           max={365}
                           value={classTypeForm.max_advance_booking_days}
@@ -1419,8 +1264,9 @@ export function ClassTimetableView({
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                        <label htmlFor="ct-min-notice" className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
                         <NumericInput
+                          id="ct-min-notice"
                           min={0}
                           max={168}
                           value={classTypeForm.min_booking_notice_hours}
@@ -1434,10 +1280,11 @@ export function ClassTimetableView({
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                        <label htmlFor="ct-cancel-notice" className="mb-1 block text-xs font-medium text-slate-600">
                           Cancellation notice (hours)
                         </label>
                         <NumericInput
+                          id="ct-cancel-notice"
                           min={0}
                           max={168}
                           value={classTypeForm.cancellation_notice_hours}
@@ -1470,10 +1317,11 @@ export function ClassTimetableView({
                 <section className="space-y-3 border-t border-slate-100 pt-5">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Price & online payment</h3>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                    <label htmlFor="ct-price" className="mb-1 block text-xs font-medium text-slate-600">
                       Price ({sym}) <span className="font-normal text-slate-400">optional</span>
                     </label>
                     <input
+                      id="ct-price"
                       type="text"
                       inputMode="decimal"
                       autoComplete="off"
@@ -1527,10 +1375,11 @@ export function ClassTimetableView({
                     </div>
                     {classTypeForm.payment_requirement === 'deposit' && (
                       <div className="mt-3 max-w-xs">
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                        <label htmlFor="ct-deposit" className="mb-1 block text-xs font-medium text-slate-600">
                           Deposit amount ({sym}) *
                         </label>
                         <input
+                          id="ct-deposit"
                           type="text"
                           inputMode="decimal"
                           autoComplete="off"
@@ -1560,72 +1409,55 @@ export function ClassTimetableView({
                   {classTypeError}
                 </p>
               )}
-
-              <div className="sticky bottom-0 mt-4 flex flex-wrap gap-2 border-t border-slate-100 bg-white/95 py-4 backdrop-blur-sm">
-                <button
-                  type="submit"
-                  disabled={classTypeSaving}
-                  className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {classTypeSaving ? 'Saving…' : 'Save class type'}
-                </button>
-                <button
-                  type="button"
-                  disabled={classTypeSaving}
-                  onClick={() => {
-                    setShowClassTypeForm(false);
-                    setEditingClassTypeId(null);
-                    setClassTypeError(null);
-                  }}
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
             </form>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {showAddCalendarModal && isAdmin && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => {
-            if (addCalendarSubmitting) return;
-            setShowAddCalendarModal(false);
-            setAddCalendarModalError(null);
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !addCalendarSubmitting) {
+              setShowAddCalendarModal(false);
+              setAddCalendarModalError(null);
+            }
           }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-calendar-modal-title"
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="add-calendar-modal-title" className="mb-1 text-lg font-semibold text-slate-900">
-              Add calendar
-            </h2>
-            <p className="mb-4 text-sm text-slate-500">
-              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them in
-              Availability later.
-            </p>
-            {addCalendarModalError && (
-              <div
-                role="alert"
-                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+          size="md"
+          contentClassName="max-w-md"
+          title="Add calendar"
+          description="Same defaults as Calendar availability: weekly hours are set automatically; you can edit them in Availability later."
+          footer={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => void submitInlineNewCalendar()}
+                loading={addCalendarSubmitting}
+                disabled={addCalendarSubmitting}
               >
-                {addCalendarModalError}
-              </div>
-            )}
-            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
-            <input
+                {addCalendarSubmitting ? 'Creating…' : 'Create and select'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setShowAddCalendarModal(false);
+                  setAddCalendarModalError(null);
+                }}
+                disabled={addCalendarSubmitting}
+              >
+                Cancel
+              </Button>
+            </div>
+          }
+        >
+          <FormField label="Display name" htmlFor="add-calendar-name" required error={addCalendarModalError}>
+            <Input
+              id="add-calendar-name"
               type="text"
               value={newCalendarName}
               onChange={(e) => setNewCalendarName(e.target.value)}
               placeholder="e.g. Studio A, Front desk"
               disabled={addCalendarSubmitting}
-              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -1634,230 +1466,103 @@ export function ClassTimetableView({
                 }
               }}
             />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void submitInlineNewCalendar()}
-                disabled={addCalendarSubmitting}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {addCalendarSubmitting ? 'Creating…' : 'Create and select'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddCalendarModal(false);
-                  setAddCalendarModalError(null);
-                }}
-                disabled={addCalendarSubmitting}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+          </FormField>
+        </Dialog>
       )}
 
-      {editingTimetable && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6">
-            <h3 className="mb-4 text-lg font-semibold text-slate-900">Edit weekly rule</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Day</label>
-                <select
-                  value={timetableForm.day_of_week}
-                  onChange={(e) => setTimetableForm((f) => ({ ...f, day_of_week: parseInt(e.target.value) }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                >
-                  {DAY_LABELS_FULL.map((label, i) => (
-                    <option key={i} value={i}>{label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
-                <input
-                  type="time"
-                  value={timetableForm.start_time}
-                  onChange={(e) => setTimetableForm((f) => ({ ...f, start_time: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Every N weeks</label>
-                <select
-                  value={timetableForm.interval_weeks}
-                  onChange={(e) =>
-                    setTimetableForm((f) => ({ ...f, interval_weeks: parseInt(e.target.value, 10) || 1 }))
-                  }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <option value={1}>Weekly</option>
-                  <option value={2}>Every 2 weeks</option>
-                  <option value={3}>Every 3 weeks</option>
-                  <option value={4}>Every 4 weeks</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-2 block text-xs font-medium text-slate-600">End recurrence (optional)</label>
-                <div className="space-y-2 text-sm text-slate-700">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="edit-tt-end"
-                      checked={timetableForm.end_condition === 'never'}
-                      onChange={() =>
-                        setTimetableForm((f) => ({
-                          ...f,
-                          end_condition: 'never',
-                          recurrence_end_date: '',
-                          total_occurrences: '',
-                        }))
-                      }
-                    />
-                    Ongoing (no end)
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="edit-tt-end"
-                      checked={timetableForm.end_condition === 'until'}
-                      onChange={() => setTimetableForm((f) => ({ ...f, end_condition: 'until' }))}
-                    />
-                    Until a fixed date
-                  </label>
-                  {timetableForm.end_condition === 'until' && (
-                    <input
-                      type="date"
-                      value={timetableForm.recurrence_end_date}
-                      onChange={(e) =>
-                        setTimetableForm((f) => ({ ...f, recurrence_end_date: e.target.value }))
-                      }
-                      className="ml-6 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  )}
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="edit-tt-end"
-                      checked={timetableForm.end_condition === 'count'}
-                      onChange={() => setTimetableForm((f) => ({ ...f, end_condition: 'count' }))}
-                    />
-                    After N generated sessions
-                  </label>
-                  {timetableForm.end_condition === 'count' && (
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="e.g. 12"
-                      value={timetableForm.total_occurrences}
-                      onChange={(e) =>
-                        setTimetableForm((f) => ({ ...f, total_occurrences: e.target.value.replace(/[^0-9]/g, '') }))
-                      }
-                      className="ml-6 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  )}
+      {editingInstance && (() => {
+        const editInstBooked = editingInstance.booked_spots ?? 0;
+        const editInstCapRaw = editInstanceForm.capacity.trim();
+        const editInstCapNum = editInstCapRaw === '' ? null : parseInt(editInstCapRaw, 10);
+        // Mirror the server guard (classes/route.ts capacity-override branch): warn
+        // before the save 409s when the new cap is below who is already booked.
+        const capBelowBooked =
+          editInstCapNum != null && Number.isFinite(editInstCapNum) && editInstCapNum < editInstBooked;
+        const canManageEditInst = isAdmin || staffManagesClassType(typeMap.get(editingInstance.class_type_id));
+        const editInstName = typeMap.get(editingInstance.class_type_id)?.name;
+        return (
+          <Dialog
+            open
+            onOpenChange={(next) => {
+              if (!next && !patchSaving) setEditingInstance(null);
+            }}
+            size="md"
+            contentClassName="max-w-md"
+            title="Edit session"
+            description={editInstName ?? undefined}
+            footer={
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {canManageEditInst ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100"
+                    onClick={() => requestDeleteInstance(editingInstance)}
+                    disabled={instanceDeletingId === editingInstance.id || patchSaving}
+                  >
+                    {instanceDeletingId === editingInstance.id ? 'Removing…' : 'Remove from calendar'}
+                  </Button>
+                ) : null}
+                <div className="ml-auto flex gap-2">
+                  <Button type="button" variant="secondary" onClick={() => setEditingInstance(null)} disabled={patchSaving}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleSaveInstanceEdit()}
+                    loading={patchSaving}
+                    disabled={patchSaving || capBelowBooked}
+                  >
+                    {patchSaving ? 'Saving…' : 'Save'}
+                  </Button>
                 </div>
               </div>
-            </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingTimetable(null)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveTimetableEdit()}
-                disabled={patchSaving}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {patchSaving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {editingInstance && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6">
-            <h3 className="text-lg font-semibold text-slate-900">Edit session</h3>
-            {typeMap.get(editingInstance.class_type_id)?.name ? (
-              <p className="mt-1 text-base font-medium text-slate-800">
-                {typeMap.get(editingInstance.class_type_id)?.name}
-              </p>
-            ) : null}
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Date</label>
-                <input
+            }
+          >
+            <div className="space-y-4">
+              <FormField label="Date" htmlFor="edit-instance-date">
+                <Input
+                  id="edit-instance-date"
                   type="date"
                   value={editInstanceForm.date}
                   onChange={(e) => setEditInstanceForm((f) => ({ ...f, date: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
-                <input
+              </FormField>
+              <FormField label="Start time" htmlFor="edit-instance-time">
+                <Input
+                  id="edit-instance-time"
                   type="time"
                   value={editInstanceForm.time}
                   onChange={(e) => setEditInstanceForm((f) => ({ ...f, time: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Capacity override (optional)</label>
-                <input
+              </FormField>
+              <FormField
+                label="Capacity override"
+                htmlFor="edit-instance-capacity"
+                description={
+                  editInstBooked > 0
+                    ? `Leave blank for the class default. ${editInstBooked} guest${editInstBooked === 1 ? '' : 's'} currently booked.`
+                    : 'Leave blank for the class default.'
+                }
+                error={
+                  capBelowBooked
+                    ? `Capacity can't be below the ${editInstBooked} guest${editInstBooked === 1 ? '' : 's'} already booked. Cancel some bookings first or choose a higher number.`
+                    : null
+                }
+              >
+                <Input
+                  id="edit-instance-capacity"
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
                   value={editInstanceForm.capacity}
                   onChange={(e) => setEditInstanceForm((f) => ({ ...f, capacity: e.target.value.replace(/[^0-9]/g, '') }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
-              </div>
+              </FormField>
             </div>
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-              {editingInstance &&
-                (isAdmin ||
-                  staffManagesClassType(typeMap.get(editingInstance.class_type_id))) && (
-                <button
-                  type="button"
-                  onClick={() => requestDeleteInstance(editingInstance)}
-                  disabled={instanceDeletingId === editingInstance.id || patchSaving}
-                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
-                >
-                  {instanceDeletingId === editingInstance.id ? 'Removing…' : 'Remove from calendar'}
-                </button>
-              )}
-              <div className="ml-auto flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingInstance(null)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveInstanceEdit()}
-                  disabled={patchSaving}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {patchSaving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+          </Dialog>
+        );
+      })()}
 
       <ClassInstanceDetailSheet
         selection={classInstanceSheet}
@@ -1871,92 +1576,76 @@ export function ClassTimetableView({
       />
 
       {classDeleteDialog && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
-          onClick={() => {
-            if (!classDeleteBusy) setClassDeleteDialog(null);
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !classDeleteBusy) setClassDeleteDialog(null);
           }}
-        >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="class-delete-title"
-            aria-describedby="class-delete-desc"
-            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="class-delete-title" className="text-base font-semibold text-slate-900">
-              {classDeleteDialog.kind === 'class_type'
-                ? 'Delete this class type?'
-                : classDeleteDialog.kind === 'timetable'
-                  ? 'Remove this schedule rule?'
-                  : 'Remove this session?'}
-            </h3>
-            <p id="class-delete-desc" className="mt-2 text-sm text-slate-600">
-              {classDeleteDialog.kind === 'class_type' ? (
-                <>
-                  <span className="font-medium text-slate-800">
-                    {classTypes.find((c) => c.id === classDeleteDialog.id)?.name ?? 'This class'}
-                  </span>{' '}
-                  will be removed. Existing dated sessions stay on the calendar; new ones will not be generated from
-                  this type. This cannot be undone.
-                </>
-              ) : classDeleteDialog.kind === 'timetable' ? (
-                <>
-                  Existing dated sessions stay on the calendar; only future generation from this weekly rule stops.
-                  Delete individual sessions from the list if you still need to clear dates.
-                </>
-              ) : (
-                <>
-                  Remove{' '}
-                  <span className="font-medium text-slate-800">
-                    {typeMap.get(classDeleteDialog.inst.class_type_id)?.name ?? 'Class'}
-                  </span>{' '}
-                  on {classDeleteDialog.inst.instance_date} at {classDeleteDialog.inst.start_time.slice(0, 5)}?
-                  {(classDeleteDialog.inst.booked_spots ?? 0) > 0 ? (
-                    <>
-                      {' '}
-                      {classDeleteDialog.inst.booked_spots} booking(s) will stay on file but will no longer be linked to
-                      this class time.
-                    </>
-                  ) : null}
-                </>
-              )}
-            </p>
-            {classDeleteDialogError ? (
-              <div
-                role="alert"
-                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              >
-                {classDeleteDialogError}
-              </div>
-            ) : null}
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <button
+          size="sm"
+          contentClassName="max-w-md"
+          showClose={false}
+          title={classDeleteDialog.kind === 'class_type' ? 'Delete this class type?' : 'Remove this session?'}
+          footer={
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setClassDeleteDialog(null)}
                 disabled={classDeleteBusy}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="danger"
                 onClick={() => void confirmClassDelete()}
+                loading={classDeleteBusy}
                 disabled={classDeleteBusy}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
               >
                 {classDeleteBusy
                   ? 'Deleting…'
                   : classDeleteDialog.kind === 'instance'
                     ? 'Remove session'
-                    : classDeleteDialog.kind === 'timetable'
-                      ? 'Remove rule'
-                      : 'Delete class type'}
-              </button>
+                    : 'Delete class type'}
+              </Button>
             </div>
-          </div>
-        </div>
+          }
+        >
+          <p className="text-sm text-slate-600">
+            {classDeleteDialog.kind === 'class_type' ? (
+              <>
+                <span className="font-medium text-slate-800">
+                  {classTypes.find((c) => c.id === classDeleteDialog.id)?.name ?? 'This class'}
+                </span>{' '}
+                will be removed. Existing dated sessions stay on the calendar; new ones will not be generated from
+                this type. This cannot be undone.
+              </>
+            ) : (
+              <>
+                Remove{' '}
+                <span className="font-medium text-slate-800">
+                  {typeMap.get(classDeleteDialog.inst.class_type_id)?.name ?? 'Class'}
+                </span>{' '}
+                on {classDeleteDialog.inst.instance_date} at {classDeleteDialog.inst.start_time.slice(0, 5)}?
+                {(classDeleteDialog.inst.booked_spots ?? 0) > 0 ? (
+                  <>
+                    {' '}
+                    {classDeleteDialog.inst.booked_spots} booking(s) will stay on file but will no longer be linked to
+                    this class time.
+                  </>
+                ) : null}
+              </>
+            )}
+          </p>
+          {classDeleteDialogError ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {classDeleteDialogError}
+            </div>
+          ) : null}
+        </Dialog>
       )}
     </div>
   );

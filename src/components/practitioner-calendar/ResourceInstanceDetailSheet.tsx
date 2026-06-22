@@ -306,6 +306,10 @@ export function ResourceInstanceDetailSheet({
     }
   }, [onClose, patchBooking]);
 
+  const markNoShow = useCallback(async () => {
+    await patchBooking({ status: 'No-Show' });
+  }, [patchBooking]);
+
   const modifySource = useMemo((): StaffExpandedBookingModifySource | null => {
     if (!detail) return null;
     const guestName =
@@ -353,6 +357,10 @@ export function ResourceInstanceDetailSheet({
   const canCancel =
     detail &&
     ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(detail.status);
+  const canMarkNoShow =
+    detail &&
+    ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(detail.status) &&
+    !detail.checked_in_at;
 
   const bodyContent = (
     <div className="space-y-3 p-2.5 sm:p-4">
@@ -472,6 +480,16 @@ export function ResourceInstanceDetailSheet({
             className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
           >
             {detail?.checked_in_at ? 'Clear check-in' : 'Check in'}
+          </button>
+        ) : null}
+        {canMarkNoShow ? (
+          <button
+            type="button"
+            disabled={actionBusy || !detail}
+            onClick={() => void markNoShow()}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Mark no-show
           </button>
         ) : null}
         {canCancel ? (

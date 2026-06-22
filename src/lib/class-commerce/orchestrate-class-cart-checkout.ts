@@ -8,24 +8,30 @@ import { splitLegacyGuestName } from '@/lib/guests/name';
 import { quoteClassCart } from '@/lib/class-commerce/quote-class-cart';
 import { persistClassCartCheckoutTransaction } from '@/lib/class-commerce/persist-class-checkout';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
+import { restoreClassCreditsForBooking } from '@/lib/class-commerce/restore-class-credits';
+import { restoreMembershipAllowanceForBooking } from '@/lib/class-commerce/restore-membership-allowance';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
 import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/membership-class-access';
 import { membershipCoversClassType } from '@/lib/class-commerce/membership-allowance-coverage';
 import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
+import { decideClassLineEntitlement } from '@/lib/class-commerce/entitlement-engine';
 import type { ClassCartCheckoutResponse, ClassCartLineInput, ClassCartQuoteLine, ClassCartQuoteResult } from '@/types/class-commerce';
 import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
 
-async function rollbackGroup(admin: SupabaseClient, groupId: string): Promise<void> {
-  await admin.from('bookings').delete().eq('group_booking_id', groupId);
-  await admin.from('class_booking_groups').delete().eq('id', groupId);
+/**
+ * Capacity guard signature raised by the DB trigger `enforce_cde_capacity` when a
+ * class-session insert would oversell. SQLSTATE 23P01 (exclusion violation) and/or
+ * a message containing 'CDE_CAPACITY'. The insert helpers surface this via `code`
+ * and/or in the error message.
+ */
+function isCapacityError(value: { code?: string; error?: string } | null | undefined): boolean {
+  if (!value) return false;
+  if (value.code === '23P01') return true;
+  return typeof value.error === 'string' && value.error.includes('CDE_CAPACITY');
 }
 
-function checkoutChargeKindFromLines(lines: ClassCartQuoteLine[]): 'deposit' | 'full_payment' {
-  const paidLines = lines.filter((l) => l.online_charge_pence > 0);
-  if (paidLines.length === 0) return 'deposit';
-  return paidLines.every((l) => l.payment_requirement === 'full_payment') ? 'full_payment' : 'deposit';
-}
+const CAPACITY_FULL_MESSAGE = 'One or more sessions just filled up — your cart was not charged.';
 
 export async function orchestrateClassCartCheckout(
   admin: SupabaseClient,
@@ -93,11 +99,39 @@ export async function orchestrateClassCartCheckout(
     return { ok: false, status: 500, error: 'Failed to start checkout' };
   }
 
+  // Track bookings that consumed value so a rollback can restore it. The restore
+  // helpers reverse the `redeem` ledger rows by booking id, so this must run
+  // BEFORE the booking rows (and any cascading ledger rows) are deleted.
+  const creditConsumedBookingIds: string[] = [];
+  const allowanceConsumedBookingIds: string[] = [];
+
+  async function rollbackGroup(): Promise<void> {
+    for (const bId of creditConsumedBookingIds) {
+      const restored = await restoreClassCreditsForBooking(admin, {
+        bookingId: bId,
+        idempotencyPrefix: `redeem_cart:${groupId}`,
+      });
+      if (!restored.ok) {
+        console.error('[orchestrateClassCartCheckout] credit restore on rollback failed', bId, restored.reason);
+      }
+    }
+    for (const bId of allowanceConsumedBookingIds) {
+      await restoreMembershipAllowanceForBooking({
+        admin,
+        bookingId: bId,
+        idempotencyPrefix: `redeem_allowance_cart:${groupId}`,
+      });
+    }
+    await admin.from('bookings').delete().eq('group_booking_id', groupId);
+    await admin.from('class_booking_groups').delete().eq('id', groupId);
+  }
+
   const bookingIds: string[] = [];
   const paidBookingIds: string[] = [];
   const stripeQuoteLines: ClassCartQuoteLine[] = [];
   let primaryPaidBookingId: string | null = null;
   let totalStripePence = 0;
+  let capacityFull = false;
 
   try {
     for (let i = 0; i < lines.length; i++) {
@@ -108,39 +142,44 @@ export async function orchestrateClassCartCheckout(
       }
 
       const online = qLine.online_charge_pence;
-      let useCredits = false;
-      if (payWithClassCredits && online > 0) {
-        const avail = await sumAvailableClassCreditsForClassType(admin, {
-          userId,
-          venueId,
-          classTypeId: qLine.class_type_id,
-        });
-        useCredits = avail >= line.party_size;
-      }
 
-      let useCourse = false;
-      if (!useCredits && online > 0) {
-        useCourse = await userCourseCoversClassInstance(admin, {
+      // Resolve entitlement coverage in product-rule precedence order:
+      // course bundle → membership → class credits (opt-in) → card.
+      // Course and membership are checked BEFORE credits so a covered session
+      // never burns a credit. Credits are only considered when the guest opted
+      // to pay with credits.
+      let courseCovers = false;
+      let membershipCovers = false;
+      let membershipCoverage: Awaited<ReturnType<typeof membershipCoversClassType>> | null = null;
+      let creditsAvailable = 0;
+
+      if (online > 0) {
+        courseCovers = await userCourseCoversClassInstance(admin, {
           userId,
           venueId,
           classInstanceId: line.class_instance_id,
         });
-      }
 
-      let useMembership = false;
-      let membershipCoverage: Awaited<ReturnType<typeof membershipCoversClassType>> | null = null;
-      if (!useCredits && !useCourse && online > 0) {
-        membershipCoverage = await membershipCoversClassType(admin, {
-          userId,
-          venueId,
-          classTypeId: qLine.class_type_id,
-          partySize: line.party_size,
-        });
-        useMembership = membershipCoverage.ok;
-        // Keep legacy helper alignment for clarity (unlimited overrides allowance pricing).
-        if (!useMembership) {
-          // Fallback to the legacy unlimited check in case ledger rows are stale.
-          useMembership = await membershipUnlimitedCoversClassType(admin, {
+        if (!courseCovers) {
+          membershipCoverage = await membershipCoversClassType(admin, {
+            userId,
+            venueId,
+            classTypeId: qLine.class_type_id,
+            partySize: line.party_size,
+          });
+          membershipCovers = membershipCoverage.ok;
+          if (!membershipCovers) {
+            // Fallback to the legacy unlimited check in case ledger rows are stale.
+            membershipCovers = await membershipUnlimitedCoversClassType(admin, {
+              userId,
+              venueId,
+              classTypeId: qLine.class_type_id,
+            });
+          }
+        }
+
+        if (!courseCovers && !membershipCovers && payWithClassCredits) {
+          creditsAvailable = await sumAvailableClassCreditsForClassType(admin, {
             userId,
             venueId,
             classTypeId: qLine.class_type_id,
@@ -148,46 +187,17 @@ export async function orchestrateClassCartCheckout(
         }
       }
 
-      if (useCredits && online > 0) {
-        const res = await insertFreeClassSessionBooking({
-          admin,
-          venueId,
-          venue: venueRow,
-          guest,
-          guestName: displayName,
-          guestEmail: emailLower,
-          guestPhoneE164: '',
-          classInstanceId: line.class_instance_id,
-          partySize: line.party_size,
-          source: 'online',
-          groupBookingId: groupId,
-          settleWithoutOnlineCard: true,
-        });
-        if (!res.ok) {
-          throw new Error(res.error);
-        }
-        const consumed = await consumeClassCreditsForBooking({
-          admin,
-          userId,
-          venueId,
-          credits: line.party_size,
-          bookingId: res.bookingId,
-          idempotencyKey: `redeem_cart:${groupId}:${line.class_instance_id}`,
-          classTypeId: qLine.class_type_id,
-        });
-        if (!consumed.ok) {
-          await admin.from('bookings').delete().eq('id', res.bookingId);
-          throw new Error(
-            consumed.reason === 'insufficient_credits'
-              ? 'Not enough class credits for one or more sessions.'
-              : 'Could not apply class credits.',
-          );
-        }
-        bookingIds.push(res.bookingId);
-        continue;
-      }
+      const decision = decideClassLineEntitlement({
+        onlineChargePence: online,
+        paymentRequirement: qLine.payment_requirement,
+        courseCovers,
+        membershipCovers,
+        payWithClassCredits,
+        creditsAvailableForClassType: creditsAvailable,
+        partySize: line.party_size,
+      });
 
-      if ((useCourse || useMembership) && online > 0) {
+      if (decision.kind === 'course' || decision.kind === 'membership') {
         const res = await insertFreeClassSessionBooking({
           admin,
           venueId,
@@ -203,11 +213,15 @@ export async function orchestrateClassCartCheckout(
           settleWithoutOnlineCard: true,
         });
         if (!res.ok) {
+          if (isCapacityError(res)) {
+            capacityFull = true;
+            throw new Error(CAPACITY_FULL_MESSAGE);
+          }
           throw new Error(res.error);
         }
         // When the matched membership is an allowance plan, ledger the consumption.
         if (
-          useMembership &&
+          decision.kind === 'membership' &&
           membershipCoverage &&
           membershipCoverage.ok &&
           membershipCoverage.mode === 'allowance'
@@ -225,12 +239,57 @@ export async function orchestrateClassCartCheckout(
             await admin.from('bookings').delete().eq('id', res.bookingId);
             throw new Error('Could not apply membership allowance.');
           }
+          allowanceConsumedBookingIds.push(res.bookingId);
         }
         bookingIds.push(res.bookingId);
         continue;
       }
 
-      if (online > 0) {
+      if (decision.kind === 'credits') {
+        const res = await insertFreeClassSessionBooking({
+          admin,
+          venueId,
+          venue: venueRow,
+          guest,
+          guestName: displayName,
+          guestEmail: emailLower,
+          guestPhoneE164: '',
+          classInstanceId: line.class_instance_id,
+          partySize: line.party_size,
+          source: 'online',
+          groupBookingId: groupId,
+          settleWithoutOnlineCard: true,
+        });
+        if (!res.ok) {
+          if (isCapacityError(res)) {
+            capacityFull = true;
+            throw new Error(CAPACITY_FULL_MESSAGE);
+          }
+          throw new Error(res.error);
+        }
+        const consumed = await consumeClassCreditsForBooking({
+          admin,
+          userId,
+          venueId,
+          credits: decision.creditsToRedeem,
+          bookingId: res.bookingId,
+          idempotencyKey: `redeem_cart:${groupId}:${line.class_instance_id}`,
+          classTypeId: qLine.class_type_id,
+        });
+        if (!consumed.ok) {
+          await admin.from('bookings').delete().eq('id', res.bookingId);
+          throw new Error(
+            consumed.reason === 'insufficient_credits'
+              ? 'Not enough class credits for one or more sessions.'
+              : 'Could not apply class credits.',
+          );
+        }
+        creditConsumedBookingIds.push(res.bookingId);
+        bookingIds.push(res.bookingId);
+        continue;
+      }
+
+      if (decision.kind === 'stripe') {
         const res = await insertPendingPaidClassSessionBooking({
           admin,
           venueId,
@@ -244,6 +303,10 @@ export async function orchestrateClassCartCheckout(
           overrideOnlineChargePence: qLine.online_charge_pence,
         });
         if (!res.ok) {
+          if (isCapacityError(res)) {
+            capacityFull = true;
+            throw new Error(CAPACITY_FULL_MESSAGE);
+          }
           throw new Error(res.error);
         }
         bookingIds.push(res.bookingId);
@@ -254,6 +317,7 @@ export async function orchestrateClassCartCheckout(
         continue;
       }
 
+      // decision.kind === 'free' — no online charge required.
       const res = await insertFreeClassSessionBooking({
         admin,
         venueId,
@@ -268,13 +332,20 @@ export async function orchestrateClassCartCheckout(
         groupBookingId: groupId,
       });
       if (!res.ok) {
+        if (isCapacityError(res)) {
+          capacityFull = true;
+          throw new Error(CAPACITY_FULL_MESSAGE);
+        }
         throw new Error(res.error);
       }
       bookingIds.push(res.bookingId);
     }
   } catch (err) {
     console.error('[orchestrateClassCartCheckout] rollback', err);
-    await rollbackGroup(admin, groupId);
+    await rollbackGroup();
+    if (capacityFull) {
+      return { ok: false, status: 409, error: CAPACITY_FULL_MESSAGE };
+    }
     return {
       ok: false,
       status: 500,
@@ -294,12 +365,12 @@ export async function orchestrateClassCartCheckout(
   }
 
   if (!stripeAccountId) {
-    await rollbackGroup(admin, groupId);
+    await rollbackGroup();
     return { ok: false, status: 400, error: 'This venue cannot take card payments yet' };
   }
 
   if (!primaryPaidBookingId || paidBookingIds.length === 0) {
-    await rollbackGroup(admin, groupId);
+    await rollbackGroup();
     return { ok: false, status: 500, error: 'No payable class rows in cart' };
   }
 
@@ -360,7 +431,13 @@ export async function orchestrateClassCartCheckout(
     };
   } catch (stripeErr) {
     console.error('[orchestrateClassCartCheckout] PaymentIntent create failed', stripeErr);
-    await rollbackGroup(admin, groupId);
+    await rollbackGroup();
     return { ok: false, status: 500, error: 'Payment setup failed' };
   }
+}
+
+function checkoutChargeKindFromLines(lines: ClassCartQuoteLine[]): 'deposit' | 'full_payment' {
+  const paidLines = lines.filter((l) => l.online_charge_pence > 0);
+  if (paidLines.length === 0) return 'deposit';
+  return paidLines.every((l) => l.payment_requirement === 'full_payment') ? 'full_payment' : 'deposit';
 }

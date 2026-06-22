@@ -2,6 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { monthGrid, ymd } from '@/lib/calendar/month-grid';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 
 const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const WEEK_HEADER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1114,65 +1116,60 @@ export function ClassScheduleModal({
     </div>
 
     {instanceDeleteConfirm && (
-      <div
-        className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
-        onClick={() => {
-          if (!deletingId) setInstanceDeleteConfirm(null);
+      <Dialog
+        open
+        onOpenChange={(next) => {
+          if (!next && !deletingId) setInstanceDeleteConfirm(null);
         }}
-      >
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="schedule-remove-session-title"
-          aria-describedby="schedule-remove-session-desc"
-          className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <h3 id="schedule-remove-session-title" className="text-base font-semibold text-slate-900">
-            Remove this session?
-          </h3>
-          <p id="schedule-remove-session-desc" className="mt-2 text-sm text-slate-600">
-            Remove{' '}
-            <span className="font-medium text-slate-800">
-              {classTypeById.get(instanceDeleteConfirm.class_type_id)?.name ?? 'Class'}
-            </span>{' '}
-            on {instanceDeleteConfirm.instance_date} at {instanceDeleteConfirm.start_time.slice(0, 5)}?
-            {(instanceDeleteConfirm.booked_spots ?? 0) > 0 ? (
-              <>
-                {' '}
-                {instanceDeleteConfirm.booked_spots} booking(s) will stay on file but will no longer be linked to this
-                class time.
-              </>
-            ) : null}
-          </p>
-          {instanceDeleteDialogError ? (
-            <div
-              role="alert"
-              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-            >
-              {instanceDeleteDialogError}
-            </div>
-          ) : null}
-          <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <button
+        size="sm"
+        contentClassName="max-w-md"
+        showClose={false}
+        title="Remove this session?"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => setInstanceDeleteConfirm(null)}
               disabled={deletingId !== null}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="danger"
               onClick={() => void confirmDeleteInstance()}
+              loading={deletingId !== null}
               disabled={deletingId !== null}
-              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
             >
               {deletingId ? 'Removing…' : 'Remove session'}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Remove{' '}
+          <span className="font-medium text-slate-800">
+            {classTypeById.get(instanceDeleteConfirm.class_type_id)?.name ?? 'Class'}
+          </span>{' '}
+          on {instanceDeleteConfirm.instance_date} at {instanceDeleteConfirm.start_time.slice(0, 5)}?
+          {(instanceDeleteConfirm.booked_spots ?? 0) > 0 ? (
+            <>
+              {' '}
+              {instanceDeleteConfirm.booked_spots} booking(s) will stay on file but will no longer be linked to this
+              class time.
+            </>
+          ) : null}
+        </p>
+        {instanceDeleteDialogError ? (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+          >
+            {instanceDeleteDialogError}
+          </div>
+        ) : null}
+      </Dialog>
     )}
     </Fragment>
   );

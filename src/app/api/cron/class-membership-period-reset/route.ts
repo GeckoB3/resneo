@@ -3,6 +3,11 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { parseMembershipRules } from '@/lib/class-commerce/product-schemas';
+import {
+  ALLOWANCE_CONSUMING_REASONS,
+  computeRolloverCarryOver,
+  netAllowanceConsumed,
+} from '@/lib/class-commerce/membership-allowance-coverage';
 
 interface MembershipRow {
   id: string;
@@ -90,8 +95,14 @@ async function handleGet(request: NextRequest) {
     if (alreadyReset) continue;
 
     // Compute previous period's leftover for rollover. We look at ledger rows
-    // strictly before current_period_start and after the prior period_reset row
-    // (or all-time if none).
+    // strictly before current_period_start and after the prior period_reset row.
+    //
+    // Fix (§5.2): the prior-period window must be bounded by the prior period_reset
+    // boundary. When there is no prior reset row we DO NOT reach back to epoch —
+    // that swept every historical redeem into "the prior period", over-counting
+    // consumption and wrongly zeroing rollover. With no prior reset row there is no
+    // observable prior period, so the window starts at current_period_start (empty)
+    // and the member carries over the full allowance, capped by rollover_limit.
     let carryOver = 0;
     if (rules.rollover) {
       const { data: priorReset } = await admin
@@ -105,8 +116,9 @@ async function handleGet(request: NextRequest) {
       const priorResetRow = (priorReset ?? [])[0] as
         | { created_at: string; delta_sessions: number }
         | undefined;
-      const priorPeriodStart = priorResetRow?.created_at ?? new Date(0).toISOString();
-      const priorStartingBalance = (rules.allowance_per_period ?? 0) + (priorResetRow?.delta_sessions ?? 0);
+      const priorPeriodStart = priorResetRow?.created_at ?? m.current_period_start;
+      const priorStartingBalance =
+        (rules.allowance_per_period ?? 0) + (priorResetRow?.delta_sessions ?? 0);
 
       const { data: priorRows } = await admin
         .from('class_membership_allowance_ledger')
@@ -114,15 +126,15 @@ async function handleGet(request: NextRequest) {
         .eq('membership_id', m.id)
         .gte('created_at', priorPeriodStart)
         .lt('created_at', m.current_period_start)
-        .in('reason', ['redeem', 'restore', 'admin_adjust', 'payment_reversal']);
+        .in('reason', [...ALLOWANCE_CONSUMING_REASONS]);
 
-      let consumed = 0;
-      for (const r of (priorRows ?? []) as AllowanceLedgerRow[]) {
-        consumed -= r.delta_sessions;
-      }
-      const leftover = Math.max(0, priorStartingBalance - Math.max(0, consumed));
-      const cap = rules.rollover_limit ?? leftover;
-      carryOver = Math.min(leftover, cap);
+      const consumed = netAllowanceConsumed((priorRows ?? []) as AllowanceLedgerRow[]);
+      carryOver = computeRolloverCarryOver({
+        priorStartingBalance,
+        priorConsumed: consumed,
+        rollover: rules.rollover,
+        rolloverLimit: rules.rollover_limit,
+      });
     }
 
     const idempotencyKey = `period_reset:${m.id}:${m.current_period_start}`;

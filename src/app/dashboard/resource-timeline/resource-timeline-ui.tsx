@@ -363,65 +363,6 @@ export function ResourceMobileStrip({
   );
 }
 
-export function ResourceDetailHero({
-  name,
-  resourceType,
-  hostLabel,
-  isActive,
-  canManage,
-  onBook,
-  onEdit,
-  onDelete,
-}: {
-  name: string;
-  resourceType: string | null;
-  hostLabel: string;
-  isActive: boolean;
-  canManage: boolean;
-  onBook: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white shadow-lg shadow-slate-900/15">
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Resource</p>
-            <h2 className="mt-1 truncate text-2xl font-semibold tracking-tight sm:text-3xl">{name}</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              {[resourceType, hostLabel].filter(Boolean).join(' · ') || hostLabel}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={cn(
-                'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                isActive ? 'bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-400/30' : 'bg-slate-600/50 text-slate-300',
-              )}
-            >
-              {isActive ? 'Accepting bookings' : 'Inactive'}
-            </span>
-            <Button type="button" variant="primary" size="md" className="bg-white text-slate-900 hover:bg-slate-100" onClick={onBook}>
-              Book
-            </Button>
-            {canManage ? (
-              <>
-                <Button type="button" variant="secondary" size="md" className="border-slate-600 bg-slate-800/80 text-white hover:bg-slate-700" onClick={onEdit}>
-                  Edit
-                </Button>
-                <Button type="button" variant="danger" size="md" onClick={onDelete}>
-                  Delete
-                </Button>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function BookingsDateNavigator({
   dateIso,
   onPrev,
@@ -557,6 +498,9 @@ export function ResourcePaymentCards({
 const weekHoursTimeInputClass =
   'box-border min-h-10 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm [color-scheme:light]';
 
+type WeekHoursRange = { start: string; end: string };
+type WeekHoursDay = { enabled: boolean; ranges: WeekHoursRange[] };
+
 export function WeekHoursEditor({
   days,
   hours,
@@ -566,19 +510,43 @@ export function WeekHoursEditor({
   matchLabel,
 }: {
   days: Array<{ key: string; label: string }>;
-  hours: Record<string, { enabled: boolean; start: string; end: string }>;
-  onChange: (key: string, patch: Partial<{ enabled: boolean; start: string; end: string }>) => void;
+  hours: Record<string, WeekHoursDay>;
+  /** Receives the full next-day state (enabled + all ranges) for the given day. */
+  onChange: (key: string, nextDay: WeekHoursDay) => void;
   matchCalendar: boolean;
   onToggleMatchCalendar: () => void;
   matchLabel: string;
 }) {
+  function ensureRanges(day: WeekHoursDay): WeekHoursRange[] {
+    return day.ranges.length > 0 ? day.ranges : [{ start: '09:00', end: '17:00' }];
+  }
+  function setEnabled(key: string, enabled: boolean) {
+    const day = hours[key]!;
+    onChange(key, { enabled, ranges: ensureRanges(day) });
+  }
+  function setRange(key: string, idx: number, patch: Partial<WeekHoursRange>) {
+    const day = hours[key]!;
+    const ranges = ensureRanges(day).map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    onChange(key, { enabled: true, ranges });
+  }
+  function addRange(key: string) {
+    const day = hours[key]!;
+    const ranges = [...ensureRanges(day), { start: '09:00', end: '17:00' }];
+    onChange(key, { enabled: true, ranges });
+  }
+  function removeRange(key: string, idx: number) {
+    const day = hours[key]!;
+    const ranges = ensureRanges(day).filter((_, i) => i !== idx);
+    // Removing the last range closes the day rather than leaving it open with no hours.
+    onChange(key, ranges.length > 0 ? { enabled: true, ranges } : { enabled: false, ranges: ensureRanges(day) });
+  }
   function copyDayToOtherOpenDays(sourceKey: string) {
     const source = hours[sourceKey];
     if (!source?.enabled) return;
     for (const d of days) {
       if (d.key === sourceKey) continue;
       if (hours[d.key]?.enabled) {
-        onChange(d.key, { start: source.start, end: source.end });
+        onChange(d.key, { enabled: true, ranges: source.ranges.map((r) => ({ ...r })) });
       }
     }
   }
@@ -586,7 +554,8 @@ export function WeekHoursEditor({
   return (
     <div className="space-y-3">
       <p className={fieldHintClass}>
-        Set hours for each day. Copy one day&apos;s times to other open days, or match your venue calendar.
+        Set hours for each day. Add a second range for split hours (e.g. 09:00–12:00 and 14:00–18:00), copy one
+        day&apos;s times to other open days, or match your venue calendar.
       </p>
       <div className="flex justify-end">
         <Button
@@ -602,6 +571,7 @@ export function WeekHoursEditor({
       <div className="space-y-2">
         {days.map((d) => {
           const day = hours[d.key]!;
+          const ranges = ensureRanges(day);
           const canCopyElsewhere =
             day.enabled && days.some((other) => other.key !== d.key && hours[other.key]?.enabled);
           return (
@@ -612,57 +582,86 @@ export function WeekHoursEditor({
                 day.enabled ? 'border-slate-200/90 bg-white' : 'border-slate-100 bg-slate-50/60',
               )}
             >
-              <label className="flex min-h-10 shrink-0 cursor-pointer items-center gap-3 md:w-28 lg:w-32">
+              <label className="flex min-h-10 shrink-0 cursor-pointer items-center gap-3 md:w-28 lg:w-32 md:pt-1">
                 <input
                   type="checkbox"
                   checked={day.enabled}
-                  onChange={(e) => onChange(d.key, { enabled: e.target.checked })}
+                  onChange={(e) => setEnabled(d.key, e.target.checked)}
                   className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                 />
                 <span className="text-sm font-medium text-slate-800">{d.label}</span>
               </label>
               {day.enabled ? (
-                <div className="flex w-full min-w-0 flex-1 flex-col gap-3">
-                  <div className="grid w-full min-w-0 gap-2 max-md:grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-x-2">
-                    <div className="min-w-0 max-md:space-y-1">
-                      <span className="text-[11px] font-medium text-slate-500 md:sr-only">From</span>
-                      <input
-                        type="time"
-                        value={day.start}
-                        onChange={(e) => onChange(d.key, { start: e.target.value })}
-                        className={weekHoursTimeInputClass}
-                        aria-label={`${d.label} start`}
-                      />
-                    </div>
-                    <span
-                      className="text-center text-sm text-slate-400 max-md:py-0.5 md:px-0.5"
-                      aria-hidden
+                <div className="flex w-full min-w-0 flex-1 flex-col gap-2.5">
+                  {ranges.map((range, idx) => (
+                    <div
+                      key={idx}
+                      className="grid w-full min-w-0 gap-2 max-md:grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] md:items-center md:gap-x-2"
                     >
-                      to
-                    </span>
-                    <div className="min-w-0 max-md:space-y-1">
-                      <span className="text-[11px] font-medium text-slate-500 md:sr-only">To</span>
-                      <input
-                        type="time"
-                        value={day.end}
-                        onChange={(e) => onChange(d.key, { end: e.target.value })}
-                        className={weekHoursTimeInputClass}
-                        aria-label={`${d.label} end`}
-                      />
+                      <div className="min-w-0 max-md:space-y-1">
+                        <span className="text-[11px] font-medium text-slate-500 md:sr-only">
+                          {idx === 0 ? 'From' : `Range ${idx + 1} from`}
+                        </span>
+                        <input
+                          type="time"
+                          value={range.start}
+                          onChange={(e) => setRange(d.key, idx, { start: e.target.value })}
+                          className={weekHoursTimeInputClass}
+                          aria-label={`${d.label} range ${idx + 1} start`}
+                        />
+                      </div>
+                      <span className="text-center text-sm text-slate-400 max-md:py-0.5 md:px-0.5" aria-hidden>
+                        to
+                      </span>
+                      <div className="min-w-0 max-md:space-y-1">
+                        <span className="text-[11px] font-medium text-slate-500 md:sr-only">
+                          {idx === 0 ? 'To' : `Range ${idx + 1} to`}
+                        </span>
+                        <input
+                          type="time"
+                          value={range.end}
+                          onChange={(e) => setRange(d.key, idx, { end: e.target.value })}
+                          className={weekHoursTimeInputClass}
+                          aria-label={`${d.label} range ${idx + 1} end`}
+                        />
+                      </div>
+                      {ranges.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => removeRange(d.key, idx)}
+                          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 max-md:w-full"
+                          aria-label={`Remove ${d.label} range ${idx + 1}`}
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <span className="hidden md:block" aria-hidden />
+                      )}
                     </div>
-                  </div>
-                  {canCopyElsewhere ? (
+                  ))}
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      className="w-full shrink-0 md:w-auto md:self-start"
-                      onClick={() => copyDayToOtherOpenDays(d.key)}
-                      title={`Apply ${d.label}'s times to every other day that is open`}
+                      className="w-full shrink-0 sm:w-auto"
+                      onClick={() => addRange(d.key)}
                     >
-                      Copy to other open days
+                      + Add range
                     </Button>
-                  ) : null}
+                    {canCopyElsewhere ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="w-full shrink-0 sm:w-auto"
+                        onClick={() => copyDayToOtherOpenDays(d.key)}
+                        title={`Apply ${d.label}'s times to every other day that is open`}
+                      >
+                        Copy to other open days
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               ) : (
                 <span className="text-sm text-slate-400 md:pt-2.5">Closed</span>

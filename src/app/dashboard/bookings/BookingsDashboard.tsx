@@ -35,6 +35,12 @@ import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import {
+  bookingTypePillVariant,
+  cdeDeepLinkEntityLabel,
+  readCdeDeepLinkFilter,
+  type CdeDeepLinkFilter,
+} from './bookings-list-shared';
+import {
   inferBookingRowModel,
   bookingModelShortLabel,
   isTableReservationBooking,
@@ -253,22 +259,6 @@ function bookingTypeFilterLabel(model: BookingModel): string {
       return 'Class';
     default:
       return bookingModelShortLabel(model);
-  }
-}
-
-function bookingTypePillVariant(model: BookingModel): PillVariant {
-  switch (model) {
-    case 'unified_scheduling':
-    case 'practitioner_appointment':
-      return 'brand';
-    case 'event_ticket':
-      return 'info';
-    case 'class_session':
-      return 'success';
-    case 'resource_booking':
-      return 'warning';
-    default:
-      return 'neutral';
   }
 }
 
@@ -504,9 +494,28 @@ export function BookingsDashboard({
     return a && GUEST_UUID_RE.test(a) ? a : null;
   }, [searchParams]);
 
+  /**
+   * Calendar deep-link: `?experience_event_id=`/`?class_instance_id=`/`?resource_id=`.
+   * The calendar event/class/resource sheets link here; the list is scoped to that
+   * entity server-side (no date range needed) — review §5.5 F12.
+   */
+  const cdeDeepLink = useMemo<CdeDeepLinkFilter | null>(
+    () => readCdeDeepLinkFilter((key) => searchParams.get(key)),
+    [searchParams],
+  );
+
   const clearGuestFilter = useCallback(() => {
     const next = new URLSearchParams(searchParams.toString());
     next.delete('guest');
+    const qs = next.toString();
+    router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
+  }, [router, searchParams]);
+
+  const clearCdeDeepLink = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('experience_event_id');
+    next.delete('class_instance_id');
+    next.delete('resource_id');
     const qs = next.toString();
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
@@ -758,7 +767,8 @@ export function BookingsDashboard({
   const fetchBookings = useCallback(async (options?: FetchBookingsOptions) => {
     const silent = options?.silent ?? false;
     const ids = options?.ids;
-    if (invalidCustomRange) {
+    // A CDE deep-link ignores the date range, so its (in)validity is irrelevant there.
+    if (invalidCustomRange && !cdeDeepLink) {
       setError('Custom date range is invalid. "From" must be before or equal to "To".');
       setLoading(false);
       return;
@@ -769,18 +779,24 @@ export function BookingsDashboard({
 
     if (!silent) setError(null);
     try {
+      // `ids` is a targeted single-row refresh and always wins; otherwise, a CDE
+      // deep-link scopes to one session/event/resource (no date range or other
+      // dashboard filters) and falls back to the normal date-range query.
+      const useDeepLink = (!ids || ids.length === 0) && cdeDeepLink != null;
       const params = ids && ids.length > 0
         ? new URLSearchParams({ ids: ids.join(',') })
-        : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
-      if (!ids && statusFilter !== 'All') {
+        : useDeepLink
+          ? new URLSearchParams({ [cdeDeepLink!.param]: cdeDeepLink!.id })
+          : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
+      if (!ids && !useDeepLink && statusFilter !== 'All') {
         const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
         if (opt?.attendanceConfirmed) params.set('attendance_confirmed', '1');
         else if (opt?.apiStatus) params.set('status', opt.apiStatus);
       }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
-      if (!ids && filterAreaId) params.set('area', filterAreaId);
-      if (!ids && serviceFilterIds.length > 0) params.set('service', serviceFilterIds.join(','));
-      if (!ids && calendarFilter !== 'all') params.set('calendar', calendarFilter);
+      if (!ids && !useDeepLink && filterAreaId) params.set('area', filterAreaId);
+      if (!ids && !useDeepLink && serviceFilterIds.length > 0) params.set('service', serviceFilterIds.join(','));
+      if (!ids && !useDeepLink && calendarFilter !== 'all') params.set('calendar', calendarFilter);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       const data = await readResponseJson<{ error?: string; bookings?: BookingRow[] }>(res);
       if (!res.ok) {
@@ -789,7 +805,7 @@ export function BookingsDashboard({
       }
       const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
       const loaded: BookingRow[] = data.bookings ?? [];
-      const next = !ids && opt?.excludeAttendanceConfirmed
+      const next = !ids && !useDeepLink && opt?.excludeAttendanceConfirmed
         ? loaded.filter((booking) => !isAttendanceConfirmed(booking))
         : loaded;
       setBookings((prev) => {
@@ -812,7 +828,7 @@ export function BookingsDashboard({
       if (silent) setIsRefreshing(false);
       else setLoading(false);
     }
-  }, [calendarFilter, filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilterIds, statusFilter, to, viewMode]);
+  }, [calendarFilter, cdeDeepLink, filterAreaId, filterGuestId, from, invalidCustomRange, serviceFilterIds, statusFilter, to, viewMode]);
 
   const changeTableSaveLock = useRef(false);
 
@@ -1856,6 +1872,19 @@ export function BookingsDashboard({
             className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100"
           >
             Clear guest filter
+          </button>
+        </div>
+      )}
+
+      {cdeDeepLink && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <span>Showing all bookings for this {cdeDeepLinkEntityLabel(cdeDeepLink.param)}.</span>
+          <button
+            type="button"
+            onClick={clearCdeDeepLink}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Back to all bookings
           </button>
         </div>
       )}

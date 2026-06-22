@@ -1,7 +1,14 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { buildAccountBookingDisplayList, loadAccountBookings } from '@/lib/account/account-bookings';
+import {
+  accountBookingTimeZone,
+  buildAccountBookingDisplayList,
+  formatAccountBookingDateTime,
+  friendlyAccountBookingStatus,
+  loadAccountBookings,
+  type AccountBookingRow,
+} from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import {
   filterAccountBookings,
@@ -9,6 +16,18 @@ import {
   type AccountBookingFilter,
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+
+/** One-line summary "Class · Mon 4 August · 18:30 · Confirmed", venue-TZ + friendly status. */
+function bookingSummaryLine(row: AccountBookingRow, profileTz: string | null): string {
+  const tz = accountBookingTimeZone(row, profileTz);
+  const { date, time } = formatAccountBookingDateTime(row.booking_date, row.booking_time, tz, {
+    withWeekday: true,
+  });
+  const parts = [bookingModelShortLabel(row.booking_model), date];
+  if (time) parts.push(time);
+  parts.push(friendlyAccountBookingStatus(row.status));
+  return parts.join(' · ');
+}
 
 export default async function AccountBookingsPage({
   searchParams,
@@ -20,7 +39,13 @@ export default async function AccountBookingsPage({
   const todayUtcDate = new Date().toISOString().slice(0, 10);
 
   const supabase = await createClient();
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: profile } = user
+    ? await supabase.from('user_profiles').select('timezone').eq('id', user.id).maybeSingle()
+    : { data: null };
+  const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
 
   const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
 
@@ -63,38 +88,53 @@ export default async function AccountBookingsPage({
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
           {displayItems.map((item) =>
             item.kind === 'group' ? (
-              <li key={item.group_booking_id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="font-medium text-slate-900">{item.venue?.name ?? 'Venue'}</p>
-                  <p className="text-sm font-medium text-slate-800">Class multi-session · {item.rows.length} sessions</p>
-                  <ul className="mt-2 space-y-1 text-xs text-slate-600">
-                    {item.rows.map((b) => (
-                      <li key={b.id}>
-                        {b.booking_date} {String(b.booking_time).slice(0, 5)} · {b.party_size} guests · {b.status}
-                      </li>
-                    ))}
-                  </ul>
+              <li key={item.group_booking_id} className="flex flex-col gap-2 px-4 py-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900">
+                      {item.rows[0]?.cde_context?.title ?? item.venue?.name ?? 'Venue'}
+                    </p>
+                    <p className="text-sm font-medium text-slate-800">
+                      {item.venue?.name ? `${item.venue.name} · ` : ''}Course · {item.rows.length} sessions
+                    </p>
+                    <ul className="mt-2 space-y-1.5 text-xs text-slate-600">
+                      {item.rows.map((b) => {
+                        const tz = accountBookingTimeZone(b, profileTz);
+                        const { date, time } = formatAccountBookingDateTime(b.booking_date, b.booking_time, tz);
+                        return (
+                          <li key={b.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+                            <span>
+                              {date}
+                              {time ? ` · ${time}` : ''} · {friendlyAccountBookingStatus(b.status)}
+                            </span>
+                            <span className="flex gap-3 font-medium">
+                              <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
+                                Details
+                              </Link>
+                              <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
+                                Cancel this session
+                              </a>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1 text-sm font-medium sm:items-end">
-                  {item.rows.map((b) => (
-                    <div key={b.id} className="flex gap-3">
-                      <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
-                        Details
-                      </Link>
-                      <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
-                        Manage
-                      </a>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Each link cancels only that one session. To cancel the whole course, cancel every session here or
+                  contact the venue.
+                </p>
               </li>
             ) : (
               <li key={item.row.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-medium text-slate-900">{item.row.venue?.name ?? 'Venue'}</p>
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900">
+                    {item.row.cde_context?.title ?? item.row.venue?.name ?? 'Venue'}
+                  </p>
                   <p className="text-sm text-slate-600">
-                    {bookingModelShortLabel(item.row.booking_model)} · {item.row.booking_date} ·{' '}
-                    {String(item.row.booking_time).slice(0, 5)} · {item.row.party_size} guests · {item.row.status}
+                    {item.row.cde_context && item.row.venue?.name ? `${item.row.venue.name} · ` : ''}
+                    {bookingSummaryLine(item.row, profileTz)}
                   </p>
                 </div>
                 <div className="flex gap-3 text-sm font-medium">
@@ -111,7 +151,7 @@ export default async function AccountBookingsPage({
         </ul>
       )}
       <p className="text-xs text-slate-500">
-        Filters use the UTC calendar day. For exact local times, check the venue confirmation email.
+        Times are shown in each venue’s local timezone. Filters use the UTC calendar day.
       </p>
     </div>
   );

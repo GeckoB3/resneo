@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ExperienceEvent, EventTicketType } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
+import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import {
   resolveVenueWideAllowedMinuteRanges,
   isMinuteSubintervalCoveredByRanges,
@@ -64,8 +65,6 @@ export interface EventAvailabilitySlot {
 }
 
 // Core engine
-
-const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 export function computeEventAvailability(
   input: EventEngineInput,

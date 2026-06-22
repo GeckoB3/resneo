@@ -1,20 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import {
+  removeCalendarBlockForClassInstance,
   resolveInstructorCalendarIdForClass,
   syncCalendarBlockForClassInstance,
 } from '@/lib/class-instances/instructor-calendar-block';
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
+import { cancelClassInstanceBookings } from '@/lib/class-instances/cancel-class-instance-bookings';
+import { isCapacityConsumingStatus } from '@/lib/availability/capacity-status';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import {
   buildEntityNotFoundMessage,
   buildUpcomingBookingsBlockMessage,
   hasActiveBookingsForClassInstance,
-  hasUpcomingActiveBookingsForClassTimetableEntry,
   hasUpcomingActiveBookingsForClassType,
 } from '@/lib/venue/entity-delete-booking-guards';
 import { z } from 'zod';
@@ -128,17 +130,6 @@ const classTypePatchSchema = z.object({
   min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
   allow_same_day_booking: z.boolean().optional(),
-});
-
-const timetableEntrySchema = z.object({
-  class_type_id: z.string().uuid(),
-  day_of_week: z.number().int().min(0).max(6),
-  start_time: z.string().regex(/^\d{2}:\d{2}$/),
-  is_active: z.boolean().optional(),
-  interval_weeks: z.number().int().min(1).max(8).optional(),
-  recurrence_type: z.string().max(32).optional(),
-  recurrence_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
-  total_occurrences: z.number().int().min(1).optional().nullable(),
 });
 
 /**
@@ -296,7 +287,7 @@ export async function GET(request: NextRequest) {
         console.error('GET /api/venue/classes booking counts failed:', bookErr);
       } else {
         for (const b of bookingRows ?? []) {
-          if ((b as { status?: string }).status === 'Cancelled') continue;
+          if (!isCapacityConsumingStatus((b as { status?: string }).status)) continue;
           const cid = (b as { class_instance_id: string | null }).class_instance_id;
           if (!cid) continue;
           bookedByInstance[cid] =
@@ -343,7 +334,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST /api/venue/classes - create a class type or timetable entry (admin or scoped staff). */
+/** POST /api/venue/classes - create a class type (admin or scoped staff). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -356,33 +347,9 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // Determine what to create based on body shape
-    if (body.day_of_week !== undefined) {
-      // Timetable entry
-      const parsed = timetableEntrySchema.safeParse(body);
-      if (!parsed.success) {
-        return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
-      }
-      if (staff.role !== 'admin') {
-        const scope = await staffMayManageClassTypeSessions(
-          admin,
-          staff.venue_id,
-          staff,
-          parsed.data.class_type_id,
-        );
-        if (!scope.ok) {
-          return NextResponse.json({ error: scope.error }, { status: scope.status });
-        }
-      }
-      const { data, error } = await admin.from('class_timetable').insert(parsed.data).select().single();
-      if (error) {
-        console.error('POST /api/venue/classes (timetable) failed:', error);
-        return NextResponse.json({ error: 'Failed to create timetable entry' }, { status: 500 });
-      }
-      return NextResponse.json({ type: 'timetable', data }, { status: 201 });
-    }
-
-    // Class type
+    // Only class types are created here. The weekly-timetable entity is removed
+    // (its instance-generation path was unwired); sessions are placed directly via
+    // the bulk/one-off scheduler (`/api/venue/class-instances` + `.../bulk`).
     const parsed = classTypeSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
@@ -439,7 +406,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/classes - update class type, timetable entry, or instance. */
+/** PATCH /api/venue/classes - update a class type or an instance. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -458,33 +425,10 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden: only venue admins can edit class types.' }, { status: 403 });
     }
 
-    if (entity_type === 'timetable') {
-      const { data: ttRow, error: ttFetchErr } = await admin
-        .from('class_timetable')
-        .select('id, class_type_id')
-        .eq('id', id)
-        .maybeSingle();
-      if (ttFetchErr) {
-        console.error('PATCH /api/venue/classes (timetable) fetch failed:', ttFetchErr);
-        return NextResponse.json({ error: 'Failed to update timetable entry' }, { status: 500 });
-      }
-      if (!ttRow) {
-        return NextResponse.json({ error: 'Timetable entry not found' }, { status: 404 });
-      }
-      const ctId = (ttRow as { class_type_id: string }).class_type_id;
-      const scope = await staffMayManageClassTypeSessions(admin, staff.venue_id, staff, ctId);
-      if (!scope.ok) {
-        return NextResponse.json({ error: scope.error }, { status: scope.status });
-      }
-      const { data, error } = await admin.from('class_timetable').update(rest).eq('id', id).select().single();
-      if (error) return NextResponse.json({ error: 'Failed to update timetable entry' }, { status: 500 });
-      return NextResponse.json(data);
-    }
-
     if (entity_type === 'instance') {
       const { data: existingInst, error: fetchInstErr } = await admin
         .from('class_instances')
-        .select('id, instance_date, start_time, class_type_id, is_cancelled')
+        .select('id, instance_date, start_time, class_type_id, is_cancelled, capacity_override')
         .eq('id', id)
         .maybeSingle();
 
@@ -498,7 +442,7 @@ export async function PATCH(request: NextRequest) {
 
       const { data: ctRow, error: ctFetchErr } = await admin
         .from('class_types')
-        .select('id, instructor_id, duration_minutes')
+        .select('id, instructor_id, duration_minutes, name')
         .eq('id', (existingInst as { class_type_id: string }).class_type_id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
@@ -517,12 +461,60 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: sessionScope.error }, { status: sessionScope.status });
       }
 
+      const prevInst = existingInst as {
+        instance_date: string;
+        start_time: string;
+        class_type_id: string;
+        is_cancelled?: boolean | null;
+      };
       const mergedInst = { ...existingInst, ...rest } as {
         instance_date: string;
         start_time: string;
         is_cancelled?: boolean | null;
       };
+      const wasCancelled = Boolean(prevInst.is_cancelled);
       const nextCancelled = Boolean(mergedInst.is_cancelled);
+      const isCancelTransition = !wasCancelled && nextCancelled;
+
+      // Current active (capacity-consuming) booked count for this instance — used
+      // by the capacity-override guard and to decide whether a reschedule must
+      // move/notify bookings.
+      let activeBookedCount = 0;
+      const activeBookingIds: string[] = [];
+      {
+        const { data: activeRows, error: activeErr } = await admin
+          .from('bookings')
+          .select('id, party_size, status')
+          .eq('venue_id', staff.venue_id)
+          .eq('class_instance_id', id);
+        if (activeErr) {
+          console.error('PATCH /api/venue/classes (instance) booked count failed:', activeErr);
+          return NextResponse.json({ error: 'Failed to update instance' }, { status: 500 });
+        }
+        for (const b of activeRows ?? []) {
+          if (!isCapacityConsumingStatus((b as { status?: string }).status)) continue;
+          activeBookedCount += Number((b as { party_size?: number }).party_size ?? 1);
+          activeBookingIds.push((b as { id: string }).id);
+        }
+      }
+
+      // Guard: capacity_override cannot be set below the current active booked count.
+      if (
+        Object.prototype.hasOwnProperty.call(rest, 'capacity_override') &&
+        rest.capacity_override != null
+      ) {
+        const nextOverride = Number(rest.capacity_override);
+        if (Number.isFinite(nextOverride) && nextOverride < activeBookedCount) {
+          return NextResponse.json(
+            {
+              error: `Capacity cannot be set below the ${activeBookedCount} guest${
+                activeBookedCount === 1 ? '' : 's'
+              } already booked into this session. Cancel some bookings first or choose a higher capacity.`,
+            },
+            { status: 409 },
+          );
+        }
+      }
 
       if (!nextCancelled) {
         const conflict = await assertClassSessionWindowFreeOnCalendar(admin, staff.venue_id, {
@@ -554,6 +546,91 @@ export async function PATCH(request: NextRequest) {
         skipBlock: Boolean(row.is_cancelled),
         createdByStaffId: staff.id,
       });
+
+      // C5 — a PATCH cancellation must run the SAME pipeline as the admin-only
+      // /cancel route: cancel each attached active booking, refund per policy and
+      // notify guests. Otherwise paid guests are silently stranded.
+      if (isCancelTransition) {
+        await removeCalendarBlockForClassInstance(admin, id as string);
+        let cancelOutcome: Awaited<ReturnType<typeof cancelClassInstanceBookings>>;
+        try {
+          cancelOutcome = await cancelClassInstanceBookings(admin, staff.db, {
+            venueId: staff.venue_id,
+            classInstanceId: id as string,
+            className: String((ctRow as { name: string }).name),
+            instanceDate: String(row.instance_date),
+            actorId: staff.id,
+          });
+        } catch (cancelErr) {
+          console.error('PATCH /api/venue/classes (instance cancel) failed:', cancelErr);
+          return NextResponse.json({ error: 'Failed to cancel session bookings' }, { status: 500 });
+        }
+
+        if (cancelOutcome.refundFailures > 0 && cancelOutcome.cancelledCount === 0) {
+          return NextResponse.json(
+            {
+              error:
+                'Refund could not be processed for one or more bookings. No bookings were cancelled — please try again or refund manually in Stripe.',
+              code: 'REFUND_FAILED',
+            },
+            { status: 502 },
+          );
+        }
+
+        for (const work of cancelOutcome.notificationWork) {
+          after(async () => {
+            await work();
+          });
+        }
+
+        return NextResponse.json({
+          ...data,
+          bookings_cancelled: cancelOutcome.cancelledCount,
+          notifications_scheduled: cancelOutcome.notificationWork.length,
+          ...(cancelOutcome.refundFailures > 0 ? { refund_failures: cancelOutcome.refundFailures } : {}),
+        });
+      }
+
+      // C6 — when a (non-cancelled) instance is rescheduled, move the linked
+      // bookings to the new date/time and notify affected guests. Don't leave
+      // bookings pointing at the old slot.
+      const dateChanged =
+        Object.prototype.hasOwnProperty.call(rest, 'instance_date') &&
+        String(row.instance_date) !== String(prevInst.instance_date);
+      const timeChanged =
+        Object.prototype.hasOwnProperty.call(rest, 'start_time') &&
+        String(row.start_time) !== String(prevInst.start_time);
+
+      if (!nextCancelled && (dateChanged || timeChanged) && activeBookingIds.length > 0) {
+        const { error: moveErr } = await admin
+          .from('bookings')
+          .update({
+            booking_date: String(row.instance_date),
+            booking_time: String(row.start_time),
+            updated_at: new Date().toISOString(),
+          })
+          .in('id', activeBookingIds);
+        if (moveErr) {
+          console.error('PATCH /api/venue/classes (instance reschedule) move bookings failed:', moveErr);
+          return NextResponse.json({ error: 'Failed to move bookings to the new time' }, { status: 500 });
+        }
+
+        const venueIdForNotify = staff.venue_id;
+        const bookingIdsForNotify = [...activeBookingIds];
+        after(async () => {
+          const { executeBookingModificationGuestNotification } = await import(
+            '@/lib/booking/send-booking-modification-guest-notification'
+          );
+          for (const bookingId of bookingIdsForNotify) {
+            try {
+              await executeBookingModificationGuestNotification(admin, venueIdForNotify, bookingId);
+            } catch (commsErr) {
+              console.error('Class instance reschedule notification failed:', commsErr, { bookingId });
+            }
+          }
+        });
+      }
+
       return NextResponse.json(data);
     }
 
@@ -670,7 +747,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/classes - delete class type, timetable entry or instance (admin or scoped staff). */
+/** DELETE /api/venue/classes - delete a class type or an instance (admin or scoped staff). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -751,79 +828,6 @@ export async function DELETE(request: NextRequest) {
         console.error('DELETE /api/venue/classes (instance) failed:', error);
         return NextResponse.json(
           { error: 'Failed to delete the session. Please try again.' },
-          { status: 500 },
-        );
-      }
-      return NextResponse.json({ success: true });
-    }
-
-    if (entity_type === 'timetable') {
-      const { data: ttRow, error: ttErr } = await admin
-        .from('class_timetable')
-        .select('id, class_type_id')
-        .eq('id', id)
-        .maybeSingle();
-      if (ttErr) {
-        console.error('DELETE /api/venue/classes (timetable) lookup failed:', ttErr);
-        return NextResponse.json(
-          { error: 'Could not verify the schedule entry. Please try again.' },
-          { status: 500 },
-        );
-      }
-      if (!ttRow) {
-        return NextResponse.json(
-          { error: buildEntityNotFoundMessage('class_schedule') },
-          { status: 404 },
-        );
-      }
-      const { data: ct, error: ctErr } = await admin
-        .from('class_types')
-        .select('id')
-        .eq('id', (ttRow as { class_type_id: string }).class_type_id)
-        .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      if (ctErr) {
-        console.error('DELETE /api/venue/classes (timetable class_type) lookup failed:', ctErr);
-        return NextResponse.json(
-          { error: 'Could not verify the schedule entry. Please try again.' },
-          { status: 500 },
-        );
-      }
-      if (!ct) {
-        return NextResponse.json(
-          { error: buildEntityNotFoundMessage('class_schedule') },
-          { status: 404 },
-        );
-      }
-      if (staff.role !== 'admin') {
-        const scope = await staffMayManageClassTypeSessions(
-          admin,
-          staff.venue_id,
-          staff,
-          (ttRow as { class_type_id: string }).class_type_id,
-        );
-        if (!scope.ok) {
-          return NextResponse.json({ error: scope.error }, { status: scope.status });
-        }
-      }
-      const ttGuard = await hasUpcomingActiveBookingsForClassTimetableEntry(admin, staff.venue_id, id);
-      if (ttGuard.error) {
-        return NextResponse.json({ error: ttGuard.error }, { status: 500 });
-      }
-      if (ttGuard.blocked) {
-        return NextResponse.json(
-          {
-            error: buildUpcomingBookingsBlockMessage('class_schedule', ttGuard.bookingCount),
-            booking_count: ttGuard.bookingCount,
-          },
-          { status: 409 },
-        );
-      }
-      const { error } = await admin.from('class_timetable').delete().eq('id', id);
-      if (error) {
-        console.error('DELETE /api/venue/classes (timetable) failed:', error);
-        return NextResponse.json(
-          { error: 'Failed to delete the schedule entry. Please try again.' },
           { status: 500 },
         );
       }

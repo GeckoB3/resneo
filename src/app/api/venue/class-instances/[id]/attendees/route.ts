@@ -3,9 +3,12 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 
 /**
  * GET /api/venue/class-instances/[id]/attendees - roster for this class instance.
+ * Calendar-scoped: staff may only read the roster (which exposes guest PII) for
+ * classes they manage (C10), not merely classes at their venue.
  */
 export async function GET(
   request: NextRequest,
@@ -38,6 +41,16 @@ export async function GET(
 
     if (!ct) {
       return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    }
+
+    const scope = await staffMayManageClassTypeSessions(
+      admin,
+      staff.venue_id,
+      staff,
+      inst.class_type_id as string,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
     }
 
     const { data: rows, error } = await admin

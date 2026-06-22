@@ -26,10 +26,11 @@ export default async function ClassTimetablePage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('currency, stripe_connected_account_id')
+    .select('currency, stripe_connected_account_id, timezone')
     .eq('id', staff.venue_id)
     .single();
   const currency = (venue?.currency as string) ?? 'GBP';
+  const venueTimeZone = ((venue as { timezone?: string | null } | null)?.timezone ?? '').trim() || 'Europe/London';
   const stripeConnected = Boolean((venue as { stripe_connected_account_id?: string | null } | null)?.stripe_connected_account_id);
   const linkedPractitionerIds =
     staff.role === 'admin' || !staff.id
@@ -46,6 +47,7 @@ export default async function ClassTimetablePage() {
           isAdmin={staff.role === 'admin'}
           linkedPractitionerIds={linkedPractitionerIds}
           currency={currency}
+          venueTimeZone={venueTimeZone}
           stripeConnected={stripeConnected}
           classCommerceEnabled={classCommerceEnabled}
         />

@@ -13,6 +13,7 @@ import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField'
 import type { CountryCode } from 'libphonenumber-js';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { Dialog } from '@/components/ui/primitives/Dialog';
+import { StaffClassModifyInstancePicker } from '@/components/booking/StaffClassModifyInstancePicker';
 
 /** Same subset as ExpandedBookingContent + fields needed for appointment modify */
 export interface StaffExpandedBookingModifySource {
@@ -95,18 +96,24 @@ function CdeDetailsModifyForm({
   bookingId,
   booking,
   detail,
+  venueId,
   venueCurrency,
+  catalogOwnerVenueId,
   onSaved,
   onClose,
 }: {
   bookingId: string;
   booking: StaffExpandedBookingModifySource;
   detail: StaffExpandedBookingModifyDetailLite | undefined;
+  venueId: string;
   venueCurrency: string;
+  catalogOwnerVenueId?: string;
   onSaved: () => void;
   onClose: () => void;
 }) {
   const defaultCountry = defaultPhoneCountryForVenueCurrency(venueCurrency) as CountryCode;
+  const isClassBooking = Boolean(booking.class_instance_id);
+  const currentInstanceId = booking.class_instance_id ?? null;
 
   const g = detail?.guest;
   const [firstName, setFirstName] = useState(
@@ -171,10 +178,24 @@ function CdeDetailsModifyForm({
 
   return (
     <div className="space-y-3">
-      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        For events and classes, the allocated slot cannot be changed here. Update client contact details or internal
-        notes below, or cancel and create a new booking if the slot must move.
-      </p>
+      {isClassBooking && currentInstanceId ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <StaffClassModifyInstancePicker
+            bookingId={bookingId}
+            venueId={venueId}
+            currentInstanceId={currentInstanceId}
+            ownerVenueId={catalogOwnerVenueId}
+            onSaved={onSaved}
+            onClose={onClose}
+          />
+        </div>
+      ) : (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Event tickets can&rsquo;t be moved to another date here. To change the date, cancel
+          this booking (if the policy allows) and create a new one. You can still update the
+          client&rsquo;s contact details or internal notes below.
+        </p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-semibold text-slate-700">
@@ -377,7 +398,9 @@ export function StaffExpandedBookingModifyModal({
               bookingId={booking.id}
               booking={booking}
               detail={detail}
+              venueId={venueId}
               venueCurrency={venueCurrency}
+              catalogOwnerVenueId={catalogOwnerVenueId}
               onSaved={onSaved}
               onClose={onClose}
             />

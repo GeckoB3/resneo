@@ -6,6 +6,8 @@ import { stripe } from '@/lib/stripe';
 import { requireClassCommercePlan } from '@/lib/class-commerce/auth';
 import {
   cancelByDateFromWindow,
+  computeProratedRefundPence,
+  countEnrollmentSessions,
   earliestSessionDateForCourse,
   withinCancellationWindow,
 } from '@/lib/class-commerce/course-cancellation';
@@ -93,39 +95,73 @@ export async function POST(
       );
     }
 
-    // Refund only when in window AND the enrollment was paid.
+    // M2: atomically claim the cancellation BEFORE refunding. The conditional
+    // UPDATE (status 'active' → 'cancelled') is the single source of truth so a
+    // double-submit / retry cannot trigger a second refund. Only the request
+    // that actually flips the row proceeds to refund.
+    const { data: claimedRows, error: claimErr } = await staff.db
+      .from('class_course_enrollments')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', enrollment.id)
+      .eq('status', 'active')
+      .select('id');
+    if (claimErr) {
+      console.error('[venue/courses/enrollments/cancel] claim', claimErr);
+      return NextResponse.json({ error: 'Failed to cancel enrollment' }, { status: 500 });
+    }
+    if (!claimedRows || claimedRows.length === 0) {
+      // Lost the race / retry of an already-cancelled enrollment — no refund.
+      return NextResponse.json({ ok: true, already_cancelled: true });
+    }
+
+    // Refund only when in window AND the enrollment was paid. M3: prorate to
+    // sessions not yet delivered.
     let refundAmountPence = 0;
     if (inWindow && enrollment.stripe_payment_intent_id && course.price_pence > 0) {
       const { data: venue } = await staff.db
         .from('venues')
-        .select('stripe_connected_account_id')
+        .select('stripe_connected_account_id, timezone')
         .eq('id', staff.venue_id)
         .maybeSingle();
-      const acct = (venue as { stripe_connected_account_id?: string | null } | null)?.stripe_connected_account_id;
+      const venueRow = venue as { stripe_connected_account_id?: string | null; timezone?: string | null } | null;
+      const acct = venueRow?.stripe_connected_account_id;
       if (acct) {
-        try {
-          await stripe.refunds.create(
-            { payment_intent: enrollment.stripe_payment_intent_id },
-            { stripeAccount: acct },
-          );
-          refundAmountPence = course.price_pence;
-        } catch (err) {
-          console.error('[venue/courses/enrollments/cancel] refund failed', err);
-          return NextResponse.json(
-            { error: 'Refund failed. Enrollment unchanged.' },
-            { status: 502 },
-          );
+        const { total, remaining } = await countEnrollmentSessions(staff.db, {
+          enrollmentId: enrollment.id,
+          venueTimezone: venueRow?.timezone,
+        });
+        refundAmountPence = computeProratedRefundPence({
+          pricePence: course.price_pence,
+          totalSessions: total,
+          remainingSessions: remaining,
+        });
+
+        if (refundAmountPence > 0) {
+          try {
+            // M2: deterministic idempotency key so a retry that re-reaches
+            // Stripe (e.g. after the revert below) cannot double-charge.
+            await stripe.refunds.create(
+              {
+                payment_intent: enrollment.stripe_payment_intent_id,
+                amount: refundAmountPence,
+              },
+              { stripeAccount: acct, idempotencyKey: `course_refund:${enrollment.id}` },
+            );
+          } catch (err) {
+            console.error('[venue/courses/enrollments/cancel] refund failed', err);
+            // Revert the claim so a retry can re-attempt; the idempotency key
+            // prevents a double refund even if the original succeeded silently.
+            await staff.db
+              .from('class_course_enrollments')
+              .update({ status: 'active', updated_at: new Date().toISOString() })
+              .eq('id', enrollment.id);
+            return NextResponse.json(
+              { error: 'Refund failed. Enrollment unchanged.' },
+              { status: 502 },
+            );
+          }
         }
       }
-    }
-
-    const { error: enUpErr } = await staff.db
-      .from('class_course_enrollments')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('id', enrollment.id);
-    if (enUpErr) {
-      console.error('[venue/courses/enrollments/cancel] update', enUpErr);
-      return NextResponse.json({ error: 'Failed to cancel enrollment' }, { status: 500 });
     }
 
     await staff.db

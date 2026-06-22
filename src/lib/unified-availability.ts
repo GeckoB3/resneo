@@ -395,7 +395,15 @@ export async function getCalendarGrid(params: {
       .in('calendar_id', calendarIds)
       .gte('booking_date', startDate)
       .lte('booking_date', endDate)
-      .in('status', ACTIVE_BOOKING_STATUSES),
+      // Web parity: the calendar diary shows the day's REAL schedule, so only
+      // Cancelled (which frees the slot) is hidden — Completed/No-Show still
+      // occupied their slot and must stay visible. Mirrors the web calendar's own
+      // source (/api/venue/bookings/list?view=calendar, which does .neq Cancelled).
+      // Previously this reused ACTIVE_BOOKING_STATUSES, so a booking VANISHED from
+      // the APP calendar the instant it was marked Completed/No-Show — while the web
+      // (different endpoint) kept showing it. Availability/capacity math elsewhere in
+      // this file still correctly uses ACTIVE_BOOKING_STATUSES only.
+      .neq('status', 'Cancelled'),
     supabase
       .from('calendar_blocks')
       .select('id, calendar_id, block_date, start_time, end_time, reason, block_type')

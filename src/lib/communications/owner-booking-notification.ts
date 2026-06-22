@@ -71,6 +71,55 @@ export async function sendOwnerBookingNotification(
   }
 }
 
+/**
+ * Location block for the new-booking alert, written from the STAFF perspective —
+ * where the team member needs to be — which is deliberately different from the
+ * guest-facing copy in booking-location.ts:
+ *   • online         → "Online" plus the join link and joining instructions, so
+ *                       whoever delivers the service can connect.
+ *   • client_address → the client's address, so the staff member knows where to
+ *                       travel for the appointment.
+ *   • business venue → the venue address (or nothing when the venue has no address).
+ * Returns the "Location" detail-row value/link/extra for the HTML layout, plus the
+ * matching plain-text lines. Falls back to the venue address whenever the booking
+ * carries no location snapshot (legacy rows / non-appointment models).
+ */
+function resolveOwnerLocation(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+): { rowValue: string | null; joinUrl: string | null; extra: string | null; textLines: string[] } {
+  const loc = booking.booking_location;
+
+  if (loc?.kind === 'online') {
+    const url = loc.online_url?.trim() || null;
+    const info = loc.online_info?.trim() || null;
+    return {
+      rowValue: 'Online',
+      joinUrl: url,
+      extra: info,
+      textLines: [
+        'Location: Online',
+        ...(url ? [`Join link: ${url}`] : []),
+        ...(info ? [`Joining info: ${info}`] : []),
+      ],
+    };
+  }
+
+  if (loc?.kind === 'client_address') {
+    const addr = loc.client_address?.trim() || null;
+    const value = addr ? `Client's address — ${addr}` : "Client's address";
+    return { rowValue: value, joinUrl: null, extra: null, textLines: [`Location: ${value}`] };
+  }
+
+  const venueAddress = venue.address?.trim() || null;
+  return {
+    rowValue: venueAddress,
+    joinUrl: null,
+    extra: null,
+    textLines: venueAddress ? [`Location: ${venueAddress}`] : [],
+  };
+}
+
 export function renderOwnerBookingNotificationEmail(
   booking: BookingEmailData,
   venue: VenueEmailData,
@@ -79,6 +128,7 @@ export function renderOwnerBookingNotificationEmail(
   const timeText = formatTime(booking.booking_time);
   const guestName = booking.guest_name?.trim() || 'A guest';
   const isAppt = booking.email_variant === 'appointment';
+  const location = resolveOwnerLocation(booking, venue);
 
   const subject = `New booking: ${guestName} — ${dateText} at ${timeText}`;
 
@@ -108,6 +158,9 @@ export function renderOwnerBookingNotificationEmail(
     priceDisplay: booking.appointment_price_display,
     groupAppointments: booking.group_appointments,
     addonLines: booking.addon_lines,
+    venueAddress: location.rowValue,
+    locationJoinUrl: location.joinUrl,
+    locationExtra: location.extra,
     footerNote:
       'You are receiving this because new booking alerts are switched on in your ResNeo communication settings.',
   });
@@ -122,6 +175,7 @@ export function renderOwnerBookingNotificationEmail(
     ...(!isAppt || booking.party_size > 1
       ? [`${isAppt ? 'People' : 'Guests'}: ${booking.party_size}`]
       : []),
+    ...location.textLines,
     ...(contactLines.length ? [`Guest contact: ${contactLines.join(' / ')}`] : []),
     ...(booking.special_requests?.trim() ? [`Notes: ${booking.special_requests.trim()}`] : []),
     '',

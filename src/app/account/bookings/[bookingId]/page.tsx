@@ -112,6 +112,21 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
               <dd className="mt-1 text-slate-900">{cde.duration_minutes} minutes</dd>
             </div>
           ) : null}
+          {cde?.class_spots && cde.class_spots.capacity > 0 ? (
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Class spaces</dt>
+              <dd className="mt-1 text-slate-900">
+                {cde.class_spots.remaining > 0
+                  ? `${cde.class_spots.remaining} of ${cde.class_spots.capacity} space${
+                      cde.class_spots.capacity === 1 ? '' : 's'
+                    } left`
+                  : 'Fully booked'}
+              </dd>
+              <dd className="mt-0.5 text-xs text-slate-500">
+                {cde.class_spots.booked} of {cde.class_spots.capacity} booked
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {booking.booking_model === 'event_ticket'

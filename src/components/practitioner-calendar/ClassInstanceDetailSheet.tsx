@@ -10,6 +10,7 @@ import {
 import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import { Sheet } from '@/components/ui/primitives/Sheet';
+import { isCapacityConsumingStatus } from '@/lib/availability/capacity-status';
 
 interface ClassTypePayload {
   id: string;
@@ -61,11 +62,14 @@ function ClassBookingConcertina({
   currency,
   instanceId,
   onMutated,
+  canManageAttendance,
 }: {
   attendee: AttendeeRow;
   currency: string;
   instanceId: string;
   onMutated: () => void;
+  /** Attendance mutations are gated behind the class-commerce plan; hide the buttons otherwise. */
+  canManageAttendance: boolean;
 }) {
   const guestName = attendee.guest_name ?? 'Guest';
   const contactSummary = attendee.guest_phone ?? attendee.guest_email ?? 'No contact';
@@ -132,13 +136,15 @@ function ClassBookingConcertina({
         >
           Open full booking
         </Link>
-        <AttendanceActions
-          instanceId={instanceId}
-          bookingId={attendee.booking_id}
-          status={attendee.status}
-          checkedInAt={attendee.checked_in_at}
-          onMutated={onMutated}
-        />
+        {canManageAttendance ? (
+          <AttendanceActions
+            instanceId={instanceId}
+            bookingId={attendee.booking_id}
+            status={attendee.status}
+            checkedInAt={attendee.checked_in_at}
+            onMutated={onMutated}
+          />
+        ) : null}
       </div>
     </details>
   );
@@ -282,6 +288,7 @@ export function ClassInstanceDetailSheet({
   const panelRef = useRef<HTMLElement>(null);
   const [instance, setInstance] = useState<InstancePayload | null>(null);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
+  const [canManageAttendance, setCanManageAttendance] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -306,12 +313,14 @@ export function ClassInstanceDetailSheet({
         throw new Error((j as { error?: string }).error ?? 'Could not load roster');
       }
       const instJson = (await instRes.json()) as InstancePayload;
-      const attJson = (await attRes.json()) as { attendees?: AttendeeRow[] };
+      const attJson = (await attRes.json()) as { attendees?: AttendeeRow[]; can_manage_attendance?: boolean };
       setInstance(instJson);
       setAttendees(attJson.attendees ?? []);
+      setCanManageAttendance(Boolean(attJson.can_manage_attendance));
     } catch (e) {
       setInstance(null);
       setAttendees([]);
+      setCanManageAttendance(false);
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
@@ -445,8 +454,10 @@ export function ClassInstanceDetailSheet({
     instance?.capacity_override != null && instance.capacity_override > 0
       ? instance.capacity_override
       : ct?.capacity ?? block.class_capacity;
+  // Only capacity-consuming statuses count toward "X / Y booked" — No-Show/Completed/
+  // Cancelled must not inflate it (canonical set shared with the API list + schedule feed).
   const bookedActive = attendees
-    .filter((a) => a.status !== 'Cancelled')
+    .filter((a) => isCapacityConsumingStatus(a.status))
     .reduce((s, a) => s + (a.party_size ?? 1), 0);
   const bookedDisplay =
     loading && attendees.length === 0 ? (block.class_booked_spots ?? 0) : bookedActive;
@@ -554,6 +565,7 @@ export function ClassInstanceDetailSheet({
                       currency={currency}
                       instanceId={instanceId ?? ''}
                       onMutated={() => void load()}
+                      canManageAttendance={canManageAttendance}
                     />
                   ))
                 )}
@@ -656,7 +668,8 @@ export function ClassInstanceDetailSheet({
                   Download CSV
                 </button>
               ) : null}
-              {attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No Show' && !a.checked_in_at) ? (
+              {canManageAttendance &&
+              attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No Show' && !a.checked_in_at) ? (
                 <CheckInAllButton instanceId={instanceId ?? ''} onMutated={() => void load()} />
               ) : null}
               {isAdmin && instance && !instance.is_cancelled ? (

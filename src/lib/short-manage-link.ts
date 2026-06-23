@@ -4,8 +4,12 @@ import { getPaymentTokenSecret, tryGetPaymentTokenSecret } from '@/lib/payment-t
 
 /** Default expiry for scoped manage tokens (14 days). */
 const MANAGE_LINK_TTL_SEC = 60 * 60 * 24 * 14;
-/** Compatibility window for old stateless /m/{payload}.{sig} links. */
-const LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS = Date.UTC(2026, 7, 1, 0, 0, 0);
+/**
+ * Compatibility window for old stateless `/m/{payload}.{sig}` links AND legacy
+ * expiry-less `?hmac=` bearer values. After this instant both are rejected, so a
+ * leaked non-expiring link cannot be replayed forever.
+ */
+export const LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS = Date.UTC(2026, 7, 1, 0, 0, 0);
 
 function parseLegacyShortManageCode(code: string, secret: string): string | null {
   if (Date.now() > LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS) return null;
@@ -176,12 +180,12 @@ export function createBookingHmac(bookingId: string): string {
  * Verify an HMAC bearer value for a booking ID.
  *
  * Accepts the new expiring format `${exp}.${sig}` (rejecting expired values) and,
- * for backward compatibility, the legacy expiry-less signature (`manage:${bookingId}`).
- *
- * TODO(manage-link-rotation): remove legacy expiry-less acceptance once the
- * email/SMS link rotation window has elapsed (all outstanding links re-issued
- * in the new expiring format). Track alongside the legacy `/m/{payload}.{sig}`
- * cutoff (`LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS`).
+ * for backward compatibility, the legacy expiry-less signature (`manage:${bookingId}`)
+ * — but only until {@link LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS}, the same rotation cutoff
+ * used for legacy `/m/{payload}.{sig}` links. After that date a non-expiring `?hmac=`
+ * value is rejected, closing the permanent-bearer-token window (new expiring links keep
+ * working). By then outstanding links have been re-issued in the expiring format and the
+ * 30-day TTL on new links has long lapsed.
  */
 export function verifyBookingHmac(bookingId: string, hmac: string): boolean {
   const secret = tryGetPaymentTokenSecret();
@@ -205,7 +209,9 @@ export function verifyBookingHmac(bookingId: string, hmac: string): boolean {
     }
   }
 
-  // Legacy expiry-less signature (no `.` separator). See TODO above.
+  // Legacy expiry-less signature (no `.` separator): bounded by the same rotation
+  // cutoff as legacy `/m/` links so it cannot serve as a permanent bearer token.
+  if (Date.now() > LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS) return false;
   const expected = legacyBookingHmacSignature(secret, bookingId);
   if (expected.length !== hmac.length) return false;
   try {

@@ -56,6 +56,61 @@ Legend: ✅ Implemented · ◑ Partial (v1 / documented carve‑out) · ⏳ Defe
 
 ---
 
+## 🔁 Follow‑up re‑review & calendar‑closure fix — 23 June 2026
+
+A second independent pass re‑verified the 22 June claims directly against the current `staging` tree (five parallel audits across commerce, events, resources, calendar/list, booking‑detail/plumbing/security). **The large majority of the ✅ claims hold up and are backed by real code, not stubs.** This section records (1) a scheduling‑correctness bug found *and fixed* in this pass, (2) a money bug where a prior ✅ was only half‑true (now fixed), and (3) smaller corrections — **all of which have now been implemented** (one item, platform commission, was confirmed intentional and one, CDE import create‑new, stays deferred). Gate after this pass: **`tsc` clean · 0 lint errors · 1536 unit tests passing**.
+
+### ✅ Fixed this pass — class sessions could be scheduled over closures, leave & breaks (High, Bug)
+
+**Symptom (reported):** scheduling class sessions did not fully respect calendar/business closures — a session could be placed on top of a venue closure, staff leave, a day off or a break.
+
+**Root cause (verified):** every class‑scheduling entry point funnels through `assertClassSessionWindowFreeOnCalendar` → `assertExperienceEventWindowFreeOnCalendar` (`src/lib/experience-events/calendar-event-window-conflicts.ts`). That check only looked at `experience_events`, unified `calendar_blocks`, active `bookings` and other `class_instances`. It **never consulted** the calendar‑availability sources the appointment engine treats as authoritative (`src/lib/availability/appointment-engine.ts:963‑994`):
+
+| Source | Meaning | Checked before | Checked now |
+|--------|---------|:--------------:|:-----------:|
+| `availability_blocks` (service_id null, `closed`/`special_event`/`amended_hours`) | **Business closure** / amended hours | ✗ | ✅ |
+| `practitioner_leave_periods` (full‑day or partial) | **Calendar closure** — staff leave | ✗ | ✅ |
+| `unified_calendars.days_off` (exact date) | **Calendar closure** — one‑off day off | ✗ | ✅ |
+| `unified_calendars.break_times` / `break_times_by_day` | **Break** | ✗ | ✅ |
+| `practitioner_calendar_blocks` (legacy block table) | Blocked time | ✗ (only the unified `calendar_blocks` twin was checked) | ✅ |
+| `bookings` / events / class sessions / `calendar_blocks` | **Pre‑existing booking** | ✅ | ✅ |
+
+This affected **all four scheduling paths** (single `class-instances` POST, `class-instances/bulk` POST, instance reschedule PATCH, and the class‑type instructor/duration change re‑validation in `classes/route.ts`) because they share that one funnel.
+
+**Fix:** new module `src/lib/calendar/class-schedule-availability-conflicts.ts` (pure evaluator + thin, **fail‑closed** fetcher), wired into `assertClassSessionWindowFreeOnCalendar` *before* the existing overlap check. It returns a specific, date‑stamped message per clash, e.g.:
+- "The venue is closed on Mon 6 Jul 2026, so this class can't be scheduled then. Remove or amend that closure first."
+- "Studio A is on leave from 12:00 to 13:00 on Mon 6 Jul 2026, which clashes with this class time."
+- "This class time (13:30–14:30) overlaps a break (13:00–14:00) on Studio A's calendar on Mon 6 Jul 2026."
+- existing overlap messages are now suffixed with the offending date+time so **bulk** scheduling errors name the clashing session (e.g. "…overlaps a class session on this calendar (Mon 6 Jul 2026 at 09:00).").
+
+Returned as **409** by every route (the schedule modal already surfaces `json.error` in its red alert). Covered by 18 new unit tests (`…class-schedule-availability-conflicts.test.ts`).
+
+**Deliberate design carve‑out (documented in the code):** like the public class‑availability engine, scheduled classes remain **not** bound by *recurring weekly* opening/working hours — only the **date‑specific** closures/leave/days‑off/breaks above can block a session. This preserves the intended "a 7pm class on a venue that closes at 5pm is still bookable" behaviour while catching every real closure/leave/break/booking clash. If stricter "must be inside weekly working hours" behaviour is wanted for classes too, that is a one‑line policy change in the new module (reuse `validateExperienceEventWindowAgainstVenueAndCalendar`, the events validator) — flag it and it can be added.
+
+### ✅ Fixed this pass — entitlement precedence (M4/M6) on the single‑class path (money, High)
+
+M4/M6 were ✅ **for the multi‑session cart** but **not** the **single‑class** booking path: `src/app/api/booking/create/route.ts` consumed class credits after checking only the credit *balance*, never course/membership coverage — so a member/enrollee who booked a single class and opted to pay with credits **burned a credit for a session already covered**, and a covered member who didn't opt in was charged the deposit.
+
+**Fix:** the `class_session` branch now resolves entitlement coverage in product‑rule precedence (course → membership → credits → card), reusing the **same** helpers as the cart (`userCourseCoversClassInstance`, `membershipCoversClassType`, `membershipUnlimitedCoversClassType`, `consumeMembershipAllowanceForBooking`). For a signed‑in member/enrollee whose email matches the booking, a covered session is now **free** (no deposit, no credit) and allowance‑plan memberships ledger the consumption against the new booking row (mirroring the cart, idempotent, with booking‑delete rollback on failure). Credits remain opt‑in and are only consumed when **not** covered. `src/app/api/booking/create/route.ts` (class branch + post‑insert allowance redemption).
+
+### Smaller corrections (all fixed this pass except where noted)
+
+| Finding | Sev | Status | Where |
+|---------|-----|--------|-------|
+| **Class detail‑sheet booked count** counted No‑Show/Completed as booked → "X / Y booked" overstated in the roster sheet | Low | ✅ fixed | `ClassInstanceDetailSheet.tsx` now uses `isCapacityConsumingStatus` (canonical set shared with the API list + schedule feed) |
+| **Check‑in/roster commerce‑gate asymmetry** — buttons rendered then 403 on non‑commerce venues | Medium | ✅ fixed | roster GET returns `can_manage_attendance` (`…/attendees/route.ts`); the sheet hides check‑in / no‑show / check‑in‑all when false (no access‑policy change) |
+| **`syncCalendarBlockForClassInstance` delete‑only no‑op** run on every freshly‑inserted row | Low | ✅ fixed | removed the wasted per‑row calls from single + bulk create (`class-instances/route.ts`, `class-instances/bulk/route.ts`); reschedule/cancel cleanup unchanged |
+| **Account portal CDE detail** showed no class spot count | Low | ✅ fixed | `class_spots` (capacity / booked / remaining — no attendee PII) added in `account-bookings.ts`, rendered on `account/bookings/[bookingId]/page.tsx`; computed only for the single‑booking detail (not the list) |
+| **Allowance "remaining" math** re‑implemented inline in the account API — drift risk | Medium | ✅ fixed | `account/memberships/route.ts` now nets via the shared `netAllowanceConsumed` + `ALLOWANCE_CONSUMING_REASONS` |
+| **S1 backward‑compat** — legacy expiry‑less `?hmac=` links accepted forever | Low | ✅ hardened | legacy acceptance now bounded by the existing rotation cutoff `LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS` (1 Aug 2026), same as legacy `/m/` links; deterministic before/after‑cutoff tests added |
+| **Resource party‑size field** (1–50) was cosmetic — resources have no capacity model | Medium | ✅ fixed | removed the field from `ResourceSlotBookingForm.tsx`; `party_size` is now always 1 |
+| **No platform `application_fee`/`on_behalf_of`** on any class charge | Medium | Resolved as intended | platform takes no per‑transaction Stripe fee on **any** model (0 hits repo‑wide); confirmed intentional — commission handled via subscription billing. No change. |
+| **CDE import "create new"** is service/staff only | Medium | Deferred (as documented) | `import/create-reference-entity.ts:158` — references can be mapped or skipped but not created in‑flow |
+
+**Confirmed accurately implemented this pass** (spot‑checked, no false ✅): M1/C2 (shared `validate-event-ticket-booking`), C3 (`syncEventTicketTypes` upsert‑by‑id), C8 (`parent_event_id` + `series_key` grouping + `[id]` PATCH now re‑validates placement), C1 (`enforce_cde_capacity` trigger + 409 mapping in all write routes), C7 (resource check‑in status guard), C12 (multi‑range hours round‑trip), C4/C5/C6/C10/C11 (timetable removed; PATCH‑cancel → refund/notify; reschedule moves+notifies bookings; calendar‑scoped roster reads; unique‑slot migration), F1 (`report_by_booking_model` + tier/utilisation analytics rendered), F2 (`onHeightChange` wired to all CDE flows), M2/M3/M5/M7 (idempotent prorated course refund; reconcile cron; refund‑restore), schedule‑feed hardening, wide shell + marketing tabs + dashboard‑home cards + distinct sidebar icons. **Still correctly deferred:** S2, S3, full CDE calendar drag, multi‑resource booking, class waitlist, partial ticket refund, event/credit‑class guest self‑move.
+
+---
+
 ## Table of contents
 
 1. [Executive summary](#1-executive-summary)
@@ -130,9 +185,9 @@ Ordered by blast radius. "✔" = re‑verified directly during this review.
 | M1 ✔ | **Public event booking trusts `ticket_lines[].unit_price_pence` from the request body** — no re‑derivation from `event_ticket_types`, no `ticket_type_id` ownership check. A crafted request pays £0 (or any amount) for a `full_payment` event and can forge ticket lines. The **staff** route validates all of this (`/api/venue/bookings/route.ts:297‑328`); the public one does not. | **Critical** | ✅ | `src/app/api/booking/create/route.ts:1079‑1090` |
 | M2 ✔ | **Course cancellation refund is not idempotent** — `stripe.refunds.create({payment_intent})` with no idempotency key, and the refund fires *before* the enrollment is marked cancelled. Double‑submit or a retry between refund and DB update = second full refund. | **Critical** | ✅ | `src/app/api/account/courses/cancel/route.ts:104‑124` |
 | M3 | **Course cancellation always refunds 100%** regardless of timing or sessions already delivered — a 6‑week course cancelled in week 5 refunds the entire fee (no proration). | High | ✅ | `…/courses/cancel/route.ts:95‑118` |
-| M4 ✔ | **Cart entitlement precedence is inverted** — when the guest opts to pay with credits, credits are consumed *before* checking course/membership coverage, so a member/enrollee burns a credit for a session already paid for. Contradicts `CLASS_COMMERCE_PRODUCT_RULES.md` §1/§15 ("prefer course over credits"). | High | ✅ | `src/lib/class-commerce/orchestrate-class-cart-checkout.ts:111‑149` |
+| M4 ✔ | **Cart entitlement precedence is inverted** — when the guest opts to pay with credits, credits are consumed *before* checking course/membership coverage, so a member/enrollee burns a credit for a session already paid for. Contradicts `CLASS_COMMERCE_PRODUCT_RULES.md` §1/§15 ("prefer course over credits"). | High | ✅ | cart (`orchestrate-class-cart-checkout.ts`) **and** single‑class path (`booking/create/route.ts`) now both resolve course → membership → credits → card; see [23 Jun follow‑up](#-followup-rereview--calendarclosure-fix--23-june-2026) |
 | M5 | **Membership lifecycle depends on a manually‑configured Connect webhook with no reconciliation** — if the Stripe Dashboard subscription events aren't wired, memberships silently never activate, or a cancelled subscription keeps granting unlimited free classes. No backfill/reconcile job. | High | ✅ | `sync-membership-from-stripe.ts`; `webhooks/stripe/route.ts:246‑257` |
-| M6 | **Dead, and wrong, entitlement engine** — `decideClassLineEntitlement` is referenced only by its own test; if used it prefers credits over course/membership (also inverted). Two sources of truth for precedence. | Medium | ✅ | `src/lib/class-commerce/entitlement-engine.ts:18‑50` |
+| M6 | **Dead, and wrong, entitlement engine** — `decideClassLineEntitlement` is referenced only by its own test; if used it prefers credits over course/membership (also inverted). Two sources of truth for precedence. | Medium | ✅ | cart uses `decideClassLineEntitlement`; the single‑class path now applies the same course→membership→credits precedence via the shared coverage helpers — see [23 Jun follow‑up](#-followup-rereview--calendarclosure-fix--23-june-2026) |
 | M7 | **Refund webhook branches don't restore credits/allowance or free class capacity** — a Stripe‑originated refund marks `deposit_status=Refunded` but leaves consumed credits and the booking/capacity intact. | Medium | ✅ | `webhooks/stripe/route.ts:164‑231, 258‑318` |
 
 ### Capacity, concurrency & data integrity

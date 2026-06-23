@@ -5,7 +5,6 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
-import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 
 function normalizeTimeForDb(t: string): string {
@@ -148,20 +147,9 @@ export async function POST(request: NextRequest) {
 
     const created = inserted?.length ?? 0;
 
-    const venueId = staff.venue_id;
-    await Promise.all(
-      (inserted ?? []).map((row) =>
-        syncCalendarBlockForClassInstance(admin, {
-          venueId,
-          classInstanceId: (row as { id: string }).id,
-          instanceDate: String((row as { instance_date: string }).instance_date),
-          startTime: String((row as { start_time: string }).start_time),
-          classTypeId: (row as { class_type_id: string }).class_type_id,
-          skipBlock: false,
-          createdByStaffId: staff.id,
-        }),
-      ),
-    );
+    // Class sessions render on the calendar from the schedule feed, not as `calendar_blocks`,
+    // and a freshly-inserted instance has no block to clear — so no per-row block sync is needed
+    // here (it was a delete-only no-op running once per inserted row).
 
     return NextResponse.json({ created, skipped: normalized.length - created });
   } catch (err) {

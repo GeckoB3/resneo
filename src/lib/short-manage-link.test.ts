@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import {
   BOOKING_HMAC_TTL_SEC,
+  LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS,
   createBookingHmac,
   createShortManageLink,
   resolveShortManageBookingId,
@@ -87,13 +88,28 @@ describe('booking HMAC bearer value', () => {
     expect(verifyBookingHmac(id, `${farFuture}.${sig}`)).toBe(false);
   });
 
-  it('still verifies a legacy expiry-less signature', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('verifies a legacy expiry-less signature within the rotation window', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS - 24 * 60 * 60 * 1000);
     const legacy = createHmac('sha256', secret).update(`manage:${id}`).digest('base64url');
     expect(legacy).not.toContain('.');
     expect(verifyBookingHmac(id, legacy)).toBe(true);
   });
 
+  it('rejects a legacy expiry-less signature after the rotation cutoff', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS + 24 * 60 * 60 * 1000);
+    const legacy = createHmac('sha256', secret).update(`manage:${id}`).digest('base64url');
+    expect(verifyBookingHmac(id, legacy)).toBe(false);
+  });
+
   it('rejects a legacy signature for a different booking id', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS - 24 * 60 * 60 * 1000);
     const legacy = createHmac('sha256', secret)
       .update('manage:bbbbbbbb-cccc-dddd-eeee-ffffffffffff')
       .digest('base64url');

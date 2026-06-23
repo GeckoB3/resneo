@@ -9,6 +9,10 @@ import {
   resolveInstructorCalendarIdForClass,
 } from '@/lib/class-instances/instructor-calendar-block';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
+import {
+  findClassScheduleWindowAvailabilityConflict,
+  withScheduleDateContext,
+} from '@/lib/calendar/class-schedule-availability-conflicts';
 
 function hhmmToMinutes(t: string): number {
   const s = String(t).trim();
@@ -306,7 +310,19 @@ export async function assertClassSessionWindowFreeOnCalendar(
   const dur = durationMinutes > 0 ? durationMinutes : 60;
   const endHhmm = classBlockEndTime(startHhmm, dur).slice(0, 5);
 
-  return assertExperienceEventWindowFreeOnCalendar(
+  // Closures (business + calendar), staff leave, days-off and breaks — sources the
+  // overlap check below does not cover. A class must never sit on top of any of these.
+  const availabilityConflict = await findClassScheduleWindowAvailabilityConflict(admin, {
+    venueId,
+    calendarId,
+    date: instanceDate,
+    startHHmm: startHhmm,
+    endHHmm: endHhmm,
+  });
+  if (availabilityConflict) return availabilityConflict;
+
+  // Existing bookings, events, other class sessions and unified calendar blocks.
+  const overlapConflict = await assertExperienceEventWindowFreeOnCalendar(
     admin,
     venueId,
     calendarId,
@@ -317,4 +333,7 @@ export async function assertClassSessionWindowFreeOnCalendar(
       ? { excludeClassInstanceIds: [excludeClassInstanceId] }
       : undefined,
   );
+  if (!overlapConflict) return null;
+  // Stamp the offending date/time so bulk scheduling errors name the clashing session.
+  return withScheduleDateContext(overlapConflict, instanceDate, startHhmm);
 }

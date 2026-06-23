@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { resolveCdeBookingContext, type CdeBookingContext } from '@/lib/booking/cde-booking-context';
+import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import type { BookingModel } from '@/types/booking-models';
 
 export interface AccountGuestSafeRow {
@@ -52,6 +53,8 @@ export interface AccountCdeContext {
   ticket_lines?: AccountTicketLine[];
   /** Resource booking duration in minutes (from start/end), when derivable. */
   duration_minutes?: number | null;
+  /** Class session capacity / how full it is (no attendee PII — guest-safe). */
+  class_spots?: { capacity: number; booked: number; remaining: number } | null;
 }
 
 export interface AccountBookingRow {
@@ -179,13 +182,57 @@ function minutesBetween(start: string | null | undefined, end: string | null | u
 }
 
 /**
+ * Capacity + how-full for a class instance, with no attendee PII (guest-safe).
+ * capacity = instance override ?? class type capacity; booked = Σ party_size of
+ * capacity-consuming bookings on the instance.
+ */
+async function loadClassInstanceSpots(
+  admin: Pick<SupabaseClient, 'from'>,
+  classInstanceId: string,
+): Promise<{ capacity: number; booked: number; remaining: number } | null> {
+  const { data: inst } = await admin
+    .from('class_instances')
+    .select('capacity_override, class_type_id')
+    .eq('id', classInstanceId)
+    .maybeSingle();
+  if (!inst) return null;
+
+  const override = (inst as { capacity_override?: number | null }).capacity_override ?? null;
+  let capacity = override != null && override > 0 ? override : 0;
+  if (capacity <= 0) {
+    const { data: ct } = await admin
+      .from('class_types')
+      .select('capacity')
+      .eq('id', (inst as { class_type_id: string }).class_type_id)
+      .maybeSingle();
+    capacity = (ct as { capacity?: number } | null)?.capacity ?? 0;
+  }
+
+  const { data: bookingRows } = await admin
+    .from('bookings')
+    .select('party_size, status')
+    .eq('class_instance_id', classInstanceId)
+    .in('status', [...CAPACITY_CONSUMING_STATUSES]);
+  const booked = (bookingRows ?? []).reduce(
+    (sum, r) => sum + ((r as { party_size?: number }).party_size ?? 1),
+    0,
+  );
+
+  return { capacity, booked, remaining: Math.max(0, capacity - booked) };
+}
+
+/**
  * Build the guest-facing CDE context for a single booking row, reusing the shared
  * `resolveCdeBookingContext` resolver and adding event ticket tiers / resource duration.
  * Returns null for table/appointment rows (no CDE FK).
+ *
+ * `includeClassSpots` adds the class capacity/how-full summary (an extra read or two),
+ * so the single-booking detail page can show it without bloating the list loaders.
  */
 async function buildAccountCdeContext(
   admin: Pick<SupabaseClient, 'from'>,
   row: RawBookingRow,
+  opts?: { includeClassSpots?: boolean },
 ): Promise<AccountCdeContext | null> {
   const base: CdeBookingContext | null = await resolveCdeBookingContext(admin, {
     experience_event_id: row.experience_event_id ?? null,
@@ -218,6 +265,10 @@ async function buildAccountCdeContext(
 
   if (row.resource_id) {
     ctx.duration_minutes = minutesBetween(row.booking_time, row.booking_end_time);
+  }
+
+  if (opts?.includeClassSpots && row.class_instance_id) {
+    ctx.class_spots = await loadClassInstanceSpots(admin, row.class_instance_id);
   }
 
   return ctx;
@@ -302,9 +353,10 @@ async function hydrateAccountBookingRow(
   admin: SupabaseClient,
   b: RawBookingRow,
   venueMap: Map<string, AccountVenueRow>,
+  opts?: { includeClassSpots?: boolean },
 ): Promise<AccountBookingRow> {
   const [cde_context, manage_booking_link] = await Promise.all([
-    buildAccountCdeContext(admin, b),
+    buildAccountCdeContext(admin, b, opts),
     createOrGetBookingShortLink({ venueId: b.venue_id, bookingId: b.id, purpose: 'manage' }),
   ]);
 
@@ -430,5 +482,5 @@ export async function loadAccountBookingById(
 
   const raw = booking as RawBookingRow;
   const venueMap = await loadVenueMap(admin, [raw.venue_id]);
-  return hydrateAccountBookingRow(admin, raw, venueMap);
+  return hydrateAccountBookingRow(admin, raw, venueMap, { includeClassSpots: true });
 }

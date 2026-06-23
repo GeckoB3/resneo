@@ -78,6 +78,10 @@ import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitle
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
+import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
+import { membershipCoversClassType } from '@/lib/class-commerce/membership-allowance-coverage';
+import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/membership-class-access';
+import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
@@ -678,6 +682,13 @@ async function handleNonTableBooking(
   } = await routeAuthClient.auth.getUser();
 
   let pendingClassCreditRedemption: { userId: string; credits: number; classTypeId: string } | null = null;
+  /** Allowance-plan membership consumption to ledger after the booking row exists (mirrors the cart). */
+  let pendingAllowanceRedemption: {
+    membershipId: string;
+    userId: string;
+    sessions: number;
+    classTypeId: string;
+  } | null = null;
 
   if (pay_with_class_credits && effectiveModel !== 'class_session') {
     return NextResponse.json(
@@ -1157,7 +1168,62 @@ async function handleNonTableBooking(
       appointment_price_display: classPriceDisplay,
     };
 
-    if (pay_with_class_credits) {
+    // M4/M6: resolve entitlement coverage in product-rule precedence
+    // (course → membership → credits → card) for a signed-in member/enrollee. A covered
+    // session is free and must never burn a class credit. The multi-session cart already
+    // does this (orchestrate-class-cart-checkout.ts); the single-class path did not, so a
+    // member/enrollee who booked one class and opted to pay with credits burned a credit —
+    // and a member who did not opt in was charged the deposit.
+    let classCoveredByEntitlement = false;
+    const classOnlineCharge = requiresDeposit && depositAmountPence ? depositAmountPence : 0;
+    if (classOnlineCharge > 0 && routeAuthUser?.id && routeAuthUser.email) {
+      const emailNorm = String(email ?? '').trim().toLowerCase();
+      const authEmail = routeAuthUser.email.trim().toLowerCase();
+      if (emailNorm && emailNorm === authEmail) {
+        const courseCovers = await userCourseCoversClassInstance(supabase, {
+          userId: routeAuthUser.id,
+          venueId: venue_id,
+          classInstanceId: class_instance_id,
+        });
+        if (courseCovers) {
+          classCoveredByEntitlement = true;
+        } else {
+          const coverage = await membershipCoversClassType(supabase, {
+            userId: routeAuthUser.id,
+            venueId: venue_id,
+            classTypeId: cls.class_type_id,
+            partySize: party_size,
+          });
+          let membershipCovers = coverage.ok;
+          if (!membershipCovers) {
+            // Fallback to the legacy unlimited check in case allowance ledger rows are stale.
+            membershipCovers = await membershipUnlimitedCoversClassType(supabase, {
+              userId: routeAuthUser.id,
+              venueId: venue_id,
+              classTypeId: cls.class_type_id,
+            });
+          }
+          if (membershipCovers) {
+            classCoveredByEntitlement = true;
+            // Allowance plans must ledger the consumption against the new booking row.
+            if (coverage.ok && coverage.mode === 'allowance') {
+              pendingAllowanceRedemption = {
+                membershipId: coverage.membershipId,
+                userId: routeAuthUser.id,
+                sessions: party_size,
+                classTypeId: cls.class_type_id,
+              };
+            }
+          }
+        }
+      }
+    }
+    if (classCoveredByEntitlement) {
+      requiresDeposit = false;
+      depositAmountPence = null;
+    }
+
+    if (pay_with_class_credits && !classCoveredByEntitlement) {
       if (!routeAuthUser?.id || !routeAuthUser.email) {
         return NextResponse.json({ error: 'Sign in to pay with class credits.' }, { status: 401 });
       }
@@ -1525,6 +1591,26 @@ async function handleNonTableBooking(
       await supabase.from('bookings').delete().eq('id', booking.id);
       return NextResponse.json(
         { error: 'Could not apply class credits. Refresh and try again.' },
+        { status: 409 },
+      );
+    }
+  }
+
+  if (pendingAllowanceRedemption) {
+    const consumed = await consumeMembershipAllowanceForBooking({
+      admin: supabase,
+      membershipId: pendingAllowanceRedemption.membershipId,
+      userId: pendingAllowanceRedemption.userId,
+      venueId: venue_id,
+      sessions: pendingAllowanceRedemption.sessions,
+      bookingId: booking.id,
+      idempotencyKey: `redeem_allowance_booking:${booking.id}`,
+    });
+    if (!consumed.ok) {
+      console.error('[booking/create] membership allowance redeem failed', consumed);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json(
+        { error: 'Could not apply your membership allowance. Refresh and try again.' },
         { status: 409 },
       );
     }

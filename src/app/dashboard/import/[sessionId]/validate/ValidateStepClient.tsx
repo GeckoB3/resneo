@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import { ImportRowPreviewDialog } from '@/components/import/ImportRowPreviewDialog';
 import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
 import { readResponseJson } from '@/lib/api/read-response-json';
@@ -100,7 +101,6 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const [jobError, setJobError] = useState<string | null>(null);
   const [counts, setCounts] = useState<{ errorCount: number; warningCount: number } | null>(null);
   const [dateChoice, setDateChoice] = useState<'dd/MM/yyyy' | 'MM/dd/yyyy' | ''>('');
-  const [jobId, setJobId] = useState<string | null>(null);
   const [validationScan, setValidationScan] = useState<{
     processed: number;
     total: number;
@@ -114,6 +114,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const [sendImportReminders, setSendImportReminders] = useState(true);
   const [savingImportCommsPref, setSavingImportCommsPref] = useState(false);
   const [plan, setPlan] = useState<{ headline: string; narrative: string } | null>(null);
+  const [showApprove, setShowApprove] = useState(false);
 
   /** Stage 5 Import Plan: plain-English summary fetched once validation has settled. */
   const loadPlan = useCallback(async () => {
@@ -170,16 +171,14 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   );
 
   const waitForValidation = useCallback(
-    async (initialJob?: string | null) => {
+    async () => {
       setPolling(true);
       setJobError(null);
       setValidationScan(null);
-      if (initialJob) setJobId(initialJob);
 
       const pollOnce = async () => {
         const lite = await fetchValidationJob(sessionId);
         const st = lite.validation_job_status;
-        if (lite.validation_job_id) setJobId(lite.validation_job_id);
         setValidationScan({
           processed: lite.validation_rows_processed,
           total: lite.validation_rows_total,
@@ -249,7 +248,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
         if (st === 'queued' || st === 'running') {
           applyLoaded({ ...data, issues: [] });
           setCounts(null);
-          await waitForValidation(data.session?.validation_job_id ?? null);
+          await waitForValidation();
           return;
         }
 
@@ -280,7 +279,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
         if (!res.ok) {
           throw new Error(payload.message ?? payload.error ?? 'Validation failed');
         }
-        await waitForValidation(payload.jobId ?? null);
+        await waitForValidation();
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Validation failed');
@@ -316,7 +315,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
       setIssues([]);
       setCounts(null);
       setSummary(null);
-      await waitForValidation(payload.jobId ?? null);
+      await waitForValidation();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Validation failed');
       setLoading(false);
@@ -399,6 +398,13 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
+  const decisionLabel = (d: string) => {
+    if (d === 'update_existing') return 'Update existing';
+    if (d === 'import_anyway') return 'Import anyway';
+    if (d === 'skip') return 'Skip row';
+    return d.replace(/_/g, ' ');
+  };
+
   const isSyntheticReferenceIssue = (i: Issue) =>
     i.issue_type === 'reference_skipped' ||
     i.issue_type === 'booking_defaults_missing' ||
@@ -409,8 +415,8 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Validate</h1>
         <p className="mt-1 text-sm text-slate-500">
-          We scan your rows for missing fields, duplicates, and ambiguous dates. Large imports validate on the server;
-          use the job id if you resume later.
+          We scan your rows for missing fields, duplicates, and ambiguous dates. Large files are checked in the
+          background — your progress is saved, so you can safely leave and come back.
         </p>
       </div>
 
@@ -449,10 +455,17 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           </div>
           {polling && validationScan && validationScan.total > 0 && (
             <div className="space-y-1 pt-1">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
+                role="progressbar"
+                aria-valuenow={validationScan.percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Validation progress"
+              >
                 <div className="h-full bg-brand-600 transition-all" style={{ width: `${validationScan.percent}%` }} />
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500" aria-live="polite">
                 {validationScan.processed.toLocaleString()} / {validationScan.total.toLocaleString()} rows (
                 {validationScan.percent}%)
               </p>
@@ -461,7 +474,9 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           {polling && (!validationScan || validationScan.total === 0) && (
             <p className="text-xs text-slate-500">Preparing row scan…</p>
           )}
-          {jobId && <p className="text-xs text-slate-500">Job id: {jobId}</p>}
+          {polling && (
+            <p className="text-xs text-slate-500">Your progress is saved — you can safely leave and come back.</p>
+          )}
         </div>
       )}
 
@@ -610,7 +625,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
                         </span>
                         {i.user_decision && (
                           <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                            {i.user_decision.replace(/_/g, ' ')}
+                            {decisionLabel(i.user_decision)}
                           </span>
                         )}
                       </div>
@@ -749,16 +764,90 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           >
             Download report CSV
           </a>
-          <Link
-            href={`/dashboard/import/${sessionId}/importing`}
-            className={`rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 ${
-              !canProceed ? 'pointer-events-none opacity-50' : ''
-            }`}
+          <button
+            type="button"
+            disabled={!canProceed}
+            onClick={() => setShowApprove(true)}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Proceed to import
-          </Link>
+            Review &amp; approve
+          </button>
         </div>
       </div>
+
+      <Dialog
+        open={showApprove}
+        onOpenChange={(next) => {
+          if (!next) setShowApprove(false);
+        }}
+        size="md"
+        contentClassName="max-w-lg"
+        title="Review & approve import"
+        description="This is the last step before anything is written to your venue."
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowApprove(false)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Not yet
+            </button>
+            <Link
+              href={`/dashboard/import/${sessionId}/importing`}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Approve &amp; start import
+            </Link>
+          </div>
+        }
+      >
+        {plan && (
+          <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3">
+            <p className="text-sm font-semibold text-slate-900">{plan.headline}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700">{plan.narrative}</p>
+          </div>
+        )}
+        <p className="text-sm font-medium text-slate-700">Here&rsquo;s what will happen when you approve:</p>
+        <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+          {rowsReady != null && (
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-0.5 font-semibold text-emerald-600">✓</span>
+              <span>
+                <strong>{rowsReady}</strong> row{rowsReady === 1 ? '' : 's'} ready to import.
+              </span>
+            </li>
+          )}
+          {existingRows != null && existingRows > 0 && (
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-0.5 font-semibold text-sky-600">↻</span>
+              <span>
+                <strong>{existingRows}</strong> match existing {clientPlural.toLowerCase()} — handled per your choices above.
+              </span>
+            </li>
+          )}
+          {blockingRows != null && blockingRows > 0 && (
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-0.5 font-semibold text-amber-600">⚠</span>
+              <span>
+                <strong>{blockingRows}</strong> row{blockingRows === 1 ? '' : 's'} with unresolved issues will be skipped.
+              </span>
+            </li>
+          )}
+          {staffSkipped > 0 && (
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-0.5 text-slate-400">•</span>
+              <span>
+                <strong>{staffSkipped}</strong> staff file{staffSkipped === 1 ? '' : 's'} used for matching only (not imported as bookings).
+              </span>
+            </li>
+          )}
+        </ul>
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          This creates real {clientPlural.toLowerCase()} and bookings in your venue. You can undo the whole import for 24 hours
+          afterwards.
+        </p>
+      </Dialog>
 
       {preview && (
         <ImportRowPreviewDialog

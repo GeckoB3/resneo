@@ -14,8 +14,15 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
  */
 const bodySchema = z.object({
   entity_id: z.string().uuid(),
-  entity_type: z.enum(['service_item', 'appointment_service']),
+  entity_type: z.enum(['service_item', 'appointment_service', 'unified_calendar', 'practitioner']),
 });
+
+const ENTITY_TABLE: Record<z.infer<typeof bodySchema>['entity_type'], string> = {
+  service_item: 'service_items',
+  appointment_service: 'appointment_services',
+  unified_calendar: 'unified_calendars',
+  practitioner: 'practitioners',
+};
 
 export async function POST(
   request: NextRequest,
@@ -45,7 +52,7 @@ export async function POST(
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
   // Confirm the entity exists and belongs to this venue.
-  const table = entity_type === 'service_item' ? 'service_items' : 'appointment_services';
+  const table = ENTITY_TABLE[entity_type];
   const { data: entity } = await admin
     .from(table)
     .select('id')

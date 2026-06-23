@@ -3,6 +3,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import Link from 'next/link';
 import { readResponseJson } from '@/lib/api/read-response-json';
+import { useImportTerminology } from '@/components/import/ImportTerminologyContext';
+
+function capitalize(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
 
 function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';
@@ -47,6 +52,7 @@ function createExecuteAbortSignal(): { signal: AbortSignal; cancel: () => void }
 }
 
 export function ImportingStepClient({ sessionId }: { sessionId: string }) {
+  const { clientLabel } = useImportTerminology();
   /** Wall-clock baseline for elapsed + ETA (before first execute POST, or server `started_at` when resuming). */
   const importStartMs = useRef<number | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -296,12 +302,23 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium text-slate-800">Progress</p>
-            {stageLabel && <p className="text-xs font-medium text-brand-800">{stageLabel}</p>}
+            {stageLabel && (
+              <p className="text-xs font-medium text-brand-800" aria-live="polite">
+                {stageLabel}
+              </p>
+            )}
           </div>
-          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
+          <div
+            className="h-3 w-full overflow-hidden rounded-full bg-slate-100"
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Import progress"
+          >
             <div className="h-full bg-brand-600 transition-all" style={{ width: `${pct}%` }} />
           </div>
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-slate-600" aria-live="polite">
             {progress?.progress_processed ?? 0} / {progress?.progress_total ?? 0} rows · {pct}%
             {elapsedLabel ? ` · Elapsed ${elapsedLabel}` : ''}
             {etaLabel ? ` · ${etaLabel} remaining` : ''}
@@ -318,7 +335,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
             <div className="space-y-2 pt-2 text-sm text-slate-800">
               <p className="font-semibold text-emerald-800">Import complete</p>
               <p>
-                Clients processed: {progress.imported_clients ?? 0}
+                {capitalize(clientLabel)}s processed: {progress.imported_clients ?? 0}
                 {progress.updated_existing != null && progress.updated_existing > 0 ?
                   ` (${progress.updated_existing} existing updated)`
                 : ''}
@@ -344,7 +361,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
                 Download import report (CSV)
               </a>
               <Link href="/dashboard/guests" className="inline-block font-medium text-brand-700 hover:text-brand-800">
-                View clients →
+                View {clientLabel.toLowerCase()}s →
               </Link>
               <div className="pt-2">
                 <Link

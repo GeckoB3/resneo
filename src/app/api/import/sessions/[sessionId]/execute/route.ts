@@ -16,6 +16,13 @@ export const dynamic = 'force-dynamic';
 /** Per-request row budget so each invocation stays under serverless limits; importer resumes across POSTs. */
 const IMPORT_BATCH_MAX_ROWS = 300;
 
+/**
+ * Execute-batch lease (M3): longer than `maxDuration` so a running batch's lease
+ * can never expire mid-run, while a batch killed without releasing self-heals once
+ * the lease lapses. The route claims this before processing and releases it after.
+ */
+const IMPORT_EXECUTE_LEASE_MS = 6 * 60 * 1000;
+
 function isImportExecuteStateV1(x: unknown): x is ImportExecuteStateV1 {
   if (!x || typeof x !== 'object') return false;
   const o = x as Record<string, unknown>;
@@ -88,6 +95,7 @@ export async function POST(
   const progressTotal =
     progressTotalFromFiles(importFiles ?? []) || (typeof sess.total_rows === 'number' ? sess.total_rows : 0) || 0;
 
+  let leaseHeld = false;
   try {
     if (st === 'importing') {
       const rawCheckpoint = sess.session_settings?.[IMPORT_EXECUTE_STATE_KEY];
@@ -100,6 +108,31 @@ export async function POST(
           { status: 409 },
         );
       }
+
+      // Claim the execute lease (M3): atomically take it only if no other batch
+      // holds an unexpired lease. Prevents a concurrent POST from resuming the
+      // same checkpoint and double-inserting. Released in `finally`.
+      const nowIso = new Date().toISOString();
+      const { data: claimed } = await admin
+        .from('import_sessions')
+        .update({ execute_lease_until: new Date(Date.now() + IMPORT_EXECUTE_LEASE_MS).toISOString() })
+        .eq('id', sessionId)
+        .eq('venue_id', venueId)
+        .eq('status', 'importing')
+        .or(`execute_lease_until.is.null,execute_lease_until.lt.${nowIso}`)
+        .select('id')
+        .maybeSingle();
+      if (!claimed) {
+        return NextResponse.json(
+          {
+            error: 'This import is already being processed',
+            message: 'Another import batch is running for this session. Please wait a few seconds and try again.',
+            code: 'IMPORT_BATCH_IN_PROGRESS',
+          },
+          { status: 409 },
+        );
+      }
+      leaseHeld = true;
 
       const result = await runImportExecuteBatch(admin, sessionId, venueId, staffId, {
         maxRows: IMPORT_BATCH_MAX_ROWS,
@@ -182,6 +215,9 @@ export async function POST(
         skipped_rows: 0,
         updated_existing: 0,
         session_settings: mergedSettings,
+        // Hold the execute lease from the moment we flip to 'importing' (M3) so a
+        // concurrent POST can't resume this checkpoint while the first batch runs.
+        execute_lease_until: new Date(Date.now() + IMPORT_EXECUTE_LEASE_MS).toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', sessionId)
@@ -200,6 +236,7 @@ export async function POST(
         { status: 409 },
       );
     }
+    leaseHeld = true;
 
     const result = await runImportExecuteBatch(admin, sessionId, venueId, staffId, {
       maxRows: IMPORT_BATCH_MAX_ROWS,
@@ -231,5 +268,16 @@ export async function POST(
       { error: e instanceof Error ? e.message : 'Import failed' },
       { status: 500 },
     );
+  } finally {
+    // Release the execute lease so the next sequential batch can claim it
+    // immediately. Only the request that actually claimed the lease clears it —
+    // losers and early-return paths never set leaseHeld, so we never wipe another
+    // batch's live lease. A killed batch that skips this still self-heals on expiry.
+    if (leaseHeld) {
+      await admin
+        .from('import_sessions')
+        .update({ execute_lease_until: null })
+        .eq('id', sessionId);
+    }
   }
 }

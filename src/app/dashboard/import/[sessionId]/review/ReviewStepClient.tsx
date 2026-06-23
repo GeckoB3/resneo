@@ -37,6 +37,18 @@ function labelForField(key: string | null | undefined, fileType: string): string
   return list.find((f) => f.key === key)?.label ?? key;
 }
 
+/** Plain-English label for the column action (raw values are dev tokens). */
+const ACTION_LABELS: Record<string, string> = {
+  map: 'Imported',
+  ignore: 'Not imported',
+  custom: 'Custom field',
+  split: 'Split into fields',
+};
+
+function labelForAction(action: string): string {
+  return ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
+}
+
 export function ReviewStepClient({ sessionId }: { sessionId: string }) {
   const { clientLabel } = useImportTerminology();
   const [files, setFiles] = useState<ImportFile[]>([]);
@@ -232,12 +244,10 @@ export function ReviewStepClient({ sessionId }: { sessionId: string }) {
                           <td className="max-w-[10rem] px-4 py-3 text-xs text-slate-600" title={sample0[m.source_column]}>
                             {sample0[m.source_column]?.trim() || '—'}
                           </td>
-                          <td className="px-4 py-3 text-xs capitalize text-slate-700">{m.action}</td>
+                          <td className="px-4 py-3 text-xs text-slate-700">{labelForAction(m.action)}</td>
                           <td className="px-4 py-3 text-xs text-slate-700">
                             {m.action === 'map' && (
-                              <span>
-                                {labelForField(m.target_field, file.file_type)} ({m.target_field})
-                              </span>
+                              <span>{labelForField(m.target_field, file.file_type)}</span>
                             )}
                             {m.action === 'ignore' && <span className="text-slate-500">Not imported</span>}
                             {m.action === 'custom' && (

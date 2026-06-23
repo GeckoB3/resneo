@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { readResponseJson } from '@/lib/api/read-response-json';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
+import { Dialog } from '@/components/ui/primitives/Dialog';
 import {
   AppointmentServiceModal,
   type ServiceModalCalendar,
 } from '@/components/dashboard/appointment-services/AppointmentServiceModal';
 import type { AppointmentServiceFormValues } from '@/components/dashboard/appointment-services/appointment-service-form-values';
+import { SearchableEntitySelect } from '@/components/import/SearchableEntitySelect';
 import type { OpeningHours } from '@/types/availability';
 import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
 import type { WorkingHours } from '@/types/booking-models';
@@ -50,6 +52,22 @@ type CreateDraft = {
   name: string;
   duration: string;
   price: string;
+};
+
+/** One editable row in the "Create all new" review panel. */
+type BulkRow = {
+  reference_id: string;
+  selected: boolean;
+  name: string;
+  /** Services only. Minutes as a string for the input; staff rows ignore these. */
+  duration: string;
+  price: string;
+};
+
+type BulkResult = {
+  ok: boolean;
+  created: number;
+  errors: { reference_id: string; error: string }[];
 };
 
 /** Venue context the full Add Service modal needs, fetched lazily on first use. */
@@ -101,6 +119,17 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
   const [serviceModalRefId, setServiceModalRefId] = useState<string | null>(null);
   const [openingModalRefId, setOpeningModalRefId] = useState<string | null>(null);
   const [svcContext, setSvcContext] = useState<ServiceFormContext | null>(null);
+  // Catalogue fetch lifecycle, tracked so a failed fetch shows an error + Retry
+  // instead of silently hiding every control (M9).
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRetrying, setCatalogRetrying] = useState(false);
+  // Venue currency symbol for price inputs; '£' until the catalogue load resolves it.
+  const [currencySymbol, setCurrencySymbol] = useState('£');
+  // Bulk "Create all new" review panel, keyed by reference type ('service' | 'staff').
+  const [bulkType, setBulkType] = useState<string | null>(null);
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
 
   const loadSession = useCallback(async () => {
     const res = await fetch(`/api/import/sessions/${sessionId}`);
@@ -131,6 +160,36 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     }
   }, [sessionId]);
 
+  /**
+   * Fetch the selectable-entities catalogue. On failure we keep `catalog` null
+   * and surface a clear error + Retry rather than silently hiding all controls (M9).
+   */
+  const loadCatalog = useCallback(async () => {
+    setCatalogError(null);
+    try {
+      const catRes = await fetch(`/api/import/sessions/${sessionId}/reference-catalog`);
+      const cat = await readResponseJson<Catalog & { error?: string }>(catRes);
+      if (!catRes.ok) throw new Error(cat.error ?? 'Could not load your services and staff list');
+      setCatalog(cat);
+      return true;
+    } catch (e) {
+      setCatalogError(e instanceof Error ? e.message : 'Could not load your services and staff list');
+      return false;
+    }
+  }, [sessionId]);
+
+  /** Best-effort venue currency symbol for the bulk-create price inputs. */
+  const loadCurrency = useCallback(async () => {
+    try {
+      const res = await fetch('/api/venue');
+      if (!res.ok) return;
+      const data = await readResponseJson<{ currency?: string }>(res);
+      setCurrencySymbol(currencySymbolFromCode(data.currency ?? 'GBP'));
+    } catch {
+      /* currency symbol is cosmetic; '£' is a safe default */
+    }
+  }, []);
+
   const runExtract = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -147,15 +206,18 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
         await fetch(`/api/import/sessions/${sessionId}/ai-map-references`, { method: 'POST' });
         await loadSession();
       }
-      const catRes = await fetch(`/api/import/sessions/${sessionId}/reference-catalog`);
-      const cat = await readResponseJson<Catalog & { error?: string }>(catRes);
-      if (catRes.ok) setCatalog(cat);
-      await loadDefaults();
+      await Promise.all([loadCatalog(), loadDefaults(), loadCurrency()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     }
     setLoading(false);
-  }, [sessionId, loadSession, loadDefaults]);
+  }, [sessionId, loadSession, loadDefaults, loadCatalog, loadCurrency]);
+
+  async function retryCatalog() {
+    setCatalogRetrying(true);
+    await loadCatalog();
+    setCatalogRetrying(false);
+  }
 
   // Run the (delete-then-restage) extraction exactly once per mount. Without
   // this guard React strict mode double-invokes the effect in dev, firing two
@@ -333,7 +395,9 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     const d = defaultsByRef[ref.id];
     return {
       name: ref.raw_value,
-      duration: d?.suggested_duration_minutes ? String(d.suggested_duration_minutes) : '',
+      // Services fall back to a sensible 60 min when the file gave no duration
+      // evidence; staff ignore this field.
+      duration: d?.suggested_duration_minutes ? String(d.suggested_duration_minutes) : '60',
       price: d?.suggested_price_pence != null ? (d.suggested_price_pence / 100).toFixed(2) : '',
     };
   }
@@ -487,6 +551,146 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
     return [];
   }
 
+  // ---- Bulk "create all new" (services + staff) ----------------------------
+
+  /** Unmatched, creatable references of a type, with their suggested setup values. */
+  const unmatchedOfType = useCallback(
+    (type: 'service' | 'staff') => refs.filter((r) => !r.is_resolved && r.reference_type === type),
+    [refs],
+  );
+
+  const unmatchedServiceCount = useMemo(() => unmatchedOfType('service').length, [unmatchedOfType]);
+  const unmatchedStaffCount = useMemo(() => unmatchedOfType('staff').length, [unmatchedOfType]);
+
+  /** How many entities the venue already has for a reference type. */
+  function existingCountForType(type: 'service' | 'staff'): number {
+    if (!catalog) return 0;
+    if (type === 'service') {
+      return catalog.bookingModel === 'practitioner_appointment'
+        ? catalog.appointmentServices.length
+        : catalog.serviceItems.length;
+    }
+    return catalog.bookingModel === 'practitioner_appointment'
+      ? catalog.practitioners.length
+      : catalog.calendars.length;
+  }
+
+  /**
+   * A venue is "fresh" for services when its booking files name several services
+   * but the catalogue holds few/none — i.e. setting them up one-by-one is the wrong
+   * default and we should lead with the build-from-bookings hero.
+   */
+  const servicesLookFresh = useMemo(() => {
+    if (!catalog) return false;
+    return unmatchedServiceCount >= 3 && existingCountForType('service') <= unmatchedServiceCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- existingCountForType reads catalog, listed below
+  }, [catalog, unmatchedServiceCount]);
+
+  const staffNoun = catalog?.bookingModel === 'practitioner_appointment' ? 'practitioner' : 'team member';
+
+  function bulkButtonLabel(type: 'service' | 'staff'): string {
+    if (type === 'service') {
+      const n = unmatchedServiceCount;
+      return `Create ${n} new ${n === 1 ? 'service' : 'services'} from your bookings`;
+    }
+    const n = unmatchedStaffCount;
+    return `Add ${n} new ${n === 1 ? staffNoun : `${staffNoun}s`}`;
+  }
+
+  /** Open the bulk review panel for a type, seeding each row from booking suggestions. */
+  function openBulkPanel(type: 'service' | 'staff') {
+    const rows: BulkRow[] = unmatchedOfType(type).map((r) => {
+      const d = defaultsByRef[r.id];
+      return {
+        reference_id: r.id,
+        selected: true,
+        name: r.raw_value,
+        duration: d?.suggested_duration_minutes ? String(d.suggested_duration_minutes) : '60',
+        price: d?.suggested_price_pence != null ? (d.suggested_price_pence / 100).toFixed(2) : '',
+      };
+    });
+    setBulkRows(rows);
+    setBulkResult(null);
+    setBulkType(type);
+  }
+
+  function closeBulkPanel() {
+    setBulkType(null);
+    setBulkRows([]);
+    setBulkResult(null);
+  }
+
+  function patchBulkRow(refId: string, patch: Partial<BulkRow>) {
+    setBulkRows((prev) => prev.map((r) => (r.reference_id === refId ? { ...r, ...patch } : r)));
+  }
+
+  /** Send every selected bulk row to the bulk endpoint as action:'create'. */
+  async function runBulkCreate() {
+    if (!bulkType) return;
+    const isService = bulkType === 'service';
+    const chosen = bulkRows.filter((r) => r.selected && r.name.trim());
+    if (!chosen.length) return;
+    const resolved_entity_type =
+      isService
+        ? catalog?.bookingModel === 'practitioner_appointment'
+          ? 'appointment_service'
+          : 'service_item'
+        : catalog?.bookingModel === 'practitioner_appointment'
+          ? 'practitioner'
+          : 'unified_calendar';
+
+    const operations = chosen.map((row) => {
+      const op: Record<string, unknown> = {
+        reference_id: row.reference_id,
+        action: 'create',
+        resolved_entity_type,
+        create_label: row.name.trim(),
+      };
+      if (isService) {
+        const duration = Number.parseInt(row.duration, 10);
+        op.create_duration_minutes = Number.isFinite(duration) && duration > 0 ? duration : null;
+        const cleanPrice = row.price.replace(/[£,\s]/g, '');
+        const pounds = Number.parseFloat(cleanPrice);
+        op.create_price_pence =
+          cleanPrice !== '' && Number.isFinite(pounds) && pounds >= 0 ? Math.round(pounds * 100) : null;
+      }
+      return op;
+    });
+
+    setBulkRunning(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/import/sessions/${sessionId}/references/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operations }),
+      });
+      const data = await readResponseJson<{
+        ok?: boolean;
+        created?: number;
+        errors?: { reference_id: string; error: string }[];
+        error?: string;
+      }>(res);
+      if (!res.ok) throw new Error(data.error ?? 'Could not create those items');
+      const errs = data.errors ?? [];
+      setBulkResult({ ok: errs.length === 0, created: data.created ?? 0, errors: errs });
+      // Keep only the rows that failed so the user can retry just those.
+      if (errs.length) {
+        const failedIds = new Set(errs.map((e) => e.reference_id));
+        setBulkRows((prev) => prev.filter((r) => failedIds.has(r.reference_id)));
+      } else {
+        setBulkRows([]);
+      }
+      await reloadResolvedFlag();
+      await loadCatalog();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    }
+    setBulkRunning(false);
+  }
+
+  const selectedBulkCount = bulkRows.filter((r) => r.selected && r.name.trim()).length;
+
   return (
     <div className="space-y-6">
       <div>
@@ -564,6 +768,63 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
               </button>
             </div>
           )}
+          {/* M9: catalogue fetch failed — show a clear error + Retry instead of
+              silently hiding all the Map / Add / Skip controls. */}
+          {!extract.requiresTableConfirmation && !catalog && catalogError && refs.some((r) => !r.is_resolved) && (
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+              <p className="font-medium text-amber-900">We couldn&apos;t load your services and staff</p>
+              <p className="text-amber-800">{catalogError}</p>
+              <p className="text-xs text-amber-700">
+                This is needed to match the items in your file. It&apos;s usually a brief network hiccup — try again.
+              </p>
+              <button
+                type="button"
+                disabled={catalogRetrying}
+                onClick={() => void retryCatalog()}
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:cursor-wait disabled:opacity-70"
+              >
+                {catalogRetrying ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />
+                ) : null}
+                {catalogRetrying ? 'Retrying…' : 'Try again'}
+              </button>
+            </div>
+          )}
+
+          {/* Catalogue-from-bookings hero: a fresh/near-empty venue is offered a
+              one-step build of its services rather than per-row setup. */}
+          {showReferenceMapping && catalog && servicesLookFresh && bulkType === null && (
+            <div className="space-y-3 rounded-xl border border-brand-200 bg-gradient-to-br from-brand-50 to-white p-5">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                  </svg>
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-slate-900">
+                    We found {unmatchedServiceCount} {unmatchedServiceCount === 1 ? 'service' : 'services'} in your
+                    bookings
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Set them all up in one step — we&apos;ve filled in a suggested length and price for each from your
+                    data. You can tweak anything before creating.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => openBulkPanel('service')}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                {bulkButtonLabel('service')}
+              </button>
+            </div>
+          )}
+
           {showReferenceMapping && catalog && (
             <div className="space-y-3 border-t border-slate-100 pt-3">
               <div className="flex flex-wrap gap-2">
@@ -585,11 +846,30 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                   </button>
                 ))}
               </div>
+
+              {/* Per-type bulk create. The hero above already covers services for a
+                  fresh venue, so suppress the duplicate service button in that case. */}
+              {(tab === 'service' || tab === 'staff') &&
+                bulkType === null &&
+                (tab === 'service' ? unmatchedServiceCount : unmatchedStaffCount) >= 2 &&
+                !(tab === 'service' && servicesLookFresh) && (
+                  <button
+                    type="button"
+                    onClick={() => openBulkPanel(tab as 'service' | 'staff')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3.5 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    {bulkButtonLabel(tab as 'service' | 'staff')}
+                  </button>
+                )}
+
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-slate-600">
-                  For each item: <strong>Map</strong> it to something you already have on ResNeo,{' '}
-                  <strong>Add as new</strong> to set it up now (services ask for duration and price), or{' '}
-                  <strong>Skip</strong> to leave those booking rows out of the import.
+                  For each item: <strong>Match</strong> it to something you already have on ResNeo,{' '}
+                  <strong>Add as new</strong> to set it up now (services ask for length and price), or{' '}
+                  <strong>Skip</strong> to leave those bookings out of the import.
                 </p>
                 {refs.filter((r) => !r.is_resolved && r.ai_suggested_entity_id).length > 1 && (
                   <button
@@ -634,67 +914,65 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                         </div>
                         {!ref.is_resolved ? (
                           <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                            <SearchableEntitySelect
+                              options={opts}
                               value={value}
-                              onChange={(e) =>
-                                setSelectByRef((prev) => ({
-                                  ...prev,
-                                  [ref.id]: e.target.value,
-                                }))
-                              }
-                            >
-                              <option value="">Choose…</option>
-                              {opts.map((o) => (
-                                <option key={o.id} value={o.id}>
-                                  {o.name}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(id) => setSelectByRef((prev) => ({ ...prev, [ref.id]: id }))}
+                              ariaLabel={`Match “${ref.raw_value}” to an existing ${tabLabel(ref.reference_type).replace(/s$/, '').toLowerCase() || 'item'}`}
+                              disabled={mappingId === ref.id}
+                              className="w-52"
+                            />
                             <button
                               type="button"
                               disabled={mappingId === ref.id || !value}
-                              className="rounded-lg bg-brand-600 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                               onClick={() => void applyMap(ref)}
                             >
-                              Map
+                              {mappingId === ref.id && value ? 'Matching…' : 'Match'}
                             </button>
                             {createLabel && (
                               <button
                                 type="button"
-                                disabled={mappingId === ref.id || openingModalRefId === ref.id}
-                                className={`rounded-lg px-2 py-1.5 text-xs font-semibold ${
+                                disabled={mappingId === ref.id}
+                                aria-expanded={createOpen}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                                   createOpen
                                     ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                                     : 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
                                 }`}
-                                onClick={() =>
-                                  isServiceRef ? void openServiceModal(ref) : toggleCreate(ref)
-                                }
+                                onClick={() => toggleCreate(ref)}
                               >
-                                {openingModalRefId === ref.id ? 'Opening…' : createLabel}
+                                {createLabel}
                               </button>
                             )}
                             <button
                               type="button"
                               disabled={mappingId === ref.id}
-                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-medium text-slate-700"
+                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                               onClick={() => void applySkip(ref)}
                             >
                               Skip
                             </button>
                           </div>
                         ) : (
-                          <span className="text-xs font-medium text-green-700">Done</span>
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" aria-hidden>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            Done
+                          </span>
                         )}
                       </div>
-                      {!ref.is_resolved && createOpen && !isServiceRef && (
-                        <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                      {/* Lightweight inline quick-create (default for every creatable
+                          type). Services get length + price fields and an Advanced link
+                          to the full modal; staff just need a name. */}
+                      {!ref.is_resolved && createOpen && createLabel && (
+                        <div className="mt-3 space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
                           <div className="flex flex-wrap items-end gap-3">
                             <label className="flex flex-col gap-0.5">
                               <span className="text-[10px] uppercase tracking-wide text-slate-500">Name</span>
                               <input
-                                className="w-56 rounded border border-slate-200 px-2 py-1 text-xs"
+                                className="w-56 rounded border border-slate-200 px-2 py-1.5 text-sm"
                                 value={draft.name}
                                 onChange={(e) =>
                                   setCreateDraftByRef((prev) => ({
@@ -704,19 +982,73 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                                 }
                               />
                             </label>
+                            {isServiceRef && (
+                              <>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Length (min)</span>
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={1}
+                                    className="w-24 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                                    placeholder="60"
+                                    value={draft.duration}
+                                    onChange={(e) =>
+                                      setCreateDraftByRef((prev) => ({
+                                        ...prev,
+                                        [ref.id]: { ...draft, duration: e.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                                    Price ({currencySymbol})
+                                  </span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    className="w-24 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                                    placeholder="0.00"
+                                    value={draft.price}
+                                    onChange={(e) =>
+                                      setCreateDraftByRef((prev) => ({
+                                        ...prev,
+                                        [ref.id]: { ...draft, price: e.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                              </>
+                            )}
                             <button
                               type="button"
                               disabled={mappingId === ref.id || !draft.name.trim()}
                               onClick={() => void applyCreate(ref)}
-                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                             >
                               {mappingId === ref.id ? 'Creating…' : createLabel}
                             </button>
-                            <p className="basis-full text-[11px] text-slate-600">
-                              Creates a bookable calendar with default working hours — fine-tune it later under
-                              Staff &amp; Calendars.
-                            </p>
                           </div>
+                          {isServiceRef ? (
+                            <p className="text-[11px] text-slate-600">
+                              Creates a bookable service.{' '}
+                              <button
+                                type="button"
+                                disabled={openingModalRefId === ref.id}
+                                onClick={() => void openServiceModal(ref)}
+                                className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800 disabled:opacity-60"
+                              >
+                                {openingModalRefId === ref.id ? 'Opening…' : 'Advanced setup'}
+                              </button>{' '}
+                              for online booking, categories and deposits.
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-600">
+                              Creates a bookable calendar with default working hours — fine-tune it later under Staff
+                              &amp; Calendars.
+                            </p>
+                          )}
                         </div>
                       )}
                     </li>
@@ -729,7 +1061,19 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
             </div>
           )}
           {resolved && !extract.requiresTableConfirmation && (
-            <p className="text-green-800">References are satisfied for this session.</p>
+            <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4">
+              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-green-900">Everything&apos;s matched up</p>
+                <p className="mt-0.5 text-sm text-green-800">
+                  Your services and staff are all set for this import. Continue to validation when you&apos;re ready.
+                </p>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -757,6 +1101,22 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
           );
         })()}
 
+      {bulkType && (
+        <BulkCreatePanel
+          type={bulkType as 'service' | 'staff'}
+          rows={bulkRows}
+          running={bulkRunning}
+          result={bulkResult}
+          selectedCount={selectedBulkCount}
+          currencySymbol={currencySymbol}
+          staffNoun={staffNoun}
+          onPatchRow={patchBulkRow}
+          onToggleAll={(selected) => setBulkRows((prev) => prev.map((r) => ({ ...r, selected })))}
+          onRun={() => void runBulkCreate()}
+          onClose={closeBulkPanel}
+        />
+      )}
+
       <div className="flex flex-wrap justify-between gap-3">
         <Link
           href={`/dashboard/import/${sessionId}/review`}
@@ -774,5 +1134,200 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
         </Link>
       </div>
     </div>
+  );
+}
+
+/**
+ * Review-and-confirm modal for bulk-creating every unmatched service or team
+ * member. Each row is editable (name, and for services a length + price seeded
+ * from the booking data) and can be deselected. One click creates them all via
+ * the bulk endpoint; the result summary shows how many were created and surfaces
+ * any per-row errors so the user can fix and retry just those.
+ */
+function BulkCreatePanel({
+  type,
+  rows,
+  running,
+  result,
+  selectedCount,
+  currencySymbol,
+  staffNoun,
+  onPatchRow,
+  onToggleAll,
+  onRun,
+  onClose,
+}: {
+  type: 'service' | 'staff';
+  rows: BulkRow[];
+  running: boolean;
+  result: BulkResult | null;
+  selectedCount: number;
+  currencySymbol: string;
+  staffNoun: string;
+  onPatchRow: (refId: string, patch: Partial<BulkRow>) => void;
+  onToggleAll: (selected: boolean) => void;
+  onRun: () => void;
+  onClose: () => void;
+}) {
+  const isService = type === 'service';
+  const noun = isService ? 'service' : staffNoun;
+  const nounPlural = isService ? 'services' : `${staffNoun}s`;
+  const allSelected = rows.length > 0 && rows.every((r) => r.selected);
+  const succeeded = Boolean(result && result.errors.length === 0);
+
+  return (
+    <Dialog
+      open
+      // Block dismiss (overlay click / escape) while a create is in flight.
+      onOpenChange={(next) => {
+        if (!next && !running) onClose();
+      }}
+      size="lg"
+      contentClassName="max-w-2xl"
+      title={isService ? 'Create your services' : `Add your ${nounPlural}`}
+      description={
+        succeeded
+          ? undefined
+          : isService
+            ? 'We filled in a suggested length and price from your bookings. Tweak anything, untick to skip, then create them all.'
+            : `Review the ${nounPlural} found in your bookings. Untick anyone you don't want, then add them all.`
+      }
+      bodyClassName="flex min-h-0 flex-col p-0"
+      footer={
+        succeeded ? (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={running}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onRun}
+              disabled={running || selectedCount === 0}
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {running ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />
+              ) : null}
+              {running ? 'Creating…' : `Create ${selectedCount} ${selectedCount === 1 ? noun : nounPlural}`}
+            </button>
+          </div>
+        )
+      }
+    >
+      {succeeded ? (
+        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700">
+            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </span>
+          <div>
+            <p className="text-lg font-semibold text-slate-900">
+              Created {result!.created} {result!.created === 1 ? noun : nounPlural}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">They&apos;re matched to your bookings and ready to go.</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-5 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+              <input
+                type="checkbox"
+                className="rounded border-slate-300"
+                checked={allSelected}
+                onChange={(e) => onToggleAll(e.target.checked)}
+              />
+              Select all
+            </label>
+            <span className="text-xs text-slate-500">
+              {selectedCount} of {rows.length} selected
+            </span>
+          </div>
+
+          {result && result.errors.length > 0 && (
+            <div className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-900" role="status">
+              Created {result.created} of {result.created + result.errors.length}. {result.errors.length}{' '}
+              couldn&apos;t be created — fix the highlighted {nounPlural} and try again.
+            </div>
+          )}
+
+          <ul className="divide-y divide-slate-100">
+            {rows.map((row) => {
+              const rowError = result?.errors.find((e) => e.reference_id === row.reference_id)?.error;
+              return (
+                <li
+                  key={row.reference_id}
+                  className={`px-5 py-3 ${rowError ? 'bg-red-50' : row.selected ? '' : 'opacity-50'}`}
+                >
+                  <div className="flex flex-wrap items-end gap-3">
+                    <input
+                      type="checkbox"
+                      className="mb-2 rounded border-slate-300"
+                      checked={row.selected}
+                      aria-label={`Include ${row.name}`}
+                      onChange={(e) => onPatchRow(row.reference_id, { selected: e.target.checked })}
+                    />
+                    <label className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-[10px] uppercase tracking-wide text-slate-500">Name</span>
+                      <input
+                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                        value={row.name}
+                        onChange={(e) => onPatchRow(row.reference_id, { name: e.target.value })}
+                      />
+                    </label>
+                    {isService && (
+                      <>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wide text-slate-500">Length (min)</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            className="w-20 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                            placeholder="60"
+                            value={row.duration}
+                            onChange={(e) => onPatchRow(row.reference_id, { duration: e.target.value })}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                            Price ({currencySymbol})
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="w-20 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                            placeholder="0.00"
+                            value={row.price}
+                            onChange={(e) => onPatchRow(row.reference_id, { price: e.target.value })}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  {rowError && <p className="mt-1 text-xs text-red-700">{rowError}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </Dialog>
   );
 }

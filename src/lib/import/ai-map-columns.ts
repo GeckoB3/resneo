@@ -1,9 +1,75 @@
 import type { SchemaField } from '@/lib/import/constants';
 import type { ColumnProfile } from '@/lib/import/column-profile';
+import {
+  DATETIME_RE,
+  ISO_DATE_RE,
+  NUMERIC_DATE_RE,
+  DASH_MONTH_DATE_RE,
+  TIME_RE,
+} from '@/lib/import/column-profile';
 import { runImportAiJson } from '@/lib/import/openai-client';
 
 const SYSTEM = `You are a data mapping assistant for ResNeo, a booking platform.
 Your job is to map columns from a CSV export of another booking platform to ResNeo's data schema.`;
+
+const PROMPT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// A phone-shaped value: optional leading +/(, then digits with space/hyphen/paren
+// separators (NOT '/' or '.', which collide with date formats), 7+ digits overall.
+const PROMPT_PHONE_RE = /^[+(]?[0-9][0-9()\s-]{5,}$/;
+
+/**
+ * Mask personal data before it is sent to the AI, while preserving the value's
+ * SHAPE so the model can still recognise the column type/format. Emails keep the
+ * domain (`j***@example.com`); phone numbers keep only their last 2-3 digits.
+ * Names and everything else are returned unchanged (names are needed so the
+ * model can detect combined-name columns and split candidates).
+ *
+ * Dates, times and datetimes are explicitly left intact — they carry no personal
+ * data and the AI needs them to recognise date columns and DD/MM vs MM/DD order.
+ *
+ * Pure: does not affect what is stored or imported, only what is sent to OpenAI.
+ */
+export function maskPiiForPrompt(value: string): string {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+
+  if (PROMPT_EMAIL_RE.test(trimmed)) {
+    const at = trimmed.indexOf('@');
+    const local = trimmed.slice(0, at);
+    const domain = trimmed.slice(at); // includes '@'
+    const lead = local.slice(0, 1);
+    return `${lead}***${domain}`;
+  }
+
+  // Never treat a date/time/datetime as a phone (they share digit/separator shapes).
+  const looksLikeDateOrTime =
+    DATETIME_RE.test(trimmed) ||
+    ISO_DATE_RE.test(trimmed) ||
+    NUMERIC_DATE_RE.test(trimmed) ||
+    DASH_MONTH_DATE_RE.test(trimmed) ||
+    TIME_RE.test(trimmed);
+
+  if (!looksLikeDateOrTime && PROMPT_PHONE_RE.test(trimmed)) {
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length >= 7) {
+      const keep = Math.min(3, Math.max(2, digits.length - 4));
+      const tail = digits.slice(-keep);
+      return `${'*'.repeat(digits.length - keep)}${tail}`;
+    }
+  }
+
+  return value;
+}
+
+/** Mask every cell of a sample row before it goes into the prompt. */
+function maskSampleRow(row: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = typeof v === 'string' ? maskPiiForPrompt(v) : v;
+  }
+  return out;
+}
 
 export type AiMappingRow = {
   source_column: string;
@@ -77,11 +143,18 @@ export async function runAiColumnMapping(params: {
   const { headers, sampleRows, fileType, detectedPlatform, targetFields, columnProfiles, userInstructions, knownMappings } =
     params;
 
-  const profileSection = columnProfiles?.length
+  // Mask PII in the profile top_values before they enter the prompt; everything
+  // else in the profile is aggregate stats with no personal data.
+  const maskedProfiles = columnProfiles?.map((p) => ({
+    ...p,
+    top_values: Array.isArray(p.top_values) ? p.top_values.map(maskPiiForPrompt) : p.top_values,
+  }));
+
+  const profileSection = maskedProfiles?.length
     ? `
 Column statistics computed over the whole file (fill_rate is the fraction of non-empty cells;
 type_counts shows how many sampled values look like each type; top_values are the most common values):
-${JSON.stringify(columnProfiles, null, 1)}
+${JSON.stringify(maskedProfiles, null, 1)}
 `
     : '';
 
@@ -116,7 +189,7 @@ CSV column headers:
 ${JSON.stringify(headers)}
 
 Sample data (first rows):
-${JSON.stringify(sampleRows.slice(0, 8), null, 1)}
+${JSON.stringify(sampleRows.slice(0, 8).map(maskSampleRow), null, 1)}
 ${profileSection}
 ResNeo target fields:
 ${JSON.stringify(

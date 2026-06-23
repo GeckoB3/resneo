@@ -14,7 +14,7 @@ import {
   mapImportBookingStatus,
   normaliseBoolean,
   normaliseEmail,
-  normalisePhoneUk,
+  normalisePhone,
   parseDateString,
   parseTimeString,
   parseCurrencyPence,
@@ -25,7 +25,6 @@ import {
 import {
   findBookingIdByExternalRef,
   findGuestIdByExternalRef,
-  IMPORT_REF_PROVIDER_PHOREST,
   insertBookingExternalRef,
   upsertGuestExternalRef,
 } from '@/lib/import/external-refs';
@@ -36,6 +35,7 @@ import {
   phoneForMatching,
 } from '@/lib/import/guest-lookup';
 import { recordExecuteSkip } from '@/lib/import/execute-skip-audit';
+import { defaultPhoneCountryFromCurrency } from '@/lib/phone/e164';
 import { resolveNamedRowId } from '@/lib/import/name-match';
 import { resolveBookingImportDefaults } from '@/lib/import/booking-import-defaults';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
@@ -135,6 +135,51 @@ function shouldUpdateExisting(list: IssueRow[] | undefined): boolean {
   return Boolean(list?.some((i) => i.issue_type === 'existing_client' && i.user_decision === 'update_existing'));
 }
 
+/**
+ * Classifies a booking-insert failure into a user-facing skip reason. The CDE
+ * capacity guard (`enforce_cde_capacity`) raises SQLSTATE 23P01 with a
+ * `CDE_CAPACITY` message when a class/event/resource is already at capacity for
+ * the slot; surface that as a clear "fully booked" reason rather than a generic
+ * insert error (mirrors the live booking flow at booking/create/route.ts).
+ */
+export function classifyBookingInsertSkip(
+  bErr: { code?: string | null; message?: string | null } | null,
+): { code: string; message: string } {
+  const isCapacity = bErr?.code === '23P01' || Boolean(bErr?.message?.includes('CDE_CAPACITY'));
+  if (isCapacity) {
+    return {
+      code: 'capacity_full',
+      message:
+        'Skipped: the class, event or resource was already at its configured capacity for this date and time. Increase its capacity (or free up a place) and re-import this row.',
+    };
+  }
+  return {
+    code: 'booking_insert_failed',
+    message: `Could not insert the booking: ${bErr?.message ?? 'unknown error'}`,
+  };
+}
+
+/**
+ * Booking statuses that occupy a seat for event-session capacity — mirrors
+ * `SESSION_CAPACITY_STATUSES` in booking/create/route.ts. Cancelled / No-Show /
+ * Completed bookings don't consume a place, so historical imports of those never
+ * trip capacity. Exported for testing.
+ */
+export const EVENT_SEAT_CONSUMING_STATUSES: readonly string[] = ['Pending', 'Booked', 'Confirmed', 'Seated'];
+
+export function eventStatusConsumesSeat(status: string): boolean {
+  return EVENT_SEAT_CONSUMING_STATUSES.includes(status);
+}
+
+/**
+ * Pure capacity decision (H2b): would adding `seats` exceed the session's capacity?
+ * Only enforced when a positive cap is known — an unset/zero cap means capacity
+ * isn't configured, and blocking every booking there would be worse than allowing.
+ */
+export function eventSeatExceedsCapacity(cap: number, used: number, seats: number): boolean {
+  return cap > 0 && used + seats > cap;
+}
+
 async function ensureCustomClientFieldDefinitions(
   admin: SupabaseClient,
   venueId: string,
@@ -206,6 +251,59 @@ export async function runImportExecuteBatch(
     return practitionerCommercialsCache.get(key) ?? null;
   }
 
+  /**
+   * Event-session capacity enforcement (H2b). Unlike class/resource bookings — which
+   * the `enforce_cde_capacity` DB trigger guards (it keys on class_instance_id /
+   * resource_id) — event_session bookings are capacity-checked only in application
+   * code (see booking/create/route.ts), so the importer must do the same or it can
+   * oversell a session. Effective capacity = the session's `capacity_override`, else
+   * the calendar's `capacity`. Only capacity-consuming statuses occupy a seat. We
+   * cache each session's cap + a running in-import tally so repeated rows for the
+   * same session accumulate correctly with one DB read per session.
+   */
+  const eventSessionSeats = new Map<string, { cap: number; used: number }>();
+  async function reserveEventSessionSeat(
+    eventSessionId: string,
+    seats: number,
+    status: string,
+  ): Promise<{ ok: boolean }> {
+    if (!eventStatusConsumesSeat(status)) return { ok: true };
+    let entry = eventSessionSeats.get(eventSessionId);
+    if (!entry) {
+      const { data: sess } = await admin
+        .from('event_sessions')
+        .select('capacity_override, calendar_id')
+        .eq('id', eventSessionId)
+        .eq('venue_id', venueId)
+        .maybeSingle();
+      if (!sess) return { ok: true }; // unknown session: let the insert proceed/fail normally
+      const s = sess as { capacity_override: number | null; calendar_id: string };
+      let cap = s.capacity_override;
+      if (cap == null) {
+        const { data: cal } = await admin
+          .from('unified_calendars')
+          .select('capacity')
+          .eq('id', s.calendar_id)
+          .eq('venue_id', venueId)
+          .maybeSingle();
+        cap = (cal as { capacity?: number } | null)?.capacity ?? 0;
+      }
+      const { data: booked } = await admin
+        .from('bookings')
+        .select('capacity_used')
+        .eq('venue_id', venueId)
+        .eq('event_session_id', eventSessionId)
+        .in('status', [...EVENT_SEAT_CONSUMING_STATUSES]);
+      let used = 0;
+      for (const b of booked ?? []) used += (b as { capacity_used?: number }).capacity_used ?? 1;
+      entry = { cap: cap ?? 0, used };
+      eventSessionSeats.set(eventSessionId, entry);
+    }
+    if (eventSeatExceedsCapacity(entry.cap, entry.used, seats)) return { ok: false };
+    entry.used += seats;
+    return { ok: true };
+  }
+
   const { data: session } = await admin
     .from('import_sessions')
     .select('id, session_settings, total_rows, detected_platform')
@@ -215,10 +313,8 @@ export async function runImportExecuteBatch(
 
   if (!session) throw new Error('Session not found');
 
-  const refProvider =
-    (session as { detected_platform?: string | null }).detected_platform === 'phorest'
-      ? IMPORT_REF_PROVIDER_PHOREST
-      : null;
+  const detectedPlatform =
+    (session as { detected_platform?: string | null }).detected_platform?.trim() || null;
 
   const settings = (session.session_settings ?? {}) as {
     ambiguous_date_format?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null;
@@ -231,11 +327,17 @@ export async function runImportExecuteBatch(
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('timezone')
+    .select('timezone, currency')
     .eq('id', venueId)
     .maybeSingle();
   const venueTimeZone =
     (venueRow as { timezone?: string | null } | null)?.timezone ?? 'Europe/London';
+  // National-format phone numbers are normalised against the venue's likely
+  // calling region (derived from its currency) rather than always GB, so
+  // non-UK venues' clients dedupe correctly instead of importing as duplicates.
+  const defaultPhoneCountry = defaultPhoneCountryFromCurrency(
+    (venueRow as { currency?: string | null } | null)?.currency,
+  );
 
   const venueMode = await resolveVenueMode(admin, venueId);
   const bookingModel = venueMode.bookingModel;
@@ -267,6 +369,35 @@ export async function runImportExecuteBatch(
     byFile.set(fid, list);
   }
 
+  // Cross-import dedupe provider (M2). The source's own appointment/client IDs are
+  // matched only within the same source, so re-importing the same data doesn't
+  // duplicate. Known providers use their slug (Phorest keeps 'phorest', so existing
+  // refs still match); for 'unknown' exports we append a stable hash of the column
+  // headers, so two *different* unfamiliar systems with overlapping IDs can't be
+  // mistaken for one another (no false-positive skips). `external_record_refs` is
+  // written exclusively by the import, so matches are scoped to records imported
+  // previously — never to manually-created or app-created records. The dedupe checks
+  // below only fire when a row actually carries a source ID, so this is "source IDs
+  // only": rows without IDs are never skipped on these grounds.
+  const refProvider: string =
+    detectedPlatform && detectedPlatform !== 'unknown'
+      ? detectedPlatform
+      : `import:${createHash('sha256')
+          .update(
+            [
+              ...new Set(
+                (mappingRows ?? []).map((m) =>
+                  ((m as { source_column?: string }).source_column ?? '').trim().toLowerCase(),
+                ),
+              ),
+            ]
+              .filter(Boolean)
+              .sort()
+              .join('|'),
+          )
+          .digest('hex')
+          .slice(0, 16)}`;
+
   let importedClients = st.importedClients;
   let importedBookings = st.importedBookings;
   let skipped = st.skipped;
@@ -294,13 +425,12 @@ export async function runImportExecuteBatch(
   const { data: stagedBookingRows } = await admin
     .from('import_booking_rows')
     .select('file_id, row_number')
-    .eq('session_id', sessionId)
-    .eq('is_future_booking', true);
+    .eq('session_id', sessionId);
 
   /**
    * Set of `${file_id}:${row_number}` for rows that were staged via the
-   * references step. The CSV booking phase skips a row only when it is in this
-   * set, so future-dated CSV rows that *were not* staged still get imported
+   * references step (past and future). The CSV booking phase skips a row only
+   * when it is in this set, so any row that was *not* staged still gets imported
    * through the CSV path instead of being silently dropped.
    */
   const stagedRowKeys = new Set<string>(
@@ -398,7 +528,7 @@ export async function runImportExecuteBatch(
       }
 
       const email = normaliseEmail(targets.email ?? null);
-      const ph = normalisePhoneUk(targets.phone ?? null);
+      const ph = normalisePhone(targets.phone ?? null, defaultPhoneCountry);
 
       const nameOutcome = evaluateClientRowNameRule({
         firstName: fn,
@@ -441,7 +571,7 @@ export async function runImportExecuteBatch(
       if (targets.gender?.trim()) customFields.gender = targets.gender.trim();
       if (targets.address?.trim()) customFields.address = targets.address.trim();
       if (targets.postcode?.trim()) customFields.postcode = targets.postcode.trim();
-      const landPh = normalisePhoneUk(targets.landline ?? null);
+      const landPh = normalisePhone(targets.landline ?? null, defaultPhoneCountry);
       if (landPh.e164) customFields.landline_phone = landPh.e164;
       else if (targets.landline?.trim()) customFields.landline_phone_raw = targets.landline.trim();
       for (const key of ['sms_marketing_consent', 'email_marketing_consent', 'sms_reminder_consent', 'email_reminder_consent'] as const) {
@@ -602,9 +732,12 @@ export async function runImportExecuteBatch(
         continue;
       }
 
-      const { data: inserted, error: insErr } = await admin
-        .from('guests')
-        .insert({
+      // Guest + undo-audit row inserted atomically (one transaction, no orphans):
+      // see migration 20261226120100_import_guest_tx.
+      const { data: insertedGuestId, error: insErr } = await admin.rpc('import_insert_guest_with_audit', {
+        p_session_id: sessionId,
+        p_venue_id: venueId,
+        p_guest: {
           venue_id: venueId,
           first_name: firstNameForDb,
           last_name: lastNameForDb,
@@ -616,11 +749,10 @@ export async function runImportExecuteBatch(
           tags,
           marketing_opt_out: marketingOptOut ?? false,
           custom_fields: customFields,
-        })
-        .select('id')
-        .single();
+        },
+      });
 
-      if (insErr || !inserted) {
+      if (insErr || !insertedGuestId) {
         console.error('[import execute] guest insert', insErr);
         await recordExecuteSkip(admin, sessionId, {
           fileId: f.id,
@@ -634,14 +766,7 @@ export async function runImportExecuteBatch(
         continue;
       }
 
-      await admin.from('import_records').insert({
-        session_id: sessionId,
-        venue_id: venueId,
-        record_type: 'guest',
-        record_id: inserted.id,
-        action: 'created',
-        previous_data: null,
-      });
+      const inserted = { id: insertedGuestId as string };
 
       if (refProvider && targets.external_client_id?.trim()) {
         await upsertGuestExternalRef(
@@ -750,9 +875,12 @@ export async function runImportExecuteBatch(
       import_row_number: input.rowNumber,
     };
 
-    const { data: inserted, error } = await admin
-      .from('guests')
-      .insert({
+    // Guest + undo-audit row inserted atomically (one transaction, no orphans):
+    // see migration 20261226120100_import_guest_tx.
+    const { data: insertedGuestId, error } = await admin.rpc('import_insert_guest_with_audit', {
+      p_session_id: sessionId,
+      p_venue_id: venueId,
+      p_guest: {
         venue_id: venueId,
         first_name: firstName,
         last_name: lastName,
@@ -762,23 +890,15 @@ export async function runImportExecuteBatch(
         visit_count: 0,
         marketing_opt_out: false,
         custom_fields: customFields,
-      })
-      .select('id')
-      .single();
+      },
+    });
 
-    if (error || !inserted) {
+    if (error || !insertedGuestId) {
       console.error('[import execute] booking guest insert', error);
       return null;
     }
 
-    await admin.from('import_records').insert({
-      session_id: sessionId,
-      venue_id: venueId,
-      record_type: 'guest',
-      record_id: inserted.id,
-      action: 'created',
-      previous_data: null,
-    });
+    const inserted = { id: insertedGuestId as string };
 
     if (refProvider) {
       await upsertGuestExternalRef(
@@ -807,7 +927,6 @@ export async function runImportExecuteBatch(
       .from('import_booking_rows')
       .select('*')
       .eq('session_id', sessionId)
-      .eq('is_future_booking', true)
       .order('file_id', { ascending: true })
       .order('row_number', { ascending: true });
     const stagedRows = stagedRowsData ?? [];
@@ -883,7 +1002,7 @@ export async function runImportExecuteBatch(
             fileId: row.file_id,
             rowNumber: row.row_number,
             code: 'duplicate_external_appointment_id',
-            message: `External appointment ID "${row.raw_external_appointment_id.trim()}" already exists in ResNeo; the new row was skipped.`,
+            message: `This booking (source ID "${row.raw_external_appointment_id.trim()}") was already imported into ResNeo, so it was skipped to avoid a duplicate.`,
           });
           skipped += 1;
           st.stagedRowIndex += 1;
@@ -893,7 +1012,7 @@ export async function runImportExecuteBatch(
       }
 
       const em = normaliseEmail(row.raw_client_email ?? null);
-      const ph = normalisePhoneUk(row.raw_client_phone ?? null);
+      const ph = normalisePhone(row.raw_client_phone ?? null, defaultPhoneCountry);
       const guestId = await ensureGuestForBooking({
         fileId: row.file_id,
         rowNumber: row.row_number,
@@ -1034,6 +1153,9 @@ export async function runImportExecuteBatch(
         guest_last_name: row.raw_guest_last_name?.trim() || null,
         guest_phone: ph.e164,
         special_requests: specialRequests,
+        // Structured total so imported revenue is visible to reporting, not just
+        // buried in the special_requests note. Null when no price was importable.
+        booking_total_price_pence: pricePence,
         booking_model: bookingModel as BookingModel,
       };
 
@@ -1055,7 +1177,22 @@ export async function runImportExecuteBatch(
         insert.calendar_id = null;
         insert.service_item_id = null;
       } else if (bookingModel === 'event_ticket' && row.resolved_event_session_id) {
+        const seat = await reserveEventSessionSeat(row.resolved_event_session_id, partySize, status);
+        if (!seat.ok) {
+          await recordExecuteSkip(admin, sessionId, {
+            fileId: row.file_id,
+            rowNumber: row.row_number,
+            code: 'capacity_full',
+            message:
+              'Skipped: this event session was already at its configured capacity for this date and time. Increase its capacity (or free up a place) and re-import this row.',
+          });
+          skipped += 1;
+          st.stagedRowIndex += 1;
+          await bumpProgress();
+          continue;
+        }
         insert.event_session_id = row.resolved_event_session_id;
+        insert.capacity_used = partySize;
       } else if (bookingModel === 'class_session' && row.resolved_class_instance_id) {
         insert.class_instance_id = row.resolved_class_instance_id;
       } else if (bookingModel === 'resource_booking' && row.resolved_resource_id) {
@@ -1129,11 +1266,12 @@ export async function runImportExecuteBatch(
       });
       if (bErr || !bookingId) {
         console.error('[import execute] staged booking insert', bErr);
+        const skipInfo = classifyBookingInsertSkip(bErr);
         await recordExecuteSkip(admin, sessionId, {
           fileId: row.file_id,
           rowNumber: row.row_number,
-          code: 'booking_insert_failed',
-          message: `Could not insert the booking: ${bErr?.message ?? 'unknown error'}`,
+          code: skipInfo.code,
+          message: skipInfo.message,
         });
         skipped += 1;
         st.stagedRowIndex += 1;
@@ -1227,7 +1365,7 @@ export async function runImportExecuteBatch(
 
       const { targets } = applyMappingsToDataRow(row, maps);
       const em = normaliseEmail(targets.client_email ?? null);
-      const ph = normalisePhoneUk(targets.client_phone ?? null);
+      const ph = normalisePhone(targets.client_phone ?? null, defaultPhoneCountry);
       const bdRaw = targets.booking_date?.trim() ?? '';
       const btRaw = targets.booking_time?.trim() ?? '';
       const { iso: dateIso } = parseDateWithRepairs(bdRaw, datePref, valueRepairs);
@@ -1264,7 +1402,7 @@ export async function runImportExecuteBatch(
             fileId: f.id,
             rowNumber: rowNum,
             code: 'duplicate_external_appointment_id',
-            message: `External appointment ID "${targets.external_appointment_id.trim()}" already exists in ResNeo; the new row was skipped.`,
+            message: `This booking (source ID "${targets.external_appointment_id.trim()}") was already imported into ResNeo, so it was skipped to avoid a duplicate.`,
           });
           skipped += 1;
           st.bookingRowIndex += 1;
@@ -1325,13 +1463,16 @@ export async function runImportExecuteBatch(
             name: targets.staff_name,
             isActiveOnly: true,
           });
-          if (calMatch.id) calendarId = calMatch.id;
+          // Refuse to guess: only adopt the match when it is unambiguous (one
+          // candidate). Mirrors the guest-matching ladder so a booking is never
+          // silently attached to the wrong (and wrongly-priced) calendar.
+          if (calMatch.id && !calMatch.ambiguous) calendarId = calMatch.id;
           if (calMatch.ambiguous) {
             await recordExecuteSkip(admin, sessionId, {
               fileId: f.id,
               rowNumber: rowNum,
               code: 'ambiguous_calendar_match',
-              message: `Multiple calendars matched "${targets.staff_name.trim()}"; using the first deterministically. Rename calendars or map columns to avoid ambiguity.`,
+              message: `More than one calendar is named "${targets.staff_name.trim()}", so we did not guess — map this name in the Services & staff step, or give the calendars distinct names, then re-import.`,
             });
           }
         }
@@ -1342,13 +1483,14 @@ export async function runImportExecuteBatch(
             name: targets.service_name,
             isActiveOnly: true,
           });
-          if (svcMatch.id) serviceItemId = svcMatch.id;
+          // Refuse to guess on an ambiguous service name (see calendar note above).
+          if (svcMatch.id && !svcMatch.ambiguous) serviceItemId = svcMatch.id;
           if (svcMatch.ambiguous) {
             await recordExecuteSkip(admin, sessionId, {
               fileId: f.id,
               rowNumber: rowNum,
               code: 'ambiguous_service_match',
-              message: `Multiple services matched "${targets.service_name.trim()}"; using the first deterministically. Rename services or map columns to avoid ambiguity.`,
+              message: `More than one service is named "${targets.service_name.trim()}", so we did not guess — map this name in the Services & staff step, or give the services distinct names, then re-import.`,
             });
           }
         }
@@ -1458,6 +1600,9 @@ export async function runImportExecuteBatch(
         guest_last_name: guestLastName?.trim() || null,
         guest_phone: ph.e164,
         special_requests: specialRequests,
+        // Structured total so imported revenue is visible to reporting, not just
+        // buried in the special_requests note. Null when no price was importable.
+        booking_total_price_pence: pricePence,
         booking_model: bookingModel as BookingModel,
       };
 
@@ -1478,6 +1623,38 @@ export async function runImportExecuteBatch(
           rowNumber: rowNum,
           code: 'unified_no_default_calendar_or_service',
           message: 'No default calendar or service item is configured; this booking row was skipped.',
+        });
+        skipped += 1;
+        st.bookingRowIndex += 1;
+        await bumpProgress();
+        continue;
+      } else if (bookingModel === 'practitioner_appointment') {
+        // Symmetric with the unified guard above: never insert a practitioner
+        // booking with practitioner_id / appointment_service_id unset.
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'practitioner_no_default',
+          message:
+            'Could not resolve a practitioner and service for this booking (map the staff/service in the Services & staff step, or set venue defaults); the row was skipped.',
+        });
+        skipped += 1;
+        st.bookingRowIndex += 1;
+        await bumpProgress();
+        continue;
+      } else if (
+        bookingModel === 'event_ticket' ||
+        bookingModel === 'class_session' ||
+        bookingModel === 'resource_booking'
+      ) {
+        // CDE bookings are resolved in the Services & staff step (staged path).
+        // A CDE row reaching this CSV fallback has no resolvable target, so skip
+        // it rather than insert a booking with no event/class/resource link.
+        await recordExecuteSkip(admin, sessionId, {
+          fileId: f.id,
+          rowNumber: rowNum,
+          code: 'cde_target_unresolved',
+          message: `Could not resolve a ${bookingModel.replace(/_/g, ' ')} target for this booking; the row was skipped.`,
         });
         skipped += 1;
         st.bookingRowIndex += 1;
@@ -1519,11 +1696,12 @@ export async function runImportExecuteBatch(
       });
       if (bErr || !bookingId) {
         console.error('[import execute] booking insert', bErr);
+        const skipInfo = classifyBookingInsertSkip(bErr);
         await recordExecuteSkip(admin, sessionId, {
           fileId: f.id,
           rowNumber: rowNum,
-          code: 'booking_insert_failed',
-          message: `Could not insert the booking: ${bErr?.message ?? 'unknown error'}`,
+          code: skipInfo.code,
+          message: skipInfo.message,
         });
         skipped += 1;
         st.bookingRowIndex += 1;

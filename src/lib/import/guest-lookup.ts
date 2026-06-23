@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { normalisePhoneUk, type NormalisedPhone } from '@/lib/import/normalize';
+import { normalisePhone, type NormalisedPhone } from '@/lib/import/normalize';
+import type { CountryCode } from '@/lib/phone/e164';
 
 /**
  * Returns the phone value safe to use as a dedup key.
@@ -18,8 +19,11 @@ export function phoneForMatching(ph: NormalisedPhone | null | undefined): string
  * Normalises an arbitrary stored phone value using the same UK rules used for
  * import rows, so equality checks match across both sides.
  */
-export function matchablePhone(raw: string | null | undefined): string | null {
-  return phoneForMatching(normalisePhoneUk(raw));
+export function matchablePhone(
+  raw: string | null | undefined,
+  defaultCountry: CountryCode = 'GB',
+): string | null {
+  return phoneForMatching(normalisePhone(raw, defaultCountry));
 }
 
 /**
@@ -30,6 +34,7 @@ export function matchablePhone(raw: string | null | undefined): string | null {
 export async function loadVenueGuestEmailsAndPhones(
   admin: SupabaseClient,
   venueId: string,
+  defaultCountry: CountryCode = 'GB',
 ): Promise<{ emails: Set<string>; phones: Set<string> }> {
   const emails = new Set<string>();
   const phones = new Set<string>();
@@ -48,7 +53,7 @@ export async function loadVenueGuestEmailsAndPhones(
     const rows = (data ?? []) as Array<{ email: string | null; phone: string | null }>;
     for (const r of rows) {
       if (r.email) emails.add(r.email.toLowerCase());
-      const norm = matchablePhone(r.phone);
+      const norm = matchablePhone(r.phone, defaultCountry);
       if (norm) phones.add(norm);
     }
     if (rows.length < PAGE_SIZE) break;

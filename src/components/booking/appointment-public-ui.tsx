@@ -52,7 +52,11 @@ export const BOOKING_TAB_PANEL_INSET_CLASS = 'scroll-mt-4 px-4 pb-6 py-6 sm:py-8
 export const APPOINTMENT_PUBLIC_CHEVRON = 'ap-chevron h-5 w-5 shrink-0';
 export const APPOINTMENT_PUBLIC_CHEVRON_SM = 'ap-chevron h-4 w-4 shrink-0';
 export const APPOINTMENT_PUBLIC_PRICE = 'ap-price text-sm font-semibold';
-export const APPOINTMENT_PUBLIC_TAB_INACTIVE = 'ap-tab-inactive min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors';
+/**
+ * Colour/state classes for an inactive booking-type tab. Sizing (height, radius, padding, font) is
+ * supplied by the caller's base button class so it can stay responsive without conflicting overrides.
+ */
+export const APPOINTMENT_PUBLIC_TAB_INACTIVE = 'ap-tab-inactive';
 
 export const AppointmentPublicShell = forwardRef<
   HTMLDivElement,

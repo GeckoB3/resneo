@@ -8,6 +8,7 @@ import {
   TIME_RE,
 } from '@/lib/import/column-profile';
 import { runImportAiJson } from '@/lib/import/openai-client';
+import { VALUE_MAP_TARGETS } from '@/lib/import/value-map';
 
 const SYSTEM = `You are a data mapping assistant for ResNeo, a booking platform.
 Your job is to map columns from a CSV export of another booking platform to ResNeo's data schema.`;
@@ -81,6 +82,8 @@ export type AiMappingRow = {
     separator: string;
     parts: Array<{ field: string }>;
   } | null;
+  /** Raw->canonical pairs for enum columns (status, deposit_status); null otherwise. */
+  value_map?: Array<{ from: string; to: string }> | null;
 };
 
 /** Strict structured-output schema: one entry per CSV column. */
@@ -94,7 +97,15 @@ const MAPPING_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['source_column', 'action', 'target_field', 'confidence', 'reasoning', 'split_config'],
+        required: [
+          'source_column',
+          'action',
+          'target_field',
+          'confidence',
+          'reasoning',
+          'split_config',
+          'value_map',
+        ],
         properties: {
           source_column: { type: 'string', description: 'Exact column name from the CSV.' },
           action: { type: 'string', enum: ['map', 'ignore', 'split'] },
@@ -104,6 +115,20 @@ const MAPPING_SCHEMA: Record<string, unknown> = {
           },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
           reasoning: { type: 'string', description: 'Brief plain-English explanation.' },
+          value_map: {
+            type: ['array', 'null'],
+            description:
+              'Only for a column mapped to an enum field (status, deposit_status): one {from,to} pair per distinct raw value, translating it to a canonical value. Null for every other column.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['from', 'to'],
+              properties: {
+                from: { type: 'string', description: 'The raw value exactly as it appears in the column.' },
+                to: { type: 'string', description: 'The canonical value to translate it to.' },
+              },
+            },
+          },
           split_config: {
             type: ['object', 'null'],
             additionalProperties: false,
@@ -181,6 +206,13 @@ ${JSON.stringify(knownMappings, null, 1)}
       ? 'a STAFF LIST (each row is a member of staff). Map name/contact columns to the staff fields.'
       : `${fileType} data.`;
 
+  const valueMapSection = `
+- value_map: when you map a column to one of these enum fields, ALSO return value_map — one {from,to} pair for EACH distinct raw value you can see (use the column's top_values / samples), translating it to the closest canonical value. For every other column, value_map MUST be null.
+${Object.entries(VALUE_MAP_TARGETS)
+    .map(([k, v]) => `    - ${k} (${v.label}): canonical values are ${v.canonical.join(', ')}`)
+    .join('\n')}
+  Map provider codes precisely — e.g. CXL/CANC/VOID -> Cancelled; NS/N-S/DNA -> No-Show; ATT/DONE/PAID -> Completed; CONF -> Confirmed; CHECKED-IN/ARR -> Seated.`;
+
   const userPrompt = `
 The user has uploaded a CSV file containing ${fileKindLine}
 ${detectedPlatform ? `We believe this is from ${detectedPlatform}.` : 'The source platform is unknown.'}
@@ -214,6 +246,7 @@ Rules:
 - Confidence: 'high' if clearly matching, 'medium' if reasonable guess, 'low' if uncertain.
 - Prefer 'ignore' over a low-confidence mapping for columns you are unsure about.
 - split_config must be null unless action is "split".
+${valueMapSection}
 `;
 
   const result = await runImportAiJson<{ mappings: AiMappingRow[] }>({

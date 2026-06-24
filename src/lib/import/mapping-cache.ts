@@ -9,8 +9,15 @@ import { createHash } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AiMappingRow } from '@/lib/import/ai-map-columns';
 
+/**
+ * Bump when the AI mapping OUTPUT shape changes so cached entries recompute and
+ * pick up the new fields (rather than silently serving stale mappings). v2 adds
+ * value_map (reviewed raw->canonical enum maps).
+ */
+const MAPPING_CACHE_VERSION = 2;
+
 export function mappingCacheKey(headers: string[]): string {
-  return createHash('sha256').update(JSON.stringify(headers)).digest('hex');
+  return createHash('sha256').update(`v${MAPPING_CACHE_VERSION}|${JSON.stringify(headers)}`).digest('hex');
 }
 
 export async function getCachedMappings(

@@ -26,6 +26,7 @@ export function SuperSidebar({ email }: Props) {
         { href: '/super/subscribers', label: 'Subscribers' },
         { href: '/super/comms', label: 'Communications' },
         { href: '/super/system', label: 'System status' },
+        { href: '/super/stripe', label: 'Billing health' },
       ],
     },
     {

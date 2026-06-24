@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { bookingDetailPanelSnapshotFromListRow } from '@/lib/booking/booking-detail-from-row';
 import {
@@ -14,7 +14,18 @@ import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarnin
 import { useToast } from '@/components/ui/Toast';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
-import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
+import {
+  computeEventAnalytics,
+  downloadCsvFile,
+  escapeCsvCell,
+  isValidIsoDate,
+  localTodayIso,
+  MAX_EVENT_OCCURRENCES,
+  normaliseEventDates,
+  previewWeeklyOccurrences,
+  type EventAnalytics,
+} from './event-manager-utils';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
@@ -72,9 +83,19 @@ interface AttendeeRow {
 }
 
 interface TicketTypeDraft {
+  /**
+   * Existing tier's `event_ticket_types.id`, round-tripped so the API can UPSERT
+   * by id instead of matching on name. Absent for tiers added in the editor (they
+   * are inserted fresh). Pairs with the server `syncEventTicketTypes` upsert —
+   * without it, an edited tier orphans its `booking_ticket_lines` and loses
+   * per-tier capacity (CDE review §5.3, finding C3).
+   */
+  id?: string;
   name: string;
-  price_pence: string;
-  capacity: string;
+  /** Price in whole pounds (NumericInput, decimals allowed); converted to pence on save. */
+  price_pounds: number;
+  /** Per-tier cap; `null` = no limit. */
+  capacity: number | null;
 }
 
 type ScheduleMode = 'single' | 'weekly' | 'custom';
@@ -90,7 +111,8 @@ interface EventFormState {
   ticket_types: TicketTypeDraft[];
   scheduleMode: ScheduleMode;
   recurrenceUntil: string;
-  customDatesText: string;
+  /** Picked custom dates (ISO `YYYY-MM-DD`), deduped + validated as chips are added. */
+  customDates: string[];
   calendar_id: string;
   max_advance_booking_days: number;
   min_booking_notice_hours: number;
@@ -98,26 +120,6 @@ interface EventFormState {
   allow_same_day_booking: boolean;
   payment_requirement: 'none' | 'deposit' | 'full_payment';
   deposit_pounds: string;
-}
-
-function parseOptionalTicketCapacity(raw: string): number | undefined {
-  const cap = raw.trim();
-  if (cap === '') return undefined;
-  const n = parseInt(cap, 10);
-  if (!Number.isFinite(n) || n < 1) return undefined;
-  return n;
-}
-
-function parseCustomDatesFromText(text: string): string[] {
-  const parts = text
-    .split(/[\s,;\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const set = new Set<string>();
-  for (const p of parts) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
-  }
-  return [...set].sort();
 }
 
 function attendeeBookingDetailSnapshot(attendee: AttendeeRow, event: ExperienceEvent) {
@@ -205,10 +207,10 @@ const BLANK_EVENT: EventFormState = {
   end_time: '12:00',
   capacity: 20,
   image_url: '',
-  ticket_types: [{ name: 'General Admission', price_pence: '0.00', capacity: '' }],
+  ticket_types: [{ name: 'General Admission', price_pounds: 0, capacity: null }],
   scheduleMode: 'single',
   recurrenceUntil: '',
-  customDatesText: '',
+  customDates: [],
   calendar_id: '',
   max_advance_booking_days: 90,
   min_booking_notice_hours: 1,
@@ -263,6 +265,9 @@ export function EventManagerView({
   const [eventToDelete, setEventToDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleteEventBusy, setDeleteEventBusy] = useState(false);
   const [deleteEventModalError, setDeleteEventModalError] = useState<string | null>(null);
+  const [showCancelEventConfirm, setShowCancelEventConfirm] = useState(false);
+  // Draft date in the custom-dates picker (added as a chip on "Add").
+  const [customDateDraft, setCustomDateDraft] = useState('');
   const [teamCalendars, setTeamCalendars] = useState<Array<{ id: string; name: string; calendar_type?: string }>>(
     [],
   );
@@ -277,6 +282,17 @@ export function EventManagerView({
     if (!attendee) return null;
     return attendeeBookingDetailSnapshot(attendee, detail);
   }, [detailBookingId, detail, attendees]);
+
+  // Per-event analytics: tickets sold by tier, revenue, fill % (finding 21).
+  // Cancelled / No-show bookings are already excluded by the attendees route, and
+  // computeEventAnalytics excludes them again defensively.
+  const analytics = useMemo(() => {
+    if (!detail) return null;
+    return computeEventAnalytics(attendees, {
+      capacity: detail.capacity,
+      tierNames: detail.ticket_types.map((t) => t.name),
+    });
+  }, [detail, attendees]);
 
   const openAttendeeBookingDetail = useCallback((attendee: AttendeeRow, e: MouseEvent) => {
     setDetailBookingId(attendee.booking_id);
@@ -455,12 +471,66 @@ export function EventManagerView({
     refreshEventDetail();
   }, [refreshEvents, refreshEventDetail]);
 
+  // --- Realtime detail refetch: debounced + relevance-filtered (finding 20) ---
+  // The shared `onRefresh` (used by the experience_events subscription and the
+  // poll fallback) refreshes the list + open detail. But a venue-wide `bookings`
+  // change previously also forced a full event+attendees refetch on EVERY ping,
+  // even for a booking on a different event. We give `bookings` its own handler
+  // that (a) only refetches the OPEN event's detail, (b) skips when the changed
+  // booking provably belongs to a different event, and (c) debounces bursts.
+  const selectedIdRef = useRef<string | null>(null);
+  const attendeeBookingIdsRef = useRef<Set<string>>(new Set());
+  const detailRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  useEffect(() => {
+    attendeeBookingIdsRef.current = new Set(attendees.map((a) => a.booking_id));
+  }, [attendees]);
+  useEffect(() => {
+    return () => {
+      if (detailRefreshTimerRef.current) clearTimeout(detailRefreshTimerRef.current);
+    };
+  }, []);
+
+  const scheduleRelevantDetailRefresh = useCallback(
+    (payload: { new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+      const openId = selectedIdRef.current;
+      if (!openId) return; // No detail open → nothing to refetch.
+
+      const row = payload.new ?? payload.old ?? {};
+      const changedEventId =
+        typeof row.experience_event_id === 'string' ? row.experience_event_id : undefined;
+      const changedBookingId = typeof row.id === 'string' ? row.id : undefined;
+
+      // Skip only when we can POSITIVELY attribute the change to a different event.
+      // When the realtime payload omits experience_event_id (limited replica
+      // identity), fall back to refetching unless the booking id is one we already
+      // show for a different reason — i.e. err toward freshness, never staleness.
+      if (changedEventId && changedEventId !== openId) {
+        const alreadyInRoster = changedBookingId
+          ? attendeeBookingIdsRef.current.has(changedBookingId)
+          : false;
+        if (!alreadyInRoster) return;
+      }
+
+      if (detailRefreshTimerRef.current) clearTimeout(detailRefreshTimerRef.current);
+      detailRefreshTimerRef.current = setTimeout(() => {
+        detailRefreshTimerRef.current = null;
+        const id = selectedIdRef.current;
+        if (id) void loadDetail(id, { silent: true });
+      }, 300);
+    },
+    [loadDetail],
+  );
+
   useVenuePostgresLiveSync({
     venueId,
     onRefresh: refreshEventsAndDetail,
     subscriptions: [
       { table: 'experience_events', filter: `venue_id=eq.${venueId}` },
-      { table: 'bookings', filter: `venue_id=eq.${venueId}` },
+      { table: 'bookings', filter: `venue_id=eq.${venueId}`, handler: scheduleRelevantDetailRefresh },
     ],
   });
 
@@ -488,11 +558,33 @@ export function EventManagerView({
       return;
     }
 
+    // Guard a paid event that still has a £0 tier (CDE review §5.3, finding 18).
+    // A deposit / full-payment event with a free tier silently lets guests book
+    // for nothing, so block the save with a specific message instead of relying on
+    // the advisory help text under the payment options.
+    if (eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'full_payment') {
+      const freeTier = validTickets.find(
+        (tt) => Math.round((tt.price_pounds || 0) * 100) <= 0,
+      );
+      if (freeTier) {
+        setEventError(
+          `"${freeTier.name.trim()}" is ${sym}0. ${
+            eventForm.payment_requirement === 'deposit' ? 'Deposit' : 'Full payment'
+          } events need every ticket priced above ${sym}0, or switch payment to "None".`,
+        );
+        return;
+      }
+    }
+
     let eventDateForPayload = eventForm.event_date;
     if (!editingEventId && eventForm.scheduleMode === 'custom') {
-      const customDates = parseCustomDatesFromText(eventForm.customDatesText);
+      const customDates = normaliseEventDates(eventForm.customDates);
       if (customDates.length === 0) {
-        setEventError('Add at least one date (YYYY-MM-DD), separated by commas or new lines.');
+        setEventError('Add at least one valid date for this event.');
+        return;
+      }
+      if (customDates.length > MAX_EVENT_OCCURRENCES) {
+        setEventError(`At most ${MAX_EVENT_OCCURRENCES} dates can be created at once.`);
         return;
       }
       eventDateForPayload = customDates[0];
@@ -545,10 +637,13 @@ export function EventManagerView({
         capacity: eventForm.capacity,
         image_url: eventForm.image_url.trim() || null,
         ticket_types: validTickets.map((tt) => {
-          const cap = parseOptionalTicketCapacity(tt.capacity);
+          const cap = tt.capacity != null && tt.capacity >= 1 ? tt.capacity : undefined;
           return {
+            // Round-trip the tier id so the API upserts in place (finding C3); new
+            // tiers have no id and are inserted fresh.
+            ...(tt.id ? { id: tt.id } : {}),
             name: tt.name.trim(),
-            price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
+            price_pence: Math.round((tt.price_pounds || 0) * 100),
             ...(cap !== undefined ? { capacity: cap } : {}),
           };
         }),
@@ -570,7 +665,7 @@ export function EventManagerView({
             schedule: { type: 'weekly' as const, until_date: eventForm.recurrenceUntil },
           };
         } else if (eventForm.scheduleMode === 'custom') {
-          const dates = parseCustomDatesFromText(eventForm.customDatesText);
+          const dates = normaliseEventDates(eventForm.customDates);
           postBody = {
             ...basePayload,
             event_date: dates[0],
@@ -642,14 +737,17 @@ export function EventManagerView({
       ticket_types:
         event.ticket_types.length > 0
           ? event.ticket_types.map((tt) => ({
+              // Preserve the tier id so an edit upserts in place rather than
+              // re-creating (and orphaning sold lines) — finding C3.
+              id: tt.id,
               name: tt.name,
-              price_pence: (tt.price_pence / 100).toFixed(2),
-              capacity: tt.capacity != null ? String(tt.capacity) : '',
+              price_pounds: tt.price_pence / 100,
+              capacity: tt.capacity ?? null,
             }))
-          : [{ name: 'General Admission', price_pence: '0.00', capacity: '' }],
+          : [{ name: 'General Admission', price_pounds: 0, capacity: null }],
       scheduleMode: 'single',
       recurrenceUntil: '',
-      customDatesText: '',
+      customDates: [],
       calendar_id: event.calendar_id ?? '',
       max_advance_booking_days: event.max_advance_booking_days ?? 90,
       min_booking_notice_hours: event.min_booking_notice_hours ?? 1,
@@ -665,6 +763,53 @@ export function EventManagerView({
     setEventError(null);
     setShowEventForm(true);
     setSelectedId(null);
+  };
+
+  /**
+   * Clone/duplicate (finding 22): prefill the CREATE form from an existing event.
+   * `editingEventId` stays null so this POSTs a brand-new event; tier ids are
+   * dropped so the copy inserts fresh tiers (never re-points at the source's
+   * `event_ticket_types`), and the date is cleared so the user must place the copy
+   * on a free slot rather than colliding with the original.
+   */
+  const handleCloneEvent = (event: ExperienceEvent) => {
+    setEventForm({
+      name: `${event.name} (copy)`,
+      description: event.description ?? '',
+      event_date: '',
+      start_time: event.start_time.slice(0, 5),
+      end_time: event.end_time.slice(0, 5),
+      capacity: event.capacity,
+      image_url: event.image_url ?? '',
+      ticket_types:
+        event.ticket_types.length > 0
+          ? event.ticket_types.map((tt) => ({
+              // No id: a clone always inserts fresh tiers.
+              name: tt.name,
+              price_pounds: tt.price_pence / 100,
+              capacity: tt.capacity ?? null,
+            }))
+          : [{ name: 'General Admission', price_pounds: 0, capacity: null }],
+      scheduleMode: 'single',
+      recurrenceUntil: '',
+      customDates: [],
+      calendar_id: event.calendar_id ?? '',
+      max_advance_booking_days: event.max_advance_booking_days ?? 90,
+      min_booking_notice_hours: event.min_booking_notice_hours ?? 1,
+      cancellation_notice_hours: event.cancellation_notice_hours ?? 48,
+      allow_same_day_booking: event.allow_same_day_booking ?? true,
+      payment_requirement: event.payment_requirement ?? 'none',
+      deposit_pounds:
+        event.deposit_amount_pence != null && event.deposit_amount_pence > 0
+          ? (event.deposit_amount_pence / 100).toFixed(2)
+          : '',
+    });
+    setEditingEventId(null);
+    setCustomDateDraft('');
+    setEventError(null);
+    setShowEventForm(true);
+    setSelectedId(null);
+    addToast('Prefilled a new event from this one. Pick a date to save.', 'success');
   };
 
   const requestDeleteEvent = (id: string) => {
@@ -704,10 +849,6 @@ export function EventManagerView({
 
   const handleCancelEvent = async () => {
     if (!selectedId || !detail) return;
-    const ok = window.confirm(
-      `Cancel "${detail.name}"? All active bookings will be cancelled and guests notified according to your refund policy.`,
-    );
-    if (!ok) return;
     setCancelLoading(true);
     try {
       const res = await fetch(`/api/venue/experience-events/${selectedId}/cancel`, {
@@ -733,9 +874,36 @@ export function EventManagerView({
   const addTicketType = () => {
     setEventForm((f) => ({
       ...f,
-      ticket_types: [...f.ticket_types, { name: '', price_pence: '0.00', capacity: '' }],
+      ticket_types: [...f.ticket_types, { name: '', price_pounds: 0, capacity: null }],
     }));
   };
+
+  // --- Custom-date chips (finding 14): add valid, non-past dates as chips ---
+  const customDateError = (() => {
+    const raw = customDateDraft.trim();
+    if (raw === '') return null;
+    if (!isValidIsoDate(raw)) return 'Enter a valid date.';
+    if (raw < localTodayIso()) return 'That date is in the past.';
+    if (eventForm.customDates.includes(raw)) return 'That date is already added.';
+    return null;
+  })();
+
+  const addCustomDate = () => {
+    const raw = customDateDraft.trim();
+    if (!isValidIsoDate(raw) || raw < localTodayIso() || eventForm.customDates.includes(raw)) return;
+    setEventForm((f) => ({ ...f, customDates: normaliseEventDates([...f.customDates, raw]) }));
+    setCustomDateDraft('');
+  };
+
+  const removeCustomDate = (d: string) => {
+    setEventForm((f) => ({ ...f, customDates: f.customDates.filter((x) => x !== d) }));
+  };
+
+  // Preview of the exact dates a weekly schedule will create (matches the server).
+  const weeklyPreviewDates =
+    !editingEventId && eventForm.scheduleMode === 'weekly'
+      ? previewWeeklyOccurrences(eventForm.event_date, eventForm.recurrenceUntil)
+      : [];
 
   const removeTicketType = (i: number) => {
     setEventForm((f) => ({ ...f, ticket_types: f.ticket_types.filter((_, j) => j !== i) }));
@@ -1004,26 +1172,91 @@ export function EventManagerView({
                   </div>
                   {!editingEventId && eventForm.scheduleMode === 'weekly' && (
                     <div className="min-w-0">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Repeat until *</label>
+                      <label htmlFor="weekly-until-input" className="mb-1 block text-xs font-medium text-slate-600">
+                        Repeat until *
+                      </label>
                       <input
+                        id="weekly-until-input"
                         type="date"
+                        min={eventForm.event_date || localTodayIso()}
                         value={eventForm.recurrenceUntil}
                         onChange={(e) => setEventForm((f) => ({ ...f, recurrenceUntil: e.target.value }))}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
+                      {weeklyPreviewDates.length > 0 ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {weeklyPreviewDates.length === 1
+                            ? '1 event will be created.'
+                            : `${weeklyPreviewDates.length} events will be created (every 7 days).`}
+                        </p>
+                      ) : null}
                     </div>
                   )}
                 </>
               ) : (
                 <div className="min-w-0 sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Dates * (YYYY-MM-DD)</label>
-                  <textarea
-                    rows={4}
-                    value={eventForm.customDatesText}
-                    onChange={(e) => setEventForm((f) => ({ ...f, customDatesText: e.target.value }))}
-                    placeholder={'2026-06-01\n2026-06-15\n2026-07-01'}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
+                  <label htmlFor="custom-date-input" className="mb-1 block text-xs font-medium text-slate-600">
+                    Dates *
+                  </label>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <input
+                      id="custom-date-input"
+                      type="date"
+                      min={localTodayIso()}
+                      value={customDateDraft}
+                      onChange={(e) => setCustomDateDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addCustomDate();
+                        }
+                      }}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={addCustomDate}
+                      disabled={customDateDraft.trim() === '' || customDateError !== null}
+                      className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-medium text-brand-700 shadow-sm hover:bg-brand-50 disabled:opacity-50"
+                    >
+                      Add date
+                    </button>
+                  </div>
+                  {customDateError ? (
+                    <p className="mt-1 text-xs text-red-600">{customDateError}</p>
+                  ) : null}
+                  {eventForm.customDates.length > 0 ? (
+                    <>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {eventForm.customDates.map((d) => (
+                          <span
+                            key={d}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-1 pl-3 pr-1.5 text-xs font-medium text-slate-700 shadow-sm"
+                          >
+                            {d}
+                            <button
+                              type="button"
+                              onClick={() => removeCustomDate(d)}
+                              aria-label={`Remove ${d}`}
+                              className="flex h-4 w-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            >
+                              <span aria-hidden>×</span>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {eventForm.customDates.length === 1
+                          ? '1 event will be created on this date.'
+                          : `${eventForm.customDates.length} events will be created — one per date.`}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Pick a date and choose &ldquo;Add date&rdquo;. Each date becomes its own event with the same ticket
+                      setup.
+                    </p>
+                  )}
                 </div>
               )}
               <div className="min-w-0">
@@ -1221,8 +1454,14 @@ export function EventManagerView({
                 {eventForm.ticket_types.map((tt, i) => (
                   <div key={i} className="flex min-w-0 max-w-full flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
                     <div className="min-w-0 flex-1 sm:min-w-[140px]">
-                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">Ticket name</label>
+                      <label
+                        htmlFor={`ticket-name-${i}`}
+                        className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm"
+                      >
+                        Ticket name
+                      </label>
                       <input
+                        id={`ticket-name-${i}`}
                         type="text"
                         value={tt.name}
                         onChange={(e) => updateTicketType(i, { name: e.target.value })}
@@ -1231,28 +1470,36 @@ export function EventManagerView({
                       />
                     </div>
                     <div className="w-full min-w-0 sm:w-28">
-                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">Price ({sym})</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={tt.price_pence}
-                        onChange={(e) => updateTicketType(i, { price_pence: e.target.value })}
+                      <label
+                        htmlFor={`ticket-price-${i}`}
+                        className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm"
+                      >
+                        Price ({sym})
+                      </label>
+                      <NumericInput
+                        id={`ticket-price-${i}`}
+                        allowFloat
+                        min={0}
+                        value={tt.price_pounds}
+                        onChange={(v) => updateTicketType(i, { price_pounds: v })}
                         placeholder="0.00"
+                        autoComplete="off"
                         className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
                     <div className="w-full min-w-0 sm:w-24">
-                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">
+                      <label
+                        htmlFor={`ticket-cap-${i}`}
+                        className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm"
+                      >
                         Cap <span className="font-normal text-slate-400">opt.</span>
                       </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="off"
+                      <NumericInput
+                        id={`ticket-cap-${i}`}
                         value={tt.capacity}
-                        onChange={(e) => updateTicketType(i, { capacity: e.target.value })}
-                        placeholder="-"
+                        onChange={(v) => updateTicketType(i, { capacity: v >= 1 ? v : null })}
+                        placeholder="No limit"
+                        autoComplete="off"
                         className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
@@ -1557,10 +1804,19 @@ export function EventManagerView({
                         onEdit={() => handleEditEvent(detail)}
                         onDelete={() => requestDeleteEvent(detail.id)}
                       />
+                      {isAdmin || linkedPractitionerIds.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCloneEvent(detail)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                        >
+                          Duplicate
+                        </button>
+                      ) : null}
                       {isAdmin && detail.is_active ? (
                         <button
                           type="button"
-                          onClick={() => void handleCancelEvent()}
+                          onClick={() => setShowCancelEventConfirm(true)}
                           disabled={cancelLoading}
                           className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-100 disabled:opacity-50"
                         >
@@ -1573,6 +1829,7 @@ export function EventManagerView({
               />
 
               <SectionCard.Body className="space-y-4">
+                {analytics ? <EventAnalyticsPanel analytics={analytics} formatPrice={formatPrice} /> : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Attendees</p>
@@ -1762,6 +2019,22 @@ export function EventManagerView({
           </div>
         </div>
       )}
+
+      {/* Cancel-event confirmation (replaces window.confirm — finding 22). */}
+      <ConfirmDialog
+        open={showCancelEventConfirm}
+        onOpenChange={setShowCancelEventConfirm}
+        title="Cancel this event?"
+        message={
+          detail
+            ? `"${detail.name}" will be deactivated. All active bookings are cancelled and guests are notified per your refund policy. This cannot be undone.`
+            : 'This event will be cancelled and guests notified per your refund policy.'
+        }
+        confirmLabel="Cancel event & notify"
+        cancelLabel="Keep event"
+        destructive
+        onConfirm={() => void handleCancelEvent()}
+      />
     </div>
   );
 }
@@ -1834,6 +2107,83 @@ function EventCard({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-event sales analytics for the detail panel (finding 21): tickets sold by
+ * tier, total revenue and capacity fill %. Reads the (already status-filtered)
+ * roster so the figures reflect money actually taken and seats actually held.
+ */
+function EventAnalyticsPanel({
+  analytics,
+  formatPrice,
+}: {
+  analytics: EventAnalytics;
+  formatPrice: (pence: number) => string;
+}) {
+  const { tiers, ticketsSold, revenuePence, seatsTaken, capacity, fillPercent } = analytics;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Sales &amp; capacity</p>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div>
+          <p className="text-xs text-slate-500">Tickets sold</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{ticketsSold}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Revenue</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{formatPrice(revenuePence)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Seats taken</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">
+            {seatsTaken}
+            <span className="text-sm font-normal text-slate-500"> / {capacity}</span>
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Fill</p>
+          <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">
+            {fillPercent === null ? '—' : `${fillPercent}%`}
+          </p>
+        </div>
+      </div>
+      {fillPercent !== null ? (
+        <div
+          className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-200"
+          role="progressbar"
+          aria-valuenow={fillPercent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Capacity filled"
+        >
+          <div
+            className={`h-full rounded-full ${fillPercent >= 100 ? 'bg-emerald-500' : 'bg-brand-500'}`}
+            style={{ width: `${fillPercent}%` }}
+          />
+        </div>
+      ) : null}
+      {tiers.length > 0 ? (
+        <div className="mt-4">
+          <p className="text-xs font-medium text-slate-600">By ticket type</p>
+          <ul className="mt-2 space-y-1.5">
+            {tiers.map((t) => (
+              <li
+                key={t.label}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm"
+              >
+                <span className="min-w-0 truncate text-slate-700">{t.label}</span>
+                <span className="tabular-nums text-slate-500">
+                  <span className="font-medium text-slate-800">{t.quantity}</span> sold ·{' '}
+                  {formatPrice(t.revenue_pence)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

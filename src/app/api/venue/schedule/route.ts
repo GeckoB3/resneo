@@ -3,10 +3,13 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { logApiPerfIfEnabled, perfApiStart } from '@/lib/perf/api-route-timing';
-import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
+import {
+  classBlockEndTime,
+  resolveInstructorCalendarIdForClass,
+} from '@/lib/class-instances/instructor-calendar-block';
 import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
-import { timeToMinutes, minutesToTime } from '@/lib/availability';
+import { isCapacityConsumingStatus } from '@/lib/availability/capacity-status';
 import type { BookingModel } from '@/types/booking-models';
 import type { ScheduleBlockDTO, ScheduleBlockKind } from '@/types/schedule-blocks';
 import { formatGuestDisplayName } from '@/lib/guests/name';
@@ -15,6 +18,29 @@ function hhmm(t: string | null | undefined): string {
   if (!t) return '09:00';
   const s = String(t);
   return s.length >= 5 ? s.slice(0, 5) : s;
+}
+
+/**
+ * End-time for a block as HH:MM, capped at 23:59 so a late-night start + duration that crosses
+ * midnight renders "23:59" rather than "24:30" (F15). Reuses the canonical {@link classBlockEndTime}
+ * cap (which returns HH:MM:SS) and trims to HH:MM for the feed DTO.
+ */
+function blockEndHhmm(startHhmm: string, durationMinutes: number): string {
+  return classBlockEndTime(startHhmm, durationMinutes).slice(0, 5);
+}
+
+/** Max date span (inclusive days) the feed will serve before clamping `to` (F6). */
+const MAX_SCHEDULE_SPAN_DAYS = 62;
+
+/** Hard cap on booking + class-instance rows pulled per request (F6). */
+const SCHEDULE_ROW_LIMIT = 2000;
+
+/** Add `days` to an ISO YYYY-MM-DD date string (UTC, no DST shift — date-only buckets). */
+function addDaysIso(iso: string, days: number): string {
+  const [y, mo, d] = iso.split('-').map((x) => parseInt(x, 10));
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
 }
 
 function classTypeFromInstanceRow(
@@ -65,6 +91,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=...' }, { status: 400 });
     }
 
+    // Reject inverted ranges; clamp absurd spans so one request can't sweep years of rows (F6).
+    if (toStr < fromStr) {
+      return NextResponse.json({ error: 'Invalid range: to is before from' }, { status: 400 });
+    }
+    const maxToStr = addDaysIso(fromStr, MAX_SCHEDULE_SPAN_DAYS - 1);
+    if (toStr > maxToStr) {
+      toStr = maxToStr;
+    }
+
     const { data: venueRow, error: venueErr } = await staff.db
       .from('venues')
       .select('booking_model, enabled_models')
@@ -108,7 +143,8 @@ export async function GET(request: NextRequest) {
       .gte('booking_date', fromStr)
       .lte('booking_date', toStr)
       .order('booking_date', { ascending: true })
-      .order('booking_time', { ascending: true });
+      .order('booking_time', { ascending: true })
+      .limit(SCHEDULE_ROW_LIMIT);
 
     if (bookErr) {
       console.error('GET /api/venue/schedule bookings failed:', bookErr);
@@ -128,9 +164,13 @@ export async function GET(request: NextRequest) {
       return wantByKind[kind] === true;
     });
     const guestIds = [...new Set(rows.map((r) => r.guest_id).filter(Boolean))] as string[];
-    const { data: guestsRows } = guestIds.length
+    const { data: guestsRows, error: guestsErr } = guestIds.length
       ? await staff.db.from('guests').select('id, first_name, last_name').in('id', guestIds)
-      : { data: [] };
+      : { data: [], error: null };
+    if (guestsErr) {
+      console.error('GET /api/venue/schedule guests failed:', guestsErr);
+      return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+    }
     const guestName = new Map(
       (guestsRows ?? []).map((g: { id: string; first_name: string | null; last_name: string | null }) => [
         g.id,
@@ -139,20 +179,28 @@ export async function GET(request: NextRequest) {
     );
 
     const eventIds = [...new Set(rows.map((r) => r.experience_event_id).filter(Boolean))] as string[];
-    const { data: expEvents } = eventIds.length
+    const { data: expEvents, error: expEventsErr } = eventIds.length
       ? await staff.db.from('experience_events').select('id, name, end_time, start_time, calendar_id').in('id', eventIds)
-      : { data: [] };
+      : { data: [], error: null };
+    if (expEventsErr) {
+      console.error('GET /api/venue/schedule experience_events enrichment failed:', expEventsErr);
+      return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+    }
     const eventMap = new Map((expEvents ?? []).map((e: Record<string, unknown>) => [e.id as string, e]));
 
     const classInstIds = [...new Set(rows.map((r) => r.class_instance_id).filter(Boolean))] as string[];
-    const { data: classInstRows } = classInstIds.length
+    const { data: classInstRows, error: classInstErr } = classInstIds.length
       ? await staff.db
           .from('class_instances')
           .select(
             'id, class_type_id, instance_date, start_time, capacity_override, class_types(id, name, colour, duration_minutes, capacity, instructor_id)',
           )
           .in('id', classInstIds)
-      : { data: [] };
+      : { data: [], error: null };
+    if (classInstErr) {
+      console.error('GET /api/venue/schedule class_instances enrichment failed:', classInstErr);
+      return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+    }
     const classInstMap = new Map<string, Record<string, unknown>>();
     for (const row of classInstRows ?? []) {
       const r = row as { id: string; class_types?: unknown };
@@ -162,25 +210,45 @@ export async function GET(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const calendarIdByClassTypeId = new Map<string, string | null>();
 
+    // Cache instructor calendar resolution per instructor id so two class types sharing an
+    // instructor don't re-run the (up to 5-hop) resolver.
+    const calendarIdByInstructorId = new Map<string | null, string | null>();
+
     async function ensureCalendarIdsForClassTypes(typeIds: string[]) {
-      const uniq = [...new Set(typeIds)].filter(Boolean);
+      const uniq = [...new Set(typeIds)].filter((tid) => tid && !calendarIdByClassTypeId.has(tid));
+      if (uniq.length === 0) return;
+
+      // Batch the class_types -> instructor_id lookup into one query instead of one per type (F6 N+1).
+      const { data: ctRows, error: ctErr } = await admin
+        .from('class_types')
+        .select('id, instructor_id')
+        .eq('venue_id', venueId)
+        .in('id', uniq);
+      if (ctErr) {
+        console.error('GET /api/venue/schedule class_types calendar lookup failed:', ctErr);
+        throw ctErr;
+      }
+
+      const instructorByTypeId = new Map<string, string | null>();
+      for (const ct of ctRows ?? []) {
+        const row = ct as { id: string; instructor_id?: string | null };
+        instructorByTypeId.set(row.id, row.instructor_id ?? null);
+      }
+
+      // Resolve each distinct instructor calendar once, reusing across class types.
+      const distinctInstructorIds = [...new Set([...instructorByTypeId.values()])];
       await Promise.all(
-        uniq.map(async (tid) => {
-          if (calendarIdByClassTypeId.has(tid)) return;
-          const { data: ct } = await admin
-            .from('class_types')
-            .select('instructor_id')
-            .eq('id', tid)
-            .eq('venue_id', venueId)
-            .maybeSingle();
-          const cal = await resolveInstructorCalendarIdForClass(
-            admin,
-            venueId,
-            (ct as { instructor_id?: string | null } | null)?.instructor_id ?? null,
-          );
-          calendarIdByClassTypeId.set(tid, cal);
+        distinctInstructorIds.map(async (instructorId) => {
+          if (calendarIdByInstructorId.has(instructorId)) return;
+          const cal = await resolveInstructorCalendarIdForClass(admin, venueId, instructorId ?? null);
+          calendarIdByInstructorId.set(instructorId, cal);
         }),
       );
+
+      for (const tid of uniq) {
+        const instructorId = instructorByTypeId.get(tid) ?? null;
+        calendarIdByClassTypeId.set(tid, calendarIdByInstructorId.get(instructorId) ?? null);
+      }
     }
 
     const classTypeIdsFromBookingInstances: string[] = [];
@@ -191,13 +259,17 @@ export async function GET(request: NextRequest) {
     await ensureCalendarIdsForClassTypes(classTypeIdsFromBookingInstances);
 
     const resourceIds = [...new Set(rows.map((r) => r.resource_id).filter(Boolean))] as string[];
-    const { data: resourceRows } = resourceIds.length
+    const { data: resourceRows, error: resourceErr } = resourceIds.length
       ? await staff.db
           .from('unified_calendars')
           .select('id, name, display_on_calendar_id, min_booking_minutes')
           .eq('calendar_type', 'resource')
           .in('id', resourceIds)
-      : { data: [] };
+      : { data: [], error: null };
+    if (resourceErr) {
+      console.error('GET /api/venue/schedule resources enrichment failed:', resourceErr);
+      return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+    }
     const resourceMap = new Map(
       (resourceRows ?? []).map(
         (r: { id: string; name: string; display_on_calendar_id?: string | null; min_booking_minutes?: number }) => [
@@ -212,7 +284,14 @@ export async function GET(request: NextRequest) {
     const eventStats = new Map<string, { bookingCount: number; partyTotal: number; arrivedCount: number }>();
     for (const r of rows) {
       const bmStat = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
-      if (bmStat === 'event_ticket' && r.experience_event_id && r.status !== 'Cancelled') {
+      // Only capacity-consuming statuses (Booked/Confirmed/Pending/Seated) count toward uptake — a
+      // No-Show or Completed booking must not inflate "X / Y booked" (F4). arrivedCount tracks
+      // client_arrived_at only on these still-active rows.
+      if (
+        bmStat === 'event_ticket' &&
+        r.experience_event_id &&
+        isCapacityConsumingStatus(r.status as string | null | undefined)
+      ) {
         const eid = r.experience_event_id as string;
         const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0, arrivedCount: 0 };
         cur.bookingCount += 1;
@@ -224,9 +303,18 @@ export async function GET(request: NextRequest) {
 
     for (const r of rows) {
       if (r.status === 'Cancelled') continue;
+      // De-dup: any non-cancelled booking row already renders a per-booking block below, so the
+      // empty-shell class loop must skip this instance. (Status-agnostic beyond Cancelled — a
+      // No-Show booking still occupies a visible row, just not an uptake spot.)
       if (r.class_instance_id) bookedClassIds.add(r.class_instance_id);
       const bmRow = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
-      if (bmRow === 'class_session' && r.class_instance_id) {
+      // Booked-spot uptake counts only capacity-consuming statuses; No-Show/Completed must not
+      // inflate "X / Y booked" (F4).
+      if (
+        bmRow === 'class_session' &&
+        r.class_instance_id &&
+        isCapacityConsumingStatus(r.status as string | null | undefined)
+      ) {
         const cid = r.class_instance_id as string;
         classEnrolledByInstance.set(
           cid,
@@ -265,16 +353,16 @@ export async function GET(request: NextRequest) {
         const ci = classInstMap.get(row.class_instance_id);
         const ct = ci?.class_types as { duration_minutes?: number } | undefined;
         if (ct?.duration_minutes) {
-          return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + ct.duration_minutes);
+          return blockEndHhmm(hhmm(row.booking_time as string), ct.duration_minutes);
         }
       }
       if (bm === 'resource_booking' && row.resource_id) {
         const resRow = resourceMap.get(row.resource_id as string) as { min_booking_minutes?: number } | undefined;
         const fallbackMins =
           resRow?.min_booking_minutes != null && resRow.min_booking_minutes > 0 ? resRow.min_booking_minutes : 60;
-        return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + fallbackMins);
+        return blockEndHhmm(hhmm(row.booking_time as string), fallbackMins);
       }
-      return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + 60);
+      return blockEndHhmm(hhmm(row.booking_time as string), 60);
     }
 
     for (const r of rows) {
@@ -353,10 +441,14 @@ export async function GET(request: NextRequest) {
         .eq('venue_id', venueId)
         .eq('is_active', true)
         .gte('event_date', fromStr)
-        .lte('event_date', toStr);
+        .lte('event_date', toStr)
+        .limit(SCHEDULE_ROW_LIMIT);
 
       if (evErr) {
+        // Fail closed: a sub-query error must surface as 500, not a 200 with events silently
+        // missing (which renders as "no events" on the calendar) (F5).
         console.error('GET /api/venue/schedule experience_events failed:', evErr);
+        return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
       } else {
         for (const ev of evRows ?? []) {
           const e = ev as {
@@ -398,11 +490,15 @@ export async function GET(request: NextRequest) {
     }
 
     if (wantClasses) {
-      const { data: ctRows } = await staff.db
+      const { data: ctRows, error: ctRowsErr } = await staff.db
         .from('class_types')
         .select('id')
         .eq('venue_id', venueId)
         .eq('is_active', true);
+      if (ctRowsErr) {
+        console.error('GET /api/venue/schedule class_types failed:', ctRowsErr);
+        return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+      }
       const ctIds = (ctRows ?? []).map((x: { id: string }) => x.id);
       if (ctIds.length > 0) {
         const { data: ciRows, error: ciErr } = await staff.db
@@ -411,17 +507,23 @@ export async function GET(request: NextRequest) {
           .in('class_type_id', ctIds)
           .eq('is_cancelled', false)
           .gte('instance_date', fromStr)
-          .lte('instance_date', toStr);
+          .lte('instance_date', toStr)
+          .limit(SCHEDULE_ROW_LIMIT);
 
         if (ciErr) {
           console.error('GET /api/venue/schedule class_instances failed:', ciErr);
+          return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
         } else {
           const needTypeIds = [...new Set((ciRows ?? []).map((r: { class_type_id: string }) => r.class_type_id))];
-          const { data: types } = await staff.db
+          const { data: types, error: typesErr } = await staff.db
             .from('class_types')
             .select('id, name, colour, duration_minutes, capacity, instructor_id')
             .in('id', needTypeIds)
             .eq('is_active', true);
+          if (typesErr) {
+            console.error('GET /api/venue/schedule class_types detail failed:', typesErr);
+            return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+          }
           const typeMap = new Map(
             (types ?? []).map((t: { id: string; name: string; colour: string; duration_minutes: number; capacity: number }) => [
               t.id,
@@ -443,7 +545,7 @@ export async function GET(request: NextRequest) {
             const ct = typeMap.get(row.class_type_id);
             if (!ct) continue;
             const start = hhmm(row.start_time);
-            const end = minutesToTime(timeToMinutes(start) + ct.duration_minutes);
+            const end = blockEndHhmm(start, ct.duration_minutes);
             const cap =
               row.capacity_override != null && row.capacity_override > 0 ? row.capacity_override : ct.capacity;
             blocks.push({

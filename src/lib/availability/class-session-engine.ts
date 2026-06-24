@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, ClassType, ClassInstance } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
+import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
@@ -78,8 +79,6 @@ export interface ClassAvailabilitySlot {
   requires_online_payment: boolean;
   colour: string;
 }
-
-const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 /** Resolves DB row to enum; supports legacy requires_online_payment. */
 export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequirement {

@@ -6,7 +6,9 @@ import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
+import type { WorkingHours } from '@/types/booking-models';
 import { normalizeBookingLogEmailConfig } from '@/lib/reports/booking-log-email-config';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { computeVenueBaselineMetrics } from '@/lib/metrics/compute-venue-baseline-metrics';
@@ -87,6 +89,199 @@ function buildBookingModelBreakdown(rows: BookingBreakdownInput[]): ReportByBook
       deposit_pence_collected: v.deposit_pence_collected,
     };
   });
+}
+
+// ── D2 (a): Event ticket-tier sales breakdown ──────────────────────────────
+// Tickets sold + revenue per ticket type, from immutable `booking_ticket_lines`
+// snapshots so historic numbers stay correct even after a tier is edited or its
+// row is re-minted on save (see review §5.3 C3). Cancelled bookings are excluded.
+
+export interface EventTicketTierRow {
+  /** Ticket type id, or a synthetic `label:<name>` key when the line predates a tier. */
+  ticket_type_key: string;
+  ticket_type_label: string;
+  tickets_sold: number;
+  revenue_pence: number;
+  /** Distinct bookings that included at least one ticket of this tier. */
+  booking_count: number;
+}
+
+async function buildEventTicketTierBreakdown(
+  supabase: SupabaseClient,
+  venueId: string,
+  from: string,
+  to: string,
+): Promise<EventTicketTierRow[]> {
+  const { data: rows, error } = await supabase
+    .from('booking_ticket_lines')
+    .select(
+      'booking_id, ticket_type_id, label, quantity, unit_price_pence, booking:bookings!inner(venue_id, booking_date, status)',
+    )
+    .eq('booking.venue_id', venueId)
+    .gte('booking.booking_date', from)
+    .lte('booking.booking_date', to)
+    .neq('booking.status', 'Cancelled');
+
+  if (error) {
+    console.error('[reports] event ticket tier query failed:', error);
+    return [];
+  }
+
+  const acc = new Map<
+    string,
+    { label: string; tickets_sold: number; revenue_pence: number; bookings: Set<string> }
+  >();
+
+  for (const row of (rows ?? []) as Array<{
+    booking_id: string;
+    ticket_type_id: string | null;
+    label: string | null;
+    quantity: number | null;
+    unit_price_pence: number | null;
+    booking: { booking_date?: string | null; status?: string | null } | Array<unknown> | null;
+  }>) {
+    const label = (row.label ?? '').trim() || 'Ticket';
+    // Key by tier id when present so renamed tiers still aggregate; otherwise key
+    // by snapshot label so legacy lines with no tier id don't all collapse together.
+    const key = row.ticket_type_id ?? `label:${label}`;
+    const qty = typeof row.quantity === 'number' && row.quantity > 0 ? row.quantity : 0;
+    const unit = typeof row.unit_price_pence === 'number' ? row.unit_price_pence : 0;
+    const cur = acc.get(key) ?? { label, tickets_sold: 0, revenue_pence: 0, bookings: new Set<string>() };
+    cur.tickets_sold += qty;
+    cur.revenue_pence += qty * unit;
+    cur.bookings.add(row.booking_id);
+    acc.set(key, cur);
+  }
+
+  return [...acc.entries()]
+    .map(([ticket_type_key, v]) => ({
+      ticket_type_key,
+      ticket_type_label: v.label,
+      tickets_sold: v.tickets_sold,
+      revenue_pence: v.revenue_pence,
+      booking_count: v.bookings.size,
+    }))
+    .sort((a, b) => b.revenue_pence - a.revenue_pence || b.tickets_sold - a.tickets_sold);
+}
+
+// ── D2 (b): Resource utilisation ───────────────────────────────────────────
+// Booked slot-hours vs theoretical available hours per resource, plus booking
+// count. Resources live on `unified_calendars` (calendar_type='resource'); their
+// time span is `booking_time` + `booking_end_time` (both HH:mm wall-clock). Only
+// capacity-consuming statuses count toward occupancy (review T4).
+
+export interface ResourceUtilisationRow {
+  resource_id: string;
+  resource_name: string;
+  booking_count: number;
+  occupied_hours: number;
+  available_hours: number;
+  utilisation_pct: number;
+}
+
+const RESOURCE_DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/** Minutes since midnight for an "HH:mm[:ss]" string; null/garbage → null. */
+function resourceTimeToMinutes(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const hh = Number(raw.slice(0, 2));
+  const mm = Number(raw.slice(3, 5));
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+  return hh * 60 + mm;
+}
+
+/** Open hours for one calendar date from day-keyed `working_hours` (mirrors the resource engine). */
+function resourceOpenHoursForDate(hours: WorkingHours | null | undefined, dateStr: string): number {
+  if (!hours) return 0;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dow = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  const ranges = hours[String(dow)] ?? hours[RESOURCE_DAY_NAMES[dow]!];
+  if (!ranges || ranges.length === 0) return 0;
+  let minutes = 0;
+  for (const r of ranges) {
+    const start = resourceTimeToMinutes(r.start);
+    const end = resourceTimeToMinutes(r.end);
+    if (start == null || end == null || end <= start) continue;
+    minutes += end - start;
+  }
+  return minutes / 60;
+}
+
+/** Inclusive list of YYYY-MM-DD dates between `from` and `to` (capped for safety). */
+function eachDateInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  const start = new Date(`${from}T00:00:00Z`).getTime();
+  const end = new Date(`${to}T00:00:00Z`).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return out;
+  for (let t = start, guard = 0; t <= end && guard < 400; t += 86400000, guard += 1) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+async function buildResourceUtilisation(
+  supabase: SupabaseClient,
+  venueId: string,
+  from: string,
+  to: string,
+): Promise<ResourceUtilisationRow[]> {
+  const [{ data: resources, error: resErr }, { data: bookings, error: bkErr }] = await Promise.all([
+    supabase
+      .from('unified_calendars')
+      .select('id, name, working_hours')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .eq('is_active', true),
+    supabase
+      .from('bookings')
+      .select('resource_id, booking_time, booking_end_time, status')
+      .eq('venue_id', venueId)
+      .not('resource_id', 'is', null)
+      .gte('booking_date', from)
+      .lte('booking_date', to)
+      .in('status', CAPACITY_CONSUMING_STATUSES as readonly string[]),
+  ]);
+
+  if (resErr) console.error('[reports] resource utilisation resources query failed:', resErr);
+  if (bkErr) console.error('[reports] resource utilisation bookings query failed:', bkErr);
+  if (!resources || resources.length === 0) return [];
+
+  const dates = eachDateInRange(from, to);
+
+  const occupiedByResource = new Map<string, number>();
+  const countByResource = new Map<string, number>();
+  for (const b of (bookings ?? []) as Array<{
+    resource_id: string | null;
+    booking_time: string | null;
+    booking_end_time: string | null;
+    status: string | null;
+  }>) {
+    if (!b.resource_id) continue;
+    countByResource.set(b.resource_id, (countByResource.get(b.resource_id) ?? 0) + 1);
+    const start = resourceTimeToMinutes(b.booking_time);
+    const end = resourceTimeToMinutes(b.booking_end_time);
+    if (start == null || end == null || end <= start) continue;
+    occupiedByResource.set(
+      b.resource_id,
+      (occupiedByResource.get(b.resource_id) ?? 0) + (end - start) / 60,
+    );
+  }
+
+  return (resources as Array<{ id: string; name: string; working_hours: WorkingHours | null }>)
+    .map((res) => {
+      const available = dates.reduce((sum, dateStr) => sum + resourceOpenHoursForDate(res.working_hours, dateStr), 0);
+      const occupied = occupiedByResource.get(res.id) ?? 0;
+      const utilisation = available > 0 ? Math.min(100, Math.round((occupied / available) * 100)) : 0;
+      return {
+        resource_id: res.id,
+        resource_name: res.name,
+        booking_count: countByResource.get(res.id) ?? 0,
+        occupied_hours: Number(occupied.toFixed(2)),
+        available_hours: Number(available.toFixed(2)),
+        utilisation_pct: utilisation,
+      };
+    })
+    .sort((a, b) => b.booking_count - a.booking_count || b.occupied_hours - a.occupied_hours);
 }
 
 export interface AppointmentInsightsRow {
@@ -521,6 +716,18 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // ── D2 analytics — only computed when the venue actually exposes the model ──
+    const exposesEvents = venueExposesBookingModel(bookingModel, enabledModelsNorm, 'event_ticket');
+    const exposesResources = venueExposesBookingModel(bookingModel, enabledModelsNorm, 'resource_booking');
+    const [report_event_ticket_tiers, report_resource_utilisation] = await Promise.all([
+      exposesEvents
+        ? buildEventTicketTierBreakdown(staff.db, staff.venue_id, from, to)
+        : Promise.resolve([] as EventTicketTierRow[]),
+      exposesResources
+        ? buildResourceUtilisation(staff.db, staff.venue_id, from, to)
+        : Promise.resolve([] as ResourceUtilisationRow[]),
+    ]);
+
     let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
     let report8_baseline_metrics: VenueBaselineMetrics | null = null;
     let report8_baseline_snapshot: {
@@ -581,6 +788,8 @@ export async function GET(request: NextRequest) {
       report8_baseline_metrics: report8_baseline_metrics,
       report8_baseline_snapshot: report8_baseline_snapshot,
       report_by_booking_model,
+      report_event_ticket_tiers,
+      report_resource_utilisation,
       client_summary,
       booking_log_email_config: bookingLogEmailConfig,
       default_booking_log_email: defaultBookingLogEmail,

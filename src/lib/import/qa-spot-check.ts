@@ -12,7 +12,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
 import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
-import { normaliseEmail, normalisePhoneUk, splitFullName } from '@/lib/import/normalize';
+import { normaliseEmail, normalisePhone, splitFullName } from '@/lib/import/normalize';
+import { defaultPhoneCountryFromCurrency } from '@/lib/phone/e164';
 import { runImportAiJson } from '@/lib/import/openai-client';
 
 export interface QaMismatch {
@@ -43,6 +44,15 @@ export async function runImportQaSpotCheck(
   sessionId: string,
   venueId: string,
 ): Promise<QaReport> {
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('currency')
+    .eq('id', venueId)
+    .maybeSingle();
+  const defaultPhoneCountry = defaultPhoneCountryFromCurrency(
+    (venueRow as { currency?: string | null } | null)?.currency,
+  );
+
   const { data: records } = await admin
     .from('import_records')
     .select('record_id')
@@ -136,7 +146,7 @@ export async function runImportQaSpotCheck(
       expectedLast = s.last || null;
     }
     const expectedEmail = normaliseEmail(targets.email ?? null);
-    const expectedPhone = normalisePhoneUk(targets.phone ?? null);
+    const expectedPhone = normalisePhone(targets.phone ?? null, defaultPhoneCountry);
 
     checked += 1;
     const rowMismatches: QaMismatch[] = [];

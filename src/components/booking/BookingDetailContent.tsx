@@ -102,6 +102,22 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
     onClose,
   } = ctx;
 
+  // De-restaurant the shared drawer: `bookingStyleIsTable` is true only for table
+  // reservations (false for appointments and all C/D/E). Table-only chrome (the
+  // "Table" tile, the "Table assignment" section, "covers" terminology) is gated on
+  // it; for class/event/resource we surface the CDE title and drop table language.
+  const isTableStyle = bookingStyleIsTable;
+  const inferredModel = d.inferred_booking_model;
+  const isCdeModel =
+    inferredModel === 'event_ticket' ||
+    inferredModel === 'class_session' ||
+    inferredModel === 'resource_booking';
+  const cdeTitle = d.cde_context?.title?.trim() || null;
+  const cdeSubtitle = d.cde_context?.subtitle?.trim() || null;
+  /** Party-size noun: dining counts "covers"; everything else counts "guests". */
+  const partyNoun = (n: number) => (isTableStyle ? 'cover' : 'guest') + (n === 1 ? '' : 's');
+  const partySizeLabel = `${d.party_size} ${partyNoun(d.party_size)}`;
+
   return (
     <>
           {/* Header - compact */}
@@ -125,8 +141,19 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                 <span className="text-slate-300">·</span>
                 <span className="tabular-nums">{startTime} - {endTime}</span>
                 <span className="text-slate-300">·</span>
-                <span>{d.party_size} cover{d.party_size === 1 ? '' : 's'}</span>
+                <span>{partySizeLabel}</span>
               </p>
+              {isCdeModel && cdeTitle ? (
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold text-brand-700">
+                  <span className="truncate">{cdeTitle}</span>
+                  {cdeSubtitle ? (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span className="font-medium text-slate-500">{cdeSubtitle}</span>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
               <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
                 <span className="font-mono">#{d.id.slice(0, 8)}</span>
                 <button
@@ -158,7 +185,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <p className="text-[9px] font-semibold uppercase tracking-widest text-brand-600">Booking slot</p>
                   <p className={`font-bold tracking-tight text-slate-950 tabular-nums ${isPopover ? 'text-lg leading-tight' : 'mt-0.5 text-2xl'}`}>{startTime} - {endTime}</p>
                   <p className="text-[11px] text-slate-600">
-                    {serviceLine ? `${serviceLine} · ` : ''}{durationMinutes} min · {d.party_size} cover{d.party_size === 1 ? '' : 's'}
+                    {serviceLine ? `${serviceLine} · ` : ''}{durationMinutes} min · {partySizeLabel}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {showDepositPendingPill(d) ? (
@@ -174,12 +201,32 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   </div>
                 </div>
                 <div className={isPopover ? 'grid grid-cols-2 gap-1.5 sm:min-w-44' : 'grid grid-cols-2 gap-2 sm:min-w-40'}>
-                  <div className={`rounded-lg border px-2 py-1.5 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
-                    <p className={`truncate text-xs font-bold ${hasAssignedTable ? 'text-emerald-900' : 'text-amber-800'}`}>
-                      {tableLine ?? 'Unassigned'}
-                    </p>
-                  </div>
+                  {isTableStyle ? (
+                    <div className={`rounded-lg border px-2 py-1.5 ${hasAssignedTable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Table</p>
+                      <p className={`truncate text-xs font-bold ${hasAssignedTable ? 'text-emerald-900' : 'text-amber-800'}`}>
+                        {tableLine ?? 'Unassigned'}
+                      </p>
+                    </div>
+                  ) : isCdeModel ? (
+                    <div className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5">
+                      <p className="truncate text-[9px] font-semibold uppercase tracking-widest text-brand-600">
+                        {inferredModel === 'event_ticket'
+                          ? 'Event'
+                          : inferredModel === 'class_session'
+                            ? 'Class'
+                            : 'Resource'}
+                      </p>
+                      <p className="truncate text-xs font-bold text-brand-900">
+                        {cdeTitle ?? serviceLine ?? '—'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Guests</p>
+                      <p className="truncate text-xs font-bold text-slate-700">{partySizeLabel}</p>
+                    </div>
+                  )}
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
                     <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
                     <p className={`truncate text-xs font-bold ${
@@ -396,7 +443,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <CompactInfo dense={isPopover} label="Date" value={formatDateNice(d.booking_date)} />
                   <CompactInfo dense={isPopover} label="Time" value={`${startTime} – ${endTime}`} />
                   {d.area_name ? <CompactInfo dense={isPopover} label="Area" value={d.area_name} /> : null}
-                  <CompactInfo dense={isPopover} label="Covers" value={String(d.party_size)} />
+                  <CompactInfo dense={isPopover} label={isTableStyle ? 'Covers' : 'Guests'} value={String(d.party_size)} />
                   <CompactInfo
                     dense={isPopover}
                     label="Deposit"
@@ -594,8 +641,8 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
             </SectionCard.Body>
           </SectionCard>
 
-          {/* Table assignment */}
-          {(tableManagementEnabled || assignedTables.length > 0) && (() => {
+          {/* Table assignment — table-only; never shown for class/event/resource. */}
+          {!isCdeModel && (tableManagementEnabled || assignedTables.length > 0) && (() => {
             const tableLine =
               optimisticTableLabel ??
               (assignedTables.length > 0 ? assignedTables.map((t) => t.name).join(' + ') : null);
@@ -630,7 +677,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
             );
           })()}
 
-          {showAssignModal && (
+          {!isCdeModel && showAssignModal && (
             <div className={`rounded-xl border border-brand-200 bg-brand-50/30 ${isPopover ? 'p-3' : 'p-4'}`}>
               <p className="mb-2 text-sm font-medium text-slate-900">Table Assignment</p>
               {suggestionsLoading ? (
@@ -733,7 +780,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
 
           {/* Deposit refund status banner */}
           {d.status === 'Cancelled' && d.deposit_amount_pence != null && d.deposit_amount_pence > 0 && (
-            <DepositRefundBanner depositStatus={d.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={d.cancellation_deadline} />
+            <DepositRefundBanner depositStatus={d.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={d.cancellation_deadline} refundNoticeHours={(d as { refund_notice_hours?: number | null }).refund_notice_hours ?? null} />
           )}
 
           {d.status === 'Cancelled' && (

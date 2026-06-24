@@ -1,5 +1,5 @@
 import { format, parse, isValid } from 'date-fns';
-import { normalizeToE164, normalizeToE164Lenient } from '@/lib/phone/e164';
+import { normalizeToE164, normalizeToE164Lenient, type CountryCode } from '@/lib/phone/e164';
 
 const DATE_FORMATS_TRY = [
   'dd/MM/yyyy',
@@ -28,7 +28,18 @@ export interface NormalisedPhone {
   warning: boolean;
 }
 
-export function normalisePhoneUk(raw: string | null | undefined): NormalisedPhone {
+/**
+ * Normalise a raw imported phone value to E.164.
+ *
+ * `defaultCountry` is the venue's likely calling region (see
+ * `defaultPhoneCountryFromCurrency`); it only matters for national-format
+ * numbers that carry no country code. International numbers (with + or a
+ * country code) parse regardless. Defaults to GB for backward compatibility.
+ */
+export function normalisePhone(
+  raw: string | null | undefined,
+  defaultCountry: CountryCode = 'GB',
+): NormalisedPhone {
   let t = raw?.trim();
   if (!t) return { e164: null, warning: false };
 
@@ -37,9 +48,9 @@ export function normalisePhoneUk(raw: string | null | undefined): NormalisedPhon
   // International dialling prefix written as 00 (e.g. "0033 6 12 34 56 78").
   if (/^00\s*[1-9]/.test(t)) t = `+${t.replace(/^00\s*/, '')}`;
 
-  const strict = normalizeToE164(t, 'GB');
+  const strict = normalizeToE164(t, defaultCountry);
   if (strict) return { e164: strict, warning: false };
-  const lenient = normalizeToE164Lenient(t, 'GB');
+  const lenient = normalizeToE164Lenient(t, defaultCountry);
   if (lenient) return { e164: lenient, warning: false };
 
   // Exports often drop the "+" from full international numbers ("447725002233",
@@ -202,14 +213,44 @@ export function splitFullName(full: string): { first: string; last: string } {
   return { first: t.slice(0, sp).trim(), last: t.slice(sp + 1).trim() };
 }
 
+/**
+ * Common provider status abbreviations, matched against the WHOLE trimmed value so
+ * short codes (ns, cx, dna) can't false-match inside longer words. Salon/clinic
+ * exports use a wide vocabulary of short codes that keyword substrings miss.
+ */
+const BOOKING_STATUS_CODES: Record<string, string> = {
+  // Cancelled
+  cxl: 'Cancelled', cxld: 'Cancelled', cx: 'Cancelled', canc: 'Cancelled',
+  cancel: 'Cancelled', canceled: 'Cancelled', cancelled: 'Cancelled', void: 'Cancelled',
+  // No-Show / did-not-attend
+  ns: 'No-Show', 'n/s': 'No-Show', dna: 'No-Show', noshow: 'No-Show', 'no-show': 'No-Show',
+  // Completed / attended
+  done: 'Completed', fin: 'Completed', finished: 'Completed', attended: 'Completed',
+  complete: 'Completed', completed: 'Completed', paid: 'Completed', fulfilled: 'Completed',
+  // Seated / arrived / checked-in
+  seated: 'Seated', arrived: 'Seated', 'checked-in': 'Seated', checkedin: 'Seated',
+  'checked in': 'Seated', 'in-progress': 'Seated', started: 'Seated',
+  // Pending / unconfirmed / requested
+  pending: 'Pending', unconfirmed: 'Pending', requested: 'Pending', request: 'Pending',
+  new: 'Pending', provisional: 'Pending', hold: 'Pending',
+  // Booked / confirmed
+  booked: 'Booked', confirmed: 'Booked', confirm: 'Booked', conf: 'Booked', active: 'Booked',
+};
+
 export function mapBookingStatus(raw: string | null | undefined): string {
   const t = raw?.trim().toLowerCase() ?? '';
   if (!t) return 'Booked';
+  // Whole-value provider code first (so "ns"/"cx"/"dna" map correctly), then
+  // substring heuristics for longer descriptive statuses.
+  const code = BOOKING_STATUS_CODES[t];
+  if (code) return code;
   if (t.includes('cancel')) return 'Cancelled';
-  if (t.includes('no-show') || t.includes('no show')) return 'No-Show';
-  if (t.includes('complete') || t.includes('completed')) return 'Completed';
-  if (t.includes('seat')) return 'Seated';
-  if (t.includes('pending') || t.includes('unconfirmed')) return 'Pending';
+  if (t.includes('no-show') || t.includes('no show') || t.includes('did not attend') || t.includes('did not arrive')) {
+    return 'No-Show';
+  }
+  if (t.includes('complete') || t.includes('finished') || t.includes('attend')) return 'Completed';
+  if (t.includes('seat') || t.includes('arriv') || t.includes('checked')) return 'Seated';
+  if (t.includes('pending') || t.includes('unconfirmed') || t.includes('request')) return 'Pending';
   return 'Booked';
 }
 

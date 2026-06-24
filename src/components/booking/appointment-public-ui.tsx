@@ -52,7 +52,11 @@ export const BOOKING_TAB_PANEL_INSET_CLASS = 'scroll-mt-4 px-4 pb-6 py-6 sm:py-8
 export const APPOINTMENT_PUBLIC_CHEVRON = 'ap-chevron h-5 w-5 shrink-0';
 export const APPOINTMENT_PUBLIC_CHEVRON_SM = 'ap-chevron h-4 w-4 shrink-0';
 export const APPOINTMENT_PUBLIC_PRICE = 'ap-price text-sm font-semibold';
-export const APPOINTMENT_PUBLIC_TAB_INACTIVE = 'ap-tab-inactive min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors';
+/**
+ * Colour/state classes for an inactive booking-type tab. Sizing (height, radius, padding, font) is
+ * supplied by the caller's base button class so it can stay responsive without conflicting overrides.
+ */
+export const APPOINTMENT_PUBLIC_TAB_INACTIVE = 'ap-tab-inactive';
 
 export const AppointmentPublicShell = forwardRef<
   HTMLDivElement,
@@ -191,23 +195,41 @@ export function AppointmentBackLink({
 export function AppointmentChoiceCard({
   onClick,
   icon,
+  image,
   title,
   description,
+  subtext,
 }: {
   onClick: () => void;
   icon: ReactNode;
+  /** Optional thumbnail (e.g. a resource photo) shown in place of the icon when it loads. */
+  image?: string | null;
   title: string;
-  description: string;
+  description: ReactNode;
+  /** Optional second muted line, e.g. a free-text description. Clamped to two lines. */
+  subtext?: ReactNode;
 }) {
+  const hasImage = typeof image === 'string' && /^https?:\/\//i.test(image.trim());
   return (
     <button type="button" onClick={onClick} className="ap-choice-card group w-full text-left">
       <div className="flex items-center gap-4">
-        <div className="ap-choice-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl">
+        <div className="ap-choice-icon relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl">
+          {hasImage ? (
+            <img
+              src={image!.trim()}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : null}
           {icon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900">{title}</div>
           <div className="mt-0.5 text-sm text-slate-500">{description}</div>
+          {subtext ? <div className="mt-0.5 line-clamp-2 text-sm text-slate-500">{subtext}</div> : null}
         </div>
         <svg
           className={APPOINTMENT_PUBLIC_CHEVRON}

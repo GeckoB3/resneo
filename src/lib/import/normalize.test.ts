@@ -3,7 +3,7 @@ import {
   durationMinutesBetweenTimes,
   mapBookingStatus,
   mapImportBookingStatus,
-  normalisePhoneUk,
+  normalisePhone,
   parseCurrencyPence,
   parseDateString,
   parseTimeString,
@@ -62,29 +62,42 @@ describe('parseCurrencyPence', () => {
   });
 });
 
-describe('normalisePhoneUk', () => {
-  it('normalises UK national numbers', () => {
-    expect(normalisePhoneUk('07725 002233')).toEqual({ e164: '+447725002233', warning: false });
+describe('normalisePhone', () => {
+  it('normalises UK national numbers (default GB)', () => {
+    expect(normalisePhone('07725 002233')).toEqual({ e164: '+447725002233', warning: false });
   });
 
   it('normalises international numbers with + prefix', () => {
-    expect(normalisePhoneUk('+353 87 123 4567')).toEqual({ e164: '+353871234567', warning: false });
+    expect(normalisePhone('+353 87 123 4567')).toEqual({ e164: '+353871234567', warning: false });
   });
 
   it('normalises 00-prefixed international numbers', () => {
-    expect(normalisePhoneUk('00353871234567')).toEqual({ e164: '+353871234567', warning: false });
+    expect(normalisePhone('00353871234567')).toEqual({ e164: '+353871234567', warning: false });
   });
 
   it('recovers international numbers exported without the +', () => {
-    expect(normalisePhoneUk('447725002233')).toEqual({ e164: '+447725002233', warning: false });
+    expect(normalisePhone('447725002233')).toEqual({ e164: '+447725002233', warning: false });
   });
 
   it('strips Excel numeric artifacts', () => {
-    expect(normalisePhoneUk('447725002233.0')).toEqual({ e164: '+447725002233', warning: false });
+    expect(normalisePhone('447725002233.0')).toEqual({ e164: '+447725002233', warning: false });
   });
 
   it('keeps unparseable values with a warning', () => {
-    expect(normalisePhoneUk('ext. 12')).toEqual({ e164: 'ext. 12', warning: true });
+    expect(normalisePhone('ext. 12')).toEqual({ e164: 'ext. 12', warning: true });
+  });
+
+  it('normalises non-UK national numbers against the venue country', () => {
+    // Irish mobile in national format only resolves with an IE default region.
+    expect(normalisePhone('087 123 4567', 'IE')).toEqual({ e164: '+353871234567', warning: false });
+    // French mobile in national format.
+    expect(normalisePhone('06 12 34 56 78', 'FR')).toEqual({ e164: '+33612345678', warning: false });
+    // US national number.
+    expect(normalisePhone('(415) 555-2671', 'US')).toEqual({ e164: '+14155552671', warning: false });
+  });
+
+  it('still parses + / country-coded numbers regardless of default region', () => {
+    expect(normalisePhone('+1 415 555 2671', 'IE')).toEqual({ e164: '+14155552671', warning: false });
   });
 });
 
@@ -220,6 +233,21 @@ describe('mapBookingStatus enum contract', () => {
     for (const raw of [null, '', 'cancelled', 'no show', 'no-show', 'completed', 'seated', 'pending', 'random']) {
       expect(VALID_BOOKING_STATUSES.has(mapBookingStatus(raw))).toBe(true);
     }
+  });
+
+  it('maps common provider status codes/abbreviations', () => {
+    expect(mapBookingStatus('CXL')).toBe('Cancelled');
+    expect(mapBookingStatus('cx')).toBe('Cancelled');
+    expect(mapBookingStatus('NS')).toBe('No-Show');
+    expect(mapBookingStatus('DNA')).toBe('No-Show');
+    expect(mapBookingStatus('did not attend')).toBe('No-Show');
+    expect(mapBookingStatus('attended')).toBe('Completed');
+    expect(mapBookingStatus('Done')).toBe('Completed');
+    expect(mapBookingStatus('checked-in')).toBe('Seated');
+    expect(mapBookingStatus('New')).toBe('Pending');
+    expect(mapBookingStatus('Confirmed')).toBe('Booked');
+    // Whole-value matching: "ns" inside a word must not trigger No-Show.
+    expect(mapBookingStatus('Insurance')).toBe('Booked');
   });
 
   it('mapImportBookingStatus only returns values in the bookings.status enum', () => {

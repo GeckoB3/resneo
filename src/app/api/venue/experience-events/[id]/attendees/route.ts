@@ -30,6 +30,12 @@ export async function GET(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
+    // Roster + CSV should show people who are actually attending. Cancelled and
+    // No-show bookings previously appeared in both, inflating the list and the
+    // export (CDE review §5.3, finding 13). Exclude them at the source so the
+    // count, the rendered roster and the CSV all agree.
+    const EXCLUDED_ROSTER_STATUSES = ['Cancelled', 'Canceled', 'No-Show', 'NoShow', 'No Show'];
+
     const { data: rows, error } = await admin
       .from('bookings')
       .select(
@@ -37,6 +43,7 @@ export async function GET(
       )
       .eq('venue_id', staff.venue_id)
       .eq('experience_event_id', eventId)
+      .not('status', 'in', `(${EXCLUDED_ROSTER_STATUSES.map((s) => `"${s}"`).join(',')})`)
       .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
 

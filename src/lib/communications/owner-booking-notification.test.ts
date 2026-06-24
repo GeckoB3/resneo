@@ -70,3 +70,63 @@ describe('renderOwnerBookingNotificationEmail', () => {
     expect(html).toContain('&lt;img src=x');
   });
 });
+
+describe('renderOwnerBookingNotificationEmail: booking location', () => {
+  it('shows the venue address when the booking has no location snapshot', () => {
+    const { html, text } = renderOwnerBookingNotificationEmail(baseBooking(), venue);
+    expect(html).toContain('1 Main Street, Bangor');
+    expect(text).toContain('Location: 1 Main Street, Bangor');
+  });
+
+  it("names the client's address (staff perspective) for client-address bookings", () => {
+    const { html, text } = renderOwnerBookingNotificationEmail(
+      baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Mobile massage',
+        booking_location: {
+          kind: 'client_address',
+          client_address: '12 High Street, Belfast, BT1 1AA',
+        },
+      }),
+      venue,
+    );
+    expect(text).toContain("Location: Client's address — 12 High Street, Belfast, BT1 1AA");
+    expect(html).toContain('12 High Street, Belfast, BT1 1AA');
+    // Staff email must not borrow the guest-facing "Your address" wording.
+    expect(html).not.toContain('Your address');
+  });
+
+  it('includes the join link and joining info for online bookings', () => {
+    const { html, text } = renderOwnerBookingNotificationEmail(
+      baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Online consultation',
+        booking_location: {
+          kind: 'online',
+          online_url: 'https://meet.example.com/abc-123',
+          online_info: 'Use headphones and join 5 minutes early.',
+        },
+      }),
+      venue,
+    );
+    expect(html).toContain('Online');
+    expect(html).toContain('https://meet.example.com/abc-123');
+    expect(html).toContain('Use headphones and join 5 minutes early.');
+    expect(text).toContain('Location: Online');
+    expect(text).toContain('Join link: https://meet.example.com/abc-123');
+    expect(text).toContain('Joining info: Use headphones and join 5 minutes early.');
+  });
+
+  it('falls back to "Online" with no link when the service has no meeting url', () => {
+    const { html, text } = renderOwnerBookingNotificationEmail(
+      baseBooking({
+        email_variant: 'appointment',
+        booking_location: { kind: 'online', online_url: null, online_info: null },
+      }),
+      venue,
+    );
+    expect(text).toContain('Location: Online');
+    expect(text).not.toContain('Join link:');
+    expect(html).toContain('Online');
+  });
+});

@@ -123,15 +123,30 @@ export function BookingFlowRouter({
         />
       );
     case 'event_ticket':
-      return <EventBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
+      return (
+        <EventBookingFlow
+          venue={venue}
+          cancellationPolicy={cancellationPolicy}
+          embed={embed}
+          onHeightChange={onHeightChange}
+        />
+      );
     case 'class_session':
-      return <ClassBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
+      return (
+        <ClassBookingFlow
+          venue={venue}
+          cancellationPolicy={cancellationPolicy}
+          embed={embed}
+          onHeightChange={onHeightChange}
+        />
+      );
     case 'resource_booking':
       return (
         <ResourceBookingFlow
           venue={venue}
           cancellationPolicy={cancellationPolicy}
           embed={embed}
+          onHeightChange={onHeightChange}
           accentColour={accentColour}
         />
       );

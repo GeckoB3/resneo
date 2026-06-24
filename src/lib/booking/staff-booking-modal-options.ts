@@ -1,4 +1,5 @@
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
@@ -23,6 +24,7 @@ const SURFACE_TAB_ORDER: StaffBookingSurfaceTabId[] = [
   'resource_booking',
 ];
 
+/** Fallback labels (no venue terminology). Kept singular for back-compat with existing callers. */
 const SURFACE_LABEL: Record<StaffBookingSurfaceTabId, string> = {
   table_reservation: 'Table',
   unified_scheduling: 'Appointment',
@@ -31,30 +33,77 @@ const SURFACE_LABEL: Record<StaffBookingSurfaceTabId, string> = {
   resource_booking: 'Resource',
 };
 
+/** Surface id → booking model, so labels can reuse the model-level terminology. */
+const SURFACE_TAB_BOOKING_MODEL: Record<StaffBookingSurfaceTabId, BookingModel> = {
+  table_reservation: 'table_reservation',
+  unified_scheduling: 'unified_scheduling',
+  class_session: 'class_session',
+  event_ticket: 'event_ticket',
+  resource_booking: 'resource_booking',
+};
+
+/**
+ * B1: terminology-aware label for a staff surface tab, mirroring the public booking tabs
+ * ({@link publicBookTabsForVenue}). Table/Appointment follow the venue `terminology.booking`
+ * override; C/D/E use the same plural storefront labels the public tabs show (Events/Classes/
+ * Resources). Falls back to {@link SURFACE_LABEL} when no terminology is supplied.
+ */
+function surfaceTabLabel(
+  id: StaffBookingSurfaceTabId,
+  terminology: Partial<VenueTerminology> | null | undefined,
+): string {
+  const term = terminology && typeof terminology === 'object' ? terminology : undefined;
+  const model = SURFACE_TAB_BOOKING_MODEL[id];
+  const defaults = DEFAULT_TERMINOLOGY[model];
+  switch (id) {
+    case 'table_reservation': {
+      const booking = term?.booking ?? defaults.booking;
+      return booking === 'Reservation' ? 'Table' : booking;
+    }
+    case 'unified_scheduling': {
+      // Do not let a table-tab "Reservation" override relabel appointments (matches public tabs).
+      const booking = defaults.booking;
+      return booking === 'Appointment' ? 'Appointment' : booking;
+    }
+    // C/D/E: use the same plural storefront labels the public tabs show (terminology-independent),
+    // instead of the legacy hard-coded singular Class/Event/Resource.
+    case 'event_ticket':
+      return 'Events';
+    case 'class_session':
+      return 'Classes';
+    case 'resource_booking':
+      return 'Resources';
+    default:
+      return SURFACE_LABEL[id];
+  }
+}
+
 function appointmentSurfaceExposed(primary: BookingModel, enabledModels: BookingModel[]): boolean {
   return isUnifiedSchedulingVenue(primary) || enabledModels.includes('unified_scheduling');
 }
 
 /**
  * Ordered staff surfaces (Table → Appointment → Class → Event → Resource); only includes models the venue exposes.
+ * Pass `terminology` (venue `terminology` JSONB) to label tabs the way the public booking tabs do (B1).
  */
 export function getStaffBookingSurfaceTabs(
   primary: BookingModel,
   enabledModels: BookingModel[],
+  terminology?: Partial<VenueTerminology> | null,
 ): StaffBookingSurfaceTab[] {
   const out: StaffBookingSurfaceTab[] = [];
 
   if (primary === 'table_reservation') {
-    out.push({ id: 'table_reservation', label: SURFACE_LABEL.table_reservation });
+    out.push({ id: 'table_reservation', label: surfaceTabLabel('table_reservation', terminology) });
   }
 
   if (appointmentSurfaceExposed(primary, enabledModels)) {
-    out.push({ id: 'unified_scheduling', label: SURFACE_LABEL.unified_scheduling });
+    out.push({ id: 'unified_scheduling', label: surfaceTabLabel('unified_scheduling', terminology) });
   }
 
   for (const id of ['class_session', 'event_ticket', 'resource_booking'] as const) {
     if (venueExposesBookingModel(primary, enabledModels, id)) {
-      out.push({ id, label: SURFACE_LABEL[id] });
+      out.push({ id, label: surfaceTabLabel(id, terminology) });
     }
   }
 

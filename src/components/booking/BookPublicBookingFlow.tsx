@@ -18,6 +18,7 @@ import {
   APPOINTMENT_PUBLIC_TAB_INACTIVE,
 } from '@/components/booking/appointment-public-ui';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isCdeBookingModel } from '@/lib/booking/cde-booking';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -126,9 +127,16 @@ export function BookPublicBookingFlow({
   const appointmentTabs =
     activeModel === 'practitioner_appointment' || activeModel === 'unified_scheduling';
 
-  const usesPublicAppointmentColumn = !embed && isUnifiedSchedulingVenue(venue.booking_model);
+  /**
+   * Wide storefront shell for the non-embed public page. Appointment-primary venues have always
+   * had it; C/D/E-primary venues (A2) get the same roomy two-column-width shell instead of the
+   * cramped `max-w-lg` so their booking + marketing tabs match the appointment storefront.
+   */
+  const usesPublicStorefrontColumn =
+    !embed &&
+    (isUnifiedSchedulingVenue(venue.booking_model) || isCdeBookingModel(venue.booking_model));
 
-  const rootWidthClass = usesPublicAppointmentColumn
+  const rootWidthClass = usesPublicStorefrontColumn
     ? `mx-auto w-full ${APPOINTMENT_PUBLIC_SHELL_MAX_WIDTH_CLASS}`
     : embed
       ? 'w-full'
@@ -141,26 +149,36 @@ export function BookPublicBookingFlow({
     >
       {tabs.length > 1 && (
         <div className={`border-b border-slate-200 pb-2 ${embed ? 'space-y-2' : ''}`} aria-busy={tabPending}>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {tabs.map((t) => {
-              const isActive = t.slug === activeSlug;
-              return (
-                <button
-                  key={t.slug}
-                  type="button"
-                  onClick={() => replaceTabInUrl(t.slug)}
-                  className={`min-h-[44px] rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                    isActive
-                      ? appointmentTabs
-                        ? 'ap-tab-active shadow-sm'
-                        : 'bg-brand-600 text-white shadow-sm'
-                      : APPOINTMENT_PUBLIC_TAB_INACTIVE
-                  }`}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
+          {/*
+           * A5: center the tab row when it fits, but scroll horizontally from the first tab when it
+           * doesn't. The inner `mx-auto w-max` keeps the row centered while there is free space, yet
+           * pins it to the start once the tabs overflow — so no tab is clipped or stranded in the
+           * unreachable negative-scroll gutter that plain `justify-center` + `overflow-x-auto` left
+           * behind on narrow screens. Tabs also shrink slightly on mobile, then grow from `sm`, so
+           * the common 4-tab case fits without scrolling on a phone.
+           */}
+          <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            <div className="mx-auto flex w-max items-center gap-1.5 sm:gap-2">
+              {tabs.map((t) => {
+                const isActive = t.slug === activeSlug;
+                return (
+                  <button
+                    key={t.slug}
+                    type="button"
+                    onClick={() => replaceTabInUrl(t.slug)}
+                    className={`min-h-[44px] shrink-0 rounded-full px-3 py-2 text-xs font-semibold transition-colors sm:px-4 sm:text-sm ${
+                      isActive
+                        ? appointmentTabs
+                          ? 'ap-tab-active shadow-sm'
+                          : 'bg-brand-600 text-white shadow-sm'
+                        : APPOINTMENT_PUBLIC_TAB_INACTIVE
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           {tabPending ? (
             <div className="flex justify-center">

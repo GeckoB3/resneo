@@ -2,7 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { loadAccountBookingById } from '@/lib/account/account-bookings';
+import {
+  accountBookingTimeZone,
+  formatAccountBookingDateTime,
+  friendlyAccountBookingStatus,
+  loadAccountBookingById,
+} from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
@@ -11,21 +16,6 @@ type PageProps = { params: Promise<{ bookingId: string }> };
 function money(pence: number | null | undefined): string | null {
   if (pence == null) return null;
   return `£${(pence / 100).toFixed(2)}`;
-}
-
-/** Calendar label in the user's profile timezone (falls back to Europe/London). */
-function formatLongWeekdayDate(dateStr: string, timeZone: string): string {
-  const parts = dateStr.split('-').map(Number);
-  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return dateStr;
-  const [y, mo, d] = parts;
-  const utcNoon = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
-  return utcNoon.toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: timeZone.trim() || 'Europe/London',
-  });
 }
 
 export default async function AccountBookingDetailPage({ params }: PageProps) {
@@ -37,12 +27,32 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   if (!user) notFound();
 
   const { data: profile } = await supabase.from('user_profiles').select('timezone').eq('id', user.id).maybeSingle();
-  const displayTz = (profile?.timezone as string | null | undefined)?.trim() || 'Europe/London';
+  const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
 
   const booking = await loadAccountBookingById(supabase, getSupabaseAdminClient(), bookingId);
   if (!booking) notFound();
 
-  const dateHeading = formatLongWeekdayDate(booking.booking_date, displayTz);
+  // Prefer the venue's timezone (the slot is the venue's wall clock); fall back to the
+  // user's profile timezone, then Europe/London — one convention across all surfaces.
+  const displayTz = accountBookingTimeZone(booking, profileTz);
+  const { date: dateHeading, time: timeHeading } = formatAccountBookingDateTime(
+    booking.booking_date,
+    booking.booking_time,
+    displayTz,
+    { withWeekday: true },
+  );
+  const endTime = booking.booking_end_time ? booking.booking_end_time.slice(0, 5) : null;
+
+  const cde = booking.cde_context;
+  const friendlyStatus = friendlyAccountBookingStatus(booking.status);
+  const isClassGroup = booking.booking_model === 'class_session' && !!booking.group_booking_id;
+
+  const headerTitle = cde?.title ?? booking.venue?.name ?? 'Booking details';
+  const headerSubtitleParts = [
+    `${bookingModelShortLabel(booking.booking_model)} booking`,
+    friendlyStatus,
+  ];
+  if (cde && booking.venue?.name) headerSubtitleParts.unshift(booking.venue.name);
 
   return (
     <div className="space-y-8">
@@ -59,8 +69,8 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         <div className="mt-5">
           <PageHeader
             eyebrow="Bookings"
-            title={booking.venue?.name ?? 'Booking details'}
-            subtitle={`${bookingModelShortLabel(booking.booking_model)} booking · ${booking.status}`}
+            title={headerTitle}
+            subtitle={headerSubtitleParts.join(' · ')}
             actions={
               <a
                 href={booking.manage_booking_link}
@@ -75,23 +85,81 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7">
         <dl className="grid gap-4 sm:grid-cols-2">
+          {cde ? (
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {bookingModelShortLabel(booking.booking_model)}
+              </dt>
+              <dd className="mt-1 font-medium text-slate-900">{cde.title}</dd>
+              {cde.subtitle ? <dd className="mt-0.5 text-sm text-slate-600">{cde.subtitle}</dd> : null}
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</dt>
             <dd className="mt-1 text-slate-900">{dateHeading}</dd>
-            <dd className="mt-0.5 text-xs text-slate-500">ISO {booking.booking_date}</dd>
           </div>
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Time</dt>
             <dd className="mt-1 text-slate-900">
-              {booking.booking_time.slice(0, 5)}
-              {booking.booking_end_time ? ` to ${booking.booking_end_time.slice(0, 5)}` : ''}
+              {timeHeading ?? booking.booking_time.slice(0, 5)}
+              {endTime ? ` to ${endTime}` : ''}
             </dd>
-            <dd className="mt-0.5 text-xs text-slate-500">As recorded by the venue (wall clock).</dd>
+            <dd className="mt-0.5 text-xs text-slate-500">Shown in the venue’s local time.</dd>
           </div>
+          {cde?.duration_minutes ? (
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Duration</dt>
+              <dd className="mt-1 text-slate-900">{cde.duration_minutes} minutes</dd>
+            </div>
+          ) : null}
+          {cde?.class_spots && cde.class_spots.capacity > 0 ? (
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Class spaces</dt>
+              <dd className="mt-1 text-slate-900">
+                {cde.class_spots.remaining > 0
+                  ? `${cde.class_spots.remaining} of ${cde.class_spots.capacity} space${
+                      cde.class_spots.capacity === 1 ? '' : 's'
+                    } left`
+                  : 'Fully booked'}
+              </dd>
+              <dd className="mt-0.5 text-xs text-slate-500">
+                {cde.class_spots.booked} of {cde.class_spots.capacity} booked
+              </dd>
+            </div>
+          ) : null}
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Party size</dt>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {booking.booking_model === 'event_ticket'
+                ? 'Tickets'
+                : booking.booking_model === 'resource_booking'
+                  ? 'Bookers'
+                  : 'Party size'}
+            </dt>
             <dd className="mt-1 text-slate-900">{booking.party_size}</dd>
           </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</dt>
+            <dd className="mt-1 text-slate-900">{friendlyStatus}</dd>
+          </div>
+          {cde?.ticket_lines && cde.ticket_lines.length > 0 ? (
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ticket breakdown</dt>
+              <dd className="mt-1">
+                <ul className="space-y-1 text-sm text-slate-900">
+                  {cde.ticket_lines.map((line, i) => (
+                    <li key={`${line.label}-${i}`} className="flex justify-between gap-3">
+                      <span>
+                        {line.quantity} × {line.label}
+                      </span>
+                      {line.unit_price_pence > 0 ? (
+                        <span className="text-slate-600">{money(line.unit_price_pence * line.quantity)}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Deposit</dt>
             <dd className="mt-1 text-slate-900">
@@ -114,8 +182,15 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
             </div>
           ) : null}
         </dl>
-      </div>
 
+        {isClassGroup ? (
+          <p className="mt-5 rounded-xl border border-amber-200/80 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+            This is one session of a multi-session course. <strong>Manage booking</strong> on this page affects
+            <strong> only this session</strong> — your other sessions stay booked. To change the whole course,
+            cancel each session from your bookings list or contact the venue.
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

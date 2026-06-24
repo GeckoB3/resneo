@@ -7,7 +7,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import { DetailsStep } from './DetailsStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
-import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
+import { ResourceCalendarMonth, todayYmdInTimeZone } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
 import { formatResourcePricePerSlotLine } from '@/lib/booking/format-price-display';
 import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
@@ -93,6 +93,8 @@ interface ResourceOption {
   id: string;
   name: string;
   resource_type: string | null;
+  description: string | null;
+  photo_url: string | null;
   min_booking_minutes: number;
   max_booking_minutes: number;
   slot_interval_minutes: number;
@@ -129,6 +131,12 @@ function formatDurationSlotLabel(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** "30 min" (single length) or "30 min – 3h" (range) for the resource picker description. */
+function formatBookableLengthRange(min: number, max: number): string {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return formatDurationLabel(min);
+  return `${formatDurationLabel(min)} – ${formatDurationLabel(max)}`;
 }
 
 function resourceCalendarCacheKey(resourceId: string, year: number, month: number): string {
@@ -178,6 +186,8 @@ export interface ResourceBookingFlowProps {
   staffRebookGuestPrefill?: StaffRebookGuestPrefill;
   /** Public embed iframe — passed through to the appointment shell. */
   embed?: boolean;
+  /** Embed remeasure hook: called after step changes / async layout so the iframe can resize. */
+  onHeightChange?: () => void;
   accentColour?: string;
 }
 
@@ -195,6 +205,7 @@ export function ResourceBookingFlow({
   staffRebookBootstrap = null,
   staffRebookGuestPrefill,
   embed = false,
+  onHeightChange,
   accentColour,
 }: ResourceBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
@@ -224,9 +235,13 @@ export function ResourceBookingFlow({
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [selectedMeta, setSelectedMeta] = useState<ResourceOption | null>(null);
 
+  // "Today" in the venue timezone (not the browser clock) so an out-of-TZ guest gets the
+  // correct minimum-bookable day and initial month.
+  const venueTimeZone = venue.timezone;
+  const venueTodayYmd = todayYmdInTimeZone(venueTimeZone);
   const [calendarMonth, setCalendarMonth] = useState(() => {
-    const n = new Date();
-    return { year: n.getFullYear(), month: n.getMonth() + 1 };
+    const [y, m] = venueTodayYmd.split('-').map(Number);
+    return { year: y!, month: m! };
   });
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [loadingCalendar, setLoadingCalendar] = useState(false);
@@ -254,6 +269,23 @@ export function ResourceBookingFlow({
   const [submitting, setSubmitting] = useState(false);
   const initialSelectionAppliedRef = useRef(false);
   const staffRebookApplyRef = useRef(false);
+
+  // Embed remeasure: the host iframe sizes itself from our height. A ResizeObserver covers
+  // content reflow; the step effect covers cases the observer can miss (popovers/overflow).
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!onHeightChange || !containerRef.current) return;
+    const ro = new ResizeObserver(() => {
+      onHeightChange();
+    });
+    ro.observe(containerRef.current);
+    onHeightChange();
+    return () => ro.disconnect();
+  }, [onHeightChange]);
+  useEffect(() => {
+    if (!onHeightChange) return;
+    onHeightChange();
+  }, [step, onHeightChange]);
 
   const effectiveInitialResourceId =
     initialResourceId ?? staffRebookBootstrap?.resource?.resourceId ?? undefined;
@@ -292,7 +324,9 @@ export function ResourceBookingFlow({
       bootstrapDuration != null && options.includes(bootstrapDuration)
         ? bootstrapDuration
         : options[0] ?? resource.min_booking_minutes;
-    const initialMonthDate = initialDate ? new Date(`${initialDate}T12:00:00`) : new Date();
+    const initialMonthDate = initialDate
+      ? new Date(`${initialDate}T12:00:00`)
+      : new Date(`${venueTodayYmd}T12:00:00`);
     const prefilledTime = initialTime?.trim().slice(0, 5) ?? null;
     const initialStep: Step = initialDate ? 'pick_duration' : 'pick_date';
 
@@ -494,8 +528,11 @@ export function ResourceBookingFlow({
 
   function computeEndTime(start: string, mins: number): string {
     const [h, m] = start.split(':').map(Number);
-    const totalMins = h! * 60 + m! + mins;
-    const eh = Math.floor(totalMins / 60) % 24;
+    // Clamp to the same day. Resources never book across midnight, so an end past 24:00
+    // (e.g. a stale 23:00 prefill that survives a duration change) is capped at 23:59 rather
+    // than wrapping via %24 to an earlier "01:00" that reads as end < start.
+    const totalMins = Math.min(h! * 60 + m! + mins, 24 * 60 - 1);
+    const eh = Math.floor(totalMins / 60);
     const em = totalMins % 60;
     return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
   }
@@ -674,8 +711,8 @@ export function ResourceBookingFlow({
   function selectResource(r: ResourceOption) {
     setError(null);
     setSelectedMeta(r);
-    const n = new Date();
-    const nextMonth = { year: n.getFullYear(), month: n.getMonth() + 1 };
+    const [ty, tm] = venueTodayYmd.split('-').map(Number);
+    const nextMonth = { year: ty!, month: tm! };
     setCalendarMonth(nextMonth);
     setDate('');
     setSelectedTime(null);
@@ -708,7 +745,11 @@ export function ResourceBookingFlow({
     });
   }
 
-  const minYmd = todayYmdLocal();
+  const minYmd = venueTodayYmd;
+  // Short, human-quotable booking reference for the confirmation screen (the full id is a UUID).
+  const bookingReference = createResult?.booking_id
+    ? createResult.booking_id.replace(/-/g, '').slice(-8).toUpperCase()
+    : null;
   const progressMeta = isPublicGuest ? resourceProgressPhase(step) : null;
   const primaryContinueClass = isPublicGuest
     ? APPOINTMENT_DETAILS_SUBMIT_CLASS
@@ -751,6 +792,7 @@ export function ResourceBookingFlow({
                   key={r.id}
                   onClick={() => selectResource(r)}
                   title={r.name}
+                  image={r.photo_url}
                   description={
                     [
                       r.resource_type,
@@ -759,10 +801,12 @@ export function ResourceBookingFlow({
                         currencySymbolFromCode(venue.currency),
                         slotIntervalDurationLabel(r.slot_interval_minutes),
                       ),
+                      `Book ${formatBookableLengthRange(r.min_booking_minutes, r.max_booking_minutes)}`,
                     ]
                       .filter(Boolean)
                       .join(' · ')
                   }
+                  subtext={r.description?.trim() || undefined}
                   icon={
                     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
@@ -781,9 +825,28 @@ export function ResourceBookingFlow({
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-900">{r.name}</div>
-                      {r.resource_type ? <div className="mt-0.5 text-xs text-slate-500">{r.resource_type}</div> : null}
+                    <div className="flex min-w-0 items-center gap-3">
+                      {r.photo_url && /^https?:\/\//i.test(r.photo_url.trim()) ? (
+                        <img
+                          src={r.photo_url.trim()}
+                          alt=""
+                          className="h-12 w-12 shrink-0 rounded-lg border border-slate-200 object-cover"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : null}
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900">{r.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {[r.resource_type, `Book ${formatBookableLengthRange(r.min_booking_minutes, r.max_booking_minutes)}`]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                        {r.description?.trim() ? (
+                          <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">{r.description.trim()}</div>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="shrink-0 text-right text-sm font-medium text-brand-600">
                       {formatResourcePricePerSlotLine(
@@ -922,20 +985,24 @@ export function ResourceBookingFlow({
             </div>
           ) : (
             <div className={APPOINTMENT_TIME_SLOTS_GRID_CLASS}>
-              {selectedResource.slots.map((slot) => (
-                <button
-                  key={slot.start_time}
-                  type="button"
-                  onClick={() => {
-                    setSelectedTime(slot.start_time);
-                    setError(null);
-                    setStep('summary');
-                  }}
-                  className={appointmentTimeSlotClass(false, isPublicGuest)}
-                >
-                  <span className={APPOINTMENT_TIME_SLOT_LABEL_CLASS}>{slot.start_time}</span>
-                </button>
-              ))}
+              {selectedResource.slots.map((slot) => {
+                const isSlotSelected = selectedTime === slot.start_time;
+                return (
+                  <button
+                    key={slot.start_time}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTime(slot.start_time);
+                      setError(null);
+                      setStep('summary');
+                    }}
+                    className={appointmentTimeSlotClass(isSlotSelected, isPublicGuest)}
+                    aria-pressed={isSlotSelected}
+                  >
+                    <span className={APPOINTMENT_TIME_SLOT_LABEL_CLASS}>{slot.start_time}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1105,6 +1172,17 @@ export function ResourceBookingFlow({
             <br />
             {date} · {selectedTime} – {selectedTime ? computeEndTime(selectedTime, duration) : ''}
           </p>
+          {bookingReference ? (
+            <p className="mt-3 text-sm text-green-800">
+              <span className="text-green-700">Booking reference</span>{' '}
+              <span className="font-semibold tracking-wide tabular-nums">{bookingReference}</span>
+            </p>
+          ) : null}
+          {isPublicGuest ? (
+            <p className="mt-1 text-sm leading-relaxed text-green-700">
+              We&apos;ve emailed you a confirmation with these details.
+            </p>
+          ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>
       )}
@@ -1113,7 +1191,7 @@ export function ResourceBookingFlow({
 
   if (isPublicGuest) {
     return (
-      <AppointmentPublicShell accentColour={accentColour} embed={embed}>
+      <AppointmentPublicShell ref={containerRef} accentColour={accentColour} embed={embed}>
         {progressMeta ? <AppointmentProgressBar phase={progressMeta.phase} /> : null}
         {flowContent}
       </AppointmentPublicShell>

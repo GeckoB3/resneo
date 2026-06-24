@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { findOrCreateGuest } from '@/lib/guests';
 import { insertFreeClassSessionBooking } from '@/lib/booking/insert-free-class-session-booking';
 import { splitLegacyGuestName } from '@/lib/guests/name';
+import { userVenueHasMembershipAllowingRecurring } from '@/lib/class-commerce/membership-discount';
 import {
   type ClassRecurringRule,
   parseClassRecurringRule,
@@ -95,6 +96,24 @@ export async function materializeRecurringReservation(
       booking_ids: [],
       next_materialize_on: addDaysYmd(todayYmd(), 7),
       message: 'Invalid or missing rule',
+    };
+  }
+
+  // §5.2 — recurring auto-booking is an entitlement granted by an active membership
+  // with `allow_recurring`. The rule is gated on this only at *creation*; re-check it
+  // here so a lapsed/cancelled member is not auto-booked free indefinitely. We skip
+  // (rather than fail) and stop advancing so the reservation goes dormant; if the
+  // member re-subscribes a later run resumes it.
+  const stillEntitled = await userVenueHasMembershipAllowingRecurring(admin, {
+    userId: row.user_id,
+    venueId: row.venue_id,
+  });
+  if (!stillEntitled) {
+    return {
+      status: 'skipped',
+      booking_ids: [],
+      next_materialize_on: addDaysYmd(todayYmd(), 7),
+      message: 'Membership lapsed — recurring auto-booking paused',
     };
   }
 
@@ -237,15 +256,20 @@ export async function materializeRecurringReservation(
     };
   }
 
-  // Resolve class instances for those dates / start_time.
+  // Resolve class instances by DATE primarily (§5.2). Matching on start_time in the
+  // query meant any drift between the rule's slot time and the actual instance time
+  // (e.g. the timetable slot was nudged) silently returned zero rows, so the member
+  // quietly stopped being booked while the cron advanced past the date. We instead
+  // load every active instance on the target dates and reconcile the time in code:
+  // prefer an exact start_time match, otherwise take the lone instance for that date.
   const { data: instances, error: iErr } = await admin
     .from('class_instances')
     .select('id, instance_date, start_time, is_cancelled')
     .eq('class_type_id', row.class_type_id)
     .eq('is_cancelled', false)
-    .eq('start_time', ruleTimePg)
     .in('instance_date', targetDates)
-    .order('instance_date', { ascending: true });
+    .order('instance_date', { ascending: true })
+    .order('start_time', { ascending: true });
 
   if (iErr) {
     console.error('[materializeRecurringReservation] instances', iErr);
@@ -257,19 +281,61 @@ export async function materializeRecurringReservation(
     };
   }
 
-  const instList = (instances ?? []) as Array<{
+  const allInstances = (instances ?? []) as Array<{
     id: string;
     instance_date: string;
     start_time: string;
   }>;
 
+  // One instance per target date. Prefer the slot whose start_time matches the rule;
+  // if no exact match but the date has exactly one instance, use it (tolerating drift).
+  // If a date has multiple non-matching instances we cannot disambiguate — skip that
+  // date with a recorded reason rather than guessing.
+  const byDate = new Map<string, typeof allInstances>();
+  for (const inst of allInstances) {
+    const list = byDate.get(inst.instance_date) ?? [];
+    list.push(inst);
+    byDate.set(inst.instance_date, list);
+  }
+
+  const instList: typeof allInstances = [];
+  let driftSkips = 0;
+  let ambiguousSkips = 0;
+  for (const date of targetDates) {
+    const candidates = byDate.get(date);
+    if (!candidates || candidates.length === 0) continue;
+    const exact = candidates.find((c) => c.start_time === ruleTimePg);
+    if (exact) {
+      instList.push(exact);
+    } else if (candidates.length === 1) {
+      instList.push(candidates[0]);
+      driftSkips += 1; // matched despite a start_time difference (recorded, not silent)
+    } else {
+      ambiguousSkips += 1; // multiple non-matching slots on this date — cannot pick
+    }
+  }
+
+  if (driftSkips > 0 || ambiguousSkips > 0) {
+    console.warn('[materializeRecurringReservation] start_time drift', {
+      reservationId: row.id,
+      classTypeId: row.class_type_id,
+      ruleTime: ruleTimePg,
+      driftTolerated: driftSkips,
+      ambiguousSkipped: ambiguousSkips,
+    });
+  }
+
   if (instList.length === 0) {
+    const driftNote =
+      driftSkips + ambiguousSkips > 0
+        ? ' (session times differ from the saved rule — please re-create the recurring booking)'
+        : '';
     return {
       status: 'skipped',
       booking_ids: [],
       next_materialize_on:
         rule.end_date && rule.end_date <= windowEnd ? null : addDaysYmd(windowEnd, 1),
-      message: 'No upcoming sessions match this rule',
+      message: `No upcoming sessions match this rule${driftNote}`,
     };
   }
 
@@ -312,14 +378,17 @@ export async function materializeRecurringReservation(
   for (const inst of instList) {
     if (occurrencesAvailable <= 0) break;
 
-    const { data: existing } = await admin
+    // Use limit(1) rather than maybeSingle(): a guest may legitimately have more
+    // than one booking row for an instance (legacy/duplicate data), and maybeSingle
+    // throws on >1 row, which would abort the whole run.
+    const { data: existingRows } = await admin
       .from('bookings')
       .select('id')
       .eq('class_instance_id', inst.id)
       .eq('guest_id', guest.id)
-      .maybeSingle();
+      .limit(1);
 
-    if (existing) continue;
+    if (existingRows && existingRows.length > 0) continue;
 
     const ins = await insertFreeClassSessionBooking({
       admin,
@@ -359,6 +428,11 @@ export async function materializeRecurringReservation(
   else if (failures > 0) status = 'failed';
   else status = 'skipped';
 
+  const driftNote =
+    ambiguousSkips > 0
+      ? `; ${ambiguousSkips} date(s) skipped — multiple sessions and none match the rule's time`
+      : '';
+
   return {
     status,
     booking_ids: bookingIds,
@@ -367,7 +441,9 @@ export async function materializeRecurringReservation(
       bookingIds.length === 0
         ? failures > 0
           ? 'Could not create bookings (capacity or rules)'
-          : 'No new bookings needed'
-        : undefined,
+          : `No new bookings needed${driftNote}`
+        : driftNote
+          ? `Booked ${bookingIds.length}${driftNote}`
+          : undefined,
   };
 }

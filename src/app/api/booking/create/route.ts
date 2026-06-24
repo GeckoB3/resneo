@@ -46,6 +46,7 @@ import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointme
 import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
+import { validateEventTicketBooking } from '@/lib/experience-events/validate-event-ticket-booking';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import {
   fetchResourceInput,
@@ -53,6 +54,7 @@ import {
   isResourceBookingStartInPast,
 } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -76,6 +78,10 @@ import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitle
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
+import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
+import { membershipCoversClassType } from '@/lib/class-commerce/membership-allowance-coverage';
+import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/membership-class-access';
+import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
@@ -676,6 +682,13 @@ async function handleNonTableBooking(
   } = await routeAuthClient.auth.getUser();
 
   let pendingClassCreditRedemption: { userId: string; credits: number; classTypeId: string } | null = null;
+  /** Allowance-plan membership consumption to ledger after the booking row exists (mirrors the cart). */
+  let pendingAllowanceRedemption: {
+    membershipId: string;
+    userId: string;
+    sessions: number;
+    classTypeId: string;
+  } | null = null;
 
   if (pay_with_class_credits && effectiveModel !== 'class_session') {
     return NextResponse.json(
@@ -721,6 +734,12 @@ async function handleNonTableBooking(
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
   let requiresDeposit = false;
+  // Server-priced, server-labelled event ticket lines (M1/C2). Populated in the
+  // event_ticket branch by validateEventTicketBooking; the booking_ticket_lines
+  // insert below uses these in preference to the client-supplied ticket_lines.
+  let validatedEventTicketLines:
+    | Array<{ ticket_type_id: string; label: string; quantity: number; unit_price_pence: number }>
+    | null = null;
   let resourcePaymentRequirement: ClassPaymentRequirement | null = null;
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
   let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
@@ -1076,28 +1095,31 @@ async function handleNonTableBooking(
     if (venueWideErrEvent) {
       return NextResponse.json({ error: venueWideErrEvent }, { status: 400 });
     }
-    const ticketTotal = (ticket_lines && ticket_lines.length > 0)
-      ? ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0)
-      : 0;
-    const eventPayReq = event.payment_requirement ?? 'none';
-    const eventDepPerPerson = event.deposit_amount_pence ?? 0;
-    if (eventPayReq === 'full_payment' && ticketTotal > 0) {
-      requiresDeposit = true;
-      depositAmountPence = ticketTotal;
-    } else if (eventPayReq === 'deposit' && eventDepPerPerson > 0) {
-      requiresDeposit = true;
-      depositAmountPence = eventDepPerPerson * party_size;
+    // M1/C2: never trust client ticket prices/labels. Re-derive ticket lines,
+    // per-tier capacity, party_size==Σqty and the charge from the authoritative
+    // event slot. Mirrors the staff route (/api/venue/bookings).
+    const eventValidation = validateEventTicketBooking({
+      slot: event,
+      ticketLines: ticket_lines,
+      partySize: party_size,
+      requestedStartTime: timeStr,
+    });
+    if (!eventValidation.ok) {
+      return NextResponse.json({ error: eventValidation.error }, { status: eventValidation.status });
     }
+    validatedEventTicketLines = eventValidation.value.ticketLines;
+    const ticketTotal = eventValidation.value.ticketTotalPence;
+    requiresDeposit = eventValidation.value.requiresDeposit;
+    depositAmountPence = eventValidation.value.requiresDeposit
+      ? eventValidation.value.depositAmountPence
+      : null;
     const ticketTotalDisplay =
       ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
-    const eventTicketPriceLines =
-      ticket_lines && ticket_lines.length > 0
-        ? ticket_lines.map((tl) => ({
-            label: tl.label,
-            quantity: tl.quantity,
-            unit_price_pence: tl.unit_price_pence,
-          }))
-        : undefined;
+    const eventTicketPriceLines = validatedEventTicketLines.map((tl) => ({
+      label: tl.label,
+      quantity: tl.quantity,
+      unit_price_pence: tl.unit_price_pence,
+    }));
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'event_ticket',
@@ -1105,7 +1127,7 @@ async function handleNonTableBooking(
       practitioner_name: null,
       appointment_price_display: ticketTotalDisplay,
       booking_total_price_pence: ticketTotal > 0 ? ticketTotal : null,
-      ...(eventTicketPriceLines ? { booking_ticket_price_lines: eventTicketPriceLines } : {}),
+      booking_ticket_price_lines: eventTicketPriceLines,
     };
   } else if (effectiveModel === 'class_session') {
     if (!class_instance_id) {
@@ -1146,7 +1168,62 @@ async function handleNonTableBooking(
       appointment_price_display: classPriceDisplay,
     };
 
-    if (pay_with_class_credits) {
+    // M4/M6: resolve entitlement coverage in product-rule precedence
+    // (course → membership → credits → card) for a signed-in member/enrollee. A covered
+    // session is free and must never burn a class credit. The multi-session cart already
+    // does this (orchestrate-class-cart-checkout.ts); the single-class path did not, so a
+    // member/enrollee who booked one class and opted to pay with credits burned a credit —
+    // and a member who did not opt in was charged the deposit.
+    let classCoveredByEntitlement = false;
+    const classOnlineCharge = requiresDeposit && depositAmountPence ? depositAmountPence : 0;
+    if (classOnlineCharge > 0 && routeAuthUser?.id && routeAuthUser.email) {
+      const emailNorm = String(email ?? '').trim().toLowerCase();
+      const authEmail = routeAuthUser.email.trim().toLowerCase();
+      if (emailNorm && emailNorm === authEmail) {
+        const courseCovers = await userCourseCoversClassInstance(supabase, {
+          userId: routeAuthUser.id,
+          venueId: venue_id,
+          classInstanceId: class_instance_id,
+        });
+        if (courseCovers) {
+          classCoveredByEntitlement = true;
+        } else {
+          const coverage = await membershipCoversClassType(supabase, {
+            userId: routeAuthUser.id,
+            venueId: venue_id,
+            classTypeId: cls.class_type_id,
+            partySize: party_size,
+          });
+          let membershipCovers = coverage.ok;
+          if (!membershipCovers) {
+            // Fallback to the legacy unlimited check in case allowance ledger rows are stale.
+            membershipCovers = await membershipUnlimitedCoversClassType(supabase, {
+              userId: routeAuthUser.id,
+              venueId: venue_id,
+              classTypeId: cls.class_type_id,
+            });
+          }
+          if (membershipCovers) {
+            classCoveredByEntitlement = true;
+            // Allowance plans must ledger the consumption against the new booking row.
+            if (coverage.ok && coverage.mode === 'allowance') {
+              pendingAllowanceRedemption = {
+                membershipId: coverage.membershipId,
+                userId: routeAuthUser.id,
+                sessions: party_size,
+                classTypeId: cls.class_type_id,
+              };
+            }
+          }
+        }
+      }
+    }
+    if (classCoveredByEntitlement) {
+      requiresDeposit = false;
+      depositAmountPence = null;
+    }
+
+    if (pay_with_class_credits && !classCoveredByEntitlement) {
       if (!routeAuthUser?.id || !routeAuthUser.email) {
         return NextResponse.json({ error: 'Sign in to pay with class credits.' }, { status: 401 });
       }
@@ -1224,6 +1301,13 @@ async function handleNonTableBooking(
       return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
     }
     const endForVenue = (booking_end_time.length === 5 ? booking_end_time : booking_end_time.slice(0, 5)).slice(0, 5);
+    // Store a TRUE UTC instant for estimated_end_time: interpret the booking-date +
+    // end wall-clock in the venue IANA timezone (DST-safe). Previously left null on
+    // the create path; the resource-modify route should match this convention rather
+    // than serialising venue-local wall-clock as UTC.
+    estimatedEndTime = new Date(
+      venueLocalDateTimeToUtcMs(booking_date, endForVenue, venueTzResource),
+    ).toISOString();
     const venueWideErrRes = venueWideBlocksRejectBookingWindow(
       venueWideHours.openingHours,
       booking_date,
@@ -1462,6 +1546,23 @@ async function handleNonTableBooking(
     .single();
 
   if (bookErr) {
+    // C1: the enforce_cde_capacity DB trigger RAISES (SQLSTATE 23P01,
+    // message contains CDE_CAPACITY) when an event/class/resource slot just
+    // filled or overlapped between the availability read and this insert.
+    // Surface that race as a 409 for the CDE models, not a generic 500.
+    const isCapacityConflict =
+      bookErr.code === '23P01' || bookErr.message?.includes('CDE_CAPACITY');
+    if (
+      isCapacityConflict &&
+      (effectiveModel === 'event_ticket' ||
+        effectiveModel === 'class_session' ||
+        effectiveModel === 'resource_booking')
+    ) {
+      return NextResponse.json(
+        { error: 'This slot is no longer available — it was just booked.' },
+        { status: 409 },
+      );
+    }
     console.error('Booking insert failed:', bookErr);
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
   }
@@ -1495,9 +1596,31 @@ async function handleNonTableBooking(
     }
   }
 
-  // Insert ticket lines for event/class bookings
-  if (ticket_lines && ticket_lines.length > 0) {
-    const lines = ticket_lines.map((tl) => ({
+  if (pendingAllowanceRedemption) {
+    const consumed = await consumeMembershipAllowanceForBooking({
+      admin: supabase,
+      membershipId: pendingAllowanceRedemption.membershipId,
+      userId: pendingAllowanceRedemption.userId,
+      venueId: venue_id,
+      sessions: pendingAllowanceRedemption.sessions,
+      bookingId: booking.id,
+      idempotencyKey: `redeem_allowance_booking:${booking.id}`,
+    });
+    if (!consumed.ok) {
+      console.error('[booking/create] membership allowance redeem failed', consumed);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json(
+        { error: 'Could not apply your membership allowance. Refresh and try again.' },
+        { status: 409 },
+      );
+    }
+  }
+
+  // Insert ticket lines for event bookings. Use the server-priced, server-labelled
+  // lines from validateEventTicketBooking (M1/C2) — never the client-supplied prices.
+  const ticketLinesToInsert = validatedEventTicketLines ?? ticket_lines;
+  if (ticketLinesToInsert && ticketLinesToInsert.length > 0) {
+    const lines = ticketLinesToInsert.map((tl) => ({
       booking_id: booking.id,
       ticket_type_id: tl.ticket_type_id,
       label: tl.label,

@@ -5,7 +5,6 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
-import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 
 function normalizeTimeForDb(t: string): string {
@@ -130,9 +129,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ignoreDuplicates: the unique index (class_type_id, instance_date, start_time)
+    // makes concurrent double-submits skip cleanly instead of erroring; .select()
+    // returns only the rows actually inserted.
     const { data: inserted, error: insertErr } = await admin
       .from('class_instances')
-      .insert(toInsert)
+      .upsert(toInsert, {
+        onConflict: 'class_type_id,instance_date,start_time',
+        ignoreDuplicates: true,
+      })
       .select('id, class_type_id, instance_date, start_time');
 
     if (insertErr) {
@@ -140,22 +145,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create instances' }, { status: 500 });
     }
 
-    const venueId = staff.venue_id;
-    await Promise.all(
-      (inserted ?? []).map((row) =>
-        syncCalendarBlockForClassInstance(admin, {
-          venueId,
-          classInstanceId: (row as { id: string }).id,
-          instanceDate: String((row as { instance_date: string }).instance_date),
-          startTime: String((row as { start_time: string }).start_time),
-          classTypeId: (row as { class_type_id: string }).class_type_id,
-          skipBlock: false,
-          createdByStaffId: staff.id,
-        }),
-      ),
-    );
+    const created = inserted?.length ?? 0;
 
-    return NextResponse.json({ created: inserted?.length ?? 0, skipped });
+    // Class sessions render on the calendar from the schedule feed, not as `calendar_blocks`,
+    // and a freshly-inserted instance has no block to clear — so no per-row block sync is needed
+    // here (it was a delete-only no-op running once per inserted row).
+
+    return NextResponse.json({ created, skipped: normalized.length - created });
   } catch (err) {
     console.error('POST /api/venue/class-instances/bulk failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

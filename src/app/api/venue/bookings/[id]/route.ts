@@ -76,6 +76,10 @@ import {
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
 import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
+import { validateClassModification } from '@/lib/booking/validate-class-modification';
+import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
@@ -150,7 +154,10 @@ export async function GET(
       ? booking.booking_time.slice(0, 5)
       : '';
 
-    const [detailBundle, cde_context, practitioner_name] = await Promise.all([
+    const inferredForRefund = inferBookingRowModel(
+      booking as Parameters<typeof inferBookingRowModel>[0],
+    );
+    const [detailBundle, cde_context, practitioner_name, refund_notice_hours] = await Promise.all([
       loadStaffBookingDetailBundle(scopeDb, id, scopeVenueId, { includeTimeline: true }),
       resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
       resolveBookingStaffName(
@@ -158,6 +165,24 @@ export async function GET(
         booking as { calendar_id?: string | null; practitioner_id?: string | null },
         scopeVenueId,
       ),
+      // §5.6 #5 — the staff drawer's refund banner needs the booking's deposit
+      // cancellation-notice window. Resolve it from the same per-entity source
+      // the create/confirm-modify paths use (so it matches the stored
+      // cancellation_deadline) rather than the venue-wide rule.
+      resolveCancellationNoticeHoursForCreate({
+        supabase: scopeDb,
+        venueId: scopeVenueId,
+        effectiveModel: inferredForRefund,
+        tableServiceId: (booking as { service_id?: string | null }).service_id ?? null,
+        appointmentServiceId: (booking as { appointment_service_id?: string | null }).appointment_service_id ?? null,
+        serviceItemId: (booking as { service_item_id?: string | null }).service_item_id ?? null,
+        experienceEventId: (booking as { experience_event_id?: string | null }).experience_event_id ?? null,
+        classInstanceId: (booking as { class_instance_id?: string | null }).class_instance_id ?? null,
+        resourceCalendarId: (booking as { resource_id?: string | null }).resource_id ?? null,
+      }).catch((e) => {
+        console.error('GET /api/venue/bookings/[id] refund notice resolve failed:', e);
+        return 48;
+      }),
     ]);
 
     if (!detailBundle) {
@@ -268,6 +293,7 @@ export async function GET(
       service_variant_name,
       service_variant_price_pence,
       addons,
+      refund_notice_hours,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -1292,6 +1318,7 @@ export async function PATCH(
         body.service_item_id !== undefined ||
         body.processing_time_blocks !== undefined ||
         body.practitioner_id !== undefined ||
+        body.target_class_instance_id !== undefined ||
         (body as { service_variant_id?: unknown }).service_variant_id !== undefined;
 
       if (!scheduleModifyRequested) {
@@ -1314,6 +1341,7 @@ export async function PATCH(
       body.duration_minutes !== undefined ||
       body.processing_time_blocks !== undefined ||
       body.practitioner_id !== undefined ||
+      body.target_class_instance_id !== undefined ||
       (body as { service_variant_id?: unknown }).service_variant_id !== undefined
     ) {
       const inferredForModify = inferBookingRowModel({
@@ -1390,16 +1418,47 @@ export async function PATCH(
         const skipModificationGuestNotification =
           (body as Record<string, unknown>).skip_booking_modification_guest_notification === true;
 
-        const [yr, mr, dr] = newDate.split('-').map(Number);
-        const [hr, minr] = timeStr.split(':').map(Number);
-        const estimatedEnd = new Date(Date.UTC(yr!, mr! - 1, dr!, hr!, minr!, 0));
-        estimatedEnd.setMinutes(estimatedEnd.getMinutes() + validation.durationMinutes);
+        // estimated_end_time must be a TRUE UTC instant for the venue timezone.
+        // We resolve the venue-local start wall-clock (newDate + timeStr) to a
+        // real UTC instant via venueLocalDateTimeToUtcMs, then add the booking
+        // duration. Adding minutes to the start *instant* is correct across DST
+        // and midnight wrap (unlike re-interpreting an HH:mm end that may have
+        // rolled past 24:00). booking_end_time still carries the venue-local
+        // wall-clock HH:mm, so every wall-clock reader keeps working — they all
+        // prefer booking_end_time over estimated_end_time for resource rows.
+        const { data: venueTz } = await admin
+          .from('venues')
+          .select('timezone')
+          .eq('id', scopeVenueId)
+          .single();
+        const venueTimezone =
+          typeof venueTz?.timezone === 'string' && venueTz.timezone.trim() !== ''
+            ? venueTz.timezone.trim()
+            : 'Europe/London';
+        const startUtcMs = venueLocalDateTimeToUtcMs(newDate, timeStr, venueTimezone);
+        const estimatedEnd = new Date(startUtcMs + validation.durationMinutes * 60_000);
+
+        // Re-pin the deposit-refund deadline to the NEW start. Without this the
+        // cancellation_deadline stays anchored to the old start time after a
+        // staff move (mirrors the guest self-reschedule path in /api/confirm).
+        const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+          supabase: admin,
+          venueId: scopeVenueId,
+          effectiveModel: 'resource_booking',
+          resourceCalendarId: resourceId,
+        });
+        const cancellation_deadline = cancellationDeadlineHoursBefore(
+          newDate,
+          newTime,
+          refundWindowHours,
+        );
 
         const bookingUpdate: Record<string, unknown> = {
           booking_date: newDate,
           booking_time: newTime,
           booking_end_time: `${validation.endHHmm}:00`,
           estimated_end_time: estimatedEnd.toISOString(),
+          cancellation_deadline,
           updated_at: new Date().toISOString(),
         };
 
@@ -1413,6 +1472,20 @@ export async function PATCH(
           .maybeSingle();
 
         if (modifyUpdErr) {
+          // The `enforce_cde_capacity` DB trigger RAISEs SQLSTATE 23P01 with
+          // message 'CDE_CAPACITY' when this reschedule would overlap another
+          // resource booking. Surface that as a 409 (slot taken) rather than a
+          // generic 500, while keeping the optimistic-concurrency 412 below.
+          const modifyErr = modifyUpdErr as { code?: string | null; message?: string | null };
+          const isCapacityConflict =
+            modifyErr.code === '23P01' ||
+            (typeof modifyErr.message === 'string' && modifyErr.message.includes('CDE_CAPACITY'));
+          if (isCapacityConflict) {
+            return NextResponse.json(
+              { error: 'That slot is no longer available.', code: 'slot_unavailable' },
+              { status: 409 },
+            );
+          }
           console.error('Resource booking modify update failed:', modifyUpdErr);
           return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 });
         }
@@ -1476,14 +1549,199 @@ export async function PATCH(
         return NextResponse.json(updatedAfterModify);
       }
 
-      if (
-        inferredForModify === 'event_ticket' ||
-        inferredForModify === 'class_session'
-      ) {
+      if (inferredForModify === 'class_session') {
+        // Staff slot-move: relocate to another FUTURE instance of the SAME class
+        // type (§5.6 #1). Reuses validateClassModification (the same dry-run the
+        // guest manage link uses) and is capacity-safe via the
+        // `enforce_cde_capacity` DB trigger (409 on oversell). Date/time/party
+        // edits other than the instance move are not supported here.
+        const targetInstanceId =
+          typeof body.target_class_instance_id === 'string'
+            ? body.target_class_instance_id
+            : null;
+        if (!targetInstanceId) {
+          return NextResponse.json(
+            {
+              error:
+                'Pick another session of this class to move the booking to. Other fields can’t be changed here.',
+            },
+            { status: 400 },
+          );
+        }
+
+        const currentStatus = booking.status as string;
+        if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(currentStatus)) {
+          return NextResponse.json(
+            { error: 'This booking can no longer be moved' },
+            { status: 400 },
+          );
+        }
+
+        const currentInstanceId = booking.class_instance_id as string | null;
+        if (!currentInstanceId) {
+          return NextResponse.json(
+            { error: 'This booking is missing its class session' },
+            { status: 400 },
+          );
+        }
+        if (targetInstanceId === currentInstanceId) {
+          return NextResponse.json(
+            { error: 'That is the session this booking is already on' },
+            { status: 400 },
+          );
+        }
+
+        // Block credit/membership-paid moves (v1) — re-attaching the entitlement
+        // to a different instance is not yet built; cancel+rebook restores it.
+        const { bookingWasCreditPaid, bookingWasMembershipPaid } = await import(
+          '@/lib/class-commerce/booking-was-credit-paid'
+        );
+        if (
+          (await bookingWasCreditPaid(admin, id)) ||
+          (await bookingWasMembershipPaid(admin, id))
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                'This class was paid with a class pass or membership, so it can’t be moved here yet. Cancel and rebook to keep the entitlement.',
+              code: 'entitlement_booking',
+            },
+            { status: 409 },
+          );
+        }
+
+        const { data: curInst } = await admin
+          .from('class_instances')
+          .select('class_type_id')
+          .eq('id', currentInstanceId)
+          .maybeSingle();
+        const currentClassTypeId =
+          (curInst as { class_type_id?: string } | null)?.class_type_id ?? null;
+        if (!currentClassTypeId) {
+          return NextResponse.json({ error: 'This class is no longer available' }, { status: 400 });
+        }
+
+        const { data: venueTzRow } = await admin
+          .from('venues')
+          .select('timezone')
+          .eq('id', scopeVenueId)
+          .single();
+        const venueTimezone =
+          typeof venueTzRow?.timezone === 'string' && venueTzRow.timezone.trim() !== ''
+            ? venueTzRow.timezone.trim()
+            : 'Europe/London';
+
+        const partySize = Number(booking.party_size) || 1;
+        const validation = await validateClassModification({
+          admin,
+          venueId: scopeVenueId,
+          bookingId: id,
+          currentClassTypeId,
+          targetInstanceId,
+          partySize,
+          venueTimezone,
+          enforceGuestNotice: false,
+        });
+        if (!validation.ok) {
+          const status = validation.reason.includes('full') ? 409 : 400;
+          return NextResponse.json({ error: validation.reason }, { status });
+        }
+
+        const newTime =
+          validation.startTime.length === 5 ? `${validation.startTime}:00` : validation.startTime;
+        const startUtcMs = venueLocalDateTimeToUtcMs(
+          validation.instanceDate,
+          validation.startTime,
+          venueTimezone,
+        );
+        const estimatedEnd = new Date(startUtcMs + validation.durationMinutes * 60_000);
+        const cancellation_deadline = cancellationDeadlineHoursBefore(
+          validation.instanceDate,
+          newTime,
+          validation.cancellationNoticeHours,
+        );
+
+        const beforeTime =
+          typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00';
+        const prevUpdatedAt = booking.updated_at as string;
+        const { data: classUpdated, error: classUpdErr } = await staff.db
+          .from('bookings')
+          .update({
+            class_instance_id: targetInstanceId,
+            booking_date: validation.instanceDate,
+            booking_time: newTime,
+            estimated_end_time: estimatedEnd.toISOString(),
+            cancellation_deadline,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .eq('updated_at', prevUpdatedAt)
+          .select('*')
+          .maybeSingle();
+
+        if (classUpdErr) {
+          const e = classUpdErr as { code?: string | null; message?: string | null };
+          const isCapacityConflict =
+            e.code === '23P01' ||
+            (typeof e.message === 'string' && e.message.includes('CDE_CAPACITY'));
+          if (isCapacityConflict) {
+            return NextResponse.json(
+              { error: 'That session just filled. Please choose another session.', code: 'slot_unavailable' },
+              { status: 409 },
+            );
+          }
+          console.error('Class booking staff move failed:', classUpdErr);
+          return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 });
+        }
+        if (!classUpdated) {
+          return NextResponse.json(
+            { error: 'Booking was modified elsewhere. Refresh and try again.', code: 'stale_booking' },
+            { status: 412 },
+          );
+        }
+
+        const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
+        await logBookingModifiedEvent(admin, {
+          venue_id: scopeVenueId,
+          booking_id: id,
+          modification_actor: 'staff',
+          before: { booking_date: booking.booking_date, booking_time: beforeTime },
+          after: { booking_date: validation.instanceDate, booking_time: validation.startTime },
+        });
+
+        after(async () => {
+          try {
+            const { executeBookingModificationGuestNotification } = await import(
+              '@/lib/booking/send-booking-modification-guest-notification'
+            );
+            await executeBookingModificationGuestNotification(admin, scopeVenueId, id);
+          } catch (commsErr) {
+            console.error('Class booking staff move notification failed:', commsErr);
+          }
+        });
+
+        try {
+          await admin
+            .from('communication_logs')
+            .delete()
+            .eq('booking_id', id)
+            .in('message_type', [...COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE]);
+        } catch (logResetErr) {
+          console.error('Communication log reset failed after class move:', logResetErr);
+        }
+
+        await auditLinkedBookingChange(
+          (classUpdated as Record<string, unknown> | null) ?? null,
+          'edited_booking',
+        );
+        return NextResponse.json(classUpdated);
+      }
+
+      if (inferredForModify === 'event_ticket') {
         return NextResponse.json(
           {
             error:
-              'Date, time, or party size cannot be changed here for this booking type. Cancel the booking if policy allows and create a new booking.',
+              'Event tickets can’t be moved to another date here. Cancel the booking if policy allows and create a new booking.',
           },
           { status: 400 },
         );

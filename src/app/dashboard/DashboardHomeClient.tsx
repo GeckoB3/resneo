@@ -353,6 +353,59 @@ export function DashboardHomeClient({
           />
         </div>
 
+        {payload.cde_today &&
+          (payload.cde_today.classes || payload.cde_today.events || payload.cde_today.resources) && (
+            <div>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Today at a glance
+              </h2>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 lg:gap-4">
+                {payload.cde_today.classes ? (
+                  <DashboardStatCard
+                    label="Classes today"
+                    value={payload.cde_today.classes.bookings}
+                    color="brand"
+                    subValue={
+                      payload.cde_today.classes.fill_percent != null
+                        ? `${payload.cde_today.classes.fill_percent}% full · ${payload.cde_today.classes.attendees}${
+                            payload.cde_today.classes.capacity != null
+                              ? `/${payload.cde_today.classes.capacity}`
+                              : ''
+                          } booked`
+                        : payload.cde_today.classes.bookings > 0
+                          ? `${payload.cde_today.classes.attendees} attendee${payload.cde_today.classes.attendees !== 1 ? 's' : ''} booked`
+                          : 'no class bookings yet'
+                    }
+                  />
+                ) : null}
+                {payload.cde_today.events ? (
+                  <DashboardStatCard
+                    label="Event tickets today"
+                    value={payload.cde_today.events.tickets}
+                    color="violet"
+                    subValue={
+                      payload.cde_today.events.bookings > 0
+                        ? `${payload.cde_today.events.bookings} booking${payload.cde_today.events.bookings !== 1 ? 's' : ''} · £${payload.cde_today.events.revenue.toFixed(2)} taken`
+                        : 'no ticket sales yet'
+                    }
+                  />
+                ) : null}
+                {payload.cde_today.resources ? (
+                  <DashboardStatCard
+                    label="Resource bookings today"
+                    value={payload.cde_today.resources.bookings}
+                    color="amber"
+                    subValue={
+                      payload.cde_today.resources.bookings > 0
+                        ? 'booked today'
+                        : 'no resource bookings yet'
+                    }
+                  />
+                ) : null}
+              </div>
+            </div>
+          )}
+
         {payload.today_by_booking_model &&
           Object.keys(payload.today_by_booking_model).length > 0 &&
           !tableFocusSecondariesEnabled && (

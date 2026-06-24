@@ -3,6 +3,10 @@ import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parseMembershipRules } from '@/lib/class-commerce/product-schemas';
 import {
+  ALLOWANCE_CONSUMING_REASONS,
+  netAllowanceConsumed,
+} from '@/lib/class-commerce/membership-allowance-coverage';
+import {
   extraVenueIdsFromUrl,
   getClassCommerceVenuesForUser,
 } from '@/lib/class-commerce/user-venue-scope';
@@ -110,14 +114,14 @@ export async function GET(request: Request) {
         : rowsForM;
       const resetRow = inPeriod.find((r) => r.reason === 'period_reset');
       const carryOver = resetRow?.delta_sessions ?? 0;
-      let consumed = 0;
-      for (const r of inPeriod) {
-        if (r.reason === 'period_reset') continue;
-        consumed -= r.delta_sessions;
-      }
+      // Net consumption via the shared primitive so this display never drifts from the
+      // coverage check / period-reset cron (which use the same helper + reason set).
+      const consumed = netAllowanceConsumed(
+        inPeriod.filter((r) => (ALLOWANCE_CONSUMING_REASONS as readonly string[]).includes(r.reason)),
+      );
       const startingBalance = allowance + (rules.rollover ? carryOver : 0);
-      const remaining = Math.max(0, startingBalance - Math.max(0, consumed));
-      const used = Math.max(0, Math.min(startingBalance, Math.max(0, consumed)));
+      const remaining = Math.max(0, startingBalance - consumed);
+      const used = Math.max(0, Math.min(startingBalance, consumed));
       return {
         unlimited: false as const,
         allowance_per_period: allowance,

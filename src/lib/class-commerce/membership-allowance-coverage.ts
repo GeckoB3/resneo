@@ -35,6 +35,51 @@ interface AllowanceLedgerRow {
   reason: string;
 }
 
+/** Allowance-ledger reasons that net against the period balance. */
+export const ALLOWANCE_CONSUMING_REASONS = [
+  'redeem',
+  'restore',
+  'admin_adjust',
+  'payment_reversal',
+] as const;
+
+/**
+ * Net sessions consumed from a set of allowance-ledger rows. `redeem` rows are
+ * negative (-N) and `restore`/positive adjustments are positive (+N); consumption
+ * is the negated sum, floored at zero. Pure — shared by the coverage check and the
+ * period-reset cron so the two never drift.
+ */
+export function netAllowanceConsumed(
+  rows: ReadonlyArray<{ delta_sessions: number }>,
+): number {
+  let consumed = 0;
+  for (const r of rows) consumed -= r.delta_sessions;
+  return Math.max(0, consumed);
+}
+
+/**
+ * Compute the carry-over (rollover) into a new period, given the leftover balance
+ * of the prior period and the plan's rollover settings. Pure.
+ *
+ * @param priorStartingBalance allowance granted for the prior period plus any
+ *   carry-over it itself received.
+ * @param priorConsumed net sessions consumed during the prior period.
+ * @param rollover whether the plan rolls leftover sessions forward at all.
+ * @param rolloverLimit optional cap on how many sessions may carry over.
+ */
+export function computeRolloverCarryOver(params: {
+  priorStartingBalance: number;
+  priorConsumed: number;
+  rollover: boolean;
+  rolloverLimit: number | null | undefined;
+}): number {
+  const { priorStartingBalance, priorConsumed, rollover, rolloverLimit } = params;
+  if (!rollover) return 0;
+  const leftover = Math.max(0, priorStartingBalance - Math.max(0, priorConsumed));
+  const cap = rolloverLimit ?? leftover;
+  return Math.max(0, Math.min(leftover, cap));
+}
+
 /**
  * Inclusive of `redeem`/`restore` rows since the most recent period boundary.
  * `period_reset` rows themselves are not double-counted (they record carry-over,
@@ -47,7 +92,11 @@ async function sumAllowanceConsumedThisPeriod(
 ): Promise<{ ok: true; consumed: number; carryOver: number } | { ok: false }> {
   // First, find the most recent period_reset row at or after periodStartIso so that
   // its delta becomes our "starting carry-over" for the period.
-  const sinceIso = periodStartIso ?? new Date(0).toISOString();
+  //
+  // Fallback when periodStartIso is null: scope to "now" (an empty window) rather
+  // than epoch. An unknown period start must not pull every historical redeem into
+  // the current period and over-count consumption (M5.2 / §5.2).
+  const sinceIso = periodStartIso ?? new Date().toISOString();
 
   const { data: resetRows, error: resetErr } = await admin
     .from('class_membership_allowance_ledger')
@@ -69,18 +118,15 @@ async function sumAllowanceConsumedThisPeriod(
     .select('delta_sessions, reason, created_at')
     .eq('membership_id', membershipId)
     .gte('created_at', sinceIso)
-    .in('reason', ['redeem', 'restore', 'admin_adjust', 'payment_reversal']);
+    .in('reason', [...ALLOWANCE_CONSUMING_REASONS]);
 
   if (error) {
     console.error('[membership-allowance-coverage] ledger', error);
     return { ok: false };
   }
-  let consumed = 0;
-  for (const r of (rows ?? []) as AllowanceLedgerRow[]) {
-    // redeem rows are negative (-N), restore rows positive (+N).
-    consumed -= r.delta_sessions; // sums to NET sessions consumed
-  }
-  return { ok: true, consumed: Math.max(0, consumed), carryOver };
+  // redeem rows are negative (-N), restore rows positive (+N): NET sessions consumed.
+  const consumed = netAllowanceConsumed((rows ?? []) as AllowanceLedgerRow[]);
+  return { ok: true, consumed, carryOver };
 }
 
 /**
@@ -153,6 +199,12 @@ export async function membershipCoversClassType(
     }
 
     if (rules.allowance_per_period && rules.allowance_per_period > 0) {
+      // Money-safety: without a known current_period_start we cannot window this
+      // period's consumption — the ledger sum would see 0 consumed and grant the
+      // allowance as if it were unlimited (a free-class leak). Skip allowance
+      // coverage for such memberships; they fall back to credits/card until the
+      // period syncs (the reconcile-class-memberships cron repopulates it).
+      if (!m.current_period_start) continue;
       const summary = await sumAllowanceConsumedThisPeriod(
         admin,
         m.id,

@@ -39,6 +39,37 @@ const KIND_LABELS: Record<string, string> = {
   staff: 'Staff list',
 };
 
+/** Small, realistic example files a non-technical user can pattern-match against. */
+const SAMPLE_TEMPLATES = {
+  clients: {
+    filename: 'sample-clients.csv',
+    rows: [
+      ['First name', 'Last name', 'Email', 'Phone', 'Notes'],
+      ['Sarah', 'Jones', 'sarah.jones@example.com', '07700 900123', 'Prefers afternoon appointments'],
+      ['Michael', 'Okafor', 'michael.okafor@example.com', '07700 900456', 'Allergic to lavender oil'],
+      ['Priya', 'Patel', 'priya.patel@example.com', '07700 900789', ''],
+    ],
+  },
+  bookings: {
+    filename: 'sample-bookings.csv',
+    rows: [
+      ['Date', 'Time', 'Client name', 'Email', 'Phone', 'Service', 'Staff', 'Price', 'Status'],
+      ['2025-07-14', '10:00', 'Sarah Jones', 'sarah.jones@example.com', '07700 900123', 'Haircut', 'Emma', '35.00', 'Completed'],
+      ['2025-07-14', '11:30', 'Michael Okafor', 'michael.okafor@example.com', '07700 900456', 'Beard trim', 'Daniel', '18.00', 'Completed'],
+      ['2025-07-15', '09:15', 'Priya Patel', 'priya.patel@example.com', '07700 900789', 'Colour & cut', 'Emma', '90.00', 'Booked'],
+    ],
+  },
+} as const;
+
+/** Quote a CSV cell when it contains a comma, quote, or newline (RFC 4180). */
+function toCsvCell(value: string): string {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function buildSampleCsv(rows: readonly (readonly string[])[]): string {
+  return rows.map((row) => row.map(toCsvCell).join(',')).join('\r\n');
+}
+
 export function UploadStepClient({ sessionId }: { sessionId: string }) {
   const [files, setFiles] = useState<ImportFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +81,10 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
   const [reshaping, setReshaping] = useState<Set<string>>(new Set());
   const [reshapePreview, setReshapePreview] = useState<Record<string, ReshapePreview>>({});
   const [reshapeFailed, setReshapeFailed] = useState<Record<string, string>>({});
+  const [dragActive, setDragActive] = useState(false);
+  // Drag events fire on every child element; count enter/leave so the highlight
+  // only clears when the cursor truly leaves the drop zone.
+  const dragDepth = useRef(0);
   const reshapeTriggered = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -170,6 +205,49 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
     setUploading(false);
   }
 
+  function handleDragEnter(e: React.DragEvent) {
+    if (uploading) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    if (e.dataTransfer?.types?.includes('Files')) setDragActive(true);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    // Calling preventDefault on dragover is required for the drop event to fire.
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    if (uploading) return;
+    const dropped = e.dataTransfer?.files ?? null;
+    if (dropped?.length) void onFilesSelected(dropped);
+  }
+
+  function downloadSample(kind: keyof typeof SAMPLE_TEMPLATES) {
+    const template = SAMPLE_TEMPLATES[kind];
+    const csv = buildSampleCsv(template.rows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = template.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke after the click so the browser has time to start the download.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   async function removeFile(id: string) {
     if (!window.confirm('Remove this file from the import?')) return;
     const res = await fetch(`/api/import/sessions/${sessionId}/files/${id}`, { method: 'DELETE' });
@@ -206,7 +284,17 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         </p>
       </div>
 
-      <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-14 text-center hover:border-brand-400">
+      <label
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-14 text-center transition-colors ${
+          dragActive
+            ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-200'
+            : 'border-slate-300 bg-white hover:border-brand-400'
+        }`}
+      >
         <input
           type="file"
           accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
@@ -215,8 +303,12 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           disabled={uploading}
           onChange={(e) => void onFilesSelected(e.target.files)}
         />
-        <span className="text-sm font-medium text-slate-700">
-          {uploading ? 'Uploading…' : 'Drop CSV or Excel files here, or click to browse'}
+        <span className={`text-sm font-medium ${dragActive ? 'text-brand-800' : 'text-slate-700'}`}>
+          {uploading
+            ? 'Uploading…'
+            : dragActive
+              ? 'Drop your files to upload'
+              : 'Drop CSV or Excel files here, or click to browse'}
         </span>
         <span className="mt-1 text-xs text-slate-500">
           Multiple files supported · each sheet in a workbook is read separately
@@ -395,6 +487,31 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
             columns are matched to ResNeo fields automatically; you just review the result, so the source platform
             does not need to be recognised.
           </p>
+          <div className="mt-4 border-t border-slate-200 pt-3">
+            <p className="font-medium text-slate-800">Not sure what a file should look like?</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Download an example to see the kind of columns we expect. Your own file doesn&apos;t need to match
+              exactly — these are just a guide.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadSample('clients')}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-brand-700 shadow-sm hover:border-brand-400 hover:text-brand-800"
+              >
+                <DownloadIcon />
+                Download a sample clients CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadSample('bookings')}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-brand-700 shadow-sm hover:border-brand-400 hover:text-brand-800"
+              >
+                <DownloadIcon />
+                Download a sample bookings CSV
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -425,5 +542,20 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         </p>
       )}
     </div>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+    </svg>
   );
 }

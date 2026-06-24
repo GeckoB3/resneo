@@ -43,6 +43,19 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
       throw new Error(`Undo failed (external_record_refs): ${refBookingErr.message}`);
     }
 
+    // Imported bookings may carry reminder-log rows written at import time by
+    // recordImportPassedReminderLogs. Remove them so undo leaves no orphaned
+    // communication_logs (and so an ON DELETE NO ACTION FK can't block the
+    // booking delete below).
+    const { error: commsLogErr } = await admin
+      .from('communication_logs')
+      .delete()
+      .eq('venue_id', venueId)
+      .in('booking_id', bookingIds);
+    if (commsLogErr) {
+      throw new Error(`Undo failed (communication_logs): ${commsLogErr.message}`);
+    }
+
     // Legacy DBs: table_statuses.booking_id used to block deletes (NO ACTION). Clear before delete.
     const { error: clearTsErr } = await admin.from('table_statuses').update({ booking_id: null }).in('booking_id', bookingIds);
     if (clearTsErr) {

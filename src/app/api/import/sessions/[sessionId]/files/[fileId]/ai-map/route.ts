@@ -5,6 +5,7 @@ import { runAiColumnMapping, type AiMappingRow } from '@/lib/import/ai-map-colum
 import { aliasMapColumns } from '@/lib/import/header-aliases';
 import { autoSplitCombinedNames } from '@/lib/import/auto-split-names';
 import { getCachedMappings, storeCachedMappings } from '@/lib/import/mapping-cache';
+import { sanitiseValueMap } from '@/lib/import/value-map';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export async function POST(
@@ -141,6 +142,8 @@ export async function POST(
     target_field: m.action === 'map' ? m.target_field : null,
     action: m.action === 'split' ? 'split' : m.action === 'ignore' ? 'ignore' : 'map',
     split_config: m.action === 'split' ? m.split_config ?? null : null,
+    // Reviewed raw->canonical enum lookup, validated against the target's vocabulary.
+    value_map: m.action === 'map' ? sanitiseValueMap(m.target_field, m.value_map ?? null) : null,
     // Alias matches are confirmed (not a suggestion the user must vet).
     ai_suggested: !isAlias,
     ai_confidence: m.confidence,

@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
+import { CAPACITY_CONSUMING_STATUSES, isCapacityConsumingStatus } from '@/lib/availability/capacity-status';
 import { bookingRowEndMinutes, unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
 import {
   resolveVenueWideAllowedMinuteRanges,
@@ -83,8 +84,7 @@ export interface ResourceAvailabilityResult {
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 /** Statuses that consume resource capacity (must match bookings query in fetchResourceInput). */
-export const RESOURCE_BOOKING_CAPACITY_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'] as const;
-const CAPACITY_CONSUMING_STATUSES: readonly string[] = RESOURCE_BOOKING_CAPACITY_STATUSES;
+export const RESOURCE_BOOKING_CAPACITY_STATUSES = CAPACITY_CONSUMING_STATUSES;
 
 function dayKeyForDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -321,7 +321,7 @@ export function computeResourceAvailability(
     }
 
     const resourceBookings = existingBookings.filter(
-      (b) => b.resource_id === resource.id && CAPACITY_CONSUMING_STATUSES.includes(b.status)
+      (b) => b.resource_id === resource.id && isCapacityConsumingStatus(b.status)
     );
 
     const slots: ResourceSlot[] = [];
@@ -404,7 +404,7 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
   }
 
   const resourceBookings = input.existingBookings.filter(
-    (b) => b.resource_id === resource.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
+    (b) => b.resource_id === resource.id && isCapacityConsumingStatus(b.status),
   );
 
   const { sameDaySlotCutoff } = input;

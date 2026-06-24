@@ -11,8 +11,9 @@ import {
 } from '@/lib/import/booking-import-defaults';
 import {
   normaliseEmail,
-  normalisePhoneUk,
+  normalisePhone,
 } from '@/lib/import/normalize';
+import { defaultPhoneCountryFromCurrency } from '@/lib/phone/e164';
 import {
   parseDateWithRepairs,
   parseTimeWithRepairs,
@@ -103,9 +104,19 @@ export async function runImportValidation(
     byFile.set(fid, list);
   }
 
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('currency')
+    .eq('id', venueId)
+    .maybeSingle();
+  const defaultPhoneCountry = defaultPhoneCountryFromCurrency(
+    (venueRow as { currency?: string | null } | null)?.currency,
+  );
+
   const { emails: existingEmails, phones: existingPhones } = await loadVenueGuestEmailsAndPhones(
     admin,
     venueId,
+    defaultPhoneCountry,
   );
 
   let errorCount = 0;
@@ -164,7 +175,7 @@ export async function runImportValidation(
         const fn = targets.first_name?.trim() ?? '';
         const ln = targets.last_name?.trim() ?? '';
         const emPreview = normaliseEmail(targets.email ?? null);
-        const phPreview = normalisePhoneUk(targets.phone ?? null);
+        const phPreview = normalisePhone(targets.phone ?? null, defaultPhoneCountry);
         const nameOutcome = evaluateClientRowNameRule({
           firstName: fn,
           lastName: ln,

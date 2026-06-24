@@ -350,11 +350,15 @@ export async function runExtractBookingReferences(
   const futureRows = staged.filter((r) => r.is_future_booking);
   const futureRowCount = futureRows.length;
 
-  if (futureRowCount === 0) {
+  // Historical imports (every booking in the past) must still extract references
+  // and stage rows, so past bookings get the same service/staff mapping treatment
+  // (and reference-resolved execution) as future ones. Only bail to staff-only
+  // when there are no parseable booking rows at all.
+  if (staged.length === 0) {
     return staffOnlyResult('no_future_rows');
   }
 
-  const rowInserts = futureRows.map((r) => ({
+  const rowInserts = staged.map((r) => ({
     session_id: sessionId,
     file_id: r.file_id,
     venue_id: venueId,
@@ -388,7 +392,7 @@ export async function runExtractBookingReferences(
     raw_duration_minutes: r.raw_duration_minutes,
     raw_import_metadata: r.raw_import_metadata,
     import_status: 'pending' as const,
-    is_future_booking: true,
+    is_future_booking: r.is_future_booking,
   }));
 
   for (let start = 0; start < rowInserts.length; start += INSERT_CHUNK_SIZE) {
@@ -433,7 +437,7 @@ export async function runExtractBookingReferences(
   const aggKey = (t: string, raw: string) => `${t}:::${raw.toLowerCase()}`;
 
   const aggMap = new Map<string, Agg>();
-  for (const r of futureRows) {
+  for (const r of staged) {
     const push = (type: string, raw: string | null, fileId: string) => {
       if (!raw?.trim()) return;
       const trimmed = raw.trim();

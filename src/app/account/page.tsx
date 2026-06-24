@@ -89,10 +89,22 @@ export default async function AccountHomePage() {
       icon: 'calendar',
     },
     {
+      href: '/account/events',
+      title: 'Events',
+      description: 'Upcoming event tickets and details.',
+      icon: 'spark',
+    },
+    {
       href: '/account/classes',
       title: 'Classes',
       description: 'Sessions, passes, and class activity.',
       icon: 'spark',
+    },
+    {
+      href: '/account/resources',
+      title: 'Resources',
+      description: 'Upcoming court, room, and equipment bookings.',
+      icon: 'building',
     },
     {
       href: '/account/profile',

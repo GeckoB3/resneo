@@ -27,6 +27,8 @@ interface ClassTimetableReadOnlyCalendarProps {
   /** If set, only matching instances are clickable (e.g. staff scoped to their calendar). */
   canEditInstance?: (inst: ReadOnlyCalendarInstance) => boolean;
   onOpenSchedule?: () => void;
+  /** Venue-local "today" (YYYY-MM-DD). Defaults to browser-local; pass the venue value to avoid TZ drift. */
+  todayIso?: string;
 }
 
 /**
@@ -41,6 +43,7 @@ export function ClassTimetableReadOnlyCalendar({
   onEditInstance,
   canEditInstance,
   onOpenSchedule,
+  todayIso: todayIsoProp,
 }: ClassTimetableReadOnlyCalendarProps) {
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -80,7 +83,7 @@ export function ClassTimetableReadOnlyCalendar({
   );
 
   const grid = useMemo(() => monthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayIsoProp ?? new Date().toISOString().slice(0, 10);
 
   const canClickInstance = (inst: ReadOnlyCalendarInstance) => {
     if (typeof onEditInstance !== 'function') return false;

@@ -1,5 +1,5 @@
 /** Status values treated as non-upcoming for account list filtering (case-sensitive as stored in DB). */
-const CANCELLED = new Set(['Cancelled', 'Canceled', 'NoShow', 'No Show']);
+const CANCELLED = new Set(['Cancelled', 'Canceled', 'No-Show', 'NoShow', 'No Show']);
 
 export function isPastBooking(bookingDate: string, status: string, todayUtcDate: string): boolean {
   if (bookingDate < todayUtcDate) return true;

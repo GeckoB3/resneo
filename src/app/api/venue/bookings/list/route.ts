@@ -22,7 +22,7 @@ import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
  * Optional: `owner_venue_id=<uuid>` with `experience_event_id` or `class_instance_id` — session bookings for a linked owner venue (requires full_details calendar grant).
  * Optional: service=<uuid>[,<uuid>...] filters table reservations by venue_services.id.
  * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
- * Optional: experience_event_id=<uuid> or class_instance_id=<uuid> — all bookings for that session (no date range required).
+ * Optional: experience_event_id=<uuid>, class_instance_id=<uuid>, or resource_id=<uuid> — all bookings for that event/class/resource (no date range required; capped).
  * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
  *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
  * Returns bookings for the authenticated venue, with guest name.
@@ -33,6 +33,13 @@ import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
  */
 const BOOKINGS_LIST_SELECT_FULL =
   'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode';
+
+/**
+ * Hard ceiling on rows returned by the otherwise-unbounded query shapes
+ * (guest-history window, single-session/event/resource, group, explicit ids).
+ * Generous enough for real sessions/histories while preventing a runaway scan.
+ */
+const BOOKINGS_LIST_MAX_ROWS = 1000;
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
@@ -68,6 +75,7 @@ export async function GET(request: NextRequest) {
     const calendarIdParam = request.nextUrl.searchParams.get('calendar');
     const experienceEventIdParam = request.nextUrl.searchParams.get('experience_event_id');
     const classInstanceIdParam = request.nextUrl.searchParams.get('class_instance_id');
+    const resourceIdParam = request.nextUrl.searchParams.get('resource_id');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -134,6 +142,19 @@ export async function GET(request: NextRequest) {
       query = query.neq('status', 'Cancelled');
     }
 
+    // Push status / attendance-confirmed filtering into the DB *before* any row
+    // cap (e.g. the 250-row guest-history window). Previously these were applied
+    // in JS after the fetch, so a guest with >250 lifetime bookings could return
+    // zero of the requested status (review §5.5 F9). The JS pass below stays as a
+    // belt-and-braces filter (its result is identical for capped queries).
+    if (attendanceConfirmedFilter) {
+      query = query.or(
+        'status.eq.Confirmed,guest_attendance_confirmed_at.not.is.null,staff_attendance_confirmed_at.not.is.null',
+      );
+    } else if (statusFilter) {
+      query = query.eq('status', statusFilter);
+    }
+
     if (guestIdParam && guestUuidRe.test(guestIdParam)) {
       query = query.eq('guest_id', guestIdParam);
     }
@@ -161,17 +182,19 @@ export async function GET(request: NextRequest) {
     }
 
     if (groupBookingId) {
-      query = query.eq('group_booking_id', groupBookingId);
+      query = query.eq('group_booking_id', groupBookingId).limit(BOOKINGS_LIST_MAX_ROWS);
     } else if (experienceEventIdParam && guestUuidRe.test(experienceEventIdParam)) {
-      query = query.eq('experience_event_id', experienceEventIdParam);
+      query = query.eq('experience_event_id', experienceEventIdParam).limit(BOOKINGS_LIST_MAX_ROWS);
     } else if (classInstanceIdParam && guestUuidRe.test(classInstanceIdParam)) {
-      query = query.eq('class_instance_id', classInstanceIdParam);
+      query = query.eq('class_instance_id', classInstanceIdParam).limit(BOOKINGS_LIST_MAX_ROWS);
+    } else if (resourceIdParam && guestUuidRe.test(resourceIdParam)) {
+      query = query.eq('resource_id', resourceIdParam).limit(BOOKINGS_LIST_MAX_ROWS);
     } else if (ids) {
       const idList = ids.split(',').filter(Boolean);
       if (idList.length === 0) {
         return NextResponse.json({ bookings: [] });
       }
-      query = query.in('id', idList);
+      query = query.in('id', idList).limit(BOOKINGS_LIST_MAX_ROWS);
     } else if (date && isoRe.test(date)) {
       query = query.eq('booking_date', date);
     } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
@@ -192,7 +215,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Provide date=YYYY-MM-DD or from=...&to=... or ids=..., experience_event_id=..., class_instance_id=..., or guest=guestId&guest_history=1',
+            'Provide date=YYYY-MM-DD or from=...&to=... or ids=..., experience_event_id=..., class_instance_id=..., resource_id=..., or guest=guestId&guest_history=1',
         },
         { status: 400 },
       );
@@ -388,6 +411,9 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // The same status/attendance predicate is now also pushed into the DB query
+    // above (so it runs before any row cap — see F9). This JS pass is a backstop
+    // and is a no-op for already-filtered rows.
     if (attendanceConfirmedFilter) {
       // `Confirmed` is the canonical signal that attendance is confirmed; we
       // also include any booking whose attendance timestamps are set, for

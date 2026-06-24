@@ -15,12 +15,14 @@ import {
 import { buildEntityNotFoundMessage } from '@/lib/venue/entity-delete-booking-guards';
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/experience-events/event-hours-vs-venue-calendar';
+import { validateEventCalendarPlacement } from '@/lib/experience-events/validate-event-calendar-placement';
+import { syncEventTicketTypes } from '@/lib/experience-events/sync-event-ticket-types';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
 import { z } from 'zod';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
-import { rowsToVenueWideBlocks, venueWideBlocksQueryForDate, venueWideBlocksQueryForRange } from '@/lib/availability/venue-wide-blocks-fetch';
+import { rowsToVenueWideBlocks, venueWideBlocksQueryForRange } from '@/lib/availability/venue-wide-blocks-fetch';
 import { zExperienceEventDescription, zExperienceEventHhMm } from '@/lib/experience-events/experience-event-zod';
 
 const eventSchema = z.object({
@@ -241,6 +243,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /**
+     * Series grouping (CDE review C8): multi-date / weekly / custom-dates creates must form ONE
+     * catalogue entry, not N standalone events. The availability engine groups occurrences by
+     * `series_key = parent_event_id ?? id`, so we designate the first inserted occurrence as the
+     * series parent (its own `parent_event_id` stays null) and point every sibling's
+     * `parent_event_id` at it. All occurrences (parent included) carry `is_recurring = true` and a
+     * `recurrence_rule` describing the schedule so the catalogue collapses them to a single event
+     * with multiple dates.
+     */
+    const isSeries = datesToCreate.length > 1;
+    const recurrenceRule = !isSeries
+      ? null
+      : sched.type === 'weekly'
+        ? `weekly;until=${sched.until_date}`
+        : sched.type === 'custom'
+          ? `custom;dates=${normaliseCustomDates(sched.dates).join(',')}`
+          : null;
+
     const baseInsert = {
       venue_id: staff.venue_id,
       name: eventFields.name,
@@ -249,8 +269,8 @@ export async function POST(request: NextRequest) {
       end_time: eventFields.end_time.length === 5 ? `${eventFields.end_time}:00` : eventFields.end_time,
       capacity: eventFields.capacity,
       image_url: eventFields.image_url ?? null,
-      is_recurring: false,
-      recurrence_rule: null as string | null,
+      is_recurring: isSeries,
+      recurrence_rule: recurrenceRule,
       parent_event_id: null as string | null,
       is_active: eventFields.is_active ?? true,
       calendar_id: resolvedCalendarId ?? null,
@@ -269,7 +289,12 @@ export async function POST(request: NextRequest) {
     const startHm = timeHhMm(baseInsert.start_time);
     const endHm = timeHhMm(baseInsert.end_time);
 
+    // Insert in ascending date order so the earliest occurrence is the deterministic series parent.
+    const orderedCreateDates = [...datesToCreate].sort();
+
     const createdIds: string[] = [];
+    /** First inserted occurrence's id; siblings point their `parent_event_id` at it (C8). */
+    let seriesParentId: string | null = null;
 
     let venueHoursPayload: {
       opening_hours: OpeningHours | null;
@@ -307,7 +332,7 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    for (const eventDate of datesToCreate) {
+    for (const eventDate of orderedCreateDates) {
       if (resolvedCalendarId && venueHoursPayload && calendarRowForHours) {
         const hoursErr = validateExperienceEventWindowAgainstVenueAndCalendar(
           eventDate,
@@ -339,6 +364,8 @@ export async function POST(request: NextRequest) {
         .insert({
           ...baseInsert,
           event_date: eventDate,
+          // First occurrence is the parent (null); later occurrences point at it (C8).
+          parent_event_id: seriesParentId,
         })
         .select('id')
         .single();
@@ -349,6 +376,7 @@ export async function POST(request: NextRequest) {
       }
 
       const eid = event.id as string;
+      if (seriesParentId === null) seriesParentId = eid;
       createdIds.push(eid);
 
       if (ticket_types && ticket_types.length > 0) {
@@ -524,50 +552,19 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    // Re-validate the event window against venue/calendar hours and existing events.
+    // Shared with the `[id]` PATCH path so the two cannot diverge (CDE review T1 / §5.3).
     if (mergedCalendarId) {
-      const [{ data: venueRowPatch }, { data: patchBlockRows, error: patchBlocksErr }, { data: ucPatch, error: ucPatchErr }] =
-        await Promise.all([
-          admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
-          venueWideBlocksQueryForDate(admin, staff.venue_id, mergedDate),
-          admin
-            .from('unified_calendars')
-            .select('*')
-            .eq('id', mergedCalendarId)
-            .eq('venue_id', staff.venue_id)
-            .maybeSingle(),
-        ]);
-      if (patchBlocksErr) {
-        console.warn('PATCH /api/venue/experience-events availability_blocks:', patchBlocksErr.message);
-      }
-      if (ucPatchErr || !ucPatch) {
-        return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
-      }
-      const hoursErrPatch = validateExperienceEventWindowAgainstVenueAndCalendar(
-        mergedDate,
-        timeHhMm(mergedStart),
-        timeHhMm(mergedEnd),
-        {
-          opening_hours: (venueRowPatch?.opening_hours as OpeningHours | null) ?? null,
-          venue_opening_exceptions: parseVenueOpeningExceptions(venueRowPatch?.venue_opening_exceptions),
-          availability_blocks: rowsToVenueWideBlocks(patchBlockRows),
-        },
-        ucPatch as Record<string, unknown>,
-      );
-      if (hoursErrPatch) {
-        return NextResponse.json({ error: hoursErrPatch }, { status: 400 });
-      }
-
-      const conflict = await assertExperienceEventWindowFreeOnCalendar(
-        admin,
-        staff.venue_id,
-        mergedCalendarId,
-        mergedDate,
-        timeHhMm(mergedStart),
-        timeHhMm(mergedEnd),
-        { excludeExperienceEventId: id },
-      );
-      if (conflict) {
-        return NextResponse.json({ error: conflict }, { status: 409 });
+      const placement = await validateEventCalendarPlacement(admin, {
+        venueId: staff.venue_id,
+        calendarId: mergedCalendarId,
+        eventDate: mergedDate,
+        startTime: timeHhMm(mergedStart),
+        endTime: timeHhMm(mergedEnd),
+        excludeExperienceEventId: id,
+      });
+      if (!placement.ok) {
+        return NextResponse.json({ error: placement.error }, { status: placement.status });
       }
     }
 
@@ -584,18 +581,11 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    // Replace ticket types if provided
+    // Upsert ticket types by id (never delete tiers that have sales) — CDE review C3.
     if (Array.isArray(ticket_types)) {
-      await admin.from('event_ticket_types').delete().eq('event_id', id);
-      if (ticket_types.length > 0) {
-        const ttRows = ticket_types.map((tt: { name: string; price_pence: number; capacity?: number; sort_order?: number }, i: number) => ({
-          event_id: id,
-          name: tt.name,
-          price_pence: tt.price_pence,
-          capacity: tt.capacity ?? null,
-          sort_order: tt.sort_order ?? i,
-        }));
-        await admin.from('event_ticket_types').insert(ttRows);
+      const sync = await syncEventTicketTypes(admin, id, ticket_types);
+      if (!sync.ok) {
+        return NextResponse.json({ error: sync.error ?? 'Failed to update ticket types' }, { status: 500 });
       }
     }
 

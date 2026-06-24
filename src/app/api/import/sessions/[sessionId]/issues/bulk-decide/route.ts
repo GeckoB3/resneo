@@ -22,6 +22,19 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
 
+  // staff.db is the service-role client (RLS bypassed), so verify the session
+  // belongs to the caller's venue before touching its issues.
+  const { data: sess } = await staff.db
+    .from('import_sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+
+  if (!sess) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   const { error } = await staff.db
     .from('import_validation_issues')
     .update({ user_decision: parsed.data.user_decision })

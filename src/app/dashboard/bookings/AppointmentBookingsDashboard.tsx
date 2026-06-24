@@ -40,6 +40,15 @@ import { formatMoneyPence } from '@/lib/appointments-csv';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import {
+  bookingTypePillVariant,
+  cdeDeepLinkEntityLabel,
+  depositPillVariant,
+  isCdeModel,
+  readCdeDeepLinkFilter,
+  shouldShowBookingRowInList,
+  type CdeDeepLinkFilter,
+} from './bookings-list-shared';
+import {
   inferBookingRowModel,
   bookingModelShortLabel,
   isTableReservationBooking,
@@ -61,7 +70,7 @@ import {
 } from '@/lib/table-management/booking-status';
 import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
-import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { Pill } from '@/components/ui/dashboard/Pill';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
@@ -279,36 +288,6 @@ function statusBorderClass(b: RegistryAppointment): string {
   return bookingStatusVisualForRow(b).listBorderLeft;
 }
 
-function bookingTypePillVariant(model: BookingModel): PillVariant {
-  switch (model) {
-    case 'unified_scheduling':
-    case 'practitioner_appointment':
-      return 'brand';
-    case 'event_ticket':
-      return 'info';
-    case 'class_session':
-      return 'success';
-    case 'resource_booking':
-      return 'warning';
-    default:
-      return 'neutral';
-  }
-}
-
-function depositPillVariant(status: string): PillVariant {
-  const s = status.toLowerCase();
-  if (s === 'paid' || s === 'captured') return 'success';
-  if (s === 'pending' || s === 'requires_action') return 'warning';
-  if (s === 'refunded' || s === 'cancelled' || s === 'failed') return 'danger';
-  return 'neutral';
-}
-
-const CDE_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
-
-function isCdeModel(m: BookingModel): boolean {
-  return CDE_MODELS.has(m);
-}
-
 /** When a staff member filter is set, still show event/class/resource rows (they are venue-wide, not tied to one practitioner). When service filter is set, still show those rows so enabled secondaries are not hidden. */
 function filterRegistryAppointments(
   list: RegistryAppointment[],
@@ -472,6 +451,16 @@ export function AppointmentBookingsDashboard({
     return g && GUEST_UUID_RE.test(g) ? g : null;
   }, [searchParams]);
 
+  /**
+   * Calendar deep-link: `?experience_event_id=`/`?class_instance_id=`/`?resource_id=`.
+   * The calendar event/class/resource sheets link here to show that entity's bookings,
+   * so the list is scoped to the session server-side (no date range needed) — review §5.5 F12.
+   */
+  const cdeDeepLink = useMemo<CdeDeepLinkFilter | null>(
+    () => readCdeDeepLinkFilter((key) => searchParams.get(key)),
+    [searchParams],
+  );
+
   const showModelFilters = enabledModels.length > 0;
   const filterModels = useMemo(() => {
     const uniq = new Set<BookingModel>([primaryBookingModel, ...enabledModels]);
@@ -506,6 +495,15 @@ export function AppointmentBookingsDashboard({
   const clearGuestFilter = useCallback(() => {
     const next = new URLSearchParams(searchParams.toString());
     next.delete('guest');
+    const qs = next.toString();
+    router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
+  }, [router, searchParams]);
+
+  const clearCdeDeepLink = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('experience_event_id');
+    next.delete('class_instance_id');
+    next.delete('resource_id');
     const qs = next.toString();
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
@@ -626,7 +624,9 @@ export function AppointmentBookingsDashboard({
   const fetchBookings = useCallback(
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
-      if (invalidCustomRange) {
+      // A CDE deep-link scopes to one session/event/resource server-side, so the
+      // date range (and its validity) is irrelevant in that mode.
+      if (invalidCustomRange && !cdeDeepLink) {
         setError('Custom date range is invalid. "From" must be before or equal to "To".');
         setAllStatusBookings([]);
         setBookings([]);
@@ -637,9 +637,9 @@ export function AppointmentBookingsDashboard({
       else setLoading(true);
       if (!silent) setError(null);
       try {
-        const params = new URLSearchParams(
-          viewMode === 'day' ? { date: from } : { from, to },
-        );
+        const params = cdeDeepLink
+          ? new URLSearchParams({ [cdeDeepLink.param]: cdeDeepLink.id })
+          : new URLSearchParams(viewMode === 'day' ? { date: from } : { from, to });
         if (filterGuestId) params.set('guest', filterGuestId);
         const res = await fetch(`/api/venue/bookings/list?${params}`);
         const data = await readResponseJson<{ error?: string; bookings?: unknown[] }>(res);
@@ -648,8 +648,11 @@ export function AppointmentBookingsDashboard({
           return;
         }
         const raw = (data.bookings ?? []) as RegistryAppointment[];
+        // Keep the venue's primary/enabled models, but never drop a historical
+        // class/event/resource booking just because that model was later disabled
+        // — those rows are real and carry a type pill (review §5.5 F18).
         const modelFiltered = raw.filter((b) =>
-          venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
+          shouldShowBookingRowInList(rowForInference(b), primaryBookingModel, enabledModels),
         );
         setAllStatusBookings(modelFiltered);
         primeGroupVisitBookingsFromListSeeds(modelFiltered);
@@ -664,7 +667,7 @@ export function AppointmentBookingsDashboard({
         else setLoading(false);
       }
     },
-    [filterGuestId, from, to, viewMode, invalidCustomRange, primaryBookingModel, enabledModels, selectedStatusFilter],
+    [filterGuestId, cdeDeepLink, from, to, viewMode, invalidCustomRange, primaryBookingModel, enabledModels, selectedStatusFilter],
   );
 
 
@@ -1960,6 +1963,19 @@ export function AppointmentBookingsDashboard({
             className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100"
           >
             Clear guest filter
+          </button>
+        </div>
+      )}
+
+      {cdeDeepLink && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 sm:px-4">
+          <span>Showing all bookings for this {cdeDeepLinkEntityLabel(cdeDeepLink.param)}.</span>
+          <button
+            type="button"
+            onClick={clearCdeDeepLink}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Back to all bookings
           </button>
         </div>
       )}

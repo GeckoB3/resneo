@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import { NumericInput } from '@/components/ui/NumericInput';
 import { Button } from '@/components/ui/primitives/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
@@ -74,7 +73,6 @@ export function ResourceSlotBookingForm({
   const [lastName, setLastName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
-  const [partySize, setPartySize] = useState(1);
 
   useEffect(() => {
     if (preselectedDate) setDate(preselectedDate);
@@ -115,7 +113,6 @@ export function ResourceSlotBookingForm({
       setLastName('');
       setGuestEmail('');
       setGuestPhone('');
-      setPartySize(1);
       setError(null);
       setSubmitting(false);
     }
@@ -165,7 +162,8 @@ export function ResourceSlotBookingForm({
             last_name: lastName.trim(),
             email: guestEmail.trim() || undefined,
             phone: guestPhone.trim() || undefined,
-            party_size: partySize,
+            // Resources have no capacity model — a slot is the unit booked, so party size is always 1.
+            party_size: 1,
             source: 'phone',
           }),
         });
@@ -180,7 +178,7 @@ export function ResourceSlotBookingForm({
         setSubmitting(false);
       }
     },
-    [resource, date, startTime, endTime, firstName, lastName, guestEmail, guestPhone, partySize, venueId, onCreated],
+    [resource, date, startTime, endTime, firstName, lastName, guestEmail, guestPhone, venueId, onCreated],
   );
 
   if (!open) return null;
@@ -355,20 +353,6 @@ export function ResourceSlotBookingForm({
                     className={INPUT_CLASS}
                   />
                 </div>
-              </div>
-
-              <div>
-                <label htmlFor="resource-booking-party" className="mb-1 block text-xs font-medium text-slate-700">
-                  Party size
-                </label>
-                <NumericInput
-                  id="resource-booking-party"
-                  min={1}
-                  max={50}
-                  value={partySize}
-                  onChange={setPartySize}
-                  className={`w-full max-w-[6rem] ${INPUT_CLASS}`}
-                />
               </div>
 
               {error ? (

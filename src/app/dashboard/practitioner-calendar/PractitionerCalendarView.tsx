@@ -6605,6 +6605,27 @@ export function PractitionerCalendarView({
                                         </svg>
                                       )}
                                     </button>
+                                  ) : resName && !isOverlapLane ? (
+                                    // Resource booking: not drag-reschedulable on the calendar. Render a
+                                    // non-interactive "fixed slot" rail (a dot column, no grab cursor) in the
+                                    // grip's place so the block reads as deliberately pinned rather than as a
+                                    // draggable appointment that simply lost its handle. Slot changes go through
+                                    // the detail sheet's engine-validated "Change slot" picker.
+                                    <span
+                                      aria-hidden
+                                      title="Open to change slot"
+                                      className="relative z-[1] flex shrink-0 cursor-default items-center justify-center text-slate-400/70"
+                                      style={{
+                                        width: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                        minWidth: BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                      }}
+                                    >
+                                      <svg viewBox="0 0 10 18" className="h-3.5 w-2 opacity-60" fill="currentColor">
+                                        <circle cx="5" cy="5" r="1.1" />
+                                        <circle cx="5" cy="9" r="1.1" />
+                                        <circle cx="5" cy="13" r="1.1" />
+                                      </svg>
+                                    </span>
                                   ) : null}
                                   {moveArmingThis ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                   <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
@@ -6621,6 +6642,12 @@ export function PractitionerCalendarView({
                                               type="button"
                                               onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                               {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
+                                              // Resource bookings render in a practitioner column but are not
+                                              // drag-reschedulable here (no grip/resize handle, unlike appointments).
+                                              // Their slot is changed via the detail sheet's "Change slot" picker,
+                                              // which runs engine validation. Signpost that with a tooltip so a CDE
+                                              // block doesn't look like an identical-but-unresponsive appointment.
+                                              title={resName ? 'Open to change slot' : undefined}
                                               className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                                                 blockH < 56 ? 'py-1.5' : 'py-2'
                                               }`}
@@ -7210,6 +7237,10 @@ export function PractitionerCalendarView({
         anchor={resourceInstanceAnchor}
         onUpdated={() => {
           void refetchBookingsList();
+          // The week CDE strip reads scheduleBlocks, so a resource slot change
+          // (time/duration) leaves it stale unless we also refetch the schedule
+          // feed. Mirrors the event sheet's onUpdated above.
+          void refetchSchedule();
         }}
       />
 

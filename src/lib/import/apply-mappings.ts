@@ -1,5 +1,6 @@
 import type { FieldType } from '@/lib/import/constants';
 import { splitFullName } from '@/lib/import/normalize';
+import { applyValueMap } from '@/lib/import/value-map';
 
 export type DbMappingRow = {
   id: string;
@@ -12,6 +13,8 @@ export type DbMappingRow = {
     separator?: string;
     parts?: Array<{ field: string }>;
   } | null;
+  /** Reviewed raw->canonical lookup for enum columns (status, deposit_status). */
+  value_map?: Record<string, string> | null;
 };
 
 /** Slug used as `guests.custom_fields` key and `custom_client_fields.field_key`. */
@@ -114,7 +117,9 @@ export function applyMappingsToDataRow(
     }
 
     if (m.action === 'map' && m.target_field) {
-      targets[m.target_field] = raw;
+      // Apply the reviewed value map (e.g. "CXL" -> "Cancelled") before the value
+      // reaches the downstream normalisers, which are idempotent on canonical values.
+      targets[m.target_field] = applyValueMap(raw, m.value_map);
     }
   }
 

@@ -247,5 +247,11 @@ export function resourceSlotsUrl(
     booking_model: 'resource_booking',
     resource_id: resourceId,
   });
+  if (options?.excludeBookingId) {
+    params.set('exclude_booking_id', options.excludeBookingId);
+  }
+  if (options?.skipPastSlots) {
+    params.set('skip_past_slots', '1');
+  }
   return `/api/booking/availability?${params}`;
 }

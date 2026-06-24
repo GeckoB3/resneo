@@ -39,6 +39,9 @@ const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
 const resourceFieldSchema = z.object({
   name: z.string().min(1).max(200),
   resource_type: z.string().max(100).optional(),
+  // Empty string clears the value; null/undefined are both accepted so PATCH can unset.
+  description: z.preprocess((v) => (v === '' ? null : v), z.string().max(2000).nullable().optional()),
+  photo_url: z.preprocess((v) => (v === '' ? null : v), z.string().url().max(2000).nullable().optional()),
   min_booking_minutes: z.number().int().min(15).max(480).optional(),
   max_booking_minutes: z.number().int().min(15).max(1440).optional(),
   slot_interval_minutes: z.number().int().min(5).max(480).optional(),
@@ -111,6 +114,21 @@ function stripOptionalMigrationColumn(payload: Record<string, unknown>, col: str
   delete payload.deposit_amount_pence;
 }
 
+/** Reject an inverted booking-length range (max < min) when both are supplied. */
+function bookingLengthRangeError(
+  minBookingMinutes: number | null | undefined,
+  maxBookingMinutes: number | null | undefined,
+): string | null {
+  if (
+    typeof minBookingMinutes === 'number' &&
+    typeof maxBookingMinutes === 'number' &&
+    maxBookingMinutes < minBookingMinutes
+  ) {
+    return 'Maximum booking length cannot be shorter than the minimum booking length';
+  }
+  return null;
+}
+
 const resourceSchema = resourceFieldSchema.superRefine((data, ctx) => {
   const err = validateResourcePaymentFields({
     payment_requirement: data.payment_requirement ?? 'none',
@@ -121,6 +139,10 @@ const resourceSchema = resourceFieldSchema.superRefine((data, ctx) => {
   });
   if (err) {
     ctx.addIssue({ code: 'custom', message: err, path: ['payment_requirement'] });
+  }
+  const rangeErr = bookingLengthRangeError(data.min_booking_minutes, data.max_booking_minutes);
+  if (rangeErr) {
+    ctx.addIssue({ code: 'custom', message: rangeErr, path: ['max_booking_minutes'] });
   }
 });
 
@@ -238,6 +260,8 @@ function mapUnifiedCalendarToResource(row: Record<string, unknown>) {
     venue_id: row.venue_id,
     name: row.name,
     resource_type: row.resource_type ?? null,
+    description: (row.description as string | null | undefined) ?? null,
+    photo_url: (row.photo_url as string | null | undefined) ?? null,
     slot_interval_minutes: row.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
     min_booking_minutes: row.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
     max_booking_minutes: row.max_booking_minutes ?? 180,
@@ -293,9 +317,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch resources' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      resources: (data ?? []).map((r) => mapUnifiedCalendarToResource(r as Record<string, unknown>)),
-    });
+    return NextResponse.json(
+      {
+        resources: (data ?? []).map((r) => mapUnifiedCalendarToResource(r as Record<string, unknown>)),
+      },
+      {
+        // Authenticated dashboard route: edits (rename, hours, price) must be visible
+        // immediately. Caching here causes stale-after-edit lag (venue-catalog-cache memory).
+        headers: { 'Cache-Control': 'no-store' },
+      },
+    );
   } catch (err) {
     console.error('GET /api/venue/resources failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -362,6 +393,8 @@ export async function POST(request: NextRequest) {
       calendar_type: 'resource',
       name: parsed.data.name,
       resource_type: parsed.data.resource_type ?? null,
+      description: parsed.data.description ?? null,
+      photo_url: parsed.data.photo_url ?? null,
       working_hours: parsed.data.availability_hours ?? {},
       availability_exceptions: parsed.data.availability_exceptions ?? {},
       slot_interval_minutes: parsed.data.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
@@ -505,6 +538,15 @@ export async function PATCH(request: NextRequest) {
       (ex.slot_interval_minutes as number) ??
       DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES;
     const mergedMax = parsed.data.max_booking_minutes ?? (ex.max_booking_minutes as number) ?? 180;
+    const mergedMin =
+      parsed.data.min_booking_minutes ??
+      (ex.min_booking_minutes as number) ??
+      DEFAULT_RESOURCE_MIN_BOOKING_MINUTES;
+
+    const rangeErr = bookingLengthRangeError(mergedMin, mergedMax);
+    if (rangeErr) {
+      return NextResponse.json({ error: rangeErr }, { status: 400 });
+    }
 
     const paymentErr = validateResourcePaymentFields({
       payment_requirement: mergedPaymentRequirement,
@@ -520,6 +562,8 @@ export async function PATCH(request: NextRequest) {
     const updatePayload: Record<string, unknown> = {};
     if (parsed.data.name !== undefined) updatePayload.name = parsed.data.name;
     if (parsed.data.resource_type !== undefined) updatePayload.resource_type = parsed.data.resource_type;
+    if (parsed.data.description !== undefined) updatePayload.description = parsed.data.description;
+    if (parsed.data.photo_url !== undefined) updatePayload.photo_url = parsed.data.photo_url;
     if (parsed.data.availability_hours !== undefined) updatePayload.working_hours = parsed.data.availability_hours;
     if (parsed.data.availability_exceptions !== undefined) updatePayload.availability_exceptions = parsed.data.availability_exceptions;
     if (parsed.data.slot_interval_minutes !== undefined) updatePayload.slot_interval_minutes = parsed.data.slot_interval_minutes;

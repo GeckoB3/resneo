@@ -159,6 +159,13 @@ export function AccountCreditsSection() {
   const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Pack';
 
+  const formatExpiry = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
   const startPurchase = useCallback(
     async (venue_id: string, product_id: string) => {
       setError(null);
@@ -224,14 +231,22 @@ export function AccountCreditsSection() {
           <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
-            {balances.map((b) => (
-              <li key={b.id} className="flex justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                <span>
-                  {productName(b.product_id)} · {venueName(b.venue_id)}
-                </span>
-                <span className="font-medium">{b.credits_remaining} left</span>
-              </li>
-            ))}
+            {balances.map((b) => {
+              const expiry = formatExpiry(b.expires_at);
+              return (
+                <li key={b.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block">
+                      {productName(b.product_id)} · {venueName(b.venue_id)}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {expiry ? `Expires ${expiry}` : 'No expiry'}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-medium">{b.credits_remaining} left</span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

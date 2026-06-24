@@ -40,7 +40,7 @@ export interface InsertFreeClassSessionBookingParams {
  */
 export async function insertFreeClassSessionBooking(
   params: InsertFreeClassSessionBookingParams,
-): Promise<{ ok: true; bookingId: string } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; bookingId: string } | { ok: false; status: number; error: string; code?: string }> {
   const {
     admin,
     venueId,
@@ -184,6 +184,13 @@ export async function insertFreeClassSessionBooking(
 
   if (bookErr || !booking) {
     console.error('[insertFreeClassSessionBooking] insert failed', bookErr);
+    const code = (bookErr as { code?: string } | null)?.code;
+    const msg = (bookErr as { message?: string } | null)?.message ?? '';
+    // Surface the DB capacity guard (`enforce_cde_capacity` raises SQLSTATE 23P01
+    // / message 'CDE_CAPACITY') so callers can roll back and return a 409.
+    if (code === '23P01' || msg.includes('CDE_CAPACITY')) {
+      return { ok: false, status: 409, error: 'CDE_CAPACITY', code: '23P01' };
+    }
     return { ok: false, status: 500, error: 'Failed to create booking' };
   }
 

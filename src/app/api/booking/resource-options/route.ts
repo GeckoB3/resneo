@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from('unified_calendars')
       .select(
-        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, cancellation_notice_hours, sort_order',
+        'id, name, resource_type, description, photo_url, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, cancellation_notice_hours, sort_order',
       )
       .eq('venue_id', venueId)
       .eq('calendar_type', 'resource')
@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
         id: r.id as string,
         name: r.name as string,
         resource_type: (r.resource_type as string | null) ?? null,
+        description: (r.description as string | null) ?? null,
+        photo_url: (r.photo_url as string | null) ?? null,
         min_booking_minutes: (r.min_booking_minutes as number | null) ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
         max_booking_minutes: (r.max_booking_minutes as number | null) ?? 180,
         slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,

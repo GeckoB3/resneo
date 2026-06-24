@@ -44,6 +44,9 @@ import {
   resolveAppointmentsFeatureFlags,
 } from "@/lib/feature-flags";
 import { offerAppointmentWaitlistOnCancel } from "@/lib/booking/offer-appointment-waitlist-on-cancel";
+import { validateResourceBookingModification } from "@/lib/booking/validate-resource-booking-modification";
+import { validateClassModification } from "@/lib/booking/validate-class-modification";
+import { venueLocalDateTimeToUtcMs } from "@/lib/venue/venue-local-clock";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -130,6 +133,8 @@ export async function GET(request: NextRequest) {
 
     let event_name: string | null = null;
     let class_summary: string | null = null;
+    let class_type_id: string | null = null;
+    let class_type_name: string | null = null;
     let resource_name: string | null = null;
     let booking_end_label: string | null = null;
 
@@ -148,7 +153,8 @@ export async function GET(request: NextRequest) {
         .eq("id", bookingRow.class_instance_id)
         .maybeSingle();
       if (ci) {
-        const ctId = (ci as { class_type_id?: string }).class_type_id;
+        const ctId = (ci as { class_type_id?: string }).class_type_id ?? null;
+        class_type_id = ctId;
         const { data: ct } = ctId
           ? await supabase
               .from("class_types")
@@ -157,6 +163,7 @@ export async function GET(request: NextRequest) {
               .maybeSingle()
           : { data: null };
         const nm = (ct as { name?: string } | null)?.name ?? "Class";
+        class_type_name = (ct as { name?: string } | null)?.name ?? null;
         const d = String(
           (ci as { instance_date?: string }).instance_date ?? "",
         );
@@ -265,6 +272,14 @@ export async function GET(request: NextRequest) {
       appointment_service_name,
       event_name,
       class_summary,
+      class_type_name,
+      // CDE self-reschedule (guest manage link): the slot/instance pickers need
+      // the resource / class-type identity to list alternative slots. Only
+      // surfaced for the relevant model so other bookings keep a lean payload.
+      resource_id: inferredModel === "resource_booking" ? bookingRow.resource_id ?? null : null,
+      class_instance_id:
+        inferredModel === "class_session" ? bookingRow.class_instance_id ?? null : null,
+      class_type_id: inferredModel === "class_session" ? class_type_id : null,
       resource_name,
       booking_end_time: booking_end_label,
       cancellation_deadline: bookingRow.cancellation_deadline ?? null,
@@ -316,6 +331,9 @@ export async function POST(request: NextRequest) {
       party_size,
       practitioner_id: bodyPractitionerId,
       appointment_service_id: bodyAppointmentServiceId,
+      duration_minutes: bodyDurationMinutes,
+      booking_end_time: bodyBookingEndTime,
+      target_class_instance_id: bodyTargetClassInstanceId,
     } = body as {
       booking_id?: string;
       token?: string;
@@ -326,6 +344,9 @@ export async function POST(request: NextRequest) {
       party_size?: number;
       practitioner_id?: string;
       appointment_service_id?: string;
+      duration_minutes?: number | null;
+      booking_end_time?: string | null;
+      target_class_instance_id?: string;
     };
 
     if (
@@ -758,6 +779,393 @@ export async function POST(request: NextRequest) {
       const isAppointmentBooking =
         currentBookingModel === "unified_scheduling" ||
         currentBookingModel === "practitioner_appointment";
+
+      // ── CDE guest self-reschedule (resource + class) ───────────────────────
+      // Resource bookings move to another slot for the SAME resource; class
+      // bookings move to another FUTURE instance of the SAME class type. Both
+      // are gated by the venue `guest_self_reschedule` flag (the only modify
+      // gate the platform encodes — there is no per-booking modify window) and
+      // are capacity-safe via the `enforce_cde_capacity` DB trigger (409 on
+      // conflict). Events stay cancel+rebook (handled by the UI copy).
+      if (
+        currentBookingModel === "resource_booking" ||
+        currentBookingModel === "class_session"
+      ) {
+        const { data: venueCdeRow } = await supabase
+          .from("venues")
+          .select("feature_flags, timezone")
+          .eq("id", booking.venue_id)
+          .single();
+        const venueCdeFlags = parseVenueFeatureFlags(
+          (venueCdeRow as { feature_flags?: unknown } | null)?.feature_flags,
+        );
+        try {
+          assertAppointmentsFeatureEnabled("guest_self_reschedule", venueCdeFlags);
+        } catch {
+          return NextResponse.json(
+            {
+              error: "Online booking changes are not available for this venue.",
+              code: "feature_disabled",
+              feature: "guest_self_reschedule",
+            },
+            { status: 403 },
+          );
+        }
+        const venueTimezone =
+          typeof (venueCdeRow as { timezone?: string | null } | null)?.timezone ===
+            "string" &&
+          String((venueCdeRow as { timezone?: string | null }).timezone).trim() !== ""
+            ? String((venueCdeRow as { timezone?: string | null }).timezone).trim()
+            : "Europe/London";
+
+        const beforeTime =
+          typeof booking.booking_time === "string"
+            ? booking.booking_time.slice(0, 5)
+            : "";
+
+        if (currentBookingModel === "resource_booking") {
+          const resourceId = booking.resource_id as string | null;
+          if (!resourceId) {
+            return NextResponse.json(
+              { error: "This booking is missing its resource." },
+              { status: 400 },
+            );
+          }
+          if (!booking_date || !booking_time) {
+            return NextResponse.json(
+              {
+                error:
+                  "booking_date and booking_time are required to change this booking.",
+              },
+              { status: 400 },
+            );
+          }
+          const newDate = booking_date;
+          const timeStr =
+            booking_time.length >= 5 ? booking_time.slice(0, 5) : booking_time;
+          const existingEnd =
+            typeof booking.booking_end_time === "string"
+              ? String(booking.booking_end_time).slice(0, 5)
+              : null;
+
+          const validation = await validateResourceBookingModification({
+            admin: supabase,
+            venueId: booking.venue_id,
+            bookingId,
+            resourceId,
+            newDate,
+            timeStr,
+            durationMinutes: bodyDurationMinutes ?? null,
+            bookingEndTime:
+              bodyBookingEndTime ??
+              (bodyDurationMinutes == null ? existingEnd : null),
+          });
+          if (!validation.ok) {
+            const status = validation.reason.includes("no longer available")
+              ? 409
+              : 400;
+            return NextResponse.json({ error: validation.reason }, { status });
+          }
+
+          // estimated_end_time must be a true UTC instant: resolve the
+          // venue-local start to UTC, then add the booking duration (DST/midnight
+          // safe). booking_end_time keeps the venue-local wall-clock HH:mm.
+          const startUtcMs = venueLocalDateTimeToUtcMs(newDate, timeStr, venueTimezone);
+          const estimatedEnd = new Date(
+            startUtcMs + validation.durationMinutes * 60_000,
+          );
+          const newTime = timeStr.length === 5 ? `${timeStr}:00` : timeStr;
+
+          const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+            supabase,
+            venueId: booking.venue_id,
+            effectiveModel: "resource_booking",
+            resourceCalendarId: resourceId,
+          });
+          const cancellation_deadline = cancellationDeadlineHoursBefore(
+            newDate,
+            newTime,
+            refundWindowHours,
+          );
+
+          const nowIso = new Date().toISOString();
+          const prevUpdatedAt = booking.updated_at as string;
+          const { data: resUpdated, error: resUpdErr } = await supabase
+            .from("bookings")
+            .update({
+              booking_date: newDate,
+              booking_time: newTime,
+              booking_end_time: `${validation.endHHmm}:00`,
+              estimated_end_time: estimatedEnd.toISOString(),
+              cancellation_deadline,
+              updated_at: nowIso,
+            })
+            .eq("id", bookingId)
+            .eq("updated_at", prevUpdatedAt)
+            .select("id")
+            .maybeSingle();
+
+          if (resUpdErr) {
+            const e = resUpdErr as { code?: string | null; message?: string | null };
+            const isCapacityConflict =
+              e.code === "23P01" ||
+              (typeof e.message === "string" && e.message.includes("CDE_CAPACITY"));
+            if (isCapacityConflict) {
+              return NextResponse.json(
+                {
+                  error:
+                    "That slot just filled. Please choose another available time.",
+                  code: "slot_unavailable",
+                },
+                { status: 409 },
+              );
+            }
+            console.error("confirm modify (resource) update failed:", resUpdErr);
+            return NextResponse.json(
+              { error: "Failed to update booking." },
+              { status: 500 },
+            );
+          }
+          if (!resUpdated) {
+            return NextResponse.json(
+              {
+                error:
+                  "This booking was updated elsewhere. Refresh the page and try again.",
+              },
+              { status: 412 },
+            );
+          }
+
+          const { logBookingModifiedEvent } = await import(
+            "@/lib/booking/log-booking-modified-event"
+          );
+          await logBookingModifiedEvent(supabase, {
+            venue_id: booking.venue_id as string,
+            booking_id: bookingId,
+            modification_actor: "guest",
+            before: {
+              booking_date: String(booking.booking_date),
+              booking_time: beforeTime,
+              ...(existingEnd ? { booking_end_time: existingEnd } : {}),
+            },
+            after: {
+              booking_date: newDate,
+              booking_time: timeStr,
+              booking_end_time: validation.endHHmm,
+            },
+          });
+
+          after(async () => {
+            try {
+              const { executeBookingModificationGuestNotification } = await import(
+                "@/lib/booking/send-booking-modification-guest-notification"
+              );
+              await executeBookingModificationGuestNotification(
+                supabase,
+                booking.venue_id,
+                bookingId,
+              );
+            } catch (commsErr) {
+              console.error(
+                "Self-service resource modification notification failed:",
+                commsErr,
+              );
+            }
+          });
+
+          return NextResponse.json({
+            success: true,
+            message: "Your booking has been updated.",
+            booking_date: newDate,
+            booking_time: timeStr,
+            booking_end_time: validation.endHHmm,
+          });
+        }
+
+        // ── class_session move to another future instance ────────────────────
+        const currentClassInstanceId = booking.class_instance_id as string | null;
+        if (!currentClassInstanceId) {
+          return NextResponse.json(
+            { error: "This booking is missing its class session." },
+            { status: 400 },
+          );
+        }
+        const targetInstanceId = bodyTargetClassInstanceId;
+        if (!targetInstanceId) {
+          return NextResponse.json(
+            { error: "Please choose a class session to move to." },
+            { status: 400 },
+          );
+        }
+
+        // v1 scope: do not move a booking that spent class credits or a
+        // membership allowance. Re-attaching the entitlement to a different
+        // instance without double-charging or losing it is non-trivial; until
+        // that is built we leave such bookings to cancel+rebook (which already
+        // restores credits/allowance) and tell the guest to contact the venue.
+        const { bookingWasCreditPaid, bookingWasMembershipPaid } = await import(
+          "@/lib/class-commerce/booking-was-credit-paid"
+        );
+        if (
+          (await bookingWasCreditPaid(supabase, bookingId)) ||
+          (await bookingWasMembershipPaid(supabase, bookingId))
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "This class was booked with a class pass or membership, so it can't be moved online yet. Please contact the venue to change it.",
+              code: "entitlement_booking",
+            },
+            { status: 409 },
+          );
+        }
+
+        // Resolve the booking's current class type (the move must stay within it).
+        const { data: curInst } = await supabase
+          .from("class_instances")
+          .select("class_type_id")
+          .eq("id", currentClassInstanceId)
+          .maybeSingle();
+        const currentClassTypeId =
+          (curInst as { class_type_id?: string } | null)?.class_type_id ?? null;
+        if (!currentClassTypeId) {
+          return NextResponse.json(
+            { error: "This class is no longer available." },
+            { status: 400 },
+          );
+        }
+
+        if (targetInstanceId === currentClassInstanceId) {
+          return NextResponse.json(
+            { error: "That's the session you're already booked on." },
+            { status: 400 },
+          );
+        }
+
+        const partySize = Number(booking.party_size) || 1;
+        const validation = await validateClassModification({
+          admin: supabase,
+          venueId: booking.venue_id,
+          bookingId,
+          currentClassTypeId,
+          targetInstanceId,
+          partySize,
+          venueTimezone,
+          enforceGuestNotice: true,
+        });
+        if (!validation.ok) {
+          const status = validation.reason.includes("full") ? 409 : 400;
+          return NextResponse.json({ error: validation.reason }, { status });
+        }
+
+        const newTime =
+          validation.startTime.length === 5
+            ? `${validation.startTime}:00`
+            : validation.startTime;
+        // estimated_end_time as a true UTC instant for the new venue-local start.
+        const startUtcMs = venueLocalDateTimeToUtcMs(
+          validation.instanceDate,
+          validation.startTime,
+          venueTimezone,
+        );
+        const estimatedEnd = new Date(
+          startUtcMs + validation.durationMinutes * 60_000,
+        );
+        const cancellation_deadline = cancellationDeadlineHoursBefore(
+          validation.instanceDate,
+          newTime,
+          validation.cancellationNoticeHours,
+        );
+
+        const nowIso = new Date().toISOString();
+        const prevUpdatedAt = booking.updated_at as string;
+        const { data: classUpdated, error: classUpdErr } = await supabase
+          .from("bookings")
+          .update({
+            class_instance_id: targetInstanceId,
+            booking_date: validation.instanceDate,
+            booking_time: newTime,
+            estimated_end_time: estimatedEnd.toISOString(),
+            cancellation_deadline,
+            updated_at: nowIso,
+          })
+          .eq("id", bookingId)
+          .eq("updated_at", prevUpdatedAt)
+          .select("id")
+          .maybeSingle();
+
+        if (classUpdErr) {
+          const e = classUpdErr as { code?: string | null; message?: string | null };
+          const isCapacityConflict =
+            e.code === "23P01" ||
+            (typeof e.message === "string" && e.message.includes("CDE_CAPACITY"));
+          if (isCapacityConflict) {
+            return NextResponse.json(
+              {
+                error: "That session just filled. Please choose another session.",
+                code: "slot_unavailable",
+              },
+              { status: 409 },
+            );
+          }
+          console.error("confirm modify (class) update failed:", classUpdErr);
+          return NextResponse.json(
+            { error: "Failed to update booking." },
+            { status: 500 },
+          );
+        }
+        if (!classUpdated) {
+          return NextResponse.json(
+            {
+              error:
+                "This booking was updated elsewhere. Refresh the page and try again.",
+            },
+            { status: 412 },
+          );
+        }
+
+        const { logBookingModifiedEvent } = await import(
+          "@/lib/booking/log-booking-modified-event"
+        );
+        await logBookingModifiedEvent(supabase, {
+          venue_id: booking.venue_id as string,
+          booking_id: bookingId,
+          modification_actor: "guest",
+          before: {
+            booking_date: String(booking.booking_date),
+            booking_time: beforeTime,
+          },
+          after: {
+            booking_date: validation.instanceDate,
+            booking_time: validation.startTime,
+          },
+        });
+
+        after(async () => {
+          try {
+            const { executeBookingModificationGuestNotification } = await import(
+              "@/lib/booking/send-booking-modification-guest-notification"
+            );
+            await executeBookingModificationGuestNotification(
+              supabase,
+              booking.venue_id,
+              bookingId,
+            );
+          } catch (commsErr) {
+            console.error(
+              "Self-service class modification notification failed:",
+              commsErr,
+            );
+          }
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: "Your booking has been updated.",
+          booking_date: validation.instanceDate,
+          booking_time: validation.startTime,
+        });
+      }
 
       if (isAppointmentBooking) {
         const { data: venueFlagsRow } = await supabase

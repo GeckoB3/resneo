@@ -4,7 +4,6 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
-import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { z } from 'zod';
 
@@ -79,19 +78,20 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
+      // Unique index (class_type_id, instance_date, start_time): a session already
+      // exists at this slot — surface as a friendly conflict, not a 500.
+      if ((error as { code?: string }).code === '23505') {
+        return NextResponse.json(
+          { error: 'A session already exists at this date and time.' },
+          { status: 409 },
+        );
+      }
       console.error('POST /api/venue/class-instances failed:', error);
       return NextResponse.json({ error: 'Failed to create class instance' }, { status: 500 });
     }
 
-    await syncCalendarBlockForClassInstance(admin, {
-      venueId: staff.venue_id,
-      classInstanceId: row.id as string,
-      instanceDate: instance_date,
-      startTime: startNorm,
-      classTypeId: class_type_id,
-      skipBlock: false,
-      createdByStaffId: staff.id,
-    });
+    // No calendar-block sync needed on create: class sessions render from the schedule feed
+    // (not `calendar_blocks`), and a brand-new instance has no block to clear.
 
     return NextResponse.json(row, { status: 201 });
   } catch (err) {

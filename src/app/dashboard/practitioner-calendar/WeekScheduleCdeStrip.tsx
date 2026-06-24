@@ -35,7 +35,9 @@ export function WeekScheduleCdeStrip({
           <td key={d} className="align-top px-1 py-2">
             <div className="flex min-h-[80px] max-h-[200px] flex-col gap-1 overflow-y-auto">
               {dayBlocks.length === 0 ? (
-                <span className="text-[10px] text-slate-400">-</span>
+                <span className="select-none py-1 text-center text-[11px] italic text-slate-300">
+                  None
+                </span>
               ) : (
                 dayBlocks.map((b) => {
                   const emptyEvent =
@@ -56,7 +58,7 @@ export function WeekScheduleCdeStrip({
                   const eventUptake = b.kind === 'event_ticket' ? formatEventUptakeLine(b) : null;
                   const body = (
                     <div
-                      className={`rounded border px-1.5 py-1 text-left text-[10px] shadow-sm ${
+                      className={`rounded border px-1.5 py-1 text-left text-[11px] leading-snug shadow-sm ${
                         shell ? 'border-dashed border-slate-300 bg-white/80' : 'border-slate-200 bg-white'
                       }`}
                       style={{ borderLeftWidth: 3, borderLeftColor: accent }}

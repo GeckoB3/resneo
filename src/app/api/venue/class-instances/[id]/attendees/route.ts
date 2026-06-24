@@ -3,9 +3,13 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
+import { venueHasClassCommerceEnabled } from '@/lib/class-commerce/auth';
 
 /**
  * GET /api/venue/class-instances/[id]/attendees - roster for this class instance.
+ * Calendar-scoped: staff may only read the roster (which exposes guest PII) for
+ * classes they manage (C10), not merely classes at their venue.
  */
 export async function GET(
   request: NextRequest,
@@ -38,6 +42,16 @@ export async function GET(
 
     if (!ct) {
       return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    }
+
+    const scope = await staffMayManageClassTypeSessions(
+      admin,
+      staff.venue_id,
+      staff,
+      inst.class_type_id as string,
+    );
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
     }
 
     const { data: rows, error } = await admin
@@ -76,7 +90,12 @@ export async function GET(
       };
     });
 
-    return NextResponse.json({ class_instance_id: instanceId, attendees });
+    // Attendance mutations (check-in / no-show) are gated behind the class-commerce plan,
+    // but reading the roster is not. Surface the capability so the UI hides the action
+    // buttons on venues that lack it instead of rendering buttons that 403 on click.
+    const canManageAttendance = await venueHasClassCommerceEnabled(admin, staff.venue_id);
+
+    return NextResponse.json({ class_instance_id: instanceId, attendees, can_manage_attendance: canManageAttendance });
   } catch (err) {
     console.error('GET /api/venue/class-instances/[id]/attendees failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

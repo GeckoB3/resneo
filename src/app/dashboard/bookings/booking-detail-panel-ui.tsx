@@ -26,11 +26,15 @@ export function DepositRefundBanner({
   depositStatus,
   depositAmount,
   cancellationDeadline,
+  refundNoticeHours,
 }: {
   depositStatus: string;
   depositAmount: string;
   cancellationDeadline: string | null;
+  /** Venue's cancellation/refund window in hours; drives the "X-hour refund window" copy. Falls back to 48. */
+  refundNoticeHours?: number | null;
 }) {
+  const refundHours = refundNoticeHours != null && refundNoticeHours > 0 ? refundNoticeHours : 48;
   if (depositStatus === 'Refunded') {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -54,7 +58,7 @@ export function DepositRefundBanner({
         <p className="mt-1 text-xs text-amber-700">
           {wasEligible
             ? `${depositAmount} - refund was eligible but failed to process. Please refund manually via Stripe.`
-            : `${depositAmount} - cancelled after the 48-hour refund window. Deposit retained per cancellation policy.`}
+            : `${depositAmount} - cancelled after the ${refundHours}-hour refund window. Deposit retained per cancellation policy.`}
         </p>
       </div>
     );

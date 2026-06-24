@@ -776,8 +776,25 @@ async function handleResourceAvailability(
 ) {
   const resourceId = searchParams.get('resource_id') ?? undefined;
   const durationMinutes = parseInt(searchParams.get('duration') ?? '60', 10) || 60;
+  // When a guest reschedules their own resource booking (manage link), exclude it
+  // from occupancy so their current slot doesn't block overlapping moves, and skip
+  // the past-slot cutoff — mirrors the staff /api/venue/resource-availability route.
+  const excludeBookingIdParam = searchParams.get('exclude_booking_id');
+  const excludeBookingId =
+    excludeBookingIdParam &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(excludeBookingIdParam)
+      ? excludeBookingIdParam
+      : undefined;
+  const skipPastSlots = searchParams.get('skip_past_slots') === '1';
 
-  const input = await fetchResourceInput({ supabase, venueId, date, resourceId });
+  const input = await fetchResourceInput({
+    supabase,
+    venueId,
+    date,
+    resourceId,
+    excludeBookingId,
+    skipPastSlotFilter: skipPastSlots,
+  });
   const result = computeResourceAvailability(input, durationMinutes);
 
   return NextResponse.json({ date, venue_id: venueId, resources: result });

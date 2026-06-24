@@ -27,6 +27,42 @@ export function getDialCodeForCountry(country: CountryCode): string {
 }
 
 /**
+ * Best-guess default calling region for a venue from its ISO-4217 currency.
+ *
+ * National-format numbers (e.g. "06 12 34 56 78", "087 123 4567") carry no
+ * country code, so libphonenumber needs a default region to parse them. Venues
+ * have a `currency` but no explicit country, so we map the currency to its most
+ * likely market. This only affects national-format numbers; international ones
+ * (with + or a country code) parse regardless. Where a currency spans many
+ * countries (notably EUR) the mapping is a heuristic the user can later override.
+ */
+export function defaultPhoneCountryFromCurrency(
+  currency: string | null | undefined,
+): CountryCode {
+  const code = currency?.trim().toUpperCase();
+  const MAP: Record<string, CountryCode> = {
+    GBP: 'GB',
+    EUR: 'IE', // primary EUR market for this app (Ireland); overridable per venue
+    USD: 'US',
+    CAD: 'CA',
+    AUD: 'AU',
+    NZD: 'NZ',
+    CHF: 'CH',
+    SEK: 'SE',
+    NOK: 'NO',
+    DKK: 'DK',
+    PLN: 'PL',
+    ZAR: 'ZA',
+    AED: 'AE',
+    INR: 'IN',
+    JPY: 'JP',
+    SGD: 'SG',
+    HKD: 'HK',
+  };
+  return (code && MAP[code]) || 'GB';
+}
+
+/**
  * Parse user input to E.164. Uses defaultCountry for national numbers (e.g. 07725… + GB → +447725…).
  */
 export function normalizeToE164(

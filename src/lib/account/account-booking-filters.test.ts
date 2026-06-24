@@ -28,6 +28,15 @@ describe('account-booking-filters', () => {
     expect(isPastBooking('2026-06-20', 'Confirmed', today)).toBe(false);
   });
 
+  it('treats the hyphenated No-Show enum value as past, never upcoming', () => {
+    // 'No-Show' is the actual booking_status enum value (see BOOKING_STATUSES),
+    // not 'NoShow' or 'No Show'. A same-day or future no-show belongs in Past.
+    expect(isPastBooking('2026-06-15', 'No-Show', today)).toBe(true); // today
+    expect(isPastBooking('2026-06-20', 'No-Show', today)).toBe(true); // future
+    expect(isUpcomingBooking('2026-06-15', 'No-Show', today)).toBe(false); // today
+    expect(isUpcomingBooking('2026-06-20', 'No-Show', today)).toBe(false); // future
+  });
+
   it('filterAccountBookings', () => {
     const rows = [
       { booking_date: '2026-06-20', status: 'Confirmed', id: '1' },

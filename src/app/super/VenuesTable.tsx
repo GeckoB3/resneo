@@ -60,7 +60,7 @@ interface ApiResponse {
 
 const TIER_OPTIONS = ['', 'appointments', 'plus', 'light', 'restaurant', 'founding'] as const;
 const STATUS_OPTIONS = ['', 'active', 'trialing', 'past_due', 'cancelled', 'cancelling'] as const;
-type EnvFilter = 'live' | 'test' | 'all';
+type EnvFilter = 'live' | 'cancelled' | 'test' | 'all';
 
 function tierBadge(tier: string) {
   const t = tier.toLowerCase().trim();
@@ -172,6 +172,7 @@ export function VenuesTable() {
         {(
           [
             { key: 'live', label: 'Live venues' },
+            { key: 'cancelled', label: 'Cancelled' },
             { key: 'test', label: 'Test venues' },
             { key: 'all', label: 'All' },
           ] as Array<{ key: EnvFilter; label: string }>
@@ -260,7 +261,11 @@ export function VenuesTable() {
             ) : venues.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
-                  {env === 'test' ? 'No test venues. Expand a live venue to mark it as a test venue.' : 'No venues found.'}
+                  {env === 'test'
+                    ? 'No test venues. Expand a live venue to mark it as a test venue.'
+                    : env === 'cancelled'
+                      ? 'No cancelled venues. Venues appear here once their subscription has fully ended.'
+                      : 'No venues found.'}
                 </td>
               </tr>
             ) : (

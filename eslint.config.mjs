@@ -56,6 +56,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Parallel preview dev server build output (NEXT_DIST_DIR=.next-preview) — generated, never lint it.
+    ".next-preview/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

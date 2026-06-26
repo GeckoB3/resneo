@@ -2,6 +2,9 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Allow a second concurrent `next dev` (e.g. a parallel Claude session) to use its
+  // own build dir + dev lock. Defaults to `.next` so normal runs are unaffected.
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   // Pin workspace root so Turbopack resolves `next` from repo root (not `src/app`).
   turbopack: {
     root: path.join(__dirname),

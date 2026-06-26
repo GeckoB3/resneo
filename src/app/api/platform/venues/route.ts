@@ -14,7 +14,11 @@ const PAGE_SIZE = 50;
  *   search    – case-insensitive substring match on venue name or slug
  *   tier      – filter by pricing_tier (appointments | restaurant | founding)
  *   status    – filter by plan_status  (active | past_due | cancelled | trialing)
- *   env       – live (default) | test | all — separates dev/test venues from real data
+ *   env       – live (default) | cancelled | test | all
+ *               live      – real venues that still have access (excludes fully-cancelled)
+ *               cancelled – real venues whose subscription has ended (plan_status = cancelled)
+ *               test      – dev/test venues
+ *               all       – everything, no filtering
  */
 export async function GET(req: NextRequest) {
   const auth = await requirePlatformSuperuserAuth();
@@ -56,8 +60,13 @@ export async function GET(req: NextRequest) {
   }
   if (env === 'test') {
     query = query.eq('is_test', true);
+  } else if (env === 'cancelled') {
+    // Real venues whose subscription has fully ended (no remaining access).
+    // 'cancelling' venues keep access until period end, so they stay in 'live'.
+    query = query.eq('is_test', false).eq('plan_status', 'cancelled');
   } else if (env !== 'all') {
-    query = query.eq('is_test', false);
+    // live: real venues that still have access — exclude fully-cancelled.
+    query = query.eq('is_test', false).neq('plan_status', 'cancelled');
   }
 
   const { data: venues, count, error } = await query;

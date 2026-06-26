@@ -1998,6 +1998,7 @@ export function AppointmentBookingsDashboard({
         onNewBooking={() => setNewBookingOpen(true)}
         onWalkIn={() => setWalkInOpen(true)}
         compact
+        hideTitle
         toolbarLeadingTools={appointmentToolbarLeadingTools}
         controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
         controlsPanel={appointmentFilterPanel}

@@ -1904,6 +1904,7 @@ export function BookingsDashboard({
         onNewBooking={() => setNewBookingOpen(true)}
         onWalkIn={() => setWalkInOpen(true)}
         compact
+        hideTitle
         toolbarLeadingTools={bookingsToolbarLeadingTools}
         controlsLabel={filterCount > 0 ? `Filter (${filterCount})` : 'Filter'}
         controlsPanel={bookingsFilterPanel}

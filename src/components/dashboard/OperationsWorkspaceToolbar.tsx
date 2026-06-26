@@ -231,6 +231,13 @@ export interface OperationsWorkspaceToolbarProps {
   showSummaryInfo?: boolean;
   /** Extra actions after Walk-in (e.g. Edit layout link). */
   trailingActions?: ReactNode;
+  /**
+   * Compact only: drop the inline title + Info header and render the toolbar as a
+   * single responsive control bar, with the live-status light moved inline next to
+   * the other controls. Used by list surfaces (bookings, calendar, contacts) that
+   * don't need a workspace title or KPI info popover.
+   */
+  hideTitle?: boolean;
 }
 
 type OpenPanel = 'none' | 'info' | 'date' | 'controls' | 'timeline' | 'search';
@@ -272,6 +279,7 @@ export function OperationsWorkspaceToolbar({
   infoPanelExtra,
   showSummaryInfo = true,
   trailingActions,
+  hideTitle = false,
 }: OperationsWorkspaceToolbarProps) {
   const baseId = useId();
   const datePanelId = `${baseId}-date-panel`;
@@ -407,6 +415,11 @@ export function OperationsWorkspaceToolbar({
 
   const compactActionsShellClass =
     'flex w-full min-w-0 flex-wrap items-center justify-start gap-x-1.5 gap-y-1.5 sm:flex-1 sm:justify-end sm:gap-x-2';
+  // Title-less bar: controls form the whole row, so anchor them left and let the
+  // rightmost items (New/Walk-in) wrap first — instead of hugging the right edge
+  // against an empty left side. The title layouts keep `compactActionsShellClass`.
+  const compactActionsShellLeftClass =
+    'flex w-full min-w-0 flex-wrap items-center justify-start gap-x-1.5 gap-y-1.5 sm:gap-x-2';
   const defaultActionsShellClass =
     '-mx-1 flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-1.5 overflow-x-auto overscroll-x-contain px-1 pb-0.5 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:max-w-none sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0';
 
@@ -629,8 +642,8 @@ export function OperationsWorkspaceToolbar({
           />
         </svg>
       </button>
-      {!compact ? (
-        <span className="inline-flex h-9 shrink-0 items-center px-1">
+      {!compact || hideTitle ? (
+        <span className={compact ? 'inline-flex h-8 shrink-0 items-center px-1' : 'inline-flex h-9 shrink-0 items-center px-1'}>
           <LiveStateIndicator state={liveState} />
         </span>
       ) : null}
@@ -701,6 +714,9 @@ export function OperationsWorkspaceToolbar({
         >
           {compact ? (
             <>
+              {hideTitle ? (
+                <div className={compactActionsShellLeftClass}>{toolbarActionControls}</div>
+              ) : (
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3 md:items-center">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
                   <h1 className="min-w-0 max-w-full shrink truncate text-sm font-bold tracking-tight text-slate-900 sm:max-w-[16rem] md:max-w-[20rem] lg:max-w-xl lg:shrink-0 sm:text-base">
@@ -749,6 +765,7 @@ export function OperationsWorkspaceToolbar({
                 </div>
                 <div className={compactActionsShellClass}>{toolbarActionControls}</div>
               </div>
+              )}
               {pinnedRow ? <div className="w-full border-t border-slate-100 pt-1.5 sm:pt-2">{pinnedRow}</div> : null}
               {inlineTools ? <div className="w-full border-t border-slate-100 pt-1.5 sm:pt-2">{inlineTools}</div> : null}
             </>

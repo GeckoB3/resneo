@@ -1651,6 +1651,7 @@ export function ContactsDashboard({
             onNewBooking={() => {}}
             onWalkIn={() => {}}
             compact
+            hideTitle
             showDateNavigator={false}
             showBookingActions={false}
             showControlsButton={false}

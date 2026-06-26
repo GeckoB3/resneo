@@ -41,8 +41,10 @@ export function LoginForm({
     setError(null);
     setLoading(true);
     const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { setLoading(false); setError(err.message); return; }
+    // Deliberately keep `loading` true through resolve-next and the redirect
+    // below. Resetting it here flips the button back to "Sign In" during the
+    // brief gap before navigation — the exact delay this spinner exists to mask.
 
     // Route through the same server-side resolver the magic-link flow uses so
     // that:
@@ -135,7 +137,7 @@ export function LoginForm({
 
   const inputClass =
     'min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
-  const primaryBtn = 'w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50';
+  const primaryBtn = 'inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-70';
   const secondaryLink = 'text-sm font-medium text-slate-500 hover:text-brand-600';
 
   if (forgotPassword) {
@@ -149,7 +151,9 @@ export function LoginForm({
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           {successMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
-          <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Sending...' : 'Send Reset Link'}</button>
+          <button type="submit" disabled={loading} aria-busy={loading} className={primaryBtn}>
+            {loading ? (<><ButtonSpinner />Sending...</>) : 'Send Reset Link'}
+          </button>
           <div className="text-center">
             <button type="button" onClick={() => { setForgotPassword(false); setError(null); setSuccessMessage(null); }} className={secondaryLink}>Back to sign in</button>
           </div>
@@ -263,7 +267,9 @@ export function LoginForm({
             <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" className={inputClass} />
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-          <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Signing in...' : 'Sign In'}</button>
+          <button type="submit" disabled={loading} aria-busy={loading} className={primaryBtn}>
+            {loading ? (<><ButtonSpinner />Signing in...</>) : 'Sign In'}
+          </button>
           <div className="text-center">
             <button type="button" onClick={() => setForgotPassword(true)} className={secondaryLink}>Forgot password?</button>
           </div>
@@ -280,11 +286,21 @@ export function LoginForm({
             <input id="magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@example.com" className={inputClass} />
           </div>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-          <button type="submit" disabled={loading} className={primaryBtn}>
-            {loading ? 'Sending...' : isBookingFlow ? 'Email me a sign-in link' : 'Send Magic Link'}
+          <button type="submit" disabled={loading} aria-busy={loading} className={primaryBtn}>
+            {loading ? (<><ButtonSpinner />Sending...</>) : isBookingFlow ? 'Email me a sign-in link' : 'Send Magic Link'}
           </button>
         </form>
       )}
     </div>
+  );
+}
+
+/** Spinner sized for the brand-coloured primary buttons (white on brand). */
+function ButtonSpinner() {
+  return (
+    <span
+      className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white"
+      aria-hidden
+    />
   );
 }

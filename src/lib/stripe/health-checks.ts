@@ -295,6 +295,9 @@ export interface WebhookEndpointSpec {
   secretEnvKey: string;
   requiredEvents: string[];
   recommendedEvents: string[];
+  /** Optional context appended to the "missing recommended events" warning so superusers
+   *  understand why this endpoint wants them (and why it isn't shared with another endpoint). */
+  recommendedEventsNote?: string;
 }
 
 export const WEBHOOK_SPECS: WebhookEndpointSpec[] = [
@@ -323,6 +326,12 @@ export const WEBHOOK_SPECS: WebhookEndpointSpec[] = [
       'customer.subscription.updated',
       'customer.subscription.deleted',
     ],
+    recommendedEventsNote:
+      'The customer.subscription.* events here are for Connect-account class-membership ' +
+      'subscriptions (synced via syncClassMembershipFromStripeSubscription) — a different job ' +
+      'from the platform-account subscription events on the Subscription & billing webhook, ' +
+      'which drive venue plan_status. Without them, class memberships only reconcile via the ' +
+      'daily reconcile-class-memberships cron rather than in real time.',
   },
 ];
 
@@ -429,7 +438,10 @@ export async function checkWebhookEndpoints(
       severities.push('fail');
     }
     if (missingRecommended.length > 0) {
-      issues.push(`Missing recommended events: ${missingRecommended.join(', ')}.`);
+      issues.push(
+        `Missing recommended events: ${missingRecommended.join(', ')}.` +
+          (spec.recommendedEventsNote ? ` ${spec.recommendedEventsNote}` : ''),
+      );
       severities.push('warn');
     }
 

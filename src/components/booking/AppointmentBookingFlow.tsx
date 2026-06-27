@@ -3527,6 +3527,7 @@ export function AppointmentBookingFlow({
               minSelectableDate={todayYmdLocal()}
               loading={loadingCalendar}
               weekOffsetShortcuts={isStaff}
+              weekShortcutBaseDate={staffRebookBootstrap?.initialDate}
             />
           </div>
           {isStaffWalkInAppointment && (
@@ -4619,6 +4620,7 @@ export function AppointmentBookingFlow({
               minSelectableDate={todayYmdLocal()}
               loading={loadingCalendar}
               weekOffsetShortcuts={isStaff}
+              weekShortcutBaseDate={staffRebookBootstrap?.initialDate}
             />
           </div>
           {loading ? (

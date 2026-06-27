@@ -50,6 +50,19 @@ export function addWeeksLocalYmd(weeksFromToday: number, base: Date = new Date()
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/**
+ * Local Date the +N week shortcuts count forward from, parsed from a YYYY-MM-DD
+ * anchor. Returns undefined for missing/invalid input so callers fall back to
+ * today (the {@link addWeeksLocalYmd} default). Staff rebook passes the source
+ * booking's date — upcoming → that booking, previous → today — so the offsets
+ * read as "N weeks after that booking" rather than after today.
+ */
+export function weekShortcutAnchorDate(ymd: string | null | undefined): Date | undefined {
+  if (!ymd) return undefined;
+  const d = new Date(`${ymd}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 function formatWeekShortcutLabel(weeks: number, ymd: string): string {
   const d = new Date(`${ymd}T12:00:00`);
   if (Number.isNaN(d.getTime())) return `+${weeks} wk`;
@@ -74,6 +87,7 @@ export function ResourceCalendarMonth({
   loading = false,
   accentPublic = false,
   weekOffsetShortcuts = false,
+  weekShortcutBaseDate,
 }: {
   year: number;
   month: number;
@@ -89,8 +103,14 @@ export function ResourceCalendarMonth({
   loading?: boolean;
   /** When true, nav/selection use appointment-public accent classes. */
   accentPublic?: boolean;
-  /** Staff booking: quick-pick +2 … +6 weeks from today below the grid. */
+  /** Staff booking: quick-pick +2 … +6 weeks below the grid. */
   weekOffsetShortcuts?: boolean;
+  /**
+   * Anchor date (YYYY-MM-DD) the +2 … +6 week shortcuts count forward from.
+   * Defaults to today when omitted. Staff rebook passes the source booking's
+   * date so the offsets read as "N weeks after that booking", not after today.
+   */
+  weekShortcutBaseDate?: string;
 }) {
   const first = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0).getDate();
@@ -101,6 +121,10 @@ export function ResourceCalendarMonth({
 
   const title = `${MONTH_NAMES[month - 1]} ${year}`;
   const navClass = accentPublic ? NAV_BTN_PUBLIC : NAV_BTN_BASE;
+
+  // Anchor the +N week shortcuts (defaults to today; staff rebook supplies the
+  // source booking's date so the offsets count forward from that booking).
+  const weekShortcutBase = weekShortcutAnchorDate(weekShortcutBaseDate);
 
   // Roving-tabindex focus target for arrow-key grid navigation. Defaults to the
   // selected day, else the first focusable (non-disabled) day, else day 1.
@@ -268,7 +292,7 @@ export function ResourceCalendarMonth({
       {weekOffsetShortcuts ? (
         <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
             {STAFF_BOOKING_WEEK_OFFSETS.map((weeks) => {
-              const ymd = addWeeksLocalYmd(weeks);
+              const ymd = addWeeksLocalYmd(weeks, weekShortcutBase);
               const outOfRange =
                 ymd < minSelectableDate || (maxSelectableDate != null && ymd > maxSelectableDate);
               const isSelected = selectedDate === ymd;

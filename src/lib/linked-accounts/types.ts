@@ -126,7 +126,7 @@ export const PAST_LINK_STATUSES: LinkStatus[] = ['rejected', 'revoked', 'expired
 export const DEFAULT_LINK_GRANT: LinkGrant = {
   calendar: 'full_details',
   pii: true,
-  act: 'edit_existing',
+  act: 'create_edit_cancel',
 };
 
 /** Outgoing pending request cap per venue (§12). */

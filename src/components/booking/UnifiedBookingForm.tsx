@@ -14,6 +14,7 @@ import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-b
 import {
   addWeeksLocalYmd,
   STAFF_BOOKING_WEEK_OFFSETS,
+  weekShortcutAnchorDate,
 } from '@/components/booking/ResourceCalendarMonth';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1250,6 +1251,9 @@ export function UnifiedBookingForm({
               const tomorrowStr = localCalendarDateStr(tomorrow);
               const nowDate = new Date();
               const canGoPrev = new Date(yr, mo - 1, 1) >= new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+              // Anchor the +N week shortcuts (defaults to today; staff rebook supplies the
+              // source booking's date so the offsets count forward from that booking).
+              const weekShortcutBase = weekShortcutAnchorDate(staffRebookBootstrap?.initialDate);
 
               return (
                 <div className="absolute left-1/2 z-20 mt-1.5 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:left-0 sm:w-72 sm:translate-x-0 sm:p-3">
@@ -1339,7 +1343,7 @@ export function UnifiedBookingForm({
 
                   <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
                       {STAFF_BOOKING_WEEK_OFFSETS.map((weeks) => {
-                        const ymd = addWeeksLocalYmd(weeks);
+                        const ymd = addWeeksLocalYmd(weeks, weekShortcutBase);
                         const isPast = ymd < todayStr;
                         const isSelected = date === ymd;
                         return (

@@ -899,6 +899,7 @@ export function ResourceBookingFlow({
             loading={loadingCalendar}
             accentPublic={isPublicGuest}
             weekOffsetShortcuts={isStaff}
+            weekShortcutBaseDate={staffRebookBootstrap?.initialDate}
           />
         </div>
       )}

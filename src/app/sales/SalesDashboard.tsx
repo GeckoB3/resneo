@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { SalesDashboardData } from '@/lib/sales/load-dashboard';
+import { salesTrialRewardLabel } from '@/lib/sales/constants';
 
 function formatGbp(pence: number): string {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(pence / 100);
@@ -221,21 +222,41 @@ export function SalesDashboard() {
               <dd className="font-semibold text-slate-900">{salesperson.revenue_share_months} months</dd>
             </div>
           </dl>
-          {codes.length > 1 && (
+          {codes.length > 0 && (
             <div className="mt-4 border-t border-slate-100 pt-4">
-              <p className="text-xs font-medium text-slate-500">All your codes</p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <p className="text-xs font-medium text-slate-500">Your codes &amp; free-trial offers</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Each code gives the venue a different free trial — pick the longer offer for prospects
+                leaving software with a long cancellation notice.
+              </p>
+              <ul className="mt-3 space-y-2">
                 {codes.map((c) => (
-                  <span
+                  <li
                     key={c.code}
-                    className={`rounded-lg px-2.5 py-1 font-mono text-xs font-semibold ${
-                      c.active ? 'bg-blue-50 text-blue-800' : 'bg-slate-100 text-slate-400 line-through'
+                    className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${
+                      c.active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    {c.code}
-                  </span>
+                    <div className="min-w-0">
+                      <span
+                        className={`font-mono text-xs font-semibold ${
+                          c.active ? 'text-blue-800' : 'text-slate-400 line-through'
+                        }`}
+                      >
+                        {c.code}
+                      </span>
+                      {c.label && <p className="truncate text-[11px] text-slate-400">{c.label}</p>}
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                        c.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      {c.active ? salesTrialRewardLabel(c.trial_days) : 'inactive'}
+                    </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </div>

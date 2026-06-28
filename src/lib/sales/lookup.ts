@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { clampSalesTrialDays } from '@/lib/sales/constants';
 
 export interface ValidatedSalesCode {
   code: string;
+  /** Free-trial days this specific code grants the subscriber (Stripe trial_period_days). */
+  trial_days: number;
   salesperson_id: string;
   salesperson_name: string;
   salesperson_email: string | null;
@@ -38,7 +41,7 @@ export async function validateSalesCode(
 
   const { data: codeRow, error: codeErr } = await admin
     .from('sales_codes')
-    .select('code, active, salesperson_id')
+    .select('code, active, salesperson_id, trial_days')
     .ilike('code', normalised)
     .maybeSingle();
 
@@ -64,6 +67,7 @@ export async function validateSalesCode(
     ok: true,
     value: {
       code: codeRow.code,
+      trial_days: clampSalesTrialDays((codeRow as { trial_days?: number | null }).trial_days),
       salesperson_id: spRow.id,
       salesperson_name: (spRow.name ?? '').trim() || 'ResNeo sales',
       salesperson_email: ((spRow as { email?: string | null }).email ?? '').trim().toLowerCase() || null,

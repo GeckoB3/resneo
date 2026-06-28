@@ -151,6 +151,7 @@ import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCard } from './BookingCard';
+import { CompactBookingActions } from './CompactBookingActions';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import {
   ComplianceBarIcon,
@@ -512,7 +513,16 @@ function serviceIdForBooking(b: Booking): string | null {
 
 type ViewMode = 'day' | 'week' | 'month';
 
-const SLOT_HEIGHT = 48;
+/** Comfortable (default) pixel height for one {@link SLOT_MINUTES} slot. */
+const COMFORTABLE_SLOT_PX = 48;
+/**
+ * Floor for the compact day view's runtime slot height. Below this the client name
+ * stops being legible, so we clamp here (per the "stay legible" product decision) and
+ * let a very long day overflow slightly rather than shrink rows into illegibility.
+ */
+const MIN_SLOT_PX = 16;
+/** In compact mode, ignore drag nudges smaller than this so a few px of jitter can't reschedule. */
+const COMPACT_DRAG_DEADZONE_PX = 6;
 const SLOT_MINUTES = 15;
 const CALENDAR_MOVE_INCREMENT_MINUTES = 1;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -529,6 +539,8 @@ interface PractitionerCalendarPreferences {
   filterStatus?: string;
   startHourOverride?: number | null;
   endHourOverride?: number | null;
+  /** Day-view "Compact" toggle: shrink rows so the whole day fits one vertical screen. */
+  compactDay?: boolean;
 }
 
 function practitionerCalendarPreferencesKey(venueId: string): string {
@@ -566,6 +578,7 @@ function isPractitionerCalendarPreferences(value: unknown): value is Practitione
   if (value.filterStatus !== undefined && typeof value.filterStatus !== 'string') return false;
   if (value.startHourOverride !== undefined && !isNullableHour(value.startHourOverride)) return false;
   if (value.endHourOverride !== undefined && !isNullableHour(value.endHourOverride)) return false;
+  if (value.compactDay !== undefined && typeof value.compactDay !== 'boolean') return false;
   return true;
 }
 
@@ -1608,6 +1621,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
   dateStr,
   slotStartMins,
   top,
+  slotHeightPx,
   disabled,
   onEmptyClick,
 }: {
@@ -1616,6 +1630,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
   dateStr: string;
   slotStartMins: number;
   top: number;
+  slotHeightPx: number;
   disabled: boolean;
   onEmptyClick: (e: MouseEvent, p: string, d: string, t: string) => void;
 }) {
@@ -1639,7 +1654,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       className={`absolute left-0 right-0 z-0 [touch-action:pan-x_pan-y] border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
-      style={{ top, height: SLOT_HEIGHT }}
+      style={{ top, height: slotHeightPx }}
       aria-label={`Empty slot ${tlabel}`}
     />
   );
@@ -1701,6 +1716,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   booking,
   top,
   height,
+  slotHeightPx,
   heightExtraPx = 0,
   laneIndex = 0,
   laneCount = 1,
@@ -1710,6 +1726,8 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   booking: Booking;
   top: number;
   height: number;
+  /** Runtime slot height (comfortable 48px, or the smaller compact-fit value). */
+  slotHeightPx: number;
   /** Live vertical stretch while resizing (pixels). */
   heightExtraPx?: number;
   laneIndex?: number;
@@ -1722,7 +1740,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     disabled: !canDrag,
     data: { booking },
   });
-  const totalHeight = Math.max(SLOT_HEIGHT, height + heightExtraPx);
+  const totalHeight = Math.max(slotHeightPx, height + heightExtraPx);
   const widthPct = 100 / Math.max(1, laneCount);
   const style = {
     top,
@@ -1785,6 +1803,7 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   block,
   top,
   height,
+  slotHeightPx,
   heightExtraPx = 0,
   canDrag,
   children,
@@ -1792,6 +1811,8 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   block: CalendarBlock;
   top: number;
   height: number;
+  /** Runtime slot height (comfortable 48px, or the smaller compact-fit value). */
+  slotHeightPx: number;
   heightExtraPx?: number;
   canDrag: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
@@ -1801,7 +1822,7 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
     disabled: !canDrag,
     data: { block },
   });
-  const totalHeight = Math.max(SLOT_HEIGHT * 0.5, height + heightExtraPx);
+  const totalHeight = Math.max(slotHeightPx * 0.5, height + heightExtraPx);
   const style = {
     top,
     height: totalHeight,
@@ -1825,14 +1846,14 @@ function linkedTimeToMinutes(time: string): number {
   return (parseInt(hh, 10) || 0) * 60 + (parseInt(mm, 10) || 0);
 }
 
-function linkedSlotTop(time: string, startHour: number): number {
-  return ((linkedTimeToMinutes(time) - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT;
+function linkedSlotTop(time: string, startHour: number, slotHeightPx: number): number {
+  return ((linkedTimeToMinutes(time) - startHour * 60) / SLOT_MINUTES) * slotHeightPx;
 }
 
-function linkedBlockHeight(start: string, end: string | null): number {
-  if (!end) return SLOT_HEIGHT;
+function linkedBlockHeight(start: string, end: string | null, slotHeightPx: number): number {
+  if (!end) return slotHeightPx;
   const d = linkedTimeToMinutes(end) - linkedTimeToMinutes(start);
-  return Math.max((d / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.6);
+  return Math.max((d / SLOT_MINUTES) * slotHeightPx, slotHeightPx * 0.6);
 }
 
 function linkedBookingUsesExpandedDetail(column: LinkedColumn): boolean {
@@ -1893,7 +1914,7 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   visibility,
   venueName,
   variant,
-  blockHeightPx = SLOT_HEIGHT,
+  blockHeightPx = COMFORTABLE_SLOT_PX,
   rowOverlay = {},
 }: {
   booking: LinkedBooking;
@@ -2036,6 +2057,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   resourceMintSlots = [],
   startHour,
   totalSlots,
+  slotHeightPx,
   onBookingClick,
   onEventBlockClick,
   onClassBlockClick,
@@ -2049,6 +2071,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   resourceMintSlots?: ResourceAvailabilityMintSlot[];
   startHour: number;
   totalSlots: number;
+  /** Runtime slot height (comfortable 48px, or the smaller compact-fit value). */
+  slotHeightPx: number;
   onBookingClick: (b: LinkedBooking, anchor?: { x: number; y: number }) => void;
   onEventBlockClick?: (block: ScheduleBlockDTO) => void;
   onClassBlockClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
@@ -2058,14 +2082,14 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
 }) {
   return (
     <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
-      <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
+      <div className="relative" style={{ height: totalSlots * slotHeightPx }}>
         {Array.from({ length: totalSlots }, (_, i) => {
           const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
           return (
             <div
               key={i}
               className={`absolute left-0 w-full border-t ${calendarGridLineClass(slotStartMins)}`}
-              style={{ top: i * SLOT_HEIGHT }}
+              style={{ top: i * slotHeightPx }}
               aria-hidden
             />
           );
@@ -2085,7 +2109,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                   type="button"
                   onClick={() => onCreateAt(slotTime)}
                   className="absolute left-0 w-full transition-colors hover:bg-brand-50/60"
-                  style={{ top: i * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+                  style={{ top: i * slotHeightPx, height: slotHeightPx }}
                   title={`New booking at ${slotTime}`}
                   aria-label={`New booking in ${column.venueName} at ${slotTime}`}
                 />
@@ -2093,8 +2117,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
             })
           : null}
         {classBlocks.map((cb) => {
-          const top = linkedSlotTop(cb.start_time, startHour);
-          const height = linkedBlockHeight(cb.start_time, cb.end_time);
+          const top = linkedSlotTop(cb.start_time, startHour, slotHeightPx);
+          const height = linkedBlockHeight(cb.start_time, cb.end_time, slotHeightPx);
           const uptake =
             cb.class_booked_spots != null && cb.class_capacity != null
               ? `${cb.class_booked_spots}/${cb.class_capacity} booked`
@@ -2127,8 +2151,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
           );
         })}
         {eventBlocks.map((eb) => {
-          const top = linkedSlotTop(eb.start_time, startHour);
-          const height = linkedBlockHeight(eb.start_time, eb.end_time);
+          const top = linkedSlotTop(eb.start_time, startHour, slotHeightPx);
+          const height = linkedBlockHeight(eb.start_time, eb.end_time, slotHeightPx);
           const accent = eb.accent_colour ?? '#F59E0B';
           const uptake = formatEventUptakeLine(eb);
           const emptyOccurrence =
@@ -2161,8 +2185,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
           );
         })}
         {bookings.map((b) => {
-          const top = linkedSlotTop(b.bookingTime, startHour);
-          const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime);
+          const top = linkedSlotTop(b.bookingTime, startHour, slotHeightPx);
+          const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime, slotHeightPx);
           return (
             <div
               key={b.id}
@@ -2405,6 +2429,10 @@ export function PractitionerCalendarView({
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRootRef = useRef<HTMLDivElement>(null);
+  /** The day grid's slot canvas (time-gutter body). Measured to fit the compact day on one screen. */
+  const slotCanvasRef = useRef<HTMLDivElement>(null);
+  /** True while a drag/resize is in flight — pauses compact re-measurement so the slot ratio can't shift mid-gesture. */
+  const interactingRef = useRef(false);
   const suppressNextCalendarClick = useRef(false);
   const mousePanRef = useRef<{
     startX: number;
@@ -2745,6 +2773,13 @@ export function PractitionerCalendarView({
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  /**
+   * "Compact" day view. `compactDay` is the user's persisted toggle; `measuredSlotHeight`
+   * is the px-per-slot computed each layout to fit the whole day on one screen. Until the
+   * measurement runs we fall back to the comfortable height, so the first paint matches SSR.
+   */
+  const [compactDay, setCompactDay] = useState(false);
+  const [measuredSlotHeight, setMeasuredSlotHeight] = useState<number | null>(null);
 
   /** Session preferences are applied after mount so the first paint matches SSR HTML. */
   const [calendarPrefsHydrated, setCalendarPrefsHydrated] = useState(false);
@@ -2771,6 +2806,7 @@ export function PractitionerCalendarView({
     }
     if (remembered.startHourOverride !== undefined) setStartHourOverride(remembered.startHourOverride);
     if (remembered.endHourOverride !== undefined) setEndHourOverride(remembered.endHourOverride);
+    if (remembered.compactDay !== undefined) setCompactDay(remembered.compactDay);
     setCalendarPrefsHydrated(true);
   }, [preferencesKey]);
   const startHour = startHourOverride ?? derivedStartHour;
@@ -2780,6 +2816,18 @@ export function PractitionerCalendarView({
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
   })();
 
+  /**
+   * The runtime per-slot pixel height. Comfortable view (and any view that isn't the day
+   * grid) keeps the full {@link COMFORTABLE_SLOT_PX}; compact view uses the measured
+   * fit-to-viewport height once it's been computed. `compactActive` is the boolean form
+   * (true only once a measurement exists), used to gate the resize affordance and drag dead-zone.
+   */
+  const compactActive = compactDay && measuredSlotHeight != null;
+  const slotHeightPx =
+    compactDay && measuredSlotHeight != null ? measuredSlotHeight : COMFORTABLE_SLOT_PX;
+  /** Resize handles + their reserved strip are hidden in compact (rows are too short to grab precisely). */
+  const resizeAffordanceOn = !compactActive;
+
   const calendarPrefsSnapshot = useMemo(
     (): PractitionerCalendarPreferences => ({
       viewMode,
@@ -2788,6 +2836,7 @@ export function PractitionerCalendarView({
       filterStatus,
       startHourOverride,
       endHourOverride,
+      compactDay,
     }),
     [
       viewMode,
@@ -2796,6 +2845,7 @@ export function PractitionerCalendarView({
       filterStatus,
       startHourOverride,
       endHourOverride,
+      compactDay,
     ],
   );
 
@@ -2803,6 +2853,57 @@ export function PractitionerCalendarView({
     if (!calendarPrefsHydrated) return;
     writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
   }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
+
+  /**
+   * Compact day view: measure how much vertical room the slot canvas has inside the page's
+   * scroll container and shrink each slot so the whole day (open → close) fits one screen.
+   *
+   * We measure the canvas's own offset within `<main>` (which folds in the toolbar, page
+   * padding, safe-area insets, and the sticky column header automatically — no hard-coded
+   * header constant) and divide the remaining height by the slot count. The result is clamped
+   * to {@link MIN_SLOT_PX} (legibility floor — a long day may then overflow slightly rather
+   * than become unreadable) and {@link COMFORTABLE_SLOT_PX} (never grow past the default).
+   * Recomputed on viewport/orientation/content changes; paused mid drag/resize so the slot
+   * ratio can't shift under an in-flight gesture. Cleared when compact is off.
+   */
+  useLayoutEffect(() => {
+    if (!compactDay || viewMode !== 'day') {
+      setMeasuredSlotHeight(null);
+      return;
+    }
+    const main = scrollRef.current?.closest('main');
+    if (!main) return;
+    const measure = () => {
+      if (interactingRef.current) return;
+      const canvas = slotCanvasRef.current;
+      if (!canvas || TOTAL_SLOTS <= 0) return;
+      const mainRect = main.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      // Canvas offset from the top of main's scrollable content (scroll-independent).
+      const canvasOffsetWithinMain = canvasRect.top - mainRect.top + main.scrollTop;
+      const BOTTOM_GUTTER_PX = 16;
+      const available = main.clientHeight - canvasOffsetWithinMain - BOTTOM_GUTTER_PX;
+      const next = Math.max(
+        MIN_SLOT_PX,
+        Math.min(COMFORTABLE_SLOT_PX, Math.floor(available / TOTAL_SLOTS)),
+      );
+      if (Number.isFinite(next) && next > 0) {
+        setMeasuredSlotHeight((prev) => (prev === next ? prev : next));
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(main);
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+    // `loading` is included so the measurement re-runs once the day grid mounts after the
+    // initial fetch (the slot canvas isn't in the DOM while loading, so the first pass bails).
+  }, [compactDay, viewMode, TOTAL_SLOTS, loading]);
 
   const calendarListQuery = useMemo(() => {
     const { from, to } = listFromTo;
@@ -3451,13 +3552,13 @@ export function PractitionerCalendarView({
         resources: vrList,
         existingBookings,
         startHour,
-        slotHeightPx: SLOT_HEIGHT,
+        slotHeightPx: slotHeightPx,
         slotMinutes: SLOT_MINUTES,
       });
       if (mint.length > 0) out.set(prac.id, mint);
     }
     return out;
-  }, [viewMode, loadVenueResources, date, filteredPractitioners, venueResources, bookings, startHour, venueId, venueTimezone]);
+  }, [viewMode, loadVenueResources, date, filteredPractitioners, venueResources, bookings, startHour, venueId, venueTimezone, slotHeightPx]);
 
   /** Free resource slots on linked venue columns (read-only + native-grid linked). */
   const linkedResourceAvailabilityByColumnKey = useMemo(() => {
@@ -3499,13 +3600,13 @@ export function PractitionerCalendarView({
         resources: vrList,
         existingBookings,
         startHour,
-        slotHeightPx: SLOT_HEIGHT,
+        slotHeightPx: slotHeightPx,
         slotMinutes: SLOT_MINUTES,
       });
       if (mint.length > 0) out.set(col.key, mint);
     }
     return out;
-  }, [viewMode, visibleLinkedColumns, linkedVenueById, date, startHour]);
+  }, [viewMode, visibleLinkedColumns, linkedVenueById, date, startHour, slotHeightPx]);
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
 
@@ -3573,12 +3674,12 @@ export function PractitionerCalendarView({
   function slotTop(time: string): number {
     const mins = timeToMinutes(time);
     const offset = mins - startHour * 60;
-    return (offset / SLOT_MINUTES) * SLOT_HEIGHT;
+    return (offset / SLOT_MINUTES) * slotHeightPx;
   }
 
   function slotHeightFromDuration(durationMins: number): number {
     /** At least one grid row so label + actions + optional resize strip do not overlap. */
-    return Math.max((durationMins / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT);
+    return Math.max((durationMins / SLOT_MINUTES) * slotHeightPx, slotHeightPx);
   }
 
   function clearTimeRangeOverridesForDayChange() {
@@ -4377,6 +4478,7 @@ export function PractitionerCalendarView({
   }
 
   function clearCalendarDragUi() {
+    interactingRef.current = false;
     setDragBooking(null);
     setDragExcludeBookingId(null);
     setDragBlock(null);
@@ -4413,6 +4515,7 @@ export function PractitionerCalendarView({
   );
 
   function handleDragStart(e: DragStartEvent) {
+    interactingRef.current = true;
     // The hold elapsed and the sensor armed: clear the "Hold to move" hint, give the same
     // haptic tick as the duration slider, and suppress native scroll for the drag's
     // duration (the grip's touch-action stays pannable at rest so scrolls pass through).
@@ -4465,7 +4568,10 @@ export function PractitionerCalendarView({
         slotStartMins: number;
       };
       const originalStartMins = timeToMinutes(bl.start_time.slice(0, 5));
-      const deltaMinutes = snapCalendarMoveMinutes((e.delta.y / SLOT_HEIGHT) * SLOT_MINUTES);
+      const deltaMinutes =
+        compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
+          ? 0
+          : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
       const targetStartMins = originalStartMins + deltaMinutes;
       const duration = blockDurationMinutes(bl);
       const endMin = targetStartMins + duration;
@@ -4512,7 +4618,10 @@ export function PractitionerCalendarView({
       slotStartMins: number;
     };
     const originalStartMins = timeToMinutes(b.booking_time.slice(0, 5));
-    const deltaMinutes = snapCalendarMoveMinutes((e.delta.y / SLOT_HEIGHT) * SLOT_MINUTES);
+    const deltaMinutes =
+      compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
+        ? 0
+        : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
     const targetStartMins = originalStartMins + deltaMinutes;
     const duration = getBookingDuration(b);
     const endMin = targetStartMins + duration;
@@ -4748,8 +4857,8 @@ export function PractitionerCalendarView({
         setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
 
         /** Max / min pointer delta (px) so implied end stays in [minEnd, gridEndMax]. */
-        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
-        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * slotHeightPx;
+        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * slotHeightPx;
 
         const clampDeltaY = (clientY: number) => {
           const raw = clientY - startY;
@@ -4759,12 +4868,12 @@ export function PractitionerCalendarView({
         /** Continuous end (minutes); used while dragging for smooth height. */
         const endMinutesFromClientY = (clientY: number) => {
           const dY = clampDeltaY(clientY);
-          return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          return endM0 + (dY / slotHeightPx) * SLOT_MINUTES;
         };
 
         const applyFromClientY = (clientY: number) => {
           const dY = clampDeltaY(clientY);
-          const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          const endFloat = endM0 + (dY / slotHeightPx) * SLOT_MINUTES;
           setResizeVisual({ bookingId: booking.id, deltaYPx: dY });
           setResizePreviewEnd({
             bookingId: booking.id,
@@ -4825,7 +4934,7 @@ export function PractitionerCalendarView({
 
       return withResizeHold({ kind: 'booking', id: booking.id, eligible, startDrag });
     },
-    [addToast, endHour, patchBookingResize, serviceMapForBooking, withResizeHold],
+    [addToast, endHour, patchBookingResize, serviceMapForBooking, withResizeHold, slotHeightPx],
   );
 
   const beginBlockResize = useCallback(
@@ -4842,8 +4951,8 @@ export function PractitionerCalendarView({
         setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
         setBlockResizePreviewEnd({ blockId: block.id, endHm: minutesToTime(endM0) });
 
-        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
-        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * SLOT_HEIGHT;
+        const deltaYMin = ((minEnd - endM0) / SLOT_MINUTES) * slotHeightPx;
+        const deltaYMax = ((gridEndMax - endM0) / SLOT_MINUTES) * slotHeightPx;
 
         const clampDeltaY = (clientY: number) => {
           const raw = clientY - startY;
@@ -4852,12 +4961,12 @@ export function PractitionerCalendarView({
 
         const endMinutesFromClientY = (clientY: number) => {
           const dY = clampDeltaY(clientY);
-          return endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          return endM0 + (dY / slotHeightPx) * SLOT_MINUTES;
         };
 
         const applyFromClientY = (clientY: number) => {
           const dY = clampDeltaY(clientY);
-          const endFloat = endM0 + (dY / SLOT_HEIGHT) * SLOT_MINUTES;
+          const endFloat = endM0 + (dY / slotHeightPx) * SLOT_MINUTES;
           setBlockResizeVisual({ blockId: block.id, deltaYPx: dY });
           setBlockResizePreviewEnd({
             blockId: block.id,
@@ -4913,7 +5022,7 @@ export function PractitionerCalendarView({
 
       return withResizeHold({ kind: 'block', id: block.id, eligible, startDrag });
     },
-    [endHour, patchBlockResize, withResizeHold],
+    [endHour, patchBlockResize, withResizeHold, slotHeightPx],
   );
 
   const timeLabels = Array.from({ length: TOTAL_SLOTS + 1 }, (_, i) => {
@@ -4938,8 +5047,8 @@ export function PractitionerCalendarView({
     const offset = nowMins - startHour * 60;
     const gridMins = TOTAL_SLOTS * SLOT_MINUTES;
     if (offset < 0 || offset > gridMins) return null;
-    return (offset / SLOT_MINUTES) * SLOT_HEIGHT;
-  }, [viewMode, date, startHour, TOTAL_SLOTS, calendarClockTick]);
+    return (offset / SLOT_MINUTES) * slotHeightPx;
+  }, [viewMode, date, startHour, TOTAL_SLOTS, calendarClockTick, slotHeightPx]);
 
   const bookingsMatchingFilters = useMemo(() => {
     return bookings.filter((b) => {
@@ -5456,6 +5565,8 @@ export function PractitionerCalendarView({
         <PractitionerCalendarToolbar
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          compactDay={compactDay}
+          onToggleCompactDay={() => setCompactDay((v) => !v)}
           onNavigateDay={navigateDay}
           onDateChange={navigateDayDirect}
           date={date}
@@ -5944,7 +6055,7 @@ export function PractitionerCalendarView({
                   className="min-h-[58px] rounded-tl-xl border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/80"
                   aria-hidden
                 />
-                <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
+                <div ref={slotCanvasRef} className="relative" style={{ height: TOTAL_SLOTS * slotHeightPx }}>
                   {timeLabels.map((t, i) => {
                     const isHour = i % 4 === 0;
                     const isHalfHour = i % 4 === 2;
@@ -5953,7 +6064,7 @@ export function PractitionerCalendarView({
                       <div
                         key={`time-label-${i}`}
                         className="absolute left-0 flex w-full justify-end pr-1.5"
-                        style={{ top: i * SLOT_HEIGHT, transform: 'translateY(-50%)' }}
+                        style={{ top: i * slotHeightPx, transform: 'translateY(-50%)' }}
                       >
                         <span
                           className={
@@ -6151,14 +6262,14 @@ export function PractitionerCalendarView({
                     );
                 return (
                   <div key={pracId} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
-                    <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
+                    <div className="relative" style={{ height: TOTAL_SLOTS * slotHeightPx }}>
                       {timeLabels.map((_, i) => {
                         const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
                         return (
                           <div
                             key={i}
                             className={`absolute left-0 w-full border-t ${calendarGridLineClass(slotStartMins)}`}
-                            style={{ top: i * SLOT_HEIGHT }}
+                            style={{ top: i * slotHeightPx }}
                           />
                         );
                       })}
@@ -6187,7 +6298,8 @@ export function PractitionerCalendarView({
                             pracId={pracId}
                             dateStr={date}
                             slotStartMins={slotStartMins}
-                            top={i * SLOT_HEIGHT}
+                            top={i * slotHeightPx}
+                            slotHeightPx={slotHeightPx}
                             disabled={occ}
                             onEmptyClick={(ev, pid, dstr, t) => {
                               const linkedCol = linkedNativeGridColumnByKey.get(pid);
@@ -6234,10 +6346,10 @@ export function PractitionerCalendarView({
                                 : 'border-emerald-500 bg-emerald-200/35 ring-1 ring-inset ring-emerald-400/50'
                           }`}
                           style={{
-                            top: ((calendarDragTarget.startMin - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT,
+                            top: ((calendarDragTarget.startMin - startHour * 60) / SLOT_MINUTES) * slotHeightPx,
                             height:
                               ((calendarDragTarget.endMin - calendarDragTarget.startMin) / SLOT_MINUTES) *
-                              SLOT_HEIGHT,
+                              slotHeightPx,
                           }}
                           aria-hidden
                         />
@@ -6256,8 +6368,8 @@ export function PractitionerCalendarView({
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
                         const baseH = Math.max(
-                          (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * SLOT_HEIGHT,
-                          SLOT_HEIGHT * 0.5,
+                          (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * slotHeightPx,
+                          slotHeightPx * 0.5,
                         );
                         const breakBlock = isBreakCalendarBlock(bl);
                         const closureBlock = isScheduleClosureBlock(bl);
@@ -6280,6 +6392,7 @@ export function PractitionerCalendarView({
                             block={bl}
                             top={top}
                             height={baseH}
+                            slotHeightPx={slotHeightPx}
                             heightExtraPx={resizeExtra}
                             canDrag={canDrag}
                           >
@@ -6320,7 +6433,7 @@ export function PractitionerCalendarView({
                                   }}
                                   disabled={readOnlyBlock}
                                   className={`flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left ${
-                                    canDrag ? 'pb-[19px]' : ''
+                                    canDrag && resizeAffordanceOn ? 'pb-[19px]' : ''
                                   } ${readOnlyBlock ? 'cursor-default' : ''}`}
                                   title={
                                     breakBlock
@@ -6367,7 +6480,7 @@ export function PractitionerCalendarView({
                                       aria-orientation="horizontal"
                                       aria-label="Press and hold, then drag to change block duration"
                                       data-no-calendar-pan="true"
-                                      className={`group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-lg transition-colors duration-150 ${
+                                      className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-lg transition-colors duration-150 ${
                                         resizeArmingThis
                                           ? 'bg-black/[0.12]'
                                           : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
@@ -6497,7 +6610,7 @@ export function PractitionerCalendarView({
                         const durationForLayout = (booking: Booking) => {
                           const baseDuration = getBookingDuration(booking);
                           if (resizeVisual?.bookingId !== booking.id) return baseDuration;
-                          const resizeDeltaMins = (resizeVisual.deltaYPx / SLOT_HEIGHT) * SLOT_MINUTES;
+                          const resizeDeltaMins = (resizeVisual.deltaYPx / slotHeightPx) * SLOT_MINUTES;
                           return Math.max(SLOT_MINUTES, baseDuration + resizeDeltaMins);
                         };
                         const clusterLayouts = computeBookingClusterLayouts(bookingClusters, durationForLayout);
@@ -6532,8 +6645,9 @@ export function PractitionerCalendarView({
                               ? lastScheduleEditUndo.kind
                               : 'move';
                           const isOverlapLane = layout.laneCount > 1;
-                          const contentHeightPx =
-                            blockH - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0);
+                          const reservePx =
+                            canDrag && resizeAffordanceOn ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0;
+                          const contentHeightPx = Math.max(0, blockH - reservePx);
                           const cardDensity =
                             isOverlapLane || contentHeightPx < 56 ? 'compact' : 'comfortable';
                           const showPillsRow =
@@ -6546,6 +6660,7 @@ export function PractitionerCalendarView({
                               booking={b}
                               top={top}
                               height={height}
+                              slotHeightPx={slotHeightPx}
                               heightExtraPx={resizeExtra}
                               laneIndex={layout.laneIndex}
                               laneCount={layout.laneCount}
@@ -6628,11 +6743,61 @@ export function PractitionerCalendarView({
                                     </span>
                                   ) : null}
                                   {moveArmingThis ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
-                                  <BookingGuestActionsRowMeasured className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
+                                  <BookingGuestActionsRowMeasured
+                                    className={`relative z-[1] flex min-h-0 min-w-0 flex-1 ${
+                                      compactActive ? 'flex-row items-center' : 'flex-col'
+                                    }`}
+                                  >
                                       {(shellRowWidthPx) => {
+                                        if (compactActive) {
+                                          // Compact bars lay the name (flex-1, truncating) and the
+                                          // horizontal action row (flex-none) as siblings, both vertically
+                                          // centred. The name yields width to the buttons rather than the
+                                          // buttons overlapping it, and every control fits within the bar.
+                                          return (
+                                            <>
+                                              <div className="flex min-w-0 flex-1 self-stretch overflow-hidden">
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
+                                                  {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
+                                                  title={resName ? 'Open to change slot' : undefined}
+                                                  className={`flex h-full min-h-0 w-full flex-col justify-center overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-0 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+                                                  aria-label={`Open booking details for ${b.guest_name}`}
+                                                >
+                                                  <BookingCard
+                                                    name={b.guest_name}
+                                                    nameAccessory={
+                                                      complianceFlags[b.id] ? (
+                                                        <ComplianceBarIcon flag={complianceFlags[b.id]!} />
+                                                      ) : undefined
+                                                    }
+                                                    service={calendarBookingServiceLabel(b, svc, resName ?? null)}
+                                                    phone={formatPhoneForDisplay(b.guest_phone)}
+                                                    start={b.booking_time.slice(0, 5)}
+                                                    end={displayEndHm}
+                                                    pill={<CalendarBookingStatusBadge b={b} palette={palette} />}
+                                                    contentHeightPx={contentHeightPx}
+                                                    density={cardDensity}
+                                                    actionsReservePx={0}
+                                                  />
+                                                </button>
+                                              </div>
+                                              <CompactBookingActions
+                                                booking={b}
+                                                busy={qBusy}
+                                                barHeightPx={blockH}
+                                                availableWidthPx={shellRowWidthPx}
+                                                narrow={isOverlapLane}
+                                                onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                                onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                              />
+                                            </>
+                                          );
+                                        }
                                         const actionBlockHeight = Math.max(
                                           0,
-                                          height + resizeExtra - (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0),
+                                          height + resizeExtra - reservePx,
                                         );
                                         const actionInset = computeBookingActionCornerInset(b, actionBlockHeight);
                                         return (
@@ -6656,11 +6821,8 @@ export function PractitionerCalendarView({
                                                   ? actionInset.right
                                                   : undefined,
                                                 paddingBottom: actionInset.hasActions
-                                                  ? actionInset.bottom +
-                                                    (canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0)
-                                                  : canDrag
-                                                    ? BOOKING_RESERVE_ABOVE_RESIZE_PX
-                                                    : undefined,
+                                                  ? actionInset.bottom + reservePx
+                                                  : reservePx || undefined,
                                               }}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
@@ -6701,7 +6863,7 @@ export function PractitionerCalendarView({
                                               narrow={isOverlapLane}
                                               shellRowWidthPx={shellRowWidthPx}
                                               floating={false}
-                                              bottomReservePx={canDrag ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0}
+                                              bottomReservePx={reservePx}
                                             />
                                           </>
                                         );
@@ -6787,7 +6949,7 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Press and hold, then drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className={`group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
+                                        className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
                                           resizeArmingThis
                                             ? 'bg-black/[0.12]'
                                             : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
@@ -6841,6 +7003,7 @@ export function PractitionerCalendarView({
                             booking={first}
                             top={top}
                             height={height}
+                            slotHeightPx={slotHeightPx}
                             laneIndex={layout.laneIndex}
                             laneCount={layout.laneCount}
                             canDrag={false}
@@ -6967,6 +7130,7 @@ export function PractitionerCalendarView({
                       )}
                       startHour={startHour}
                       endHour={endHour}
+                      slotHeightPx={slotHeightPx}
                       onBookingClick={openBookingDetail}
                       hideHeader
                     />
@@ -6986,6 +7150,7 @@ export function PractitionerCalendarView({
                       resourceMintSlots={linkedResourceAvailabilityByColumnKey.get(col.key) ?? []}
                       startHour={startHour}
                       totalSlots={TOTAL_SLOTS}
+                      slotHeightPx={slotHeightPx}
                       bookingRowOverlayForId={bookingRowOverlayForId}
                       onBookingClick={(b, anchor) => openLinkedBooking(col, b, anchor)}
                       onEventBlockClick={(b) => openEventInstanceDetail(b, col)}

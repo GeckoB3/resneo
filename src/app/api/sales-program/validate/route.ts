@@ -32,5 +32,6 @@ export async function GET(request: Request) {
     ok: true,
     code: result.value.code,
     salesperson_name: result.value.salesperson_name,
+    trial_days: result.value.trial_days,
   });
 }

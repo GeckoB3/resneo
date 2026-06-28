@@ -2,24 +2,28 @@ import Link from 'next/link';
 import type { HelpArticle } from '@/lib/help/types';
 import { helpArticleHref } from '@/lib/help/navigation';
 
-const SECTION_ORDER = ['gs-start-here', 'gs-know-the-app', 'gs-configure-venue', 'gs-open-the-doors'] as const;
+const SECTION_ORDER = ['gs-start-here', 'gs-set-up', 'gs-catalogue', 'gs-run', 'gs-grow'] as const;
 
 const SECTION_META: Record<(typeof SECTION_ORDER)[number], { title: string; subtitle: string }> = {
   'gs-start-here': {
     title: 'Start here',
-    subtitle: 'What ResNeo is, how it fits your day, and where to go first.',
+    subtitle: 'What ResNeo is, your dashboard, and the quickest path to your first booking.',
   },
-  'gs-know-the-app': {
-    title: 'Know the app',
-    subtitle: 'Home, sidebar, roles, and how the dashboard adapts to your venue.',
+  'gs-set-up': {
+    title: 'Set up your venue',
+    subtitle: 'Your profile, hours, payments, booking page, and team, before guests arrive.',
   },
-  'gs-configure-venue': {
-    title: 'Configure your venue',
-    subtitle: 'Profile, identity on the web, and payments—before guests arrive.',
+  'gs-catalogue': {
+    title: 'Build what you sell',
+    subtitle: 'Services, classes, events, and bookable resources.',
   },
-  'gs-open-the-doors': {
-    title: 'Open the doors',
-    subtitle: 'Share your booking link, embed on your site, and use the setup checklist to go live.',
+  'gs-run': {
+    title: 'Run your day',
+    subtitle: 'The calendar, bookings, contacts, waitlist, and compliance you use day to day.',
+  },
+  'gs-grow': {
+    title: 'Communicate and grow',
+    subtitle: 'Messaging, reports, importing your data, and refer and earn.',
   },
 };
 

@@ -35,7 +35,7 @@ import {
   type SalesValidationOk,
 } from '@/lib/sales/client';
 import { REFERRAL_REFEREE_BONUS_DAYS } from '@/lib/referrals/constants';
-import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
+import { salesTrialRewardLabel } from '@/lib/sales/constants';
 
 type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
@@ -57,7 +57,7 @@ export default function PaymentPage() {
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
   /** Referral state — when present, the trial is extended by REFERRAL_REFEREE_BONUS_DAYS. */
   const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
-  /** Sales code — takes precedence; grants a flat SALES_SIGNUP_TRIAL_DAYS (1 month) free trial. */
+  /** Sales code — takes precedence; grants the code's own free trial (`salesValid.trial_days`). */
   const [salesValid, setSalesValid] = useState<SalesValidationOk | null>(null);
 
   useEffect(() => {
@@ -264,8 +264,8 @@ export default function PaymentPage() {
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
           <p className="font-medium">Sales offer applied ({salesValid.code})</p>
           <p className="mt-1 text-blue-800">
-            You get 1 month free — a {SALES_SIGNUP_TRIAL_DAYS}-day free trial instead of the standard{' '}
-            {SIGNUP_TRIAL_DAYS} days. Your first charge happens after {SALES_SIGNUP_TRIAL_DAYS} days.
+            You get {salesTrialRewardLabel(salesValid.trial_days)} — a {salesValid.trial_days}-day free trial instead
+            of the standard {SIGNUP_TRIAL_DAYS} days. Your first charge happens after {salesValid.trial_days} days.
           </p>
         </div>
       )}
@@ -324,7 +324,7 @@ export default function PaymentPage() {
           ) : isLight ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
               <p className="font-medium">
-                Appointments Light: {salesValid ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
+                Appointments Light: {salesValid ? salesValid.trial_days : SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
               </p>
               <p className="mt-1.5 leading-relaxed">
                 One bookable calendar and one venue login. Appointments, classes, events, and bookable resources
@@ -336,7 +336,7 @@ export default function PaymentPage() {
           ) : (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">
-                ResNeo {planLabel}: {salesValid ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{totalPrice}/month
+                ResNeo {planLabel}: {salesValid ? salesValid.trial_days : SIGNUP_TRIAL_DAYS}-day free trial, then &pound;{totalPrice}/month
               </p>
               <p className="mt-1 leading-relaxed">
                 {isRestaurant
@@ -364,7 +364,7 @@ export default function PaymentPage() {
                   <span className="text-base font-semibold text-slate-900">
                     After{' '}
                     {salesValid
-                      ? `${SALES_SIGNUP_TRIAL_DAYS}-day`
+                      ? `${salesValid.trial_days}-day`
                       : referralValid
                         ? `${SIGNUP_TRIAL_DAYS + REFERRAL_REFEREE_BONUS_DAYS}-day`
                         : `${SIGNUP_TRIAL_DAYS}-day`}{' '}
@@ -374,7 +374,7 @@ export default function PaymentPage() {
                 </div>
                 <p className="mt-3 text-xs leading-relaxed text-slate-500">
                   {salesValid
-                    ? `Add your card at checkout. Your subscription is free for ${SALES_SIGNUP_TRIAL_DAYS} days; the first monthly charge is after the trial.`
+                    ? `Add your card at checkout. Your subscription is free for ${salesValid.trial_days} days; the first monthly charge is after the trial.`
                     : SIGNUP_TRIAL_CARD_NOTICE}{' '}
                   {signupTrialSmsDuringTrialNotice()}
                 </p>

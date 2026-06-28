@@ -24,7 +24,7 @@ import {
   isTransientSalesValidationFailure,
   type SalesValidationOk,
 } from '@/lib/sales/client';
-import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
+import { salesTrialRewardLabel } from '@/lib/sales/constants';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -127,7 +127,7 @@ export default function SignupPage() {
         if (sres.ok) {
           setSalesValid(sres);
           setReferralValid(null);
-          persistSalesCodeCookie(sres.code);
+          persistSalesCodeCookie(sres.code, sres.trial_days);
           clearReferralCodeCookieForSalesPrecedence();
           setReferralCheckedAt(Date.now());
           return;
@@ -187,7 +187,7 @@ export default function SignupPage() {
       if (sales.ok) {
         setSalesValid(sales);
         setReferralValid(null);
-        persistSalesCodeCookie(sales.code);
+        persistSalesCodeCookie(sales.code, sales.trial_days);
         clearReferralCodeCookieForSalesPrecedence();
         setReferralCheckedAt(Date.now());
         return;
@@ -316,7 +316,7 @@ export default function SignupPage() {
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
           <p className="font-medium">Sales offer applied ({salesValid.code})</p>
           <p className="mt-1 text-blue-800">
-            You get 1 month free — a {SALES_SIGNUP_TRIAL_DAYS}-day free trial.
+            You get {salesTrialRewardLabel(salesValid.trial_days)} — a {salesValid.trial_days}-day free trial.
           </p>
         </div>
       )}

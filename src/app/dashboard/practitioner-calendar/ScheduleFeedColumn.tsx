@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 
-const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
 
 /** Matches Confirmed (indigo) lane styling next to practitioner calendar booking blocks. */
@@ -34,6 +33,8 @@ interface ScheduleFeedColumnProps {
   blocks: ScheduleBlockDTO[];
   startHour: number;
   endHour: number;
+  /** Runtime slot height (comfortable 48px, or the smaller compact-fit value) — kept in sync with the booking columns. */
+  slotHeightPx: number;
   onBookingClick: (bookingId: string, anchor: { x: number; y: number }) => void;
   /** When set, class session blocks open this handler (full session roster) instead of a single booking. */
   onClassInstanceClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
@@ -52,6 +53,7 @@ export function ScheduleFeedColumn({
   blocks,
   startHour,
   endHour,
+  slotHeightPx,
   onBookingClick,
   onClassInstanceClick,
   onEventInstanceClick,
@@ -65,12 +67,12 @@ export function ScheduleFeedColumn({
   function slotTop(time: string): number {
     const mins = timeToMinutes(time);
     const offset = mins - startHour * 60;
-    return (offset / SLOT_MINUTES) * SLOT_HEIGHT;
+    return (offset / SLOT_MINUTES) * slotHeightPx;
   }
 
   function slotHeight(start: string, end: string): number {
     const d = Math.max(timeToMinutes(end) - timeToMinutes(start), SLOT_MINUTES);
-    return Math.max((d / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.75);
+    return Math.max((d / SLOT_MINUTES) * slotHeightPx, slotHeightPx * 0.75);
   }
 
   const dayBlocks = blocks.filter((b) => b.date === date);
@@ -82,14 +84,14 @@ export function ScheduleFeedColumn({
           <span className="truncate text-center text-sm font-semibold text-slate-900">{label}</span>
         </div>
       ) : null}
-      <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
+      <div className="relative" style={{ height: totalSlots * slotHeightPx }}>
         {Array.from({ length: totalSlots + 1 }, (_, i) => {
           const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
           return (
             <div
               key={`grid-${i}`}
               className={`absolute left-0 right-0 z-[1] border-t ${feedGridLineClass(slotStartMins)}`}
-              style={{ top: i * SLOT_HEIGHT }}
+              style={{ top: i * slotHeightPx }}
             />
           );
         })}
@@ -99,7 +101,7 @@ export function ScheduleFeedColumn({
             <div
               key={`band-${i}`}
               className={`absolute left-0 right-0 z-0 ${feedSlotBandClass(slotStartMins)}`}
-              style={{ top: i * SLOT_HEIGHT, height: SLOT_HEIGHT }}
+              style={{ top: i * slotHeightPx, height: slotHeightPx }}
             />
           );
         })}

@@ -14,17 +14,16 @@ import {
   signupTrialThenPrice,
   signupTrialSmsDuringTrialNotice,
 } from '@/lib/signup-trial-copy';
-import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
 import { useSalesTrial } from '@/lib/sales/use-sales-trial';
 
 export default function AppointmentsLightIntroPage() {
   const router = useRouter();
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  // A validated commissioned-sales code (persisted as a cookie upstream) earns 1 month free, so
-  // the trial copy matches the offer payment validates and Stripe charges.
-  const salesTrial = useSalesTrial();
-  const trialDays = salesTrial ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS;
+  // A validated commissioned-sales code (persisted as a cookie upstream) earns the code's free
+  // trial, so the copy matches the offer payment validates and Stripe charges.
+  const salesTrialDays = useSalesTrial();
+  const trialDays = salesTrialDays ?? SIGNUP_TRIAL_DAYS;
 
   useEffect(() => {
     sessionStorage.removeItem('signup_business_type');

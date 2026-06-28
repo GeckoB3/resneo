@@ -1,793 +1,297 @@
 import type { HelpCategory } from '../types';
-import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 
 export const gettingStartedCategory: HelpCategory = {
   slug: 'getting-started',
   title: 'Getting started',
   description:
-    'From first login to a confident guest flow: Home, Settings, Stripe, your public page, and the setup checklist, explained in plain language.',
+    "Everything you need to set up and run ResNeo for your appointments business: your profile, hours, payments, booking page, services, classes, events, resources, your team, the daily tools, communications, reports, and more, all in plain language.",
   plan: 'all',
   articles: [
     {
-      slug: 'welcome',
-      helpSection: 'gs-start-here',
-      title: 'Welcome to ResNeo',
-      description:
-        'What ResNeo does, how the dashboard differs from your public booking page, and where to read next after you pick a topic on the help home.',
-      tags: ['overview', 'basics', 'onboarding', 'plans'],
-      content: `
-# Welcome to ResNeo
-
-You are in the right place. ResNeo helps **independent businesses** take bookings, stay in touch with guests, and, if you choose, collect **card payments** through **Stripe Connect**. You run day to day work from the **dashboard**. Guests use your **public booking page** at \`/book/...\`, and you can optionally embed the flow on your own site.
-
-> **Quick mental model:** the dashboard is for you and your team. The \`/book/...\` page is for guests. They never see your staff tools.
-
-## What you can do here
-
-| Area | What it gives you |
-| --- | --- |
-| **Bookings** | Table reservations, appointments, classes, events, or resources, depending on your **plan** and which **booking models** you turned on. |
-| **Guest experience** | Branded public page, optional iframe embed, automated **email** and **SMS** (templates under **Settings → Communications**). |
-| **Payments** | Deposits and full payments online via **Stripe Connect**. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
-| **Insight** | **Reports** (admins) and **Contacts** for guest history, plus **Data import** (admins) when you move data in from a spreadsheet. |
-
-## Plans (high level)
-
-Your **product plan** (Restaurant / Founding Partner versus Appointments Light, Plus, or Pro) decides which tools appear and how software billing works. That is **separate** from **Stripe Connect**, which only covers money moving from guests to **your** Stripe connected account.
-
-- **Restaurant / Founding Partner** venues get the dining toolkit: **Dining Availability**, **Day Sheet**, **Bookings**, and, when enabled, **table management** (**Table Grid**, **Floor Plan**). Detail lives under [Restaurant plan](/help/restaurant/overview).
-- **Appointments** plans centre on **calendars**, **services**, and related models (**Classes**, **Events**, **Resources**). **Light** and **Plus** cap calendars and team logins. Detail lives under [Appointments plan](/help/appointments/overview).
-
-## Your first session (about 15 minutes)
-
-1. Sign in and open **Home** (\`/dashboard\`). Admins usually see a **setup checklist** card with the next concrete tasks.
-2. Read [Your dashboard at a glance](/help/getting-started/dashboard-overview) so the sidebar matches what you see in the app.
-3. As an **admin**, open **Settings** (\`/dashboard/settings\`) and work through **Profile**, **Business hours**, and **Payments** when you need them.
-4. When you are ready for guests, read [Your public booking page](/help/getting-started/public-booking-page) and [Completing your setup checklist](/help/getting-started/setup-checklist).
-
-## When something does not look right
-
-- [Troubleshooting](/help/troubleshooting) for common fixes on access, Stripe, imports, and availability.
-- **Support** in the dashboard sidebar footer to message the ResNeo team from inside the app.
-
-## Common questions
-
-**Do I need Stripe on day one?**  
-Only if you want guests to pay **online** (deposit or full payment) before confirmation. You can still take **phone** bookings and handle payment outside ResNeo. Connect Stripe before you turn on online payment rules in your catalogue.
-
-**Who can change venue-wide settings?**  
-**Admins** see full **Settings** (Profile, Business hours, Plan, Payments, Communications, Staff, Data import). **Staff** see **Account** at the same URL for their own name, email, phone, and password, not the whole venue.
-
-**Where did the old “Widget” menu go?**  
-Embeds and QR now live on **Settings → Booking Page** (old \`/dashboard/settings/widget\` URLs redirect there).
-`.trim(),
-      markdownRestaurant: `
-# Welcome to ResNeo
-
-You are on a **Restaurant** or **Founding Partner** plan. ResNeo helps you run **table reservations**, guest messaging, and optional **card payments** through **Stripe Connect**, from the **dashboard** through to your public \`/book/...\` page and optional **website embed**.
-
-> **Quick mental model:** the dashboard is for your team. Guests never log into it.
-
-## What you can do on this plan
-
-| Area | What it gives you |
-| --- | --- |
-| **Dining and tables** | **Dining Availability** (admins), **Day Sheet**, **Bookings**, **Waitlist** when you use table reservations, and optional **Table Grid** and **Floor Plan** when **table management** is enabled. |
-| **Schedule add-ons** | If you enable **classes**, **events**, **resources**, or **unified scheduling**, you also get **Calendar Availability**, **Appointment Calendar**, and catalogue links such as **Services**, **Events**, **Classes**, and **Resources** after **Contacts**. The sidebar matches what the product turned on for your venue. |
-| **Guest experience** | Public page, embed, **email** and **SMS** templates under **Settings → Communications**. |
-| **Payments** | Guest charges through **Stripe Connect**. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
-| **Insight** | **Reports** (admins), **Contacts**, **Data import** (admins). |
-
-## Billing you need to know
-
-**Settings → Plan** is your **ResNeo subscription** (the software). **Settings → Payments** is **Stripe Connect** for guest cards. They bill and renew on different rails. Fix Plan issues first if banners say subscription or public booking paused.
-
-## First working session
-
-1. Open **Home** and clear the **setup checklist** rows (admins).
-2. Read [Your dashboard at a glance](/help/getting-started/dashboard-overview) for **Day Sheet**, **Bookings**, and any **Appointment Calendar** link your venue shows.
-3. Finish **Settings → Profile**, **Business hours**, and **Payments** as needed.
-4. Open [Your public booking page](/help/getting-started/public-booking-page), then [Completing your setup checklist](/help/getting-started/setup-checklist).
-
-## Where the deep guides live
-
-- [Restaurant plan](/help/restaurant/overview) for dining, areas, and table operations.
-- If your sidebar includes schedule tools, use the **Schedule and other booking types** section in this help centre for the same articles that Appointments venues use for calendars and catalogues.
-
-## Support
-
-[Troubleshooting](/help/troubleshooting) and **Support** in the sidebar footer.
-`.trim(),
-      markdownAppointments: `
-# Welcome to ResNeo
-
-You are on an **Appointments** plan (**Light**, **Plus**, or **Pro**). ResNeo is built around **bookable calendars**, **services** (and related catalogues), **availability**, and guest messaging, with optional **Stripe Connect** for deposits and online payment. You work in the **dashboard**; guests book on your **public booking page** and, if you use it, an **embed** on your website.
-
-> **Quick mental model:** staff tools live under \`/dashboard\`. Guest booking lives at \`/book/your-slug\` (and \`/embed/your-slug\` inside an iframe).
-
-## What you can do on this plan
-
-| Area | What it gives you |
-| --- | --- |
-| **Scheduling** | **Calendar Availability** for calendars, weekly templates, breaks, and closures. **Appointment Calendar** (or **Day Sheet** when the app shows that layout for your booking model) for the live grid. |
-| **Catalogue** | **Services** for appointment lines, plus **Classes**, **Events**, or **Resources** when those **booking models** are enabled under **Settings → Profile**. |
-| **Operations** | **Bookings** or **Appointments** list (the label changes when you mix models), **New Booking** or **New Appointment**, and **Contacts**. |
-| **Guest comms** | **Settings → Communications** for email and SMS templates and policies. |
-| **Payments** | **Stripe Connect** under **Settings → Payments** for guest cards. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD} |
-| **Insight** | **Reports** (admins), **Contacts**, **Data import** (admins). |
-
-## Tiers in one place
-
-**Appointments Light** is built for a single calendar column and a single team login, with SMS charged per message (see **Settings → Plan** for the current rate). **Appointments Plus** raises calendar and team caps and includes a monthly SMS bundle. **Appointments Pro** (the tier stored as \`appointments\` in billing) removes those calendar and team caps for normal Pro use and includes a larger SMS bundle. Exact numbers, caps, and SMS wording always come from **Settings → Plan** in your venue, not from help text alone.
-
-## First working session
-
-1. Open **Home** and work through the **setup checklist** (admins).
-2. Read [Your dashboard at a glance](/help/getting-started/dashboard-overview) so **Calendar Availability**, lists, and calendar links match what you see.
-3. Under **Settings → Profile**, confirm **Booking models**, public fields, and **Booking widget & QR code**.
-4. Connect **Stripe** under **Settings → Payments** if you sell online, then walk [Your public booking page](/help/getting-started/public-booking-page) and [Completing your setup checklist](/help/getting-started/setup-checklist).
-
-## Where to go deeper
-
-Everything about calendars, services, deposits, comms, and imports for this product line lives in **[Appointments plan](/help/appointments/overview)** and linked articles there.
-
-## Support
-
-[Troubleshooting](/help/troubleshooting) and **Support** in the sidebar footer.
-`.trim(),
+      slug: "welcome",
+      helpSection: "gs-start-here",
+      title: "Welcome to ResNeo",
+      description: "A friendly introduction to ResNeo and a clear path to taking your first booking.",
+      tags: ["overview","introduction","getting started","first booking","setup","basics"],
+      content: "# Welcome to ResNeo\n\nResNeo is the simple way to take and manage bookings for your appointments business. Your clients book themselves online, day or night, while ResNeo keeps your calendar tidy, sends the reminders, and (if you want) takes payment up front so you get fewer no-shows. This guide takes you from here to your very first booking.\n\n:::help-figure welcome-what\n\n## What ResNeo does for you\n\n- **Takes bookings around the clock.** Clients choose a service and a time on your own booking page, even when you are closed.\n- **Keeps your day organised.** Every booking lands on one clear calendar, so you always know what is next.\n- **Cuts no-shows.** Automatic email and text reminders, plus optional deposits, keep clients turning up.\n- **Looks professional.** A booking page with your name, logo, and colours, and tidy confirmation messages.\n- **Gets you paid.** Take a deposit or full payment online when clients book, if you choose to.\n- **Keeps clients coming back.** Every client's visit history, notes, and contact details live in one place.\n\n## How it works\n\nYou run everything from your **dashboard** once you sign in: your services, your calendar, your clients, and your settings. Your clients never see any of that. They book through your own **booking page**, which you share as a link or a QR code, or add to your website.\n\n> **Tip:** click **Your Booking Page** in the sidebar any time to see exactly what your clients see.\n\n## Getting up and running\n\nYou can be ready for bookings in well under an hour. Work through these in order and tick each one off as you go:\n\n1. **Add what you offer.** Set up your [services](/help/getting-started/services), plus [classes](/help/getting-started/classes), [events](/help/getting-started/events), or [resources](/help/getting-started/resources) if you use them.\n2. **Set your hours.** Tell ResNeo when you are open and when each person works in [business and calendar hours](/help/getting-started/business-and-calendar-hours).\n3. **Add your details.** Put in your business name, logo, and contact details in [your business profile](/help/getting-started/business-profile).\n4. **Turn on payments (optional).** [Connect Stripe](/help/getting-started/stripe-payments) if you want clients to pay a deposit or in full when they book.\n5. **Open your doors.** Share [your booking page](/help/getting-started/public-booking-page) and take your first booking.\n\n:::help-figure welcome-steps\n\n> **You are not on your own.** When you sign in, your **Home** screen shows a setup checklist that walks you through these same steps. See [your go-live checklist](/help/getting-started/setup-checklist).\n\n## Which plan am I on?\n\nResNeo comes in three plans: **Light** for a single person, **Plus** for small teams, and **Pro** for larger teams. Your plan sets how many calendars and team members you can have and how many text messages are included each month. To see or change your plan, open **Settings**, then **Plan**.\n\n## Common questions\n\n| Question | Answer |\n| --- | --- |\n| Do I have to take payments online? | No. It is completely optional. You can take bookings without it and handle payment in person. |\n| Where do my clients book? | On your booking page. Share the link or QR code, or add it to your website. Click **Your Booking Page** in the sidebar to see it. |\n| I only see **Account**, not **Settings**. Why? | You are signed in as a team member. Owners and admins see the full **Settings**; team members see their own **Account**. |\n| Can my team sign in too? | Yes, on the Plus and Pro plans. Add team members in **Settings**, then **Staff**. |\n| Where do I get help later? | Use the **Support** link in the sidebar, or browse the rest of this Getting started guide. |\n\n## Next steps\n\n- [A tour of your dashboard](/help/getting-started/dashboard-overview)\n- [Set up your services](/help/getting-started/services)\n- [Your go-live checklist](/help/getting-started/setup-checklist)",
     },
     {
-      slug: 'dashboard-overview',
-      helpSection: 'gs-know-the-app',
-      title: 'Your dashboard at a glance',
-      description:
-        'Home, sidebar links, admin versus staff, how list labels change, Support, and your public booking link.',
-      tags: ['dashboard', 'navigation', 'roles', 'home'],
-      content: `
-# Your dashboard at a glance
-
-Think of the dashboard as your **control room**: today’s work, shortcuts to create bookings, and links to every tool your role is allowed to use.
-
-## Home
-
-**Home** is \`/dashboard\`. It surfaces what matters **today**: upcoming bookings, useful alerts, and, for **venue admins**, a **setup checklist** card that tracks profile, availability, Stripe Connect, and a first test booking.
-
-> **Staff note:** you have the same **Home** experience for operational work, but you will **not** see the setup checklist. That card is **admin-only**.
-
-## The left sidebar
-
-Links depend on your **role**, **plan**, **booking model**, and which extra models are enabled. Every venue gets **Home**. Most get **Bookings** and **New Booking** (or appointment style labels; see below). **Contacts** lists guests.
-
-**Admin-only** items (hidden from staff):
-
-- **Dining Availability** (\`/dashboard/availability\`) when you run restaurant style dining on a Restaurant or Founding tier with table reservations.
-- **Reports** (\`/dashboard/reports\`).
-- **Settings** for admins versus **Account** for staff (same route \`/dashboard/settings\`).
-
-**Conditional tools**
-
-- **Waitlist** when the venue uses **table reservations** in the model the app loaded.
-- **Calendar Availability** (\`/dashboard/calendar-availability\`) when the venue needs calendar and availability settings for schedule backed models (the app decides from your plan and models).
-- **Day Sheet** and/or **Appointment Calendar** next to **Bookings** depending on restaurant table primary layouts versus schedule calendar eligibility.
-- **Table Grid** and **Floor Plan** when **table management** is enabled on a Restaurant or Founding table venue.
-- **Services**, **Classes**, **Events**, **Resources** after **Contacts** when those models are active.
-
-## Why labels say **Appointments** or **Bookings**
-
-On appointment style dashboards, the list reads **Appointments** when you only run schedule backed flows. If you also enable another booking style (for example tables alongside appointments), the labels become **Bookings** and **New Booking** so they match what guests do.
-
-## Your Booking Page
-
-With a venue **slug**, **Your Booking Page** opens \`/book/your-slug\` in a new tab from the sidebar.
-
-## Support
-
-**Support** at the bottom of the sidebar, plus [Troubleshooting](/help/troubleshooting).
-
-## Where to go next
-
-- [Setting up your business profile](/help/getting-started/business-profile)
-- [Restaurant plan](/help/restaurant/overview) or [Appointments plan](/help/appointments/overview)
-`.trim(),
-      markdownRestaurant: `
-# Your dashboard at a glance
-
-This page assumes a **Restaurant** or **Founding Partner** table led setup. Your sidebar prioritises covers, sittings, and service rhythm.
-
-## Home
-
-**Home** (\`/dashboard\`) shows today’s operational picture. **Admins** also get the **setup checklist** for profile, dining configuration, Stripe, and a first test booking.
-
-> **Staff:** no checklist card. Ask an admin if setup still blocks you.
-
-## What Restaurant and Founding venues usually see
-
-- **Day Sheet** and **Bookings** together when the app uses that pair for your venue (covers focused day view plus the list).
-- **Dining Availability** for admins (sittings, capacity, areas).
-- **Waitlist** when **table reservations** are part of your model.
-- **Table Grid** and **Floor Plan** when **table management** is turned on.
-- **New Booking** for staff created reservations.
-- **Contacts** for guest records.
-
-If you added **classes**, **events**, **resources**, or **unified scheduling**, you will also see **Calendar Availability**, **Appointment Calendar**, and the relevant catalogue links after **Contacts**, matching the live product.
-
-## Admin-only and staff views
-
-**Dining Availability** and **Reports** are **admin** links. **Settings** is the full venue console for admins. **Staff** see **Account** at \`/dashboard/settings\` for personal details and password only.
-
-## Labels next to **Bookings**
-
-If schedule backed models are on, the second link may read **Appointment Calendar** or **Day Sheet** depending on eligibility. Trust the label shown in your sidebar.
-
-## Your Booking Page
-
-**Your Booking Page** uses your public slug and opens the hosted guest experience.
-
-## Support
-
-Use **Support** after [Troubleshooting](/help/troubleshooting).
-
-## Next
-
-- [Setting up your business profile](/help/getting-started/business-profile)
-- [Restaurant plan](/help/restaurant/overview)
-`.trim(),
-      markdownAppointments: `
-# Your dashboard at a glance
-
-This page is for **Appointments** plans (**Light**, **Plus**, **Pro**). Navigation centres on calendars, services, lists, and guest comms, not on Restaurant dining consoles.
-
-## Home
-
-**Home** (\`/dashboard\`) shows what matters today. **Admins** see the **setup checklist** for profile, availability, Stripe, catalogue gaps for enabled models, and a first test booking.
-
-> **Staff:** you do not see the checklist.
-
-## Core links you should expect
-
-- **Calendar Availability** (\`/dashboard/calendar-availability\`) when your venue uses schedule settings (calendars, weekly hours, breaks, closures). It appears whenever the product’s rules say you need that screen, including some mixed model venues on other tiers. On standard Appointments tiers without dining admin tools, you will not see a separate **Dining Availability** item because that is part of the Restaurant and Founding table product surface.
-- **Services** at \`/dashboard/appointment-services\` when appointments style services are in your model set.
-- **Appointment Calendar** at \`/dashboard/calendar\` when your venue is **schedule calendar eligible**. If the product shows **Day Sheet** instead of **Appointment Calendar** next to **Bookings** for your booking model, use the in app label: both are staff scheduling views, not guest tools.
-- **Bookings** list at \`/dashboard/bookings\` (or the label **Appointments** when only schedule backed models are active) plus **New Booking** or **New Appointment**.
-- **Contacts** for guest history.
-- **Classes**, **Events**, or **Resources** entries after **Contacts** when those models are enabled.
-
-## Admin-only
-
-**Reports** and full **Settings** are **admin** only. **Staff** use **Account** on the same route for their own profile.
-
-## Your Booking Page
-
-Once a **slug** exists, **Your Booking Page** opens your live \`/book/...\` page.
-
-## Practitioner links
-
-Some setups expose \`/book/{venue-slug}/{practitioner-slug}\` for a focused guest entry. Whether that appears depends on your venue configuration in the product.
-
-## Support
-
-**Support** in the sidebar footer, plus [Troubleshooting](/help/troubleshooting).
-
-## Next
-
-- [Setting up your business profile](/help/getting-started/business-profile)
-- [Appointments plan](/help/appointments/overview)
-`.trim(),
+      slug: "dashboard-overview",
+      helpSection: "gs-start-here",
+      title: "A tour of your dashboard",
+      description: "A quick tour of your dashboard sidebar, so you can find any tool in a couple of clicks.",
+      tags: ["dashboard","navigation","sidebar","roles","admin","staff","home","booking page"],
+      content: "# A tour of your dashboard\n\nYour dashboard is where you run your business: see what's on today, take bookings, manage clients, and set everything up. This quick tour shows you what each link in the sidebar does and how to open your live booking page, so you can find any tool in a couple of clicks.\n\n## Start on Home\n\n**Home** is the first link in the sidebar. It shows what matters today. If you are an admin, you also see a \"Get your venue ready\" card that walks you through getting set up.\n\n> Staff see the same Home for daily work, but the setup card is hidden. That card is for admins only.\n\n## What's in the sidebar\n\nThe sidebar stays the same on every page. The exact links depend on your plan and which booking types you have turned on. An appointments business usually sees these, top to bottom:\n\n1. **Home**: today's view, plus the setup card for admins.\n2. **Appointments**: your list of bookings. (If you also turn on Classes, Events, or Resources, this reads **Bookings**.)\n3. **Appointment Calendar**: your live day and week grid, shown just under Appointments.\n4. **New Appointment**: book someone in by hand. (With Classes, Events, or Resources on, this reads **New Booking**.)\n5. **Contacts**: your client list and each client's history.\n6. **Services**: the things people can book.\n7. **Calendar Availability**: your working hours, breaks, and closures.\n8. **Settings**: where you set up your venue (more below). Staff see this as **Account** instead.\n\n> If a link in this list is missing for you, that booking type just isn't turned on yet. Trust the labels you see in your own sidebar.\n\n:::help-figure dashboard-sidebar\n\n## Admins and staff: who sees what\n\nYour day to day links are the same for everyone. Your role mainly changes the bottom link.\n\n- **Admins** see **Settings**, which opens the full venue setup with tabs such as Profile, Business hours, Booking Settings, Booking Page, Plan, Payments, Communications, Staff, and Reports. Admins also see the Home setup card.\n- **Staff** see **Account** instead, which opens just their own details: name, sign in email, phone, and password.\n\n> If you expected the full **Settings** and only see **Account**, you are signed in as staff. Ask a venue admin to update your role if you need more access.\n\n:::help-figure dashboard-roles\n\n## Open your public booking page\n\nBelow the navigation links you will find **Your Booking Page**. Click it to open your live, client facing page in a new tab, so you can see exactly what clients see when they book.\n\nThis link only appears once your venue has a web address set on your booking page. To add one, open **Settings** and choose **Booking Page**.\n\n> This is the one link that leaves the dashboard. Everything else is for you and your team. Clients never sign in here.\n\n## At the bottom of the sidebar\n\nA small card shows your venue name, your name, and your sign in email, so you always know which account you are using. Below it:\n\n- **Support**: message the ResNeo team from inside the app.\n- **Sign out**: ends your session safely on this device.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I see **Account**, not **Settings** | You are signed in as staff, not an admin | Ask a venue admin to update your role, or sign in with an admin account |\n| **Your Booking Page** link is missing | Your venue has no web address yet | An admin opens **Settings**, then **Booking Page**, and adds one |\n| My sidebar says **Appointments**, a colleague's says **Bookings** | One venue also runs Classes, Events, or Resources | Both are correct: the label follows the booking types each venue has on |\n| I can't find **Calendar Availability** | Your venue's booking setup doesn't use a calendar | Ask a venue admin to check your booking setup in **Settings** |\n| There's no setup card on **Home** | You are staff, or your setup is already finished | The card is admin only and hides itself once every step is done |\n| I'm not sure which account I'm using | Easy to miss when sharing a device | Check the card at the bottom of the sidebar: it shows the venue, your name, and your email |\n\n## Next steps\n\n- [Setting up your business profile](/help/getting-started/business-profile)\n- [Business and calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)\n",
     },
     {
-      slug: 'business-profile',
-      helpSection: 'gs-configure-venue',
-      title: 'Setting up your business profile',
+      slug: "setup-checklist",
+      helpSection: "gs-start-here",
+      title: "Your go-live checklist",
+      description: "A friendly walkthrough of the setup card that gets your business ready to take bookings online.",
+      tags: ["checklist","onboarding","home","admin","setup","go-live","stripe","getting-started"],
+      content: "# Your go-live checklist\n\nGetting set up to take bookings online is simpler than it looks. When you sign in as an admin, your **Home** screen shows a setup card that lists exactly what is left to do before clients can book you. Work through it and you are ready to go.\n\n> **Staff note:** this card is admin only. If you sign in as a team member, you will not see it. Ask an admin to finish setup.\n\n## Where to find the card\n\nOpen **Home** from the top of the sidebar. The card sits near the top, marked **Setup**, with a title like **Get your venue ready** or **What's next**. The number in brackets (for example 3/5) shows how many steps are done, and a small percent pill and a progress bar track how close you are.\n\n> **Good to know:** the card only shows steps you still need to do. As soon as a step is finished, its row disappears, so the list gets shorter as you go. That is normal.\n\n:::help-figure checklist-card\n\n## Working through the steps\n\nEach row has a short title and a button that takes you straight to the right screen. You do not have to do them in order, so start with whatever is easiest right now.\n\n1. **Business profile.** Add your business name, address, and phone number so clients know who they are booking. Click **Complete profile** to open your venue settings, fill those in, and add a cover photo while you are there.\n\n2. **Team & services.** Set up the calendars and the services clients can book. The **Appointment services** button takes you there. Add at least one team calendar and link a service to it.\n\n3. **Public booking page.** This clears once at least one active service is linked to a calendar, so clients can see real times and book online. Use **Review services** if it stays open.\n\n4. **Events, Classes, or Resources.** If you sell these, you will see a matching row asking you to add a starter item, with a button like **Event manager**, **Class timetable**, or **Resource timeline**. If you do not use them, no row appears.\n\n5. **Stripe payments.** Connect this only if you want to take deposits or card payments online. The **Connect Stripe** button opens your venue settings on the **Payments** tab. Follow the steps all the way to the end, until Stripe shows you are ready to take payments.\n\n6. **First test booking.** Make one booking yourself to check the flow and confirmation emails look right. Click **Create booking** to try it, and the row clears.\n\n> **Tip:** dismissing the card only hides the reminder, it does not finish setup. If you hide it before Stripe is connected, clients still cannot pay online until you finish that step.\n\n:::help-figure checklist-flow\n\n## Making the card go away\n\nYou have two options. Click the small **X** at the top right to hide the card yourself (it stays hidden next time you sign in, even on another device). Or simply finish every step, and the card hides itself automatically.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| Business profile will not clear | Name, address, or phone is still blank | Click **Complete profile**, fill in all three, then return to **Home** |\n| Stripe payments stays open | Stripe setup was started but not finished | Click **Connect Stripe**, then complete every step on the **Payments** tab until Stripe shows ready |\n| Public booking page will not clear | No active service is linked to a calendar yet | Use **Review services** to link at least one active service to a calendar |\n| A step I just finished still shows | The card has not refreshed yet | Wait a moment, then refresh **Home** |\n| The card vanished but I am not done | It was hidden with the **X** | Open the screen you need from the sidebar and finish the step there |\n| I do not see the card | You are signed in as staff, not an admin | The card is admin only. Ask an admin to finish setup |\n\n## Next steps\n\n- [Your dashboard at a glance](/help/getting-started/dashboard-overview)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)",
+    },
+    {
+      slug: "business-profile",
+      helpSection: "gs-set-up",
+      title: "Set up your business profile",
+      description: "Add your business details, booking address, timezone, logo, and the kinds of bookings you offer, all in a few minutes.",
+      tags: ["business profile","settings","venue details","booking page address","slug","timezone","booking models","logo"],
+      content: "# Set up your business profile\n\nYour business profile is what clients see when they find you, and it tells ResNeo who you are so confirmations and reminders go out correctly. In a few minutes you will add your business name and contact details, claim your booking page address, set your timezone, add your logo, and turn on the kinds of bookings you offer.\n\n> **Who can do this:** these settings are admin only. If the fields look greyed out, ask an administrator to make the changes, or to give you admin access.\n\n## Step 1: Fill in your business details\n\nOpen **Settings** from the sidebar, then the **Profile** tab, and find the **Business profile** card.\n\n1. Set your **Name**. This is the name clients see and the name used in your emails to them.\n2. Fill in your **Address**.\n3. Add a **Phone** number and an **Email**. When clients reply to a confirmation or reminder, it goes to that email, so use one you check.\n4. Add your **Business website** if you have one. It shows on your booking page.\n5. Check your **Timezone** is correct (see Step 3).\n\n> **No Save button needed.** These fields save on their own a moment after you stop typing. You will see \"Venue profile saved.\" If you see an error instead, fix the highlighted field and pause again.\n\n:::help-figure profile-form\n\n## Step 2: Claim your booking page address\n\nYour booking page address is the short, friendly end of the link you share with clients. Open **Settings**, then the **Booking Page** tab, and find the **Booking page address** field.\n\n1. Type the name you want, for example my-salon.\n2. Use lowercase letters, numbers and hyphens only. No spaces, capitals or symbols.\n3. Wait for the check. ResNeo tells you \"This address is available.\" or \"This address is already in use.\" before you can save it.\n\n:::help-figure profile-slug\n\n> **Changing this breaks old links.** Once you have shared your link, changing the address means the old one stops working. Pick it before you start promoting, or be ready to update everywhere you posted the old one.\n\n## Step 3: Set your timezone\n\nYour timezone makes sure booking times and reminders land at the right hour. On the **Profile** tab, find the **Timezone** field in the **Business profile** card.\n\n1. Enter your zone, for example Europe/London.\n2. It saves automatically like the rest of the card.\n\n> **Why it matters:** the wrong timezone can shift every slot and reminder by hours. If clients report appointments at odd times, check here first.\n\n## Step 4: Add your logo and cover photo\n\nA logo and cover photo make your booking page feel like your own business. Open **Settings**, then the **Booking Page** tab.\n\n1. Upload your logo and your cover photo using the image controls on that page.\n2. Each image saves as soon as the upload finishes.\n\n> **Tip:** use a clear, square-ish logo and a wide cover image. They appear at the top of your booking page.\n\n## Step 5: Choose what clients can book\n\nThis decides what clients can book from you and which tools show up in your dashboard. Open **Settings**, then the **Booking Settings** tab, and find the **Booking models** card.\n\n1. Tick what you offer:\n   - **Appointments & services** for bookings against calendars, people or rooms.\n   - **Ticketed events** to sell tickets for dated events.\n   - **Classes & sessions** for one-off or recurring classes.\n   - **Resources & facilities** for bookable rooms, courts or equipment.\n2. Changes save automatically. You will see \"Booking types saved.\"\n3. Next to anything you turned on, use the **Set up** link to start setting it up.\n\n:::help-figure profile-models\n\n> **Keep at least one on.** ResNeo will not let you untick your last one, because clients need something they can book. To switch, turn the new one on before turning the old one off.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| My changes will not save | These are admin only fields and you are not an admin | Ask an administrator to make the change, or to grant you admin access |\n| The booking address will not save | The address is already taken, or it has spaces or capitals | Pick a different address using only lowercase letters, numbers and hyphens until it shows \"available\" |\n| A field keeps showing an error | The value is invalid (for example a mistyped email or phone) | Correct the highlighted field, then pause typing so it saves |\n| My old booking link stopped working | The booking page address was changed | Share your new link and update it everywhere you posted the old one |\n| Appointment times look hours out | The timezone is wrong | Set the correct **Timezone** on the **Profile** tab |\n| I cannot turn off a booking type | It is your last active one | Turn another on first, since at least one must stay active |\n\n## Next steps\n\n- [Set your business and calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Your public booking page](/help/getting-started/public-booking-page)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)",
+    },
+    {
+      slug: 'business-and-calendar-hours',
+      helpSection: 'gs-set-up',
+      title: 'Business & calendar hours',
       description:
-        'Venue identity, slug, timezone, cover image, booking models, embed and QR, and where to go for hours and catalogue rules.',
-      tags: ['settings', 'profile', 'venue', 'slug'],
+        'How your venue’s opening hours and each calendar’s own hours work together to decide when guests can book, plus breaks, closures, and one-off changes.',
+      tags: ['hours', 'opening hours', 'availability', 'closures', 'breaks', 'calendar', 'closed', 'holiday'],
       content: `
-# Setting up your business profile
+# Business & calendar hours
 
-**Who can edit venue fields:** **admins** on **Settings → Profile** (\`/dashboard/settings?tab=profile\`). **Staff** manage only **Account** (personal details on the same route).
+Getting your hours right is the most important setup step. It decides exactly which times guests can book. ResNeo uses **two layers of hours**, and a time only becomes bookable when **both** agree. Once that clicks, everything else is easy.
 
-The **Profile** tab stacks several blocks in one scroll:
+> **The one big idea:** your **venue business hours** set the outer limit, and **each calendar's own hours** sit inside them. A time is bookable only where the two overlap, and then breaks and closures are taken away.
 
-1. **Your account** on Appointments plans: display name, sign in email, phone, and password for **you**, not the whole venue.
-2. **Venue profile and public details** guests see on \`/book/...\` and in messages.
-3. **Booking models**, **Booking widget and QR code**, and restaurant only fields when your tier exposes them.
+:::help-figure hours-stack
 
-## Venue essentials
+## The two layers, in plain English
 
-| Field | Why it matters |
-| --- | --- |
-| **Business name** | Shown to guests and used in templates. |
-| **Address and contact channels** | Trust on the public page and in comms. |
-| **Venue slug** | Builds \`/book/your-slug\`. **Changing it later breaks old links.** |
-| **Timezone** | Defines “today”, reminders, and slot windows. Match where you trade. |
-| **Cover image** and **logo** when shown | Branding on the public header. |
+**1. Venue business hours.** When your business is open as a whole (for example, *Mon–Fri 9:00–18:00, Sat 10:00–16:00, closed Sunday*). This is the ceiling: nothing can be booked outside it.
 
-Most simple fields **save automatically**. If the checklist on **Home** lags, refresh after saving.
+**2. Each calendar's working hours.** When one particular team member or room takes bookings (for example, *Sarah works 9:00–17:00 but takes Thursdays off*). A "calendar" is one bookable person, room, or piece of equipment.
 
-## Booking models (Appointments plans)
+To find a bookable time, ResNeo:
 
-Under **Booking models** (sometimes titled around models on your public page), **admins** enable **Appointments and services**, **Classes**, **Ticketed events**, and **Resources**. Only turn on what you sell. Each switch usually adds sidebar entries and a public tab.
+1. starts with your **business hours**,
+2. keeps only the times that also fall inside the **calendar's hours**,
+3. removes any **breaks** (like lunch), and
+4. removes any **closures** (holidays or one-off closed dates).
 
-> After changes, open your public page once to confirm tabs.
+> **Good to know:** if you haven't set business hours at all, each calendar's hours apply on their own. But once business hours exist, they always win as the outer limit.
 
-## Booking widget and QR code
+## Step 1: Set your weekly opening hours
 
-Scroll to **Booking widget and QR code** for the \`/embed/...\` iframe snippet, optional **accent** colour, **QR** download, and the **resize.js** helper (\`/embed/resize.js\`) so iframe height tracks each step.
+This is admin-only and lives in **Settings → Business hours**.
 
-## Restaurant only fields
+1. Open **Settings** from the sidebar, then the **Business hours** tab.
+2. Under **Weekly opening hours**, switch each day **Open** or **Closed**.
+3. For open days, set the **open** and **close** times.
+4. Need a midday gap (say you close 15:00–17:00 between lunch and dinner)? Add a **second period** for that day.
+5. Click **Save opening hours**.
 
-On Restaurant and Founding tiers you may also edit **cuisine type**, **price band**, **kitchen email**, and **no show grace**. Align them with house policy.
+:::help-figure business-hours-screen
 
-## Where deeper rules live
+> **Changing hours later?** If you make a day narrower and some upcoming bookings now fall outside it, ResNeo asks *"Some upcoming bookings fall outside the new hours. Save these hours anyway?"* Saving keeps those existing bookings. It only stops new ones being taken in the time you removed.
 
-- Tables, areas, dining availability: [Restaurant plan](/help/restaurant/overview) and **Dining Availability**.
-- Opening hours and closures: **Settings → Business hours**.
-- Calendars and services: [Appointments plan](/help/appointments/overview), **Calendar Availability**, **Services**.
+## Step 2: Set each calendar's working hours
 
-## Next
+Now tell ResNeo when each person or room actually works. This lives in **Calendar Availability** (the page is titled **Availability Settings**).
+
+1. Open **Calendar Availability** from the sidebar.
+2. First make sure the calendar exists: admins add team members and rooms on the **Calendars** tab. If you haven't added anyone yet, do that before setting hours.
+3. Open the **Availability** tab.
+4. Choose the person or room from the **Calendar** dropdown.
+5. Set their **weekly working hours**, day by day.
+6. Click **Save Working Hours**.
+
+:::help-figure availability-tabs
+
+> **Why a time still won't show:** the hours here only open times that are **also inside your business hours**. If you set a calendar to start at 8:00 but the venue opens at 9:00, 8:00 stays unbookable. To genuinely open earlier or later, widen **Settings → Business hours** too.
+
+**Who can edit what:** admins can change every calendar. A team member who signs in can view anyone for reference, but only edit the calendar(s) linked to their own account.
+
+## Step 3: Add breaks (lunch, admin time)
+
+Breaks are short windows *inside* a working day when a calendar stops taking bookings, ideal for lunch or daily admin time.
+
+1. In **Calendar Availability**, open the **Breaks** tab.
+2. Pick the **Calendar**.
+3. For each day, click **+ Add break** and set the start and end time (for example 13:00–14:00).
+4. If every day has the same break, set **Monday** then click **Copy Monday to all days**.
+5. Click **Save breaks**.
+
+Guests can never book during a break, even though it sits inside working hours.
+
+## Closing for a day, or changing hours just once
+
+For bank holidays, a private event, or a one-off early close, use **closures and special days** instead of editing your normal weekly hours. These live under **Settings → Business hours**, in the **Closures & special days** card, and they apply to the **whole venue** (every calendar and every booking type).
+
+1. In **Settings → Business hours**, scroll to **Closures & special days**.
+2. Click the **start date** on the calendar, then the **end date** for a range, or click a single day on its own.
+3. Choose a **Type**:
+   - **Closure**: closed that date. Leave the times blank for a full day, or set a start and end time to close only part of the day.
+   - **Amended Hours**: open, but on different hours. Enter **Period 1** (and an optional **Period 2** for a split day).
+4. Add an optional **Reason** (such as "Christmas Day") so your team knows why.
+5. Click **Add to Calendar**.
+
+:::help-figure closures-form
+
+Saved entries appear under **Upcoming**. Click any one to edit it, or to **Delete** it if plans change.
+
+## Taking one person or room off
+
+If a single team member is on holiday but the rest of the venue is open, don't close the whole venue. Instead, take just that calendar off in **Calendar Availability → Closures**.
+
+:::help-figure two-closures
+
+- **Whole venue closed?** Use **Settings → Business hours → Closures & special days**. This blocks everyone.
+- **Just one person or room?** Use **Calendar Availability → Closures**. This blocks only that calendar.
+
+Mixing these two up is the most common reason a closure seems "not to work". See the table below.
+
+## Common problems & fixes
+
+| Problem | Likely cause | Fix |
+| --- | --- | --- |
+| I set a calendar's hours but guests see no slots | The times fall outside your venue business hours, or the calendar isn't **Active (bookable)** | Widen **Settings → Business hours**, and check the calendar is active on the **Calendars** tab |
+| My closure didn't block bookings | You closed one calendar but meant the whole venue, or the other way round | Whole venue → **Settings → Business hours**; one person or room → **Calendar Availability → Closures** |
+| I changed my hours and old bookings are still there | This is intentional: ResNeo keeps existing bookings when you narrow hours | Honour or move those bookings yourself; new bookings already follow the new hours |
+| Lunchtime is still bookable | No break is set for that day on that calendar | Add it on the **Breaks** tab and **Save breaks** |
+| Amended hours won't save | A start or end time is missing | **Amended Hours** needs at least Period 1's open and close times |
+| A team member can't edit their hours | Their account isn't linked to that calendar | An admin can link the calendar to them, or edit the hours on their behalf |
+
+## Next steps
 
 - [Connecting Stripe to take payments](/help/getting-started/stripe-payments)
-`.trim(),
-      markdownRestaurant: `
-# Setting up your business profile
-
-**Who can edit:** **admins** on **Settings → Profile** (\`/dashboard/settings?tab=profile\`). **Staff** use **Account** for themselves only.
-
-## What sits on **Profile**
-
-1. **Personal account** block (name, email, phone, password) for the signed in user where the product shows it.
-2. **Venue profile and public details** (name, address, channels, slug, imagery).
-3. **Booking widget and QR code** for embed and poster links.
-4. **Restaurant fields** such as **cuisine type**, **price band**, **kitchen email**, and **no show grace** on Restaurant and Founding tiers.
-
-## Venue essentials
-
-| Field | Why it matters |
-| --- | --- |
-| **Business name** | Guest facing and used in templates. |
-| **Address and contact channels** | Public trust and comms routing. |
-| **Venue slug** | \`/book/your-slug\`. **Changing it later breaks old links.** |
-| **Timezone** | Operational “today” and reminders. |
-| **Cover image** / **logo** | Public header branding. |
-
-Simple fields **save automatically**.
-
-## Booking models when you run add ons
-
-If you enabled **classes**, **events**, **resources**, or **unified scheduling**, use **Booking models** to control which public tabs appear. Save, then check \`/book/...\`.
-
-## Booking widget and QR code
-
-Same section as other plans: iframe to \`/embed/your-slug\`, optional **accent**, **QR** for hosted \`/book/...\`, and **resize.js** in the snippet so the iframe grows with the flow.
-
-## Where deeper rules live
-
-- Dining and areas: [Restaurant plan](/help/restaurant/overview) and **Dining Availability**.
-- Opening hours: **Settings → Business hours**.
-- Schedule catalogues when enabled: articles under **Schedule and other booking types** in this help centre (same underlying guides as the Appointments category).
-
-## Next
-
-- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)
-`.trim(),
-      markdownAppointments: `
-# Setting up your business profile
-
-**Who can edit venue wide fields:** **admins** on **Settings → Profile** (\`/dashboard/settings?tab=profile\`). **Staff** only open **Account** for their own login details.
-
-## How the **Profile** tab is organised
-
-1. **Your account** (display name, sign in email, phone, password) applies to **you**, not the venue record.
-2. **Venue profile and public details** power \`/book/...\` and automated messages.
-3. **Booking models** decides which experiences are on sale (**Appointments and services**, **Classes**, **Ticketed events**, **Resources**).
-4. **Booking widget and QR code** holds the embed snippet, optional accent, QR, and **resize.js** line.
-
-## Venue essentials
-
-| Field | Why it matters |
-| --- | --- |
-| **Business name** | Guest facing copy and templates. |
-| **Address and contact channels** | Public page and comms. |
-| **Venue slug** | Public URL. **Changing it later breaks old links.** |
-| **Timezone** | Slots, reminders, and “today” in lists. |
-| **Cover image** / **logo** | Public header presentation. |
-
-Most fields **save automatically**.
-
-## Booking models
-
-Turn on only what you operate. Each active model typically adds:
-
-- Sidebar links such as **Services**, **Classes**, **Events**, or **Resources** after **Contacts**.
-- A matching tab on the public page when the product exposes that surface.
-
-After saving, visit your public page and confirm tabs and copy.
-
-## Booking widget and QR code
-
-- Copy the **iframe** pointing at \`/embed/{slug}\`.
-- Optional \`?accent=RRGGBB\` (no \`#\`) and \`?tab=\` values as documented in [Your public booking page](/help/getting-started/public-booking-page).
-- Include **resize.js** from the snippet so height tracks each step.
-
-## Business hours
-
-Venue wide weekly hours and opening exceptions live under **Settings → Business hours**, not on **Profile**.
-
-## Where to read more
-
-- [Appointments plan](/help/appointments/overview) for calendars, services, deposits, comms, and imports.
-
-## Next
-
-- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)
+- [Your public booking page and embed](/help/getting-started/public-booking-page)
 `.trim(),
     },
     {
-      slug: 'stripe-payments',
-      helpSection: 'gs-configure-venue',
-      title: 'Connecting Stripe to take payments',
-      description:
-        'Plan tab versus Payments tab, Stripe Connect for guests, who can complete onboarding, and what “ready” means.',
-      tags: ['stripe', 'payments', 'deposits', 'connect'],
-      content: `
-# Connecting Stripe to take payments
-
-Two different Stripe relationships exist. Treat them separately:
-
-| | **Settings → Plan** | **Settings → Payments** |
-| --- | --- | --- |
-| **What it pays for** | Your **ResNeo subscription** (the software). | **Nothing to ResNeo** for guest cards. Guest charges use **Stripe Connect**. |
-| **Money goes to** | ResNeo as the SaaS vendor. | **Your** connected Stripe account, then bank payouts per Stripe rules. |
-| **Who sets it up** | Venue **admin**. | Venue **admin** (staff are prompted to ask an admin). |
-
-${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
-
-## Stripe Connect (guest payments)
-
-1. Sign in as an **admin**.
-2. Open **Settings → Payments** (\`/dashboard/settings?tab=payments\`).
-3. Complete Stripe onboarding (business details, bank account, any identity checks Stripe requests).
-
-The app marks Connect **ready** when Stripe reports **charges enabled** and **details submitted**. Until then, catalogue rules that require online payment can block guest checkout even if everything else looks fine.
-
-### Practical tips
-
-- Use a **business** Stripe account for the legal entity that should receive guest money.
-- If Stripe shows **restricted** or **pending** tasks, open the **Stripe Dashboard** from in app links and finish them.
-- After Connect works, set **payment requirements** on each catalogue line you use (services, classes, events, resources, or dining rules on Restaurant plans).
-
-## ResNeo subscription (**Plan** tab)
-
-**Settings → Plan** (\`?tab=plan\`) covers upgrades, SMS allowances on appointment tiers, cancellation state, and the card on file for **ResNeo itself**. If software billing fails, banners on **Home** or **Settings** explain what paused. Fix **Plan** issues separately from Connect.
-
-## Setup checklist
-
-**Home** includes a **Stripe payments** row linking to **Payments**. Use it even if you think Connect is already done.
-
-## Related reading
-
-- [Settings overview](/help/settings/overview)
-- [Troubleshooting for Stripe](/help/troubleshooting/stripe-issues)
-`.trim(),
-      markdownRestaurant: `
-# Connecting Stripe to take payments
-
-## Two Stripe relationships
-
-| | **Settings → Plan** | **Settings → Payments** |
-| --- | --- | --- |
-| **Purpose** | **ResNeo** software subscription. | **Stripe Connect** for guest card charges. |
-| **Payout** | SaaS billing to ResNeo. | Guest money to **your** connected account. |
-| **Who** | **Admin**. | **Admin**. |
-
-${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
-
-## Connect for guest cards
-
-1. **Admin** opens **Settings → Payments** (\`/dashboard/settings?tab=payments\`).
-2. Finish Stripe onboarding until the app shows Connect as **ready** (**charges enabled**, **details submitted**).
-
-Without that, online deposits or full payment rules on dining or catalogue rows can fail at checkout.
-
-Tips: use the correct legal entity, resolve **restricted** states in the Stripe Dashboard, then wire **payment requirements** in your dining and table rules ([Restaurant plan](/help/restaurant/overview)) and on any schedule catalogue you also run.
-
-## Software subscription
-
-**Settings → Plan** manages your **ResNeo** invoice, plan tier, and payment method. Public booking pauses from subscription state are explained in product banners, not by Connect alone.
-
-## Checklist shortcut
-
-**Home** links to **Payments** from the checklist row.
-
-## Related
-
-- [Settings overview](/help/settings/overview)
-- [Troubleshooting for Stripe](/help/troubleshooting/stripe-issues)
-`.trim(),
-      markdownAppointments: `
-# Connecting Stripe to take payments
-
-## Two separate flows
-
-| | **Settings → Plan** | **Settings → Payments** |
-| --- | --- | --- |
-| **Purpose** | **ResNeo** subscription (Light, Plus, or Pro software). | **Stripe Connect** for guest card charges. |
-| **Money** | Software invoice. | Guest payments to **your** connected account. |
-| **Who** | **Admin**. | **Admin**. |
-
-${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}
-
-## Stripe Connect
-
-1. Sign in as **admin**.
-2. Open **Settings → Payments** (\`/dashboard/settings?tab=payments\`).
-3. Complete Stripe’s onboarding until **charges enabled** and **details submitted** are true in Stripe.
-
-Until Connect is ready, guests cannot finish online payment for rules that require a card, even if services and calendars look fine.
-
-### Tips
-
-- Match the Connect account to the legal entity that should receive guest funds.
-- Clear **restricted** or **pending** tasks in the Stripe Dashboard using the in app links.
-- After Connect is healthy, set **payment requirements** on each **service**, **class type**, **event**, or **resource** row that should charge online. Step by step detail lives in **[Deposits and payments](/help/appointments/deposits)** under the Appointments help category.
-
-## Plan tab and SMS
-
-**Settings → Plan** shows tier, SMS allowance on Plus and Pro, Light pay as you go SMS rules, upgrades, and subscription status. That billing is unrelated to guest Connect charges.
-
-## Setup checklist
-
-The **Home** checklist **Stripe payments** button jumps to **Payments**.
-
-## Related
-
-- [Settings overview](/help/settings/overview)
-- [Troubleshooting for Stripe](/help/troubleshooting/stripe-issues)
-`.trim(),
+      slug: "stripe-payments",
+      helpSection: "gs-set-up",
+      title: "Connect Stripe to take payments",
+      description: "Take card payments from clients by connecting Stripe in two simple steps, with your money going straight to your own bank.",
+      tags: ["stripe","payments","connect","card payments","onboarding","settings","subscription","charges enabled"],
+      content: "# Connect Stripe to take payments\n\nWant to take card payments when clients book? Connecting Stripe makes that happen, and the money lands straight in your own bank account. It is a quick two-step setup, and this guide walks you through it.\n\n> **Two different things, so let's clear this up first.** In Settings, **Plan** is what you pay ResNeo for the software. In Settings, **Payments** is where you set up card payments from your clients, which go into your own bank. They are completely separate. This page is only about **Payments**.\n\n:::help-figure stripe-plan-vs-pay\n\n## Before you start\n\n- You need to be an **admin**. If you are a team member, you will see a message asking you to check with an admin instead.\n- You will fill in your details on Stripe's own pages. ResNeo sends you there, then brings you back.\n- Have these handy: your **business information**, your **bank account details**, and an ID document for the person who represents the account.\n\n## The two steps\n\nSetting up Stripe takes two steps, and ResNeo shows you a small progress indicator so you always know where you are.\n\n1. **Business and bank details:** add your business information and bank account.\n2. **Identity verification:** confirm the identity of the account representative.\n\nOnce both are done, you are ready to take payments.\n\n:::help-figure stripe-steps\n\n## Step 1: Add your business and bank details\n\n1. Open **Settings** from the sidebar, then choose the **Payments** tab.\n2. You will see the **Stripe payments** card with both steps listed as not yet done.\n3. Click **Start Stripe setup**. ResNeo sends you over to Stripe.\n4. On Stripe, enter your **business information** and **bank account details**, then continue. Stripe brings you back to ResNeo when you finish.\n\n> **Give it a minute.** After Step 1, Stripe sometimes needs a few moments to get ready for the next step. If it is not available right away, wait a moment and try again.\n\n## Step 2: Verify your identity\n\n1. Back in Settings, Payments, Step 1 now shows a green tick, and you will see that **Step 2: Identity verification** is required.\n2. Click **Complete identity verification**. This sends you back to Stripe.\n3. Follow Stripe's prompts to verify the identity of the **account representative**.\n4. Stripe returns you to ResNeo once you submit it.\n\n> **Stopped partway through?** No problem. The button will read **Continue Stripe setup** or **Complete identity verification**, and clicking it picks up right where you left off. You never start over.\n\n## How you know you are ready\n\nWhen both steps are done, the **Stripe payments** card shows a green message: **\"Stripe connected; charges enabled\"**. That is your sign that everything is in place and you can take card payments from clients.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I only see a message to ask an admin | You are signed in as a team member, not an admin | Ask an admin at your business to finish setup in Settings, Payments |\n| Step 2 will not open right after Step 1 | Stripe needs a few minutes to get ready | Wait a moment, then click **Complete identity verification** again |\n| The card still says a step is incomplete | You left Stripe before finishing that step | Click **Continue Stripe setup** or **Complete identity verification** to resume |\n| I finished on Stripe but cannot take payments yet | Identity verification is still being checked | Return to Settings, Payments and finish **Step 2: Identity verification** |\n| I see an error loading my Stripe status | A temporary glitch | Click **Retry**, or refresh the page |\n| I am being charged but my clients are not | You are mixing up your subscription with client payments | Your subscription is in Settings, Plan; client card payments are in Settings, Payments |\n\n## Next steps\n\n- [Your public booking page and embed](/help/getting-started/public-booking-page)\n- [The setup checklist](/help/getting-started/setup-checklist)\n- [Dashboard overview](/help/getting-started/dashboard-overview)",
     },
     {
-      slug: 'public-booking-page',
-      helpSection: 'gs-open-the-doors',
-      title: 'Your public booking page and embed',
-      description:
-        'Hosted \`/book\` URLs, optional practitioner paths, guest pause messaging, embed parameters, resize.js, and how widget source appears in reporting.',
-      tags: ['public', 'embed', 'widget', 'qr', 'guests'],
-      content: `
-# Your public booking page and embed
-
-Guests never use the dashboard. They book through:
-
-| Surface | URL | Typical use |
-| --- | --- | --- |
-| **Hosted page** | \`/book/{venue-slug}\` | Social bios, Google Business, QR, “Book now”. |
-| **Practitioner page** (when supported) | \`/book/{venue-slug}/{practitioner-slug}\` | Deep link to one calendar column. |
-| **Embed** | \`/embed/{venue-slug}\` | iframe on your site, plus \`/embed/resize.js\` for height. |
-
-## What guests see
-
-Branding from **Settings → Profile**, **tabs** when multiple booking models are on, and **Stripe hosted** card fields when your rules require payment. ResNeo never asks you to build custom card fields.
-
-### When booking is paused
-
-Guests see **Online booking unavailable** and are asked to **contact you directly** (no hidden slots).
-
-## Embed parameters
-
-From **Settings → Profile → Booking widget and QR code**:
-
-- \`?accent=RRGGBB\` without \`#\`.
-- \`?tab=appointments\`, \`tables\`, \`events\`, \`classes\`, or \`resources\` when that model is enabled.
-
-Always include **resize.js** from the snippet.
-
-## QR
-
-QR defaults to the **hosted** \`/book/...\` page for print. If you point QR at \`/embed/...\`, test on phones.
-
-## Source in **Reports**
-
-Embed traffic can record **widget** as a source where the product supports that attribution.
-
-## Dining areas (tables)
-
-Multiple dining areas and guest facing area choice are configured in dining tools, not on this help page alone. See [Restaurant plan](/help/restaurant/overview).
-
-## Next
-
-- [Completing your setup checklist](/help/getting-started/setup-checklist)
-`.trim(),
-      markdownRestaurant: `
-# Your public booking page and embed
-
-Guests use \`/book/{venue-slug}\`, optional \`/book/{venue-slug}/{practitioner-slug}\` when your setup exposes it, and \`/embed/{venue-slug}\` inside your site with \`/embed/resize.js\`.
-
-## Guest experience
-
-Public branding from **Settings → Profile**, model **tabs** when more than one surface is on, and **Stripe hosted** checkout when rules require payment.
-
-Paused venues show **Online booking unavailable** and ask guests to phone or message you.
-
-## Widget section on **Profile**
-
-Copy the iframe, optional **accent** query, **tab** query for each model, and the **resize** script so the iframe height tracks steps.
-
-## QR
-
-Defaults to hosted \`/book/...\` for posters.
-
-## Dining areas
-
-Multiple areas and whether guests pick an area are part of dining configuration. See [Restaurant plan](/help/restaurant/overview).
-
-## Source
-
-Widget completions can appear as **widget** source in **Reports** where supported.
-
-## Next
-
-- [Completing your setup checklist](/help/getting-started/setup-checklist)
-`.trim(),
-      markdownAppointments: `
-# Your public booking page and embed
-
-## URLs guests use
-
-| Surface | URL | Notes |
-| --- | --- | --- |
-| **Hosted booking** | \`/book/{venue-slug}\` | Main guest entry. |
-| **Practitioner landing** | \`/book/{venue-slug}/{practitioner-slug}\` | When your venue exposes a practitioner or column slug for direct entry. |
-| **Embed** | \`/embed/{venue-slug}\` | iframe on your site. |
-
-## What they see
-
-Cover and logo from **Profile**, **tabs** driven by **Booking models**, and **Stripe** card collection when your catalogue rules require payment online.
-
-If the venue is **booking paused**, guests see **Online booking unavailable** and instructions to contact you, not a broken slot picker.
-
-## Snippet and parameters
-
-All controls live under **Settings → Profile → Booking widget and QR code**.
-
-- iframe \`src\` to \`/embed/{slug}\`.
-- \`?accent=RRGGBB\` (no hash) to tint chrome.
-- \`?tab=appointments\`, \`events\`, \`classes\`, or \`resources\` to open on a tab that exists for your venue. Use the exact values the settings page lists for your setup.
-
-## resize.js
-
-Paste the **resize.js** line from settings (\`/embed/resize.js\` on your site origin). Without it, embeds often clip or double scroll inside CMS templates.
-
-## QR codes
-
-Download QR for marketing. It targets the **hosted** page so phones get the full responsive layout.
-
-## Reporting
-
-Bookings that start in the embed can record **widget** as their source in **Reports**, which helps compare channels.
-
-## Next
-
-- [Completing your setup checklist](/help/getting-started/setup-checklist)
-- [Appointments plan](/help/appointments/overview) for model specific public behaviour
-`.trim(),
+      slug: "public-booking-page",
+      helpSection: "gs-set-up",
+      title: "Your public booking page and embed",
+      description: "Share your booking link, add a booking widget to your website, and brand it with your colour and a QR code.",
+      tags: ["public booking","embed","widget","qr code","accent colour","booking page address","guests","resize.js"],
+      content: "# Your public booking page and embed\n\nYour booking page is where clients book with you online, day or night. This guide shows you how to find your link, share it, add a booking widget to your own website, and brand it all with your colour and a QR code. Your clients never see your dashboard, just a clean page to pick a time.\n\n## Where clients book\n\nYou have a ready-made booking page with its own link. Share it anywhere: your social bios, Google Business profile, a \"Book now\" button, posters, or a QR code. You will find the exact link, ready to copy, in the **Public booking page** box on the **Booking Page** tab.\n\nYou can also drop the same booking flow right onto your own website with a widget (see below).\n\n> **Pick your link name early.** Your link name comes from the **Booking page address** field on the **Booking Page** tab under **Settings**. If you change it later, any old links, QR codes, and website widgets you have already shared will stop working. So settle on it before you start sharing.\n\n:::help-figure public-surfaces\n\n## Brand and preview your page\n\n1. Open **Settings** from the sidebar, then choose the **Booking Page** tab.\n2. In the **URL & branding** group, the **Your booking page** card holds your **Booking page address**, your logo, and your cover photo. Add your logo and cover photo here.\n3. In the **Book now** section of that card, pick your **Brand colour** to tint the buttons, highlights, and accents clients see. There is also an optional **Accent colour** if you want a second tone. Changes save automatically.\n4. Use the **Open booking page in a new tab** link to see exactly what your clients see, or expand **Live preview** to check it without leaving the page.\n\n> **Two different colour settings.** The **Brand colour** in the **Your booking page** card brands the booking page itself. Lower down, the **Booking widget & QR code** card has its own **Accent colour** just for the widget on your own website. Set both if you use both.\n\n## Add the booking widget to your website\n\nWant clients to book without leaving your website? You can place the booking form right on one of your own pages.\n\n1. In **Settings**, on the **Booking Page** tab, scroll to the **Website widget & QR code** group and find the **Embed code** section.\n2. (Optional) Set an **Accent colour** for the widget. Pick a colour or type a 6-digit hex value such as #4F46E5. It saves on its own, and you will see **Accent colour saved.**\n3. Click **Copy code**. The button changes to **Copied!** once it is on your clipboard.\n4. Paste it onto your website where you want the booking form to appear.\n\n> **Paste the whole thing.** The code comes as two lines. Keep both. Together they let the booking form grow and shrink neatly as clients move through each step. With only part of it pasted, the form often looks cut off or shows an extra scrollbar.\n\n> **If the colour will not save:** it needs to be 6 hex digits (for example #4F46E5). If it is not, you will see **Could not save accent colour. Use 6 hex digits.** Click **Reset** to clear the widget colour.\n\n:::help-figure public-embed\n\n## Print a QR code\n\n1. In the same **Website widget & QR code** group, find the **QR code** section. Your code is ready and waiting.\n2. Click **Download QR code** to save an image with your business name printed underneath.\n3. Add it to window stickers, business cards, table cards, or printed flyers.\n\n> When someone scans your QR code, it opens your booking page on their phone.\n\n## When booking is paused\n\nOnline booking can be paused for your business, most often when a subscription or payment needs attention. While it is paused, clients cannot book online, so make sure your phone number or email is easy to find on your website and your other channels. Sorting out the underlying issue, usually under the **Plan** or **Payments** tab, gets booking running again.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| My link goes to a \"page not found\" screen | Your **Booking page address** is empty or mistyped | Set or check the **Booking page address** on the **Booking Page** tab, then share that exact link |\n| The widget looks cut off or has a scrollbar inside it | Only part of the code was pasted | Click **Copy code** again and paste the whole thing, both lines |\n| The widget colour did not change | The accent colour was not a valid 6-digit hex value | Re-enter a 6-digit value (for example #4F46E5); you should see **Accent colour saved.** |\n| I cannot save my booking page address | The address is already in use by another venue | Choose a different name (lowercase letters, numbers, and hyphens only) until it shows as available |\n| Clients cannot book online | Booking is paused for your business | Sort out the cause (often a subscription or payments issue) under the **Plan** or **Payments** tab |\n| My old QR code stopped working | Your **Booking page address** changed after the code was printed | Download a fresh QR code from the **QR code** section and reprint it |\n\n## Next steps\n\n- [Setting up your business profile](/help/getting-started/business-profile)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Completing your setup checklist](/help/getting-started/setup-checklist)",
     },
     {
-      slug: 'setup-checklist',
-      helpSection: 'gs-open-the-doors',
-      title: 'Completing your setup checklist',
-      description:
-        'How the Home card works, what each step checks, dismiss and auto complete behaviour, and what to do when a row will not clear.',
-      tags: ['checklist', 'onboarding', 'home', 'admin'],
-      content: `
-# Completing your setup checklist
-
-**Admins** see a **Setup** card on **Home** (\`/dashboard\`). Titles read **Get your venue ready** while onboarding is incomplete, then **What’s next** when onboarding is done but something still needs attention. Each row explains why it matters and links to the right screen.
-
-> **Staff:** the card is hidden for you. Ask an admin.
-
-## What rows can represent
-
-| Step (labels vary) | Done when |
-| --- | --- |
-| **Business profile** | Venue **name**, **address**, and **phone** are present. |
-| **Availability** | Depends on booking model: onboarding wizard for some table first paths, **calendars and services** for unified or practitioner paths, or model specific hubs (events, classes, resources) when those models are enabled. |
-| **Public booking page** | Guest booking can succeed (rules, services, calendars, Connect where needed). |
-| **Stripe payments** | Connect is **ready** in Stripe, not half started. Opens \`/dashboard/settings?tab=payments\`. |
-| **First test booking** | Encourages a trial; button opens **New booking** (\`/dashboard/bookings/new\`). |
-
-Copy on each row comes from the same server rules as **Home**, so trust the live text.
-
-## Progress, dismiss, auto hide
-
-- Percent pill shows completion.
-- **Dismiss** (X) hides the card and **persists** for your staff profile.
-- When every step is complete, the card hides on its own and records dismissal.
-
-## If a step will not clear
-
-Use the row button, fix the underlying screen, return to **Home**, refresh if needed, then try [Troubleshooting](/help/troubleshooting) or **Support**.
-
-## After go live
-
-Templates, exports, and training sit in the wider help centre, including **Communications** and **Reports**.
-
-## Related
-
-- [Your dashboard at a glance](/help/getting-started/dashboard-overview)
-- [Appointments plan](/help/appointments/overview)
-- [Restaurant plan](/help/restaurant/overview)
-`.trim(),
-      markdownRestaurant: `
-# Completing your setup checklist
-
-**Admins** only: **Home** shows **Get your venue ready** or **What’s next** with rows wired to your venue’s booking model.
-
-## Typical Restaurant and Founding rows
-
-- **Business profile** (name, address, phone).
-- **Services and availability** via onboarding or **Dining Availability** and related tools until guests can book tables.
-- **Public booking page** readiness once rules, services, and Stripe (if used) line up.
-- Optional **Events**, **Classes**, or **Resources** rows when those models are enabled and need a starter catalogue.
-- **Stripe payments** through **Settings → Payments**.
-- **First test booking** via **New booking**.
-
-Row labels and descriptions match the live product for your venue.
-
-## Dismiss and completion
-
-**Dismiss** saves to your staff record. All green hides the card automatically.
-
-## Stuck steps
-
-Follow the row link, fix data, reload **Home**, then use [Troubleshooting](/help/troubleshooting) or **Support**.
-
-## After launch
-
-Tune **Communications**, run **Reports**, train staff on **Day Sheet** versus **Bookings** as your layout requires.
-
-## Related
-
-- [Restaurant plan](/help/restaurant/overview)
-- [Your dashboard at a glance](/help/getting-started/dashboard-overview)
-`.trim(),
-      markdownAppointments: `
-# Completing your setup checklist
-
-**Admins** see the **Setup** card on **Home**. Titles are **Get your venue ready** until onboarding completes, then **What’s next** while anything remains.
-
-> **Staff:** you will not see this card.
-
-## What the product checks (Appointments plans)
-
-Exact labels vary, but expect combinations of:
-
-1. **Business profile** with name, address, and phone.
-2. **Team and services** or **Services and calendars** style rows pointing at **Calendar Availability** and **Appointment Services** until calendars exist and services attach where required.
-3. **Public booking page** until at least one active service is linked so online guests can see slots.
-4. **Events**, **Classes**, or **Resources** rows when those models are enabled and still need a starter catalogue.
-5. **Stripe payments** until Connect reaches **charges enabled** with **details submitted** if you sell online.
-6. **First test booking** encouraging \`/dashboard/bookings/new\`.
-
-The strings on the card are generated from the same **setup status** payload the dashboard uses, so read them literally.
-
-## Dismiss and auto hide
-
-**Dismiss** persists per staff member. Finishing every step hides the card without an extra click.
-
-## If a row repeats
-
-1. Click the suggested route (for example **Appointment services** or **Calendar Availability**).
-2. Fix missing links, hours, or Stripe tasks.
-3. Return to **Home** and wait a moment for status to refresh.
-
-## After you are live
-
-Polish **Communications**, use **Reports**, and keep staff aligned on **Bookings** list versus **Appointment Calendar** for day control.
-
-## Related (Appointments help)
-
-- [Appointments plan](/help/appointments/overview)
-- [Your dashboard at a glance](/help/getting-started/dashboard-overview)
-`.trim(),
+      slug: "staff",
+      helpSection: "gs-set-up",
+      title: "Add and manage your team",
+      description: "Invite your team by email, give each person the right role, and choose which calendars they look after.",
+      tags: ["staff","team","roles","admin","permissions","invites","session timeout","calendars"],
+      content: "# Add and manage your team\n\nBring your team into ResNeo so everyone can sign in and help run the day. You invite people by email, choose what each person can do, and decide which calendars they look after. It all starts in **Settings**, then the **Staff** tab.\n\n> **The one big idea:** an **Admin** can change everything for your business. A **Staff** member works day to day and only touches their own account and the calendars you give them. Pick the role that matches how much each person needs to do.\n\nOnly admins can invite people, change roles, assign calendars, and set the auto-logout timer. Staff see the same tab as a read-only view, plus a **My account** card where they can change their own password.\n\n:::help-figure staff-list\n\n## Step 1: Invite a team member\n\n1. Sign in as an admin, open **Settings** from the sidebar, then the **Staff** tab.\n2. In the **Staff members** card, click **Add User**.\n3. Enter their **Email** (required).\n4. Add their **Name** if you like. It makes the list easier to read.\n5. Choose a **Role**: **Staff** or **Admin** (see Step 2).\n6. Click **Send invitation**.\n\nResNeo emails them a secure link to set their own password and open the dashboard.\n\n> **Good to know:** you never choose a password for someone. They click the link, set their own, and they are in. If they already had an account, they can just sign in or use **Forgot password** on the login page.\n\n## Step 2: Choose Admin or Staff\n\nThe role decides how much of your business each person can change:\n\n- **Admin:** full access to all settings, staff management, reports, and bookings.\n- **Staff:** day-to-day work in the schedule, bookings, and guest details, but only for the calendars you assign them.\n\n:::help-figure staff-roles\n\nYou can change a role later. In the **Staff members** list, find the person, click the **shield** button in their row, then pick **Staff** or **Admin**.\n\n> **Tip:** keep the number of admins small. Give most of the team the **Staff** role, and only make someone an **Admin** if they truly need to change business-wide settings or see reports.\n\n## Step 3: Assign a Staff member's calendars\n\nDecide which calendars a Staff member can look after, meaning their availability, services, and bookings. You can set this during the invite or change it any time.\n\n1. In the invite form, with the role set to **Staff**, look under **Calendars they can manage**.\n2. Tick one or more calendars. Use **All** to select every calendar or **Clear** to start over.\n3. Send the invite as usual.\n\nTo change this later, find the person in the **Staff members** list and tick or untick calendars under **Calendars they manage**. Use **All** or **None** to select or clear them all. Changes save as you go.\n\n> **No calendars to choose from?** Add an active bookable calendar first under **Calendar availability**, then come back and assign it. Admins do not need calendar assignments because they can already see everything.\n\n## Other things you can do per person\n\nIn the **Staff members** list, each person's row has small icon buttons (admins only):\n\n- **Shield:** switch their role between Staff and Admin.\n- **Key:** reset their password if they are locked out.\n- **Envelope:** resend the invitation or sign-in link if the first email did not arrive.\n- **Trash:** remove the person so they can no longer sign in.\n\n## Step 4: Set the auto-logout timer\n\nDecide how long someone can sit idle before ResNeo signs them out. This keeps your account safe, especially on a shared device. It is admin-only and lives in the **Security settings** card at the bottom of the **Staff** tab.\n\n1. Scroll to **Security settings** and find **Auto-Logout Timer**.\n2. Choose a period from the dropdown. Options run from 30 minutes up to 7 days.\n3. Click **Save**.\n\n> **Tip:** a shared front-desk device is safer with a shorter timer. A solo practitioner on their own laptop can use a longer one.\n\n## A note on login limits\n\nSome plans limit how many team members can have a login. If you hit that limit, the **Add User** button is replaced by a short message about your plan. To add more people, remove someone you no longer need, or upgrade under **Settings**, then **Plan**.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I cannot see the **Add User** button | You are signed in as Staff, not an admin, or your plan's login limit is reached | Ask an admin to invite people, or check the message in the **Staff members** card |\n| The invited person did not get the email | It went to spam, or they already had an account | Use the **envelope** button to resend, or tell them to use **Forgot password** |\n| A Staff member cannot manage a calendar | That calendar is not assigned to them | Tick the calendar in their row under **Calendars they manage** |\n| There are no calendars to assign | No active bookable calendar exists yet | Add one under **Calendar availability**, then return and assign it |\n| A team member gets logged out too often | The **Auto-Logout Timer** is set short | An admin can raise it in **Security settings** (up to 7 days) |\n\n## Next steps\n\n- [Business and calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Your dashboard at a glance](/help/getting-started/dashboard-overview)\n- [Completing your setup checklist](/help/getting-started/setup-checklist)",
+    },
+    {
+      slug: "services",
+      helpSection: "gs-catalogue",
+      title: "Set up your services",
+      description: "Create the services clients can book, set their length and price, and decide how they pay, so your booking page fills up.",
+      tags: ["services","appointments","duration","deposit","payments","calendar","catalogue","booking"],
+      content: "# Set up your services\n\nA service is anything a client can book with you: a consultation, a treatment, a class slot, a session. Get one set up here and it will show on your booking page, ready for clients to choose a time. This page walks you through naming it, setting its length and price, deciding how clients pay, and linking it to a calendar.\n\n> **The one big idea:** a service only appears for clients once it is **Active** and linked to at least one **calendar** that has working hours. Service plus calendar plus hours equals a bookable slot.\n\n## Before you start\n\nServices live under **Services** in the sidebar. You will need admin access to set up services for the whole business. Staff linked to a calendar can add services too, but only for the calendars they look after.\n\nIf you want clients to pay a deposit or pay in full online, connect Stripe first. Open **Settings** from the sidebar, choose **Payments**, and follow the steps. See [Connecting Stripe to take payments](/help/getting-started/stripe-payments).\n\n## Step 1: Open the service editor\n\n1. Open **Services** from the sidebar.\n2. Click **Add service** at the top right. (On your very first one, the button says **Add your first service**.)\n\n:::help-figure services-editor\n\n## Step 2: Name and describe it\n\n1. In **Name**, type what clients will see, for example \"Consultation\" or \"Standard session\". This is required.\n2. In **Description**, add a short line about what is included. This is optional, but it helps clients choose.\n\n## Step 3: Set duration, buffer, and price\n\n1. **Duration (mins)** is how long the appointment takes. This is required and can be from 5 to 480 minutes.\n2. **Buffer (mins)** is extra protected time after the appointment, for cleaning or notes. Clients cannot book during it. Leave it at 0 if you do not need any.\n3. **Price** shows your currency symbol, for example **Price (£)**. Type the amount, like 45.00. Leave it blank or 0 if the service is free or priced on the day.\n\n> **Need different lengths or tiers?** Admins can switch to **Multiple bookable options**, where clients pick an option (such as \"60 minutes\" or \"Full head\") before choosing a time, each with its own duration, buffer, and price. For one set price and length, leave it on **One fixed offering**.\n\n## Step 4: Choose how clients pay\n\nScroll to **Online payment when booking** and pick one:\n\n- **No online payment (pay at venue or arrange separately):** clients book without paying. Best when you take payment in person.\n- **Custom deposit (fixed amount online):** clients pay a set amount to hold the slot. A **Deposit amount** field appears, so type the amount.\n- **Pay full price online at booking:** clients pay the full price when they book.\n\n> **Warning:** deposits and full payment only work once Stripe is connected. If it is not, the editor warns you and clients cannot pay online. Open **Settings**, choose **Payments**, and connect it first.\n\n## Step 5: Assign the service to a calendar\n\nA calendar is one bookable person, room, or piece of equipment. A service is only offered by the calendars you tick here.\n\n1. Scroll to **Calendars that offer this service**.\n2. Tick each calendar that should offer it.\n3. No calendar yet? Admins can click **Add calendar** to create one on the spot, and it is ticked for you. You can set its hours later in **Calendar availability**.\n\n> **Tip:** if a calendar is missing from the list, it may be inactive. Add or reactivate it from the **Calendar availability** link, on the **Calendars** tab.\n\n## Step 6: Make it active and save\n\n1. Pick a **Colour** so the service is easy to spot on your calendar grid.\n2. Make sure the **Active (visible to clients)** toggle is on. If it is off, clients will not see the service.\n3. Click **Create Service**. When you come back to change it later, the button reads **Save Changes**.\n\n:::help-figure services-flow\n\n## How a service reaches your booking page\n\nOnce a service is **Active** and linked to a calendar with working hours, clients see it on your booking page. The times they can pick are where your venue opening hours, the calendar's hours, and any schedule on the service itself all line up. To learn how those hours stack up, read [Business & calendar hours](/help/getting-started/business-and-calendar-hours).\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| My new service is not on the booking page | It is not linked to a calendar, or it is not Active | Open the service, tick a calendar under **Calendars that offer this service**, and turn on **Active (visible to clients)** |\n| The service shows but has no available times | The linked calendar has no working hours, or its hours sit outside your venue opening hours | Set the calendar's hours in **Calendar availability**, and widen your venue opening hours in **Settings** if needed |\n| I cannot choose a deposit or full payment | Stripe is not connected | Connect it in **Settings**, **Payments**, then reopen the service and set the rule |\n| The calendar I want is missing from the list | The calendar is inactive | Add or reactivate it on the **Calendars** tab from the **Calendar availability** link, then return to the service |\n| I cannot save the service | **Name** or **Duration (mins)** is empty, or the duration is outside 5 to 480 | Fill in the required fields and use a duration between 5 and 480 minutes |\n| Clients still pay nothing after I set a deposit | The payment rule was left on **No online payment** | Reopen the service and choose a deposit or full payment option |\n\n## Next steps\n\n- [Business & calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)",
+    },
+    {
+      slug: "classes",
+      helpSection: "gs-catalogue",
+      title: "Set up your classes",
+      description: "Create reusable class types and put them on real dates so guests can book your group sessions.",
+      tags: ["classes","class types","sessions","timetable","rosters","capacity","schedule"],
+      content: "# Set up your classes\n\nClasses let several guests book the same session at once, like a yoga class or a workshop. You set them up in two quick steps: first you create a class type (a reusable template), then you put it on real dates so people can book. You will find everything under Classes in the sidebar, on the Class timetable page.\n\n> **Before you start:** every class runs on a calendar column, so add at least one team member or room in Calendar availability first. If you want guests to pay online, connect a Stripe account so you can take card payments.\n\n## Step 1: Create a class type\n\nA class type is the template guests book, for example \"Beginner Yoga, 60 minutes, 12 spots\". You only build it once.\n\n1. Open Classes from the sidebar.\n2. Click + Add class type.\n3. Fill in the few details that matter:\n   - A name (and a short description if you like).\n   - How long each session runs (duration in minutes).\n   - How many guests can book one session (capacity).\n   - The calendar column it runs on, plus an optional instructor label shown to guests.\n   - A price, plus a deposit or full-payment rule if you take payment online.\n4. Click Save class type.\n\n:::help-figure classes-type\n\nYour new class type now appears under Class types. On its own it cannot be booked yet. Next you put it on the calendar.\n\n## Step 2: Schedule sessions\n\nThis is the step that makes a class bookable.\n\n1. Click Schedule classes, pick the class type, then tap a day in the month grid.\n2. Choose how it repeats:\n   - One-off session for a single date.\n   - Weekly repeat to repeat on the same weekday, either for a number of weeks or between two dates.\n   - Every few days to space sessions out, for example every 2 days for a short course.\n3. Set the start time (the end time follows the duration you chose).\n4. Save. Each date becomes its own session you can manage on its own.\n\n:::help-figure classes-schedule\n\nYour sessions now show under Upcoming sessions and on your calendar, each with a count of how many spots are booked so you can see how full it is.\n\n:::help-figure classes-timetable\n\n## Taking and managing bookings\n\nOnce the Classes & sessions booking type is switched on, guests can book a session from your public booking page (see [Set up your business profile](/help/getting-started/business-profile)). Open any session to see who is coming, add a guest yourself, or set a capacity override for that one session. Only an admin can cancel a class and let booked guests know.\n\n> **Tip:** if you sell class packs, courses, or memberships, open Class products on the Class timetable page to set those up.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| My class type is not bookable | You created the type but have not added any dates | Click Schedule classes to add dates; only scheduled sessions can be booked |\n| Classes do not show on my booking page | The Classes & sessions booking type is switched off | Turn on Classes & sessions in Settings (see [Set up your business profile](/help/getting-started/business-profile)) |\n| I cannot lower a session's capacity | More guests are already booked than the new number | Cancel a few bookings first, then set the capacity override for that session |\n| Scheduling created lots of separate sessions | Each date is its own session, by design | Edit or remove individual sessions as needed; your class type stays the same |\n| Guests cannot pay for a class | Stripe is not connected, or the class has no online payment rule | Connect a Stripe account, then add a deposit or full payment to the class type |\n\n## Next steps\n\n- [Set up your services](/help/getting-started/services)\n- [Business & calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Guest communications (email and SMS)](/help/getting-started/communications)",
+    },
+    {
+      slug: "events",
+      helpSection: "gs-catalogue",
+      title: "Set up ticketed events",
+      description: "Create one-off or repeating ticketed events, set prices and seat limits, show them on your calendar, and check guests in on the day.",
+      tags: ["events","tickets","capacity","attendees","check-in","stripe","calendar","scheduling"],
+      content: "# Set up ticketed events\n\nSell seats to a one-off or repeating experience like a workshop, tasting, or class. You can set named ticket types, prices, and limits, show the event on a calendar, and check guests in on the day. Here is how to get it all running.\n\n> **Before you start:** an admin needs to turn on ticketed events first in your booking settings. Once it is on, Events appears in your sidebar. If you want guests to pay a deposit or pay in full online, connect Stripe first under your payment settings.\n\n## Step 1: Open the Event manager\n\n1. In the sidebar, click Events.\n2. Click + Create event in the top right.\n\n> **Who can create events:** admins can always create one. A staff member can create an event only when their account is linked to a calendar. If you see a note that your account is not linked yet, ask an admin to link you first.\n\n## Step 2: Choose how often the event runs\n\nIn the Schedule box, pick how the event repeats:\n\n1. **One date** for a single event on one day.\n2. **Weekly (same weekday)** to repeat on the same weekday. Set the First occurrence date and a Repeat until date, and you will see how many events get created.\n3. **Custom dates** to pick specific days. Choose a date, click Add date, and it appears as a chip. Add as many as you like, and remove any with the x.\n\n> **Good to know:** weekly and custom create one event per date, each with the same ticket setup. You can edit each date on its own afterwards.\n\n## Step 3: Fill in the event details\n\n1. Enter the Event name, for example \"Seasonal tasting\" or \"Workshop\".\n2. Set the Date (or First occurrence for weekly, or your Dates chips for custom).\n3. Set the overall Capacity, the total number of seats across all ticket types.\n4. Set the Start time and End time.\n5. Add a Description, and paste an Image URL if you would like guests to see a picture on your public page.\n\n:::help-figure events-editor\n\n> **Tip:** the Capacity here is the ceiling for the whole event. Per-ticket limits in the next step sit inside it, so you can never sell more seats than this number.\n\n## Step 4: Add your ticket types\n\nEvery event starts with one tier called General Admission. Under Ticket types, for each ticket type:\n\n1. Enter the Ticket name, for example \"General Admission\" or \"Members\".\n2. Set the Price. Leave it at 0 for a free tier.\n3. Set a Cap if you want a limit for that tier only, or leave it blank for no limit (the overall Capacity still applies).\n4. Click + Add ticket type to add another, or Remove to drop one. You need to keep at least one.\n\n> **Warning:** if you take payment in the next step, every ticket must be priced above 0. An event with a free tier will not save if you ask for a deposit or full payment, because guests could book for nothing.\n\n## Step 5: Set online payment (optional)\n\nUnder Online payment (Stripe), pick one:\n\n1. **None**, for pay at venue or free events.\n2. **Deposit per person**, then enter the Deposit amount.\n3. **Full payment online** per ticket.\n\nDeposit and full payment need ticket prices above 0 and a connected Stripe account. If Stripe is not connected, you will see a warning and guests will not be able to pay.\n\n## Step 6: Put the event on a calendar\n\nUnder Calendar column, choose a Calendar from the dropdown, or leave it as Not assigned to a calendar.\n\n1. Assigning a calendar shows the event on that team column in your dashboard. The event time must not overlap other appointments, classes, resources, or blocked time on that column.\n2. The calendar you choose also decides which staff can edit or delete the event later: only staff linked to that column see those actions.\n3. Admins can click Add calendar to create a new column and assign it on the spot.\n\n> **Set your booking rules too:** under Guest booking rules you can control how far ahead guests can book, how much notice they need to give, and whether same-day bookings are allowed.\n\nWhen everything looks right, click Save event. You will see a confirmation, and for weekly or custom schedules a note telling you how many events were created.\n\n## Step 7: Manage attendees and check guests in\n\nBack on the Event manager, your events are grouped under Upcoming and Past. Click any event card to open it.\n\n1. The Sales & capacity panel shows tickets sold, revenue, seats taken, fill percent, and a breakdown by ticket type.\n2. Under Attendees you see each guest with their tickets and status. Click a booking to view its full details.\n3. To check someone in, click Arrived. To undo it, click Clear.\n4. To save the guest list, click Export CSV.\n\n:::help-figure events-attendees\n\n> **Cancelling a whole event:** only admins can click Cancel event & notify guests. This cancels all active bookings and notifies guests per your refund policy, and it cannot be undone. For a small change, use the edit (pencil) action instead, or Duplicate to copy the event onto a new date.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| + Create event is missing, or I cannot edit | Your staff account is not linked to a calendar | Ask an admin to link your account to a calendar, then reload Events |\n| The event will not save | You chose Deposit or Full payment but a ticket is priced at 0 | Price every ticket above 0, or set Online payment to None |\n| Guests cannot pay online | Stripe is not connected | Connect Stripe in your payment settings, then reopen the event |\n| Saving shows a time conflict | The event overlaps another booking or blocked time on that calendar | Pick a different Calendar column, or change the time so it does not overlap |\n| A tier sells out before the event is full | That ticket type has a Cap lower than the overall Capacity | Raise the tier's Cap, or leave it blank for no limit |\n| Guests cannot find the event to book | Ticketed events is off, or the event is inactive or cancelled | Turn ticketed events on in your booking settings, and check the event is not marked Inactive |\n\n## Next steps\n\n- [Setting up your business profile](/help/getting-started/business-profile)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)",
+    },
+    {
+      slug: "resources",
+      helpSection: "gs-catalogue",
+      title: "Set up bookable resources",
+      description: "Add your rooms, courts, studios, or equipment as bookable resources, then set their hours, prices, and rules so clients can reserve them.",
+      tags: ["resources","rooms","courts","equipment","slots","availability","pricing","bookings"],
+      content: "# Set up bookable resources\n\nGot rooms, courts, studios, pitches, bays, or equipment that clients book by the hour? This page shows you how to add one, set how long it can be booked, price it, and choose when clients can reserve it. Each resource sits on your calendar, so its bookings show up right alongside the rest of your schedule.\n\n> **Quick way to think about it:** a resource is anything bookable that is not a person.\n\n## Where resources live\n\nOpen **Resources** from the sidebar. On the left you see **All resources**, and the main panel shows the one you have selected, with its weekly hours and that day's bookings. To start a new one, click **+ Add resource**.\n\n> **Who can do this:** admins can manage every resource. A team member can only manage a resource on a calendar they control. If your account is not linked to a calendar yet, ask an admin to set that up first.\n\n## Step 1: Name it\n\n1. In **Resource name**, type what clients will see, for example *Court 1* or *Studio A*.\n2. In **Type** (optional), add a label like *Meeting room* or *Pitch*, or use a **Quick pick**. This is just a label.\n3. Add a **Description** and **Photo URL** if you like. Both show to clients when they choose this resource.\n\n## Step 2: Choose where it appears\n\n1. Under **Team calendar**, use **Show on calendar** to pick the calendar column where this resource should appear.\n2. If you are an admin and need a new column, click **Add calendar**, type a name, then **Create and select**.\n\n> **Good to know:** two resources can share one column only if their weekly hours never overlap. If they would clash, give each its own column.\n\n:::help-figure resources-editor\n\n## Step 3: Set the booking rules\n\nThe **Booking rules** section decides how clients pick a time and how long they can book.\n\n1. **Start times every (minutes):** how often a booking can begin, for example every 30 minutes.\n2. **Longest booking (minutes):** the most time a client can book in one go.\n3. **Shortest booking (minutes):** by default this matches your start-time step. To require a longer minimum, tick **Advanced: longer minimum than start-time step** and enter the value.\n4. Under **Guest online booking**, set how far ahead clients can book (**Max advance (days)**), how much notice you need (**Min notice (hours)**), your **Cancellation notice (hours)**, and tick **Allow same-day bookings** if you want them.\n\n:::help-figure resources-slots\n\n> **The simple version:** the start-time step is when a booking can begin, shortest and longest set the limits on its length, and price is charged per step.\n\n## Step 4: Price it and choose how clients pay\n\n1. In the price field, enter the amount charged for each start-time step. Leave it blank to make the resource free.\n2. Choose how clients pay:\n   - **Pay at venue:** no card needed online.\n   - **Deposit online:** hold a deposit when they book. Enter the **Deposit amount**.\n   - **Pay in full:** charge the full amount at booking.\n3. Tick **Active (bookable by guests)** when you are ready for it to go live.\n\n> **Online payment needs Stripe.** **Deposit online** and **Pay in full** only take money once Stripe is connected. If it is not, you will see a prompt to connect it in settings. See [Connecting Stripe to take payments](/help/getting-started/stripe-payments).\n\n## Step 5: Set weekly hours\n\nUnder **Weekly hours**, switch each day on or off and set its times. You can add a second range for split hours (for example 09:00 to 12:00 and 14:00 to 18:00), copy one day's times to other open days, or click **Match selected calendar hours** to copy the calendar's hours.\n\n> **If a time still does not show:** clients can only book when the resource hours, your venue hours, and the calendar hours all overlap. If the resource opens earlier than the others, that extra time stays unbookable until you widen them too.\n\n## Step 6: Add date exceptions (optional)\n\nFor one-off closures or special hours, use **Date exceptions**. Tap a day (or a start day then an end day for a range), choose **Closed (not open)** or **Amended hours (custom times)**, then click **Apply to calendar selection**. To change a saved day, tap it and use **Save changes** or **Remove this day**.\n\nWhen everything looks right, click **Create resource** (or **Save changes** when editing).\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| Clients see no slots | The resource is not **Active**, or its hours fall outside your venue or calendar hours | Tick **Active (bookable by guests)** and make sure resource, venue, and calendar hours overlap |\n| I cannot save: shortest booking error | **Shortest booking** is longer than **Longest booking**, or shorter than the start-time step | Lower the shortest value, or turn off **Advanced** to match the step |\n| I cannot save deposit or full payment | No price is set for the start-time step | Enter a price, then choose **Deposit online** or **Pay in full** |\n| Clients cannot pay online | Stripe is not connected | Connect Stripe in settings; until then bookings still work as **Pay at venue** |\n| The resource is not on my calendar | No column chosen under **Show on calendar** | Edit the resource and pick a column under **Show on calendar** |\n| Two resources clash on one column | They share a column but their hours overlap | Give each its own column, or make their hours not overlap |\n| A team member cannot edit it | Their account is not linked to that resource's calendar | An admin can link the calendar to them, or edit on their behalf |\n\n## Next steps\n\n- [Business & calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)",
+    },
+    {
+      slug: "calendar",
+      helpSection: "gs-run",
+      title: "Using the calendar",
+      description: "Read your day at a glance, add and reschedule bookings with a click or drag, and keep each one on track.",
+      tags: ["calendar","bookings","scheduling","drag","reschedule","status","appointments"],
+      content: "# Using the calendar\n\nYour calendar is where your day comes to life. Every booking sits on a time grid, with one column for each team member, room, or piece of equipment. Here you will learn to read the day at a glance, add a booking in a click, move and lengthen bookings by dragging, and keep each one on track from arrival to finish.\n\n> **Quick idea:** each column is one bookable calendar (a person, room, or piece of kit). Time runs down the page, and each booking is a coloured block in the column it belongs to.\n\n## Reading the grid\n\n1. Open **Appointment Calendar** from the sidebar.\n2. Use the **View** button at the top to switch between **Day**, **Week**, and **Month**.\n3. Move through time with the back and forward arrows, or click the date to jump to a specific day.\n4. In **Day** view, click **Compact** to shrink the rows so the whole day fits on one screen.\n\n:::help-figure calendar-grid\n\n> **Tip:** **Day** view is easiest for running a single day. **Week** gives you the shape of the days ahead.\n\n## Creating a booking\n\nYou have a few quick ways to add a booking:\n\n1. Click an empty slot in the column you want. That time becomes the start, and that column becomes the assigned person or room.\n2. Or click **New** in the toolbar and pick the details yourself.\n3. For someone who turns up without an appointment, click **Walk-in** in the toolbar.\n\n> **Note:** the calendar only offers times you can actually book. If a slot will not let you click it, check the working hours for that calendar and your business hours. See [Business and calendar hours](/help/getting-started/business-and-calendar-hours).\n\n## The booking card\n\nEach booking is a coloured block. Click it to open the booking details, where you can view or edit everything about it.\n\nThe card shows the guest name, service, phone number, time, and a small status pill. On short cards the lower details drop off so the name always stays readable.\n\nCards also have small action buttons (such as **Arrived**, **Confirm**, **Start**, and **Complete**) so you can move a booking along without opening it. Which buttons appear depends on where the booking is in its flow.\n\n:::help-figure calendar-card\n\n## Moving and lengthening bookings\n\nYou can reschedule and resize right on the grid:\n\n1. **Reschedule:** press and hold the drag grip on the left edge of a card, then drag it to a new time or a different column. A preview shows where it will land.\n2. **Change the length:** press and hold the resize handle at the bottom of the card, then drag down or up to make it longer or shorter.\n3. After a change, a small bar appears for a moment. Use **Notify now** or **Skip notify** to choose whether the guest is told, or **Undo** to roll it back. The toolbar **Undo** button also reverses your last change.\n\n> **Warning:** you must hold for a moment before a drag or resize takes effect. That short pause is there on purpose, so a stray touch or scroll never moves a booking by accident.\n\n## The status flow\n\nA booking moves through a simple sequence, driven by the buttons on the card:\n\n1. **Pending** is a new request. Click **Confirm** to lock it in, and it becomes **Booked**.\n2. **Booked** means it is on the schedule. When the guest arrives, click **Arrived** (use **Clear** if you tapped it by mistake).\n3. Click **Start** when the appointment begins. Use **Undo start** if you need to step back.\n4. Click **Complete** when it is finished. You can use **Reopen** if you need to.\n5. **Cancelled** and **No Show** are end states. Cancelled bookings drop off the grid, but you can still find them in the [appointments list](/help/appointments/managing-appointments).\n\n:::help-figure calendar-status\n\n> **Tip:** marking **Arrived** and **Start** as they happen keeps your day accurate, which makes your reports and waiting times far more useful.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I cannot click an empty slot | That time is outside the calendar's working hours or your business hours | Widen the hours in **Calendar Availability** and **Settings, Business hours**, then try again |\n| My booking will not drag | You let go before the hold pause finished, or the slot is already taken | Press and hold the left grip until it is ready, then drag to a free slot |\n| The card has no action buttons | The booking is **Cancelled** or **No Show**, so there is nothing to progress | Reopen or recreate it from the [appointments list](/help/appointments/managing-appointments) if it should run |\n| A cancelled booking vanished | Cancelled bookings are hidden from the grid on purpose | Find and reinstate it from the [appointments list](/help/appointments/managing-appointments) |\n| I dragged a booking by mistake | A move or resize happened | Click **Undo** on the card bar, or **Undo** in the toolbar |\n| The grid feels too cramped or too tall | Row size in **Day** view | Toggle **Compact**, or switch the **View** |\n\n## Next steps\n\n- [Managing the appointments list](/help/appointments/managing-appointments)\n- [Business and calendar hours](/help/getting-started/business-and-calendar-hours)",
+    },
+    {
+      slug: "bookings-list",
+      helpSection: "gs-run",
+      title: "Using the bookings list",
+      description: "Your one place to find every booking, open the details, update statuses, and message or tag several guests at once.",
+      tags: ["bookings","appointments","list","filter","search","status","bulk actions","tags"],
+      content: "# Using the bookings list\n\nThe **Bookings** list is your one place to find every booking, open one for the details, update its status, and message or tag several guests at once. (Depending on how your venue is set up, this page may be called **Bookings**, **Appointments**, or **Reservations**.) Here is how to work it with confidence.\n\nTo open it, click **Bookings** in the left sidebar. Each row is one booking, showing the guest, the time, what they booked, and a status.\n\n:::help-figure bookings-row\n\n## Choose the dates you want to see\n\nThe list always shows a date range, set from the toolbar at the top.\n\n1. Click the view selector (it shows the current view, such as **Day**) and pick **Day**, **Week**, **Month**, or **Custom**.\n2. Use the **left** and **right** arrows to move through your view (the next day, the next week, and so on).\n3. On **Custom**, set a **From** and **To** date for any span you like.\n\n> **Tip:** on **Custom**, put the earlier date in **From**. If **From** is after **To**, the list tells you the range is invalid and asks you to fix it.\n\n## Search for a guest\n\n1. Click the search box in the toolbar.\n2. Type a guest's name, phone, or email.\n3. Pick the match to jump to their booking, or start a new booking for them from there.\n\n## Filter the list\n\nClick the **Filter** button in the toolbar. When filters are on, the button shows a count, like **Filter (2)**.\n\n1. **Booking type** (only if you run more than one booking style): choose **All**, or one type such as **Appointment**, **Class**, **Event**, or **Resource**.\n2. **Service**: tick the services you want to see, or click **All services** to clear them.\n3. **Area** (if your venue has more than one area): choose **All areas** or one area.\n4. **Calendar**: choose **All calendars** or one calendar.\n5. **Status**: choose one of **All**, **Pending**, **Booked**, **Confirmed**, **Started**, **Completed**, **Cancelled**, or **No-Show**.\n6. To start over, click **Clear filters**.\n\n:::help-figure bookings-filters\n\n> **Good to know:** on **Day** view you can also narrow to a time window, then click **Clear time filter** to show the whole day again.\n\n## Open a booking to see the detail\n\nClick any row to open it in place. You will see the booking's details, your internal notes, and a box to message that one guest. Click the row again to close it.\n\n> **Tip:** if your venue shares calendars with linked venues, an **All / My venue / Linked** switch appears so you can choose whose bookings you see. Linked bookings are view only.\n\n## Change a booking's status\n\nYou can move a booking along from the list as your day unfolds.\n\n1. Open the booking's row.\n2. Click the action for the next step, for example **Start**, **Complete**, or **Mark No-Show**.\n3. It saves on its own. If something blocks the change, a message explains why and the row goes back.\n\n> **Warning:** only sensible status steps are offered, so if an option is missing, that move is not allowed yet. Cancelling a booking can free a slot for your waitlist.\n\n## Message or tag several guests at once\n\n1. Tick the checkbox on each booking you want, or tick **Select all** at the top.\n2. A tray appears showing how many are selected.\n3. Click **Message** to send the same message to everyone selected, or **Add tag** to add a label to their contact records. The tray also offers status actions such as **No-show**, **Cancel**, and **Delete** for the selected bookings.\n4. Click the **X** to clear your selection when you are done.\n\n> **Good to know:** tags live on the guest's contact record, so a booking with no contact details cannot be tagged.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| A booking I expected is missing | A date range, status, calendar, or service filter is hiding it | Widen the view range and click **Clear filters** |\n| The list says my date range is invalid | On **Custom**, the **From** date is after the **To** date | Put the earlier date in **From** and the later one in **To** |\n| I cannot pick the status I want | That step is not allowed from the current status | Move it one valid step at a time, or open the booking to see what is allowed |\n| **Add tag** says there is no contact to tag | The selected bookings have no contact record | Add the guest's details first, or untick that booking before tagging |\n| My message did not reach everyone | Some guests are missing a phone number or email | Check the guests' phone numbers and email addresses |\n| I cannot edit a linked booking | Bookings shared from another venue are view only | Manage it from the venue that owns that calendar |\n\n## Next steps\n\n- [Create a booking for a guest](/help/getting-started/new-booking)\n- [Manage your guests and contacts](/help/getting-started/contacts)\n- [Set up communications and reminders](/help/getting-started/communications)",
+    },
+    {
+      slug: "new-booking",
+      helpSection: "gs-run",
+      title: "Taking a booking",
+      description: "Create bookings by hand for appointments that come in by phone, email, or in person.",
+      tags: ["bookings","new booking","appointments","guests","contacts","deposits","rebooking","scheduling"],
+      content: "# Taking a booking\n\nWhen a client books over the phone, by email, or in person, you can pop their appointment straight into your calendar yourself. This guide walks you through it: pick the service and staff member, choose a time, add the client, take a deposit if you want one, and save.\n\n## Open New Booking\n\nIn the sidebar, click **New Booking**. If you offer just one kind of booking, the form opens right away. If you offer more than one, you will see a row of tabs at the top to choose from.\n\n> **Tip:** Clicking **New Booking** again while you are mid-booking clears the form and starts you fresh. Handy for a clean slate, but avoid it if you are part way through entering someone.\n\n## Step 1: Choose the booking type\n\nIf you offer more than one type, pick the tab that matches what the client wants. Depending on what you have turned on, you might see tabs like **Table**, **Appointment**, **Classes**, **Events**, and **Resources**.\n\nFor a normal appointment, choose the **Appointment** tab. The rest of this guide follows that.\n\n:::help-figure newbooking-form\n\n## Step 2: Pick the service\n\n1. On **Select a service**, click the service the client wants.\n2. If that service comes in different options (lengths or finishes, say), a **Choose your option** step appears so you can pick the right one.\n3. On **Who would you like to see?**, choose the staff member who will do the service.\n\n> **Good to know:** Need a one-off longer or shorter slot? Use **Custom duration** to change the length for this booking only. It will not affect the service for anyone else.\n\n## Step 3: Pick the date and time\n\n1. On the **Date and time** step, choose a day. Days with at least one free slot can be picked; fully booked or closed days are greyed out.\n2. Pick a time from the list, grouped into **Morning**, **Afternoon**, and **Evening**.\n\n> **Why a time might not show:** A slot only appears when the staff member is working, you are open, and nothing else is booked over it. If the time you want is missing, check that person's hours in [Business and calendar hours](/help/getting-started/business-and-calendar-hours).\n\n## Step 4: Find or add the client\n\n1. Start typing a name, email, or phone number. ResNeo searches your saved contacts and shows matches as you type.\n2. If the right person appears, click them and their details fill in automatically.\n3. If nobody matches, just finish typing the new details. Saving the booking creates the contact for you, so there is no separate step.\n\n:::help-figure newbooking-guest\n\n> **Tip:** **Phone** is required. **First name**, **Surname**, and **Email** are optional, but adding an email lets ResNeo send confirmations and reminders.\n\n## Step 5: Deposit (if you take one)\n\nIf the service is set up to charge online, you will see a deposit option:\n\n- Tick **Require deposit** to ask the client for that amount.\n- If the service is set to full payment, you will see a note that a payment link goes to the client instead.\n\nLeave the box unticked if you are taking payment in person, or not charging for this one.\n\n## Step 6: Save the booking\n\nClick the button at the bottom.\n\n- With no deposit, it reads **Confirm Booking** and saves straight away.\n- With a deposit or payment, it reads **Continue to payment** so you can take or send the charge.\n\nOnce it saves, you land on your bookings list. See [Your bookings list](/help/getting-started/bookings-list) to find it there.\n\n## Rebooking a regular\n\nTo set the same client up again fast, open their record in **Contacts** and use **Rebook** from their booking history. The booking form opens with their name, email, and phone already filled in, so you just pick the service, date, and time.\n\n> **Note:** Rebook brings over contact details only. Notes and requests start blank each time, so old notes will not tag along by mistake.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| No times show for the date | The staff member is not working then, you are closed, or the slot is taken | Try another date or staff member, and check hours in **Business and calendar hours** |\n| The tab I want is missing | That booking type is not turned on yet | An admin can enable it under **Settings**, then **Profile**, in the **Booking types** section |\n| The client is not in the list | They have no saved contact yet, or the spelling differs | Type their full details; saving the booking creates the contact |\n| I cannot tick a deposit | The service has no online charge set, or Stripe is not connected | Set a deposit on the service, and connect Stripe under **Settings**, then **Payments** |\n| The form cleared while I was filling it in | **New Booking** was clicked again, which resets it | Re-enter the details, and avoid re-clicking **New Booking** mid-booking |\n| I want full payment, not a deposit | The service is set to deposit only | Change the service's payment rule, then a payment link is sent instead |\n\n## Next steps\n\n- [Your bookings list](/help/getting-started/bookings-list)\n- [Business and calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)",
+    },
+    {
+      slug: "contacts",
+      helpSection: "gs-run",
+      title: "Your contacts (CRM)",
+      description: "See every client's visits, bookings, and contact details in one place, and reach them in a click.",
+      tags: ["contacts","crm","guests","tags","segments","merge","messaging","rebooking"],
+      content: "# Your contacts (CRM)\n\nContacts is your address book and guest history in one place. Every person who books shows up here on their own, so you can see who they are, when they last came in, what is booked next, and reach them in a click.\n\nOpen it from Contacts in the sidebar. You will see your client list, ready to use.\n\n> You do not build this list by hand. Records appear automatically as bookings come in. If the list looks empty, you simply have not taken any bookings yet.\n\n## Reading a contact row\n\nEach row gives you the essentials at a glance: the person's name, their phone and email when you have them, how many visits they have made, when they last came in, and a blue pill showing their next booking. Tags appear as small pills, and a red NS marker flags anyone with no-shows. Walk-ins with no saved details show as Anonymous.\n\n:::help-figure contacts-row\n\n> Tip: use Select all on page at the top to tick everyone shown, then run a bulk action like tagging or messaging.\n\n## Opening a contact and rebooking\n\nClick any row to open the full profile underneath it.\n\n1. At the top you see Visits, Last visit, and Next visit.\n2. Below that are the first name, surname, email, and phone. Click Edit to change them, then Save changes. You can also add or remove tags here.\n3. Scroll to Guest bookings to see past and upcoming visits.\n4. To book them in again, click New booking. Their details are filled in for you.\n\n:::help-figure contacts-detail\n\n> Tags save the moment you add or remove one. Other changes save when you click Save changes.\n\n## Messaging a contact\n\n1. Open the contact and find the Messages & privacy section.\n2. Under Send a message, choose how to reach them with Send via (Email & SMS, Email only, or SMS only).\n3. Type your message, then click Send.\n4. Anything you have sent appears under Message log.\n\n> If a contact has no email or no phone on file, that channel is skipped. Add their details first if a message does not go out.\n\n## Filtering, smart lists and tags\n\nUse Filters in the toolbar to choose who appears and to build smart lists.\n\n1. Click Filters.\n2. Under Who to include, pick Saved contact details, All identified guests, or Walk-ins only.\n3. Under Smart lists, narrow further by things like new this period, an upcoming visit, last visit, marketing consent, last booking staff member, last booked service, or a tag.\n4. Some smart lists ask for a date range or a tag. Fill those in when prompted.\n5. Click Done, or Clear filters to start over.\n\nTo tag several people at once, tick their checkboxes, then click Add tag in the selection bar. To message the whole group, click Message. Click Clear selection when you are done.\n\n> Use the sort control to order the list by last visit, name, most visits, or recently added.\n\n## Adding contacts, merging and exporting\n\n- To add someone by hand, click the New button in the toolbar (it is named after whatever you call clients, such as customer or guest). If they already exist, ResNeo opens that record instead of making a duplicate.\n- To combine two records for the same person, open one contact and click Merge (admins only). This is how you tidy up duplicates.\n- To download your list as a spreadsheet, click Export. It includes whoever your filters are currently showing.\n\n> Merge and Erase data are admin-only and cannot be undone. Check you have the right record open before you use them.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| A contact shows as Anonymous | They booked without a saved name, email, or phone | Open the record, click Edit and add their details |\n| The same person appears twice | Two records were made from different bookings | Open one record and click Merge (admin) to combine them |\n| My message did not send | The contact has no email or phone for that channel | Add the missing detail, then send again, or pick a channel they have |\n| I see no contacts at all | No bookings yet, or your filters are too narrow | Take a booking, or open Filters and choose Clear filters |\n| A smart list shows nothing | The list needs a date range or tag you have not set | In Filters under Smart lists, fill in the dates or pick a tag |\n| The export is missing people | Active filters are limiting the list | Clear your filters before clicking Export |\n\n## Next steps\n\n- [Creating a booking from the dashboard](/help/getting-started/new-booking)\n- [Setting up email and SMS messages](/help/getting-started/communications)\n- [Importing your existing data](/help/getting-started/importing-data)",
+    },
+    {
+      slug: "waitlist",
+      helpSection: "gs-run",
+      title: "Using the waitlist",
+      description: "Let fully booked clients add their name to a waitlist so you can offer them the next free slot.",
+      tags: ["waitlist","appointments","offers","bookings","availability","settings","notifications"],
+      content: "# Using the waitlist\n\nFully booked? The waitlist lets clients put their name down for the date, time, calendar, and service they want, so you can offer them a spot the moment one opens. This page shows how clients join, how an entry moves from waiting to booked, and how you send an offer.\n\n> **Before you start:** the waitlist is optional. An **admin** turns it on first. Until then, the **Waitlist** link will not appear in your sidebar.\n\n## Turn on the waitlist\n\n1. Open **Settings** from the sidebar, then the **Booking Settings** tab.\n2. In the **Optional Booking features** card, find **Appointment waitlist** and switch the toggle **on**.\n3. Under **When a slot opens**, choose how your team is notified.\n4. Your choice saves automatically.\n\nNow, when a client hits a fully booked time on your booking page, they can join the waitlist. A new **Waitlist** link appears in your sidebar.\n\n> **Tip:** clients are emailed by default. To also send SMS, change the wording, or turn invites off, open **Settings**, then the **Communications** tab, and use the **Waitlist invites** section.\n\n## What each status means\n\nEvery entry shows a coloured status pill. It tells you what to do next.\n\n- **Waiting** (amber): the client is in the queue and no slot has been offered yet.\n- **Offered** (brand colour): you have offered a slot and the client has been notified. If a deadline applies, the row shows an **Expires** time.\n- **Complete** (green): the booking is confirmed and on your calendar.\n- **Expired** (grey): an offer ran out before it was taken.\n- **Cancelled** (red): the entry was cancelled, by you or the client.\n\n:::help-figure waitlist-lifecycle\n\n## Reading the Waitlist screen\n\nOpen **Waitlist** from the sidebar.\n\n1. Use the **Active** and **All** tabs to switch views. **Active** shows clients still waiting. **All** shows the full history, including complete, expired, and cancelled entries.\n2. Each row shows the client name, the service and team member (or **Any team member**), the date and time they want, and their contact details.\n3. A **Live** pill means the list is updating in real time. If it reads **Reconnecting**, it is just catching up.\n\n:::help-figure waitlist-list\n\n> **Tip:** missing a client you expected? Switch from **Active** to **All**. Completed, expired, and cancelled entries only show there.\n\n## Offer a slot\n\nWhen a spot opens for a waiting client, offer it to them.\n\n1. Find the entry with the **Waiting** status.\n2. Click **Offer spot** on that row (on a narrow screen the button reads **Offer**).\n3. The status changes to **Offered** and the client is notified automatically. If a deadline applies, the row shows an **Expires** time so you can see how long they have.\n\n> **Warning:** if the **Offer spot** button is greyed out, that slot cannot be offered right now (for example, the time is no longer free). A short note next to the button explains why. Wait for another opening rather than forcing it.\n\n> **Heads up:** if you see \"Spot offered, but we could not send email or SMS to the guest,\" the offer was saved but the message did not go out. Phone or message the client yourself using the contact details on the row.\n\n## Confirming the booking\n\nFor appointments you do not confirm anything by hand. When the client takes up the offer, the entry moves to **Complete** on its own and the appointment appears on your calendar.\n\nIf plans change first, click **Cancel** on a waiting entry to release it. Old **Expired** or **Cancelled** entries can be tidied away with the bin icon, which asks you to confirm before deleting for good.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| No **Waitlist** link in the sidebar | The waitlist feature is off | An admin turns it on under **Settings**, in the **Booking Settings** tab |\n| The **Offer spot** button is greyed out | That slot cannot be offered right now; a note beside the button shows why | Wait for a free slot, then offer it, or contact the client directly |\n| Offer sent but the client got nothing | Email or SMS failed (a notice shows on screen) | Phone or message the client using the contact details on the row |\n| An offer vanished before they replied | The offer reached its **Expires** time | Find it under **All** and, if a slot is still free, ask the client to rejoin or rebook |\n| A client is not in the list | You are on the **Active** tab and their entry is complete, expired, or cancelled | Switch to the **All** tab |\n| You cannot remove an old entry | The bin icon only shows on **Expired** or **Cancelled** entries | Cancel the entry first, then use the bin icon |\n\n## Next steps\n\n- [Business & calendar hours](/help/getting-started/business-and-calendar-hours)\n- [Your appointments and bookings list](/help/getting-started/bookings-list)\n- [Your public booking page and embed](/help/getting-started/public-booking-page)",
+    },
+    {
+      slug: "compliance",
+      helpSection: "gs-run",
+      title: "Compliance: patch tests, consent and intake forms",
+      description: "Set up patch tests, consent and intake forms so the right records are collected before each client sits down.",
+      tags: ["compliance","patch test","consent","intake","forms","enforcement","expiry","services"],
+      content: "# Compliance: patch tests, consent and intake forms\n\nIf some of your services need a patch test, a signed consent, or an intake form before a client sits down, Resneo can collect those for you, attach them to the right services, and warn or block bookings when a record is missing or out of date. This page shows you how to switch it on, build your forms, and check who needs what each day.\n\n> **Three words to know:** a **type** is the kind of record you collect (like a patch test). A **requirement** is the link that makes a service ask for it. A **record** is the form a client actually completed, valid until its expiry date. Get these straight and the rest is easy.\n\n:::help-figure compliance-concepts\n\n## Step 1: Turn compliance on\n\nOpen **Settings** from the sidebar, then the **Compliance** tab. Inside it you will see three sub-tabs: **Templates & types**, **Service requirements**, and **General settings**.\n\n1. Click **General settings**.\n2. Tick **Enable compliance records for this venue**.\n3. Set your defaults: the **Default capture method** (Staff in venue, Client online, or Both), the **Default form-link channel** for sending forms to clients (Email, SMS, or Both), the **Reminder cadence (days before expiry)**, and the **Form-link expiry (days)**.\n4. To send the form with every booking confirmation, tick **Automatically include the form in the booking confirmation**.\n5. Click **Save settings**.\n\n> **You must do this first.** Until compliance is on, the **Templates & types** tab cannot create anything. If you see a prompt asking you to turn it on, enable it in **General settings**.\n\n## Step 2: Add a type, from the library or from scratch\n\nA type is one kind of record: a patch test, a consent form, an intake questionnaire. Go to the **Templates & types** tab.\n\n1. To use a ready-made form, click **Add from library**, find the one you want, and click **Add**. It is copied in as your own, fully editable.\n2. To build your own, click **Create custom type** to open the form builder.\n3. Give it a **Form name** and a **Category** (Test, Consent, Intake, Declaration, or Certificate).\n4. Choose a **Result type** (Pass / fail, Signed, Completed, or File upload) and set the **Validity**: no expiry, per visit (single-use), or expires after a number of days you choose.\n5. Use the **Captured by** checkboxes to set who can fill it in (Staff in venue, Client online).\n6. Add your fields from **Add field**, drag to reorder them, then click **Preview as client** to see what your client sees.\n7. Click **Create type** to save.\n\n> **The library is the fast path.** A form you add from the library is fully yours to rename and reword, with no blank page to fill in.\n\n> **Pick the result type with care.** Most things can be edited later, but the result type is locked once the type is created.\n\n## Step 3: Attach the type to a service\n\nA type does nothing until a service asks for it. That link is a requirement.\n\n1. Go to the **Service requirements** tab.\n2. Click a service to expand it.\n3. Click **Add requirement**, choose the **Compliance type**, set **When unmet** (how strict it is, see below), and click **Add requirement** again.\n\nYou can also add it inside the service editor, in its **Compliance requirements** section. To change how strict it is later, use the dropdown next to it. To detach it, click **Remove**.\n\n## Step 4: Choose how strict it is\n\nThe **When unmet** setting decides what happens when a valid record is not on file. There are four levels, from gentlest to strictest:\n\n:::help-figure compliance-enforce\n\n- **Warn staff**: your team sees a flag, nothing is blocked. Good for nice-to-have records.\n- **Warn client**: the client is warned while booking online, but can still book.\n- **Block online booking**: clients cannot book this service online without a valid record, but your staff still can.\n- **Block all bookings**: no one can book this service, online or in person, until a valid record exists. Use this for true safety gates like patch tests.\n\n> **Start gentle, then tighten.** Many businesses begin with **Warn staff** while they gather records, then move up to **Block all bookings** once most regulars are covered.\n\n## Step 5: Renewals and expiry\n\nWhen a type has a validity period, its records expire and Resneo watches the clock for you. A record in its final 30 days is flagged **Expiring soon**, and reminders go out as early as you set in your **Reminder cadence**. Once a record passes its expiry date, the service treats it as missing again and your strictness setting kicks back in.\n\n## Step 6: Check the compliance dashboard each morning\n\nClick **Compliance** in the sidebar for your daily sweep of what is missing, expiring, or waiting on a client. It has four panels:\n\n:::help-figure compliance-dashboard\n\n- **Check-in today**: today's bookings with a required form still outstanding. Use **Complete now** to fill it in on a venue device, or **Send link** to email the client.\n- **Missing for upcoming bookings**: future bookings that need a record you do not have yet. Use **Send link** to request it.\n- **Expiring soon**: records that expire within 30 days. Use **Send renewal** to ask the client to refresh theirs.\n- **Awaiting client submission**: form links you have sent that are not yet completed.\n\n> **Make it a habit.** A two-minute glance before you open means no client arrives for a service they cannot safely have.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| The **Templates & types** tab asks you to turn compliance on | The feature is still off | Tick **Enable compliance records for this venue** in **General settings** and click **Save settings** |\n| A service is not asking for the form | No requirement links the type to that service | Add it in the **Service requirements** tab with **Add requirement** |\n| Clients can still book online without the record | The requirement is set to **Warn staff** or **Warn client** | Change **When unmet** to **Block online booking** or **Block all bookings** |\n| A record you just collected still shows as missing | The old record expired, or it was captured against a different type | Collect a fresh record, and check the requirement points at the right type |\n| You cannot create or edit types | Type management is admin only | Sign in as an admin, or ask one to make the change |\n| The **Result type** is greyed out when editing | It is locked once a type is created | Create a new type with the correct result type |\n\n## Next steps\n\n- [Services](/help/getting-started/services)\n- [Communications](/help/getting-started/communications)\n- [Bookings list](/help/getting-started/bookings-list)",
+    },
+    {
+      slug: "communications",
+      helpSection: "gs-grow",
+      title: "Guest communications (email and SMS)",
+      description: "Switch on automatic emails and texts so every confirmation, reminder, and follow-up reaches your guests without any extra work.",
+      tags: ["communications","email","sms","reminders","templates","notifications","settings","messaging"],
+      content: "# Guest communications (email and SMS)\n\nKeep your guests in the loop without lifting a finger. Once you switch these on, ResNeo sends polished confirmations, reminders, and follow-ups automatically. You just decide which messages go out, by email or SMS, and when.\n\n> **The one big idea:** every message already has a ready-to-use, branded template. You choose which messages send, by which channel, and at what time. You never have to write anything from scratch.\n\n## Where to find it\n\nOpen **Settings** from the sidebar, then click the **Communications** tab. Only admins can change these settings. Staff can look but the switches stay locked.\n\n> **Good to know:** your changes save automatically. A small **Saving**, then **Saved** note appears at the top right as you work.\n\n## Booking types (when you see them)\n\nIf your venue handles more than one kind of booking, a row of tabs appears at the top, such as **Table bookings** and **Appointments & other**. Each tab holds its own set of messages, so pick the tab first, then set up the cards underneath. If you only have one kind of booking, there are no tabs and you go straight to the cards.\n\n:::help-figure comms-lanes\n\n## The message cards\n\nEach kind of guest message has its own card down the page, with a switch to turn it on. Once it is on, the channel and wording options appear underneath. The cards you may see include:\n\n- **Booking confirmation** (sent as soon as a booking is confirmed)\n- **Confirm or cancel prompt** (asks the guest to confirm or cancel before the visit)\n- **Pre-visit reminder** (a nudge shortly before the booking)\n- **Deposit payment request**, **Deposit confirmation**, and **Deposit payment reminder** (for bookings that need a deposit)\n- **Booking modification** (sent when details change)\n- **Cancellation confirmation** and **Auto-cancel notification**\n- **No-show notification** (optional, when staff mark a no-show)\n- **Post-visit thank you** (a follow-up after the visit)\n- **Custom message** (a one-off message your staff write and send)\n\n> **Note:** a few messages, such as **Deposit confirmation**, **No-show notification**, and **Post-visit thank you**, are email only, so they have no SMS option.\n\n## Turn a message on and pick email or SMS\n\n1. Open **Settings**, then **Communications**.\n2. Find the card you want, for example **Booking confirmation**.\n3. Click the switch on the right to turn it on. It turns coloured when active.\n4. The channel options appear underneath. Tick **Email**, **SMS**, or both.\n5. That is it. There is no separate save button.\n\n> **Tip:** a message that is on must use at least one channel, so you cannot untick the last one. Tick the other channel first, then untick the one you want to drop.\n\n## Set the timing\n\nSome messages send at a set time before or after the booking. On those cards you will see a small number box:\n\n- **Send hours before** appears on **Confirm or cancel prompt**, **Pre-visit reminder**, and **Deposit payment reminder**.\n- **Send hours after** appears on **Post-visit thank you**.\n\nEnter any whole number of hours from 1 to 168 (one week). For example, set **Pre-visit reminder** to 24 to remind guests the day before.\n\n## Add your own wording\n\nEvery active message already uses a complete, branded template. To add a personal line on top, use the optional message boxes:\n\n1. With a message on, look under the channel options for **Email optional message** and, where texts are supported, **SMS optional message**.\n2. Type the extra line you want. A running character count under the box helps you keep it short, which matters most for SMS.\n3. Leave a box blank to send the standard template on its own.\n4. Click **Preview** to see exactly how the message will look to a guest.\n\n:::help-figure comms-editor\n\n> **Tip:** the preview uses sample guest details so you can check the tone. Email shows the full branded layout, SMS shows the short text version.\n\n## SMS sending and your allowance\n\nEmail is included on every plan. SMS depends on your plan and may be charged per message.\n\n- On the Appointments Light plan, a set number of SMS segments is included each month, then a small per-segment charge applies beyond that. When this applies, a banner near the top of this page spells out the figures.\n- If your billing is not set up yet, that banner explains you need to add a card under **Settings, Plan** to enable SMS. Email keeps working in the meantime.\n\n> **Warning:** turning SMS on for a busy message like **Pre-visit reminder** can use a lot of your allowance fast. Start with the messages that matter most, then add more once you see your usage.\n\n## Business notifications (alerts to you, not guests)\n\nAt the bottom of the page, **Business notifications** is for you and your team. Turn on **New booking alert** to get an email whenever a booking is made. Enter a **Notification email**, or leave it blank to use your venue email from **Settings, Profile**. This alert is email only.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| The switches are greyed out | You are signed in as staff, not an admin | Ask an admin, or sign in with an admin account |\n| A card has no SMS option | That message is email only | Use email for these; SMS is not available by design |\n| Guests are not getting texts even though SMS is ticked | Billing is not set up | Add a card under **Settings, Plan**, then SMS starts going out |\n| I cannot untick the last channel | A message that is on must use at least one channel | Tick the other channel first, then untick the one to remove |\n| My reminder goes out too early or late | The **Send hours before** value is off | Adjust the hours box (any whole number from 1 to 168) |\n| The new booking alert never arrives | No notification email and no venue email set | Add a **Notification email**, or a venue email under **Settings, Profile** |\n\n## Next steps\n\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Setting up your business profile](/help/getting-started/business-profile)\n- [Completing your setup checklist](/help/getting-started/setup-checklist)",
+    },
+    {
+      slug: "reports",
+      helpSection: "gs-grow",
+      title: "Reading your reports",
+      description: "See how your business is doing at a glance, pick a date range, and download the numbers as a spreadsheet.",
+      tags: ["reports","analytics","csv","export","no-shows","cancellations","deposits","admin"],
+      content: "# Reading your reports\n\nReports give you a quick read on how your business is doing: how many appointments you took, who did not turn up, what got cancelled, and how much money you collected. By the end of this page you will know where to find your reports, how to set the dates you want, and how to download the numbers as a spreadsheet.\n\n> **Start here:** Reports is for admins only, and it lives inside **Settings**. Almost every figure follows the **date range** you pick at the top, so set that first.\n\n## Where to find Reports\n\n1. Sign in as an admin. Staff do not see this area.\n2. Open **Settings** from the sidebar, then choose the **Reports** tab.\n3. You land on the **Overview** tab. A second tab, named after your guests (for example **Clients**), holds history for each person.\n\n:::help-figure reports-dashboard\n\n> **Tip:** if you only see your own account details, you are signed in as staff, not as an admin.\n\n## Step 1: Set your date range\n\nAlmost every number follows the dates you choose, so start here.\n\n1. At the top, find the **Date range** card.\n2. Set the **From** date and the **To** date.\n3. Click **Apply**, and the figures refresh.\n\n> **Good to know:** Reports opens on roughly the last 7 days. Widen it, say a full month, to spot clearer trends. The **Export your data** card lower down is the one exception: it always covers your whole business, not the dates you picked.\n\n## Step 2: Read each report\n\nThe **Overview** tab stacks several report cards. Which ones appear depends on your plan and the kinds of bookings you take, but here are the common ones.\n\n- **Appointment activity** (called **Booking summary** on some plans): how many bookings came in, how many places were booked, and how many guests arrived. It also shows where bookings came from and a breakdown by status.\n- **No-show rate**: the share of online bookings where the guest did not turn up, with an **Overall** figure and a chart over time. Walk-ins are not counted.\n- **Cancellation rate**: how many bookings were created and how many were cancelled, split into guest-initiated and auto (unpaid), plus your overall **Cancellation rate**.\n- **Payments & deposits** (called **Deposit summary** on some plans): **Total collected**, **Total refunded**, and **Total forfeited**.\n- **Team, services & channels**: which staff, services, and booking channels brought in your bookings.\n\n> **Tip:** the **Cancellation rate** tile turns amber once it climbs above 10%, a nudge to look at your deposit or reminder settings. At or below that it stays green.\n\n## Step 3: Download a report as a spreadsheet\n\nEvery report card has its own download button, so you can open the numbers in Excel, Google Sheets, or Numbers.\n\n1. Find the report card you want.\n2. Click **Export CSV** in the top right of that card.\n3. A short message confirms the download started, and the file lands in your downloads folder.\n\n> **Warning:** if a card has no data for the chosen dates, you will see a notice instead of a download. Widen your date range and try again.\n\n## Step 4: Export everything\n\nAt the bottom of the **Overview** tab, the **Export your data** card downloads your complete records, not just the dates you picked.\n\n1. Click **Export all bookings** (named after your bookings, for example **Export all appointments**) for every booking, or **Export guest list** (named after your guests, for example **Export client list**) for your contacts.\n2. The file downloads straight away as a spreadsheet.\n\n> **Good to know:** these two exports always cover your whole business. Use them for backups or when you need every record, and use the per-card **Export CSV** buttons when you only want one report for a set period.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I cannot find Reports | You are signed in as staff | Reports is admin only, under **Settings**, then **Reports** |\n| The numbers look wrong or empty | The date range is too narrow, or before you had activity | Widen **From** and **To**, then click **Apply** |\n| I changed the dates but nothing updated | You did not apply the new range | Click **Apply** after editing **From** or **To** |\n| Export CSV did nothing | That report has no data for the chosen dates | Read the notice shown, widen the date range, then export again |\n| My full export ignores the dates I picked | This is intentional | **Export all bookings** and **Export guest list** always cover your whole business |\n| A report I expected is missing | That booking type is not in use, or has no activity in range | Some cards only show when there is something to report |\n\n## Next steps\n\n- [Your bookings list](/help/getting-started/bookings-list)\n- [Connecting Stripe to take payments](/help/getting-started/stripe-payments)\n- [Your contacts](/help/getting-started/contacts)",
+    },
+    {
+      slug: "importing-data",
+      helpSection: "gs-grow",
+      title: "Importing your data",
+      description: "Bring your clients and bookings over from a spreadsheet in a few guided steps, with a 24-hour undo if anything looks off.",
+      tags: ["import","data","csv","excel","migration","clients","bookings","undo"],
+      content: "# Importing your data\n\nSwitching from another booking system? You can bring your existing clients and bookings into ResNeo from a spreadsheet. ResNeo matches them to your services and staff, and if anything looks wrong, you can undo the whole thing for 24 hours. So it is safe to try.\n\nThis is an admin-only tool. To open it, go to Settings, then Data Import.\n\n## Before you start: prepare your file\n\nGood news: you do not need a perfect spreadsheet. ResNeo reads your file just as it came out of your old system and tidies it up for you. A few small things make the result cleaner:\n\n- Export a client list, a booking history, or both. If one file has bookings and client details together (most do), that single file is enough.\n- Add a header row at the top so each column has a name, for example First name, Email, Date, Service.\n- Keep one booking per row where you can.\n\nExcel and CSV files both work, so drop them straight in. There is no need to convert anything first.\n\n> **Tip:** Not sure what a tidy file looks like? On the Upload step, open What can I import? and download a sample file to use as a guide. Your own file does not need to match it exactly.\n\n## How the wizard works\n\nThe importer walks you through six steps. You can leave at any point and pick up where you left off, because your progress is saved.\n\n:::help-figure import-flow\n\n## Step 1: Upload your files\n\n1. Click Start new import.\n2. Drop your files onto the box, or click to browse. You can add more than one.\n3. ResNeo guesses whether each file is a Client list, Booking history, or Staff list. Check the label next to each file and change it if needed.\n4. Click Continue.\n\n> **Good to know:** If a file has both bookings and client details, label it Booking history. The client details come in too. Continue stays locked until every file has a label.\n\n## Step 2: Map columns\n\nThis is where your spreadsheet columns are matched to ResNeo's fields. ResNeo fills this in for you, so your job is just to check it.\n\n1. Pick a file using the tabs at the top. A green tick means it is ready. An amber warning means it still needs something.\n2. To change a match, drag a column onto the right field, or use the dropdowns.\n3. To split a combined column, like a full name or a single date-and-time cell, use the split option and choose the parts.\n4. Click Continue.\n\n:::help-figure import-mapping\n\n> **Tip:** If a file is missing something it needs, ResNeo lists exactly what under Before you can continue, this file needs. Fix those and the Continue button unlocks.\n\n## Step 3: Review\n\nHere you confirm how every column will be used before any rows are scanned.\n\n1. For each file, check how its columns will be handled: Imported, Not imported, set as a Custom field, or Split into fields.\n2. For some columns, like booking status, you can fine-tune how your values match ResNeo's.\n3. Click Continue.\n\n## Step 4: Set up services & staff\n\nThe services and staff named in your files are matched to what you already have in ResNeo. Anything that cannot be matched can be added right here.\n\n1. Work through the Services, Staff, and any other tabs.\n2. For each item: Match it to something you already have, add it as new (services ask for a length and price), or Skip to leave those bookings out.\n3. If lots of items came from your bookings, use the one-click create option to set them all up at once, with a suggested length and price filled in for you.\n4. When you see Everything's matched up, click Continue to validation.\n\n> **Tip:** If items have AI suggestions, use Accept all suggestions to apply them in one go. You can still change any of them afterwards.\n\n## Step 5: Validate\n\nResNeo checks every row for missing fields, duplicates, and dates that could be read two ways. Large files are checked in the background, so you can leave and come back.\n\n1. Wait for Validation complete. You will see how many rows are ready to import, plus any warnings and errors.\n2. If you see Ambiguous dates detected, choose DD/MM/YYYY (UK) or MM/DD/YYYY (US), then Apply and re-validate.\n3. For clients who already exist, choose Update all existing or Skip all duplicates (or decide row by row). The import cannot start while any are unresolved.\n4. Click Review & approve, check the summary, then Approve & start import.\n\n> **Warning:** Approving creates real clients and bookings in your venue. Remember you can undo the whole import for 24 hours afterwards.\n\n## Step 6: Importing\n\n1. Watch the progress bar. Large imports run in batches, and progress is saved if you step away.\n2. When you see Import complete, you get counts of the clients and bookings processed.\n3. From here you can Download import report (CSV), View clients, or go Back to import history.\n\n## The 24-hour undo\n\nAfter an import finishes, your import list shows Undo available until a date and time, 24 hours after it completed.\n\n- To reverse everything that import created, click Undo on that row and confirm.\n- After 24 hours the undo expires and the imported records stay for good.\n\n> **Note:** Delete only removes a session from the list and tidies the uploaded files. It does not remove clients or bookings already added to your venue. To reverse data, use Undo on a completed import.\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| Continue is greyed out on Upload | A file still has no label | Label each file as Client list, Booking history, or Staff list |\n| Continue is locked on Map columns | A file is missing a field it needs | Open the amber file and complete the items under Before you can continue, this file needs |\n| Dates look wrong after validating | A date like 03/04/2025 could be read two ways | Pick DD/MM/YYYY (UK) or MM/DD/YYYY (US) under Ambiguous dates detected, then Apply and re-validate |\n| You cannot approve at Validate | Some existing-client matches are still undecided | Choose Update all existing or Skip all duplicates, or decide each row, then try Review & approve again |\n| Bookings will not import | A service or staff member was skipped | Go back to Set up services & staff and Match or add the item, then re-validate |\n| You imported the wrong file | An import was approved by mistake | Click Undo on that row within 24 hours of it completing |\n\n## Next steps\n\n- [Your clients and contacts](/help/getting-started/contacts)\n- [Your bookings list](/help/getting-started/bookings-list)\n- [Your services](/help/getting-started/services)",
+    },
+    {
+      slug: "refer-and-earn",
+      helpSection: "gs-grow",
+      title: "Refer and earn",
+      description: "Share ResNeo with other business owners and earn credit toward your own bill when they join.",
+      tags: ["refer","referral","refer and earn","credit","rewards","share","invite"],
+      content: "# Refer and earn\n\nLove using ResNeo? You can turn that into real savings. Share ResNeo with another business owner, and when they join and start paying, you earn credit toward your own bill. It is a friendly way to help a fellow business and lower your costs at the same time.\n\nRefer and earn is for admins. To find it, open Settings and choose the Refer & Earn tab.\n\n## How it works\n\n:::help-figure refer-flow\n\n1. Open Settings and choose the Refer & Earn tab, then copy your referral code or shareable link.\n2. Send it to another business owner by email, message, or social media.\n3. When they sign up using your link, they get their free trial plus an extra free month on top.\n4. Once they pay their first invoice, you get a credit toward your next ResNeo invoice (worth about a month of your plan).\n\n> The exact credit amount is shown on the page, so check there for the latest figure.\n\n## Tracking your referrals\n\nThe Refer & Earn tab shows three quick cards at the top:\n\n- Credits earned: the total credit you have received so far.\n- Credit on next invoice: how much will come off your next bill.\n- In progress: people you have invited who have not paid yet.\n\nUnderneath, Your referrals lists each business you invited and where they are in the process. You will see statuses like Pending (shared, not signed up yet), Signed up, trialling (signed up but not yet paid), and Credited (paid, and your credit is earned).\n\n:::help-figure refer-tracking\n\n## Common problems & fixes\n\n| Problem | Likely cause | Fix |\n| --- | --- | --- |\n| I cannot see the Refer & Earn tab | It is only for admins | Sign in as an admin, then open Settings and choose the Refer & Earn tab |\n| A referral is stuck on \"Signed up, trialling\" | They have not paid their first invoice yet | You earn the credit only after their first payment goes through. The status updates on its own |\n| A referral did not credit | A safety check, such as the same card or email as your own business | Invite genuinely separate businesses, and contact support if you think it is a mistake |\n| My credit has not reached my bill | Credit applies to your next invoice, not right away | Check the Credit on next invoice card. It is added automatically at your next bill |\n| My link did not work for someone | They may already have a ResNeo account | Referrals work only for brand-new sign-ups using your link |\n\n## Next steps\n\n- [Welcome to ResNeo](/help/getting-started/welcome)\n- [A tour of your dashboard](/help/getting-started/dashboard-overview)",
     },
   ],
 };

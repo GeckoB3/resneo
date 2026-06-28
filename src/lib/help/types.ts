@@ -11,9 +11,10 @@ export type HelpArticleSectionKey =
   | 'operations'
   | 'growth'
   | 'gs-start-here'
-  | 'gs-know-the-app'
-  | 'gs-configure-venue'
-  | 'gs-open-the-doors';
+  | 'gs-set-up'
+  | 'gs-catalogue'
+  | 'gs-run'
+  | 'gs-grow';
 
 export interface HelpArticle {
   slug: string;

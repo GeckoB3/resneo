@@ -34,7 +34,7 @@ import {
   isTransientSalesValidationFailure,
   type SalesValidationOk,
 } from '@/lib/sales/client';
-import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
+import { salesTrialRewardLabel } from '@/lib/sales/constants';
 
 type Segment = 'appointments' | 'restaurant';
 
@@ -62,7 +62,7 @@ export default function ChoosePlanPage() {
         if (cancelled) return;
         if (salesResult.ok) {
           setSalesValid(salesResult);
-          persistSalesCodeCookie(salesResult.code);
+          persistSalesCodeCookie(salesResult.code, salesResult.trial_days);
           clearReferralCodeCookieForSalesPrecedence();
           setReferralValid(null);
           setReferralLoading(false);
@@ -137,7 +137,8 @@ export default function ChoosePlanPage() {
         <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
           <p className="font-medium">Sales offer applied ({salesValid.code})</p>
           <p className="mt-1 text-blue-800">
-            You get 1 month free — a {SALES_SIGNUP_TRIAL_DAYS}-day free trial on any plan you choose below.
+            You get {salesTrialRewardLabel(salesValid.trial_days)} — a {salesValid.trial_days}-day free trial on any
+            plan you choose below.
           </p>
         </div>
       )}

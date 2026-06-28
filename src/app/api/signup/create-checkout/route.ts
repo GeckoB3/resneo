@@ -254,13 +254,14 @@ export async function POST(request: Request) {
       'http://localhost:3000';
 
     // Sales programme takes precedence over venue referral programme.
-    let salesForSession: { code: string; salesperson_id: string } | null = null;
+    let salesForSession: { code: string; salesperson_id: string; trial_days: number } | null = null;
     if (salesProgrammeEnabled() && rawSalesCode) {
       const salesValidation = await validateSalesCode(admin, rawSalesCode);
       if (salesValidation.ok) {
         salesForSession = {
           code: salesValidation.value.code,
           salesperson_id: salesValidation.value.salesperson_id,
+          trial_days: salesValidation.value.trial_days,
         };
       } else {
         console.log('[create-checkout] sales code dropped:', salesValidation.reason);
@@ -299,7 +300,7 @@ export async function POST(request: Request) {
     }
 
     const subscriptionData = salesForSession
-      ? buildSignupCheckoutSubscriptionDataWithSales()
+      ? buildSignupCheckoutSubscriptionDataWithSales(salesForSession.trial_days)
       : referralForSession
         ? buildSignupCheckoutSubscriptionDataWithReferral()
         : buildSignupCheckoutSubscriptionData();

@@ -2,7 +2,11 @@
  * Client-side sales code helpers for signup. No server-only imports.
  */
 
-import { SALES_CODE_COOKIE_NAME } from '@/lib/sales/constants';
+import {
+  SALES_CODE_COOKIE_NAME,
+  SALES_TRIAL_COOKIE_NAME,
+  clampSalesTrialDays,
+} from '@/lib/sales/constants';
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
@@ -10,6 +14,8 @@ export interface SalesValidationOk {
   ok: true;
   code: string;
   salesperson_name: string;
+  /** Free-trial days this code grants — drives the signup trial copy. */
+  trial_days: number;
 }
 
 export interface SalesValidationFail {
@@ -36,17 +42,32 @@ function readCookie(name: string): string | null {
   return null;
 }
 
-export function persistSalesCodeCookie(code: string): void {
+export function persistSalesCodeCookie(code: string, trialDays?: number): void {
   if (typeof document === 'undefined') return;
   const value = encodeURIComponent(code);
   const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const secureAttr = isSecure ? '; Secure' : '';
   document.cookie = `${SALES_CODE_COOKIE_NAME}=${value}; Max-Age=${COOKIE_MAX_AGE_SECONDS}; Path=/; SameSite=Lax${secureAttr}`;
+  // Persist the validated trial length alongside the code so the cookie-only signup interstitials
+  // (/signup/plan, /signup/appointments-light) can show the right "N-day free trial" copy without
+  // re-validating. Display-only — checkout re-reads the authoritative value from the code.
+  if (typeof trialDays === 'number' && Number.isFinite(trialDays)) {
+    document.cookie = `${SALES_TRIAL_COOKIE_NAME}=${clampSalesTrialDays(trialDays)}; Max-Age=${COOKIE_MAX_AGE_SECONDS}; Path=/; SameSite=Lax${secureAttr}`;
+  }
 }
 
 export function clearSalesCodeCookie(): void {
   if (typeof document === 'undefined') return;
   document.cookie = `${SALES_CODE_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
+  document.cookie = `${SALES_TRIAL_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
+}
+
+/** Reads the display-only sales-trial cookie set by {@link persistSalesCodeCookie}. */
+export function readSalesTrialDaysFromCookie(): number | null {
+  const raw = readCookie(SALES_TRIAL_COOKIE_NAME);
+  if (!raw) return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? clampSalesTrialDays(n) : null;
 }
 
 /** Sales codes take precedence over the venue referral programme; drop the referral cookie. */

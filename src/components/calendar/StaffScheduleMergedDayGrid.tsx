@@ -204,6 +204,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
                     blocks={blocks.filter((b) => b.kind === 'event_ticket')}
                     startHour={startHour}
                     endHour={endHour}
+                    slotHeightPx={SLOT_HEIGHT}
                     onBookingClick={onBookingClick}
                     hideHeader
                   />
@@ -215,6 +216,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
                     blocks={blocks.filter((b) => b.kind === 'resource_booking')}
                     startHour={startHour}
                     endHour={endHour}
+                    slotHeightPx={SLOT_HEIGHT}
                     onBookingClick={onBookingClick}
                     hideHeader
                   />

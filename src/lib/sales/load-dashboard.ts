@@ -8,6 +8,7 @@ import {
   type SalespersonRow,
 } from '@/lib/sales/earnings';
 import { planDisplayName } from '@/lib/pricing-constants';
+import { clampSalesTrialDays } from '@/lib/sales/constants';
 
 export interface SalesDashboardData {
   salesperson: {
@@ -18,7 +19,7 @@ export interface SalesDashboardData {
     revenue_share_percent: number;
     revenue_share_months: number;
   };
-  codes: Array<{ code: string; active: boolean }>;
+  codes: Array<{ code: string; active: boolean; trial_days: number; label: string | null }>;
   summary: {
     total_signups: number;
     validated_signups: number;
@@ -77,7 +78,11 @@ export async function loadSalesDashboardForUser(
     { data: awards },
     { data: allStatementTotals },
   ] = await Promise.all([
-    db.from('sales_codes').select('code, active').eq('salesperson_id', spId).order('created_at'),
+    db
+      .from('sales_codes')
+      .select('code, active, trial_days, label')
+      .eq('salesperson_id', spId)
+      .order('created_at'),
     db
       .from('sales_monthly_statements')
       .select(
@@ -200,10 +205,15 @@ export async function loadSalesDashboardForUser(
       revenue_share_percent: Number(salesperson.revenue_share_percent),
       revenue_share_months: salesperson.revenue_share_months,
     },
-    codes: (codes ?? []).map((c) => ({
-      code: (c as { code: string }).code,
-      active: (c as { active: boolean }).active,
-    })),
+    codes: (codes ?? []).map((c) => {
+      const row = c as { code: string; active: boolean; trial_days: number | null; label: string | null };
+      return {
+        code: row.code,
+        active: row.active,
+        trial_days: clampSalesTrialDays(row.trial_days),
+        label: row.label ?? null,
+      };
+    }),
     summary: {
       total_signups: totalSignups,
       validated_signups: validatedSignups,

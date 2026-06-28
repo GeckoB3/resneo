@@ -18,7 +18,6 @@ import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT }
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import { SIGNUP_TRIAL_DAYS, signupTrialShortLabel } from '@/lib/signup-trial-copy';
-import { SALES_SIGNUP_TRIAL_DAYS } from '@/lib/sales/constants';
 import { useSalesTrial } from '@/lib/sales/use-sales-trial';
 import { LegalAcceptanceCheckbox } from '@/components/signup/LegalAcceptanceCheckbox';
 
@@ -31,9 +30,9 @@ export default function PlanPage() {
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [foundingRemaining, setFoundingRemaining] = useState<number | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  // A validated commissioned-sales code (persisted as a cookie upstream) earns 1 month free, so
-  // the trial copy on this interstitial matches the offer payment validates and Stripe charges.
-  const salesTrial = useSalesTrial();
+  // A validated commissioned-sales code (persisted as a cookie upstream) earns the code's free
+  // trial, so the copy on this interstitial matches the offer payment validates and Stripe charges.
+  const salesTrialDays = useSalesTrial();
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +142,7 @@ export default function PlanPage() {
   }
 
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
-  const trialLabel = signupTrialShortLabel(salesTrial ? SALES_SIGNUP_TRIAL_DAYS : SIGNUP_TRIAL_DAYS);
+  const trialLabel = signupTrialShortLabel(salesTrialDays ?? SIGNUP_TRIAL_DAYS);
 
   if (plan === 'founding') {
     if (foundingRemaining === null) {

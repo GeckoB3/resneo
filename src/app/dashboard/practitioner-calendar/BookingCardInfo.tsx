@@ -191,6 +191,15 @@ export function BookingCardInfo({
   const groupedRows = groupInfoRows(rows, hideName, layout, density);
   const micro = contentHeightPx < 28;
   const mt = metaTextClass(micro);
+  // Shrink the contact name only on the very short compact bars so it stays legible without
+  // clipping. The thresholds sit below the comfortable view's minimum content height (~29px),
+  // so comfortable bars always keep the full 13px name.
+  const nameSizeClass =
+    contentHeightPx < 20
+      ? 'text-[10px] leading-none'
+      : contentHeightPx < 28
+        ? 'text-[12px] leading-tight'
+        : 'text-[13px]';
   const timeRange = `${start}–${end}`;
   const [containerRef, containerWidth] = useMeasuredWidth<HTMLDivElement>();
   const [nameRef, nameWidth] = useMeasuredWidth<HTMLDivElement>();
@@ -248,7 +257,7 @@ export function BookingCardInfo({
           }`}
         >
           <span
-            className={`min-w-0 truncate text-[13px] font-extrabold tracking-tight ${
+            className={`min-w-0 truncate font-extrabold tracking-tight ${nameSizeClass} ${
               nameAccessory ? '' : 'flex-1'
             }`}
           >
@@ -307,7 +316,7 @@ export function BookingCardInfo({
   return (
     <div ref={containerRef} className="@container relative min-w-0 w-full max-w-full">
       <div className="pointer-events-none invisible absolute left-0 top-0 flex h-0 max-w-none gap-x-2 overflow-hidden whitespace-nowrap">
-        <div ref={nameRef} className="flex items-center gap-1.5 text-[13px] font-extrabold tracking-tight">
+        <div ref={nameRef} className={`flex items-center gap-1.5 font-extrabold tracking-tight ${nameSizeClass}`}>
           <span>{name}</span>
           {nameAccessory ? <span>{nameAccessory}</span> : null}
         </div>

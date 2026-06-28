@@ -11,6 +11,9 @@ export type CalendarToolbarViewMode = 'day' | 'week' | 'month';
 export interface PractitionerCalendarToolbarProps {
   viewMode: CalendarToolbarViewMode;
   onViewModeChange: (m: CalendarToolbarViewMode) => void;
+  /** Day-view "Compact" density toggle — shrink rows so the whole day fits one screen. */
+  compactDay: boolean;
+  onToggleCompactDay: () => void;
   onNavigateDay: (delta: 1 | -1) => void;
   onDateChange: (date: string) => void;
   date: string;
@@ -86,6 +89,8 @@ function formatCalendarPeriodLabel(
 export function PractitionerCalendarToolbar({
   viewMode,
   onViewModeChange,
+  compactDay,
+  onToggleCompactDay,
   onNavigateDay,
   onDateChange,
   date,
@@ -141,6 +146,7 @@ export function PractitionerCalendarToolbar({
 
   const viewModeSwitcher = useCallback(
     (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
+      <>
       <div ref={viewModeWrapRef} className="relative shrink-0">
         <button
           ref={viewModeTriggerRef}
@@ -200,8 +206,32 @@ export function PractitionerCalendarToolbar({
           </div>
         </ClampedFixedDropdown>
       </div>
+      {viewMode === 'day' ? (
+        <button
+          type="button"
+          onClick={onToggleCompactDay}
+          aria-pressed={compactDay}
+          aria-label="Compact day rows — fit the whole day on one screen"
+          title={
+            compactDay
+              ? 'Compact view on — switch back to full-size rows'
+              : 'Compact view — fit the whole day on one screen'
+          }
+          className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm sm:text-xs ${
+            compactDay
+              ? 'border-brand-300 bg-brand-50 text-brand-800 ring-1 ring-brand-200'
+              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6h16.5M3.75 10.5h16.5M3.75 15h16.5M3.75 19.5h16.5" />
+          </svg>
+          <span className="hidden sm:inline">Compact</span>
+        </button>
+      ) : null}
+      </>
     ),
-    [onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
+    [compactDay, onToggleCompactDay, onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
   );
 
   const datePickerPanel = (

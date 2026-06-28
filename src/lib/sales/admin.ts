@@ -10,9 +10,28 @@ import {
   SALES_AGENT_VALUE,
   DEFAULT_SALES_BONUS_TIERS,
   DEFAULT_REVENUE_SHARE_MONTHS,
+  SALES_SIGNUP_TRIAL_DAYS,
+  clampSalesTrialDays,
 } from '@/lib/sales/constants';
 import { buildCandidateSalesCode } from '@/lib/sales/code';
+import { normaliseSalesCodeInput } from '@/lib/sales/lookup';
 import { countActivePayingSubscribers } from '@/lib/sales/earnings';
+
+export interface SalesCodeRow {
+  id: string;
+  code: string;
+  active: boolean;
+  trial_days: number;
+  label: string | null;
+}
+
+/** Options for minting a new sales code: a custom free-trial length, an internal note, and/or a vanity code. */
+export interface NewSalesCodeOptions {
+  trialDays?: number;
+  label?: string | null;
+  /** When provided, use this exact (case-insensitive) code instead of auto-generating one. */
+  customCode?: string | null;
+}
 
 export interface SalespersonListRow {
   id: string;
@@ -27,7 +46,7 @@ export interface SalespersonListRow {
   created_by: string | null;
   last_sign_in_at: string | null;
   email_confirmed_at: string | null;
-  codes: string[];
+  codes: SalesCodeRow[];
   total_signups: number;
   active_paying_subscribers: number;
   lifetime_earnings_pence: number;
@@ -57,24 +76,26 @@ function stripSalesAgentAppMetadata(prev: Record<string, unknown> | undefined): 
   return next;
 }
 
-async function insertSalesCodeWithRetry(
+async function referralCodeExists(admin: SupabaseClient, code: string): Promise<boolean> {
+  // Sales and referral codes share one namespace on the signup page, so a sales code must not
+  // collide (case-insensitively) with an existing referral code.
+  const { data } = await admin.from('referral_codes').select('id').ilike('code', code).limit(1);
+  return Boolean(data && data.length > 0);
+}
+
+async function insertGeneratedSalesCode(
   admin: SupabaseClient,
   salespersonId: string,
   displayName: string,
+  trialDays: number,
+  label: string | null,
 ): Promise<string> {
   for (let attempt = 0; attempt < 10; attempt++) {
     const candidate = buildCandidateSalesCode(displayName);
-    // Sales and referral codes share one namespace on the signup page, so a new sales code must
-    // not collide (case-insensitively) with an existing referral code — regenerate if it does.
-    const { data: refClash } = await admin
-      .from('referral_codes')
-      .select('id')
-      .ilike('code', candidate)
-      .limit(1);
-    if (refClash && refClash.length > 0) continue;
+    if (await referralCodeExists(admin, candidate)) continue;
     const { data, error } = await admin
       .from('sales_codes')
-      .insert({ salesperson_id: salespersonId, code: candidate })
+      .insert({ salesperson_id: salespersonId, code: candidate, trial_days: trialDays, label })
       .select('code')
       .maybeSingle();
     if (!error && data?.code) return data.code as string;
@@ -86,6 +107,49 @@ async function insertSalesCodeWithRetry(
     }
   }
   throw new Error('Could not generate unique sales code');
+}
+
+async function insertCustomSalesCode(
+  admin: SupabaseClient,
+  salespersonId: string,
+  rawCode: string,
+  trialDays: number,
+  label: string | null,
+): Promise<string> {
+  const code = normaliseSalesCodeInput(rawCode);
+  if (!code) {
+    throw Object.assign(
+      new Error('Custom code must be 3–40 characters using letters, numbers, or hyphens.'),
+      { status: 400 },
+    );
+  }
+  if (await referralCodeExists(admin, code)) {
+    throw Object.assign(new Error('That code is already in use by the referral programme.'), { status: 409 });
+  }
+  const { data: salesClash } = await admin.from('sales_codes').select('id').ilike('code', code).limit(1);
+  if (salesClash && salesClash.length > 0) {
+    throw Object.assign(new Error('That code is already taken.'), { status: 409 });
+  }
+  const { data, error } = await admin
+    .from('sales_codes')
+    .insert({ salesperson_id: salespersonId, code, trial_days: trialDays, label })
+    .select('code')
+    .maybeSingle();
+  if (error || !data?.code) {
+    const isUnique =
+      (error as { code?: string } | null)?.code === '23505' ||
+      /duplicate key/i.test(error?.message ?? '');
+    if (isUnique) {
+      throw Object.assign(new Error('That code is already taken.'), { status: 409 });
+    }
+    throw new Error(error?.message ?? 'Could not create sales code');
+  }
+  return data.code as string;
+}
+
+function normaliseCodeLabel(label: string | null | undefined): string | null {
+  const trimmed = (label ?? '').trim();
+  return trimmed ? trimmed.slice(0, 120) : null;
 }
 
 async function seedDefaultBonusTiers(admin: SupabaseClient, salespersonId: string): Promise<void> {
@@ -123,7 +187,11 @@ export async function listActiveSalespeople(admin: SupabaseClient): Promise<Sale
 
     const [{ data: codeRows }, { count: signupCount }, { data: stmtRows }, { data: tierRows }] =
       await Promise.all([
-        admin.from('sales_codes').select('code').eq('salesperson_id', spId),
+        admin
+          .from('sales_codes')
+          .select('id, code, active, trial_days, label')
+          .eq('salesperson_id', spId)
+          .order('created_at', { ascending: true }),
         admin
           .from('sales_attributions')
           .select('id', { count: 'exact', head: true })
@@ -158,7 +226,16 @@ export async function listActiveSalespeople(admin: SupabaseClient): Promise<Sale
       created_by: (r.created_by as string | null) ?? null,
       last_sign_in_at: uwrap.user.last_sign_in_at ?? null,
       email_confirmed_at: uwrap.user.email_confirmed_at ?? null,
-      codes: (codeRows ?? []).map((c) => (c as { code: string }).code),
+      codes: (codeRows ?? []).map((c) => {
+        const row = c as { id: string; code: string; active: boolean; trial_days: number | null; label: string | null };
+        return {
+          id: row.id,
+          code: row.code,
+          active: row.active,
+          trial_days: clampSalesTrialDays(row.trial_days),
+          label: row.label ?? null,
+        };
+      }),
       total_signups: signupCount ?? 0,
       active_paying_subscribers: activePaying,
       lifetime_earnings_pence: lifetime,
@@ -190,6 +267,8 @@ export async function createSalespersonWithPassword(params: {
   lump_sum_per_signup_pence?: number;
   revenue_share_percent?: number;
   revenue_share_months?: number;
+  /** Free-trial length for the salesperson's first auto-generated code (defaults to one month). */
+  trial_days?: number;
 }): Promise<{ user_id: string; salesperson_id: string; code: string }> {
   const email = params.email.trim().toLowerCase();
   await assertNoActiveSalespersonForEmail(params.admin, email);
@@ -244,7 +323,13 @@ export async function createSalespersonWithPassword(params: {
 
   const salespersonId = spRow.id as string;
   await seedDefaultBonusTiers(params.admin, salespersonId);
-  const code = await insertSalesCodeWithRetry(params.admin, salespersonId, params.name || email);
+  const code = await insertGeneratedSalesCode(
+    params.admin,
+    salespersonId,
+    params.name || email,
+    clampSalesTrialDays(params.trial_days ?? SALES_SIGNUP_TRIAL_DAYS),
+    null,
+  );
 
   return { user_id: userId!, salesperson_id: salespersonId, code };
 }
@@ -258,6 +343,8 @@ export async function createSalespersonWithMagicLink(params: {
   lump_sum_per_signup_pence?: number;
   revenue_share_percent?: number;
   revenue_share_months?: number;
+  /** Free-trial length for the salesperson's first auto-generated code (defaults to one month). */
+  trial_days?: number;
 }): Promise<{ user_id: string; salesperson_id: string; code: string; channel: 'sendgrid' | 'supabase_invite' }> {
   const email = params.email.trim().toLowerCase();
   await assertNoActiveSalespersonForEmail(params.admin, email);
@@ -382,7 +469,13 @@ export async function createSalespersonWithMagicLink(params: {
 
   const salespersonId = spRow.id as string;
   await seedDefaultBonusTiers(params.admin, salespersonId);
-  const code = await insertSalesCodeWithRetry(params.admin, salespersonId, params.name || email);
+  const code = await insertGeneratedSalesCode(
+    params.admin,
+    salespersonId,
+    params.name || email,
+    clampSalesTrialDays(params.trial_days ?? SALES_SIGNUP_TRIAL_DAYS),
+    null,
+  );
 
   return {
     user_id: userId!,
@@ -430,8 +523,29 @@ export async function addSalesCode(
   admin: SupabaseClient,
   salespersonId: string,
   displayName: string,
+  opts: NewSalesCodeOptions = {},
 ): Promise<string> {
-  return insertSalesCodeWithRetry(admin, salespersonId, displayName);
+  const trialDays = clampSalesTrialDays(opts.trialDays ?? SALES_SIGNUP_TRIAL_DAYS);
+  const label = normaliseCodeLabel(opts.label);
+  if (opts.customCode && opts.customCode.trim()) {
+    return insertCustomSalesCode(admin, salespersonId, opts.customCode, trialDays, label);
+  }
+  return insertGeneratedSalesCode(admin, salespersonId, displayName, trialDays, label);
+}
+
+/** Update a single code's reward/label/active flag. Only the provided fields change. */
+export async function updateSalesCode(
+  admin: SupabaseClient,
+  codeId: string,
+  updates: { trial_days?: number; label?: string | null; active?: boolean },
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (updates.trial_days !== undefined) patch.trial_days = clampSalesTrialDays(updates.trial_days);
+  if (updates.label !== undefined) patch.label = normaliseCodeLabel(updates.label);
+  if (updates.active !== undefined) patch.active = updates.active;
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await admin.from('sales_codes').update(patch).eq('id', codeId);
+  if (error) throw new Error(error.message);
 }
 
 export async function setSalesCodeActive(
@@ -440,6 +554,11 @@ export async function setSalesCodeActive(
   active: boolean,
 ): Promise<void> {
   const { error } = await admin.from('sales_codes').update({ active }).eq('id', codeId);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteSalesCode(admin: SupabaseClient, codeId: string): Promise<void> {
+  const { error } = await admin.from('sales_codes').delete().eq('id', codeId);
   if (error) throw new Error(error.message);
 }
 

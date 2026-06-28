@@ -9,6 +9,7 @@ import {
   listActiveSalespeople,
   resolveSalesInviteBaseUrl,
 } from '@/lib/sales/admin';
+import { MIN_SALES_TRIAL_DAYS, MAX_SALES_TRIAL_DAYS } from '@/lib/sales/constants';
 import { recordPlatformAuditEvent } from '@/lib/platform/audit';
 
 const createBodySchema = z
@@ -20,6 +21,7 @@ const createBodySchema = z
     lump_sum_per_signup_pence: z.number().int().min(0).optional(),
     revenue_share_percent: z.number().min(0).max(100).optional(),
     revenue_share_months: z.number().int().min(1).max(120).optional(),
+    trial_days: z.number().int().min(MIN_SALES_TRIAL_DAYS).max(MAX_SALES_TRIAL_DAYS).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.method === 'password' && (!data.password || data.password.length < 8)) {
@@ -84,6 +86,7 @@ export async function POST(request: Request) {
       lump_sum_per_signup_pence: body.lump_sum_per_signup_pence,
       revenue_share_percent: body.revenue_share_percent,
       revenue_share_months: body.revenue_share_months,
+      trial_days: body.trial_days,
     };
 
     if (body.method === 'password') {

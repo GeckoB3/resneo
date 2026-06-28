@@ -1,12 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
-  computeMonthlyStatement,
   countActivePayingSubscribers,
   monthStartUtc,
   type BonusTierRow,
   type SalespersonRow,
 } from '@/lib/sales/earnings';
+import {
+  loadMonthlyEarnings,
+  type CurrentMonthBreakdown,
+  type PersistedStatement,
+} from '@/lib/sales/monthly-earnings';
 import { planDisplayName } from '@/lib/pricing-constants';
 import { clampSalesTrialDays } from '@/lib/sales/constants';
 
@@ -27,20 +31,13 @@ export interface SalesDashboardData {
     lifetime_earnings_pence: number;
     current_month_estimated_pence: number;
   };
+  /** Live running total for the in-progress calendar month (not yet finalised). */
+  current_month: CurrentMonthBreakdown;
   bonus_ladder: {
     tiers: Array<{ threshold: number; amount_pence: number; awarded: boolean }>;
     next_tier: { threshold: number; amount_pence: number } | null;
   };
-  statements: Array<{
-    period_month: string;
-    signups_count: number;
-    validated_count: number;
-    lump_sum_pence: number;
-    revenue_share_pence: number;
-    bonus_pence: number;
-    active_subscribers_end: number;
-    total_pence: number;
-  }>;
+  statements: PersistedStatement[];
   attributions: Array<{
     venue_id: string | null;
     venue_name: string;
@@ -72,7 +69,6 @@ export async function loadSalesDashboardForUser(
 
   const [
     { data: codes },
-    { data: statements },
     { data: attrs },
     { data: tiers },
     { data: awards },
@@ -83,14 +79,6 @@ export async function loadSalesDashboardForUser(
       .select('code, active, trial_days, label')
       .eq('salesperson_id', spId)
       .order('created_at'),
-    db
-      .from('sales_monthly_statements')
-      .select(
-        'period_month, signups_count, validated_count, lump_sum_pence, revenue_share_pence, bonus_pence, active_subscribers_end, total_pence',
-      )
-      .eq('salesperson_id', spId)
-      .order('period_month', { ascending: false })
-      .limit(24),
     db
       .from('sales_attributions')
       .select('venue_id, signed_up_at, first_paid_at, status')
@@ -110,20 +98,14 @@ export async function loadSalesDashboardForUser(
   const tierRows = (tiers ?? []) as BonusTierRow[];
   const activePaying = await countActivePayingSubscribers(db, spId);
 
-  // Live "this month so far" estimate (not persisted; the cron writes the official statement).
-  const currentMonth = monthStartUtc(new Date());
-  let currentMonthEstimate = 0;
-  try {
-    const liveBreakdown = await computeMonthlyStatement({
-      admin: db,
-      salesperson,
-      periodMonth: currentMonth,
-      bonusTiers: tierRows,
-    });
-    currentMonthEstimate = liveBreakdown.total_pence;
-  } catch (e) {
-    console.error('[sales/load-dashboard] current month estimate failed', e);
-  }
+  // Shared loader: live "this month so far" running total + finalised monthly statements. The
+  // superuser view uses the same helper, so both dashboards always show identical figures.
+  const { current_month, statements } = await loadMonthlyEarnings({
+    admin: db,
+    salesperson,
+    bonusTiers: tierRows,
+  });
+  const currentMonthEstimate = current_month.total_pence;
 
   const nextTier =
     tierRows.find((t) => !awardedSet.has(t.threshold) && activePaying < t.threshold) ?? null;
@@ -221,6 +203,7 @@ export async function loadSalesDashboardForUser(
       lifetime_earnings_pence: lifetimeEarnings,
       current_month_estimated_pence: currentMonthEstimate,
     },
+    current_month,
     bonus_ladder: {
       tiers: tierRows.map((t) => ({
         threshold: t.threshold,
@@ -229,16 +212,7 @@ export async function loadSalesDashboardForUser(
       })),
       next_tier: nextTier ? { threshold: nextTier.threshold, amount_pence: nextTier.amount_pence } : null,
     },
-    statements: (statements ?? []).map((s) => ({
-      period_month: (s as { period_month: string }).period_month,
-      signups_count: (s as { signups_count: number }).signups_count,
-      validated_count: (s as { validated_count: number }).validated_count,
-      lump_sum_pence: (s as { lump_sum_pence: number }).lump_sum_pence,
-      revenue_share_pence: (s as { revenue_share_pence: number }).revenue_share_pence,
-      bonus_pence: (s as { bonus_pence: number }).bonus_pence,
-      active_subscribers_end: (s as { active_subscribers_end: number }).active_subscribers_end,
-      total_pence: (s as { total_pence: number }).total_pence,
-    })),
+    statements,
     attributions,
   };
 }

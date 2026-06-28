@@ -10,11 +10,20 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const patchSchema = z
   .object({
+    code: z.string().max(40).optional(),
     trial_days: z.number().int().min(MIN_SALES_TRIAL_DAYS).max(MAX_SALES_TRIAL_DAYS).optional(),
     label: z.string().max(120).nullable().optional(),
     active: z.boolean().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
+
+function errorStatus(err: unknown): number {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const s = (err as { status?: unknown }).status;
+    if (typeof s === 'number' && s >= 400 && s < 600) return s;
+  }
+  return 500;
+}
 
 /** Confirms the code exists and belongs to this salesperson before any mutation. */
 async function assertCodeBelongsToSalesperson(
@@ -64,14 +73,17 @@ export async function PATCH(
       action: 'salesperson.code.update',
       targetType: 'salesperson',
       targetId: id,
-      summary: `Updated sales code ${owned.code} (${Object.keys(parsed.data).join(', ')})`,
+      summary: parsed.data.code
+        ? `Renamed sales code ${owned.code} to ${parsed.data.code.toUpperCase()}`
+        : `Updated sales code ${owned.code} (${Object.keys(parsed.data).join(', ')})`,
     });
 
     return NextResponse.json({ ok: true });
   } catch (e) {
+    const status = errorStatus(e);
     const msg = e instanceof Error ? e.message : 'Unexpected error';
-    console.error('[api/platform/salespeople/[id]/codes/[codeId]] PATCH:', msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    if (status === 500) console.error('[api/platform/salespeople/[id]/codes/[codeId]] PATCH:', msg);
+    return NextResponse.json({ error: msg }, { status });
   }
 }
 

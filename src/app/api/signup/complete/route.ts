@@ -18,6 +18,7 @@ import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-lo
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
 import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
 import { sendNewSignupNotification } from '@/lib/emails/internal-signup-notification';
+import { sendWelcomeEmail } from '@/lib/emails/welcome-email';
 import { SESSION_TIMEOUT_DEFAULT_MINUTES } from '@/lib/session-timeout';
 
 export async function POST(request: Request) {
@@ -210,6 +211,10 @@ export async function POST(request: Request) {
       referralCode: session.metadata?.referral_code?.trim() || null,
       source: 'signup_complete',
     });
+
+    // Friendly customer welcome from hello@resneo.com (reply-to hello@). Sits beside the internal
+    // notification so it sends once per signup. Never throws, so it cannot fail the signup.
+    await sendWelcomeEmail({ to: ownerEmail });
 
     // Referral programme: if the venue signed up via a referral link, mark the
     // referrals row as referee_signed_up. Idempotent — the webhook path runs the

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   areVenueSubscriptionMutationsBlocked,
+  effectivePlanStatus,
   hasPaidAccessUntilPeriodEnd,
   isExpiredCancelledAccess,
   isPublicOnlineBookingBlocked,
@@ -10,6 +11,32 @@ import {
 } from './subscription-entitlement';
 
 const NOW = 1_704_000_000_000; // fixed clock
+
+describe('effectivePlanStatus', () => {
+  const future = new Date(NOW + 86_400_000).toISOString();
+  const past = new Date(NOW - 86_400_000).toISOString();
+
+  it('keeps cancelling when the period end is still in the future', () => {
+    expect(effectivePlanStatus('cancelling', future, NOW)).toBe('cancelling');
+  });
+  it('downgrades cancelling to cancelled once the period end has passed', () => {
+    expect(effectivePlanStatus('cancelling', past, NOW)).toBe('cancelled');
+  });
+  it('keeps cancelling when the period end is unknown (do not block on missing data)', () => {
+    expect(effectivePlanStatus('cancelling', null, NOW)).toBe('cancelling');
+    expect(effectivePlanStatus('cancelling', '', NOW)).toBe('cancelling');
+  });
+  it('passes other statuses through unchanged', () => {
+    expect(effectivePlanStatus('active', past, NOW)).toBe('active');
+    expect(effectivePlanStatus('trialing', past, NOW)).toBe('trialing');
+    expect(effectivePlanStatus('past_due', past, NOW)).toBe('past_due');
+    expect(effectivePlanStatus('cancelled', past, NOW)).toBe('cancelled');
+  });
+  it('normalises casing and whitespace', () => {
+    expect(effectivePlanStatus('  CANCELLING  ', past, NOW)).toBe('cancelled');
+    expect(effectivePlanStatus('Active', null, NOW)).toBe('active');
+  });
+});
 
 describe('parseSubscriptionPeriodEndMs', () => {
   it('returns null for empty', () => {
@@ -46,8 +73,14 @@ describe('isExpiredCancelledAccess', () => {
     const end = new Date(NOW + 86_400_000).toISOString();
     expect(isExpiredCancelledAccess('cancelled', end, NOW)).toBe(false);
   });
-  it('is false for cancelling', () => {
-    expect(isExpiredCancelledAccess('cancelling', new Date(NOW - 1).toISOString(), NOW)).toBe(false);
+  it('is true for cancelling once its period end has passed', () => {
+    expect(isExpiredCancelledAccess('cancelling', new Date(NOW - 86_400_000).toISOString(), NOW)).toBe(true);
+  });
+  it('is false for cancelling with a future period end', () => {
+    expect(isExpiredCancelledAccess('cancelling', new Date(NOW + 86_400_000).toISOString(), NOW)).toBe(false);
+  });
+  it('is false for cancelling with no period end (do not block on missing data)', () => {
+    expect(isExpiredCancelledAccess('cancelling', null, NOW)).toBe(false);
   });
 });
 
@@ -67,8 +100,22 @@ describe('resolveVenueSubscriptionEntitlement', () => {
     expect(resolveVenueSubscriptionEntitlement({ plan_status: 'active' }, NOW).kind).toBe('active_like');
     expect(resolveVenueSubscriptionEntitlement({ plan_status: 'trialing' }, NOW).kind).toBe('active_like');
   });
-  it('returns active_like for cancelling', () => {
+  it('returns active_like for cancelling with no period end or a future one', () => {
     expect(resolveVenueSubscriptionEntitlement({ plan_status: 'cancelling' }, NOW).kind).toBe('active_like');
+    expect(
+      resolveVenueSubscriptionEntitlement(
+        { plan_status: 'cancelling', subscription_current_period_end: new Date(NOW + 86_400_000).toISOString() },
+        NOW,
+      ).kind,
+    ).toBe('active_like');
+  });
+  it('returns expired_cancelled for cancelling stuck past its period end (missed deleted webhook)', () => {
+    expect(
+      resolveVenueSubscriptionEntitlement(
+        { plan_status: 'cancelling', subscription_current_period_end: new Date(NOW - 86_400_000).toISOString() },
+        NOW,
+      ).kind,
+    ).toBe('expired_cancelled');
   });
   it('returns active_like for cancelled with paid-through period', () => {
     const end = new Date(NOW + 86_400_000).toISOString();
@@ -116,6 +163,22 @@ describe('areVenueSubscriptionMutationsBlocked', () => {
       ),
     ).toBe(false);
   });
+  it('blocks cancelling once its period end has passed', () => {
+    expect(
+      areVenueSubscriptionMutationsBlocked(
+        { plan_status: 'cancelling', subscription_current_period_end: new Date(NOW - 86_400_000).toISOString() },
+        NOW,
+      ),
+    ).toBe(true);
+  });
+  it('allows cancelling that is still within its paid period', () => {
+    expect(
+      areVenueSubscriptionMutationsBlocked(
+        { plan_status: 'cancelling', subscription_current_period_end: new Date(NOW + 86_400_000).toISOString() },
+        NOW,
+      ),
+    ).toBe(false);
+  });
   it('does not block superuser_free even when cancelled', () => {
     expect(
       areVenueSubscriptionMutationsBlocked(
@@ -146,6 +209,18 @@ describe('isPublicOnlineBookingBlocked', () => {
       isPublicOnlineBookingBlocked({ pricing_tier: 'appointments', plan_status: 'cancelled', subscription_current_period_end: pastEnd }, NOW),
     ).toBe(true);
   });
+  it('blocks all tiers when a cancelling venue is past its period end', () => {
+    const pastEnd = new Date(NOW - 86_400_000).toISOString();
+    expect(
+      isPublicOnlineBookingBlocked({ pricing_tier: 'plus', plan_status: 'cancelling', subscription_current_period_end: pastEnd }, NOW),
+    ).toBe(true);
+  });
+  it('does not block a cancelling venue still within its paid period', () => {
+    const futureEnd = new Date(NOW + 86_400_000).toISOString();
+    expect(
+      isPublicOnlineBookingBlocked({ pricing_tier: 'plus', plan_status: 'cancelling', subscription_current_period_end: futureEnd }, NOW),
+    ).toBe(false);
+  });
   it('never blocks superuser_free venues', () => {
     expect(
       isPublicOnlineBookingBlocked(
@@ -170,5 +245,12 @@ describe('isVenueSubscriptionExpiredCancelled', () => {
       ),
     ).toBe(true);
     expect(isVenueSubscriptionExpiredCancelled({ plan_status: 'active' }, NOW)).toBe(false);
+    // A cancelling venue stuck past its period end must also resubscribe.
+    expect(
+      isVenueSubscriptionExpiredCancelled(
+        { plan_status: 'cancelling', subscription_current_period_end: new Date(NOW - 86_400_000).toISOString() },
+        NOW,
+      ),
+    ).toBe(true);
   });
 });

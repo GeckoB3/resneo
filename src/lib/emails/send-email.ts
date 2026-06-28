@@ -14,9 +14,15 @@ interface SendEmailOptions {
   html: string;
   text: string;
   /**
-   * Display name for the From header, e.g. venue name. The envelope address stays {@link defaultFromAddress}.
+   * Display name for the From header, e.g. venue name.
    */
   fromDisplayName?: string;
+  /**
+   * Override the envelope From address for this message. Must be a SendGrid-verified sender
+   * (e.g. hello@resneo.com). Defaults to {@link defaultFromAddress} (bookings@resneo.com), so
+   * every existing caller keeps sending from bookings@ unless it opts in here.
+   */
+  fromEmail?: string;
   /**
    * When set, guest replies go to this address instead of the platform inbox.
    */
@@ -41,10 +47,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<string | null> 
     return null;
   }
 
+  const fromAddress = opts.fromEmail?.trim() || defaultFromAddress;
   const fromBlock =
     opts.fromDisplayName?.trim() ?
-      { email: defaultFromAddress, name: opts.fromDisplayName.trim() }
-    : defaultFromAddress;
+      { email: fromAddress, name: opts.fromDisplayName.trim() }
+    : fromAddress;
 
   const replyTo = opts.replyTo?.trim() || undefined;
 

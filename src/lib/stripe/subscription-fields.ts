@@ -69,11 +69,11 @@ export function subscriptionStatus(sub: unknown): string | undefined {
 export function mapStripeSubscriptionToPlanStatus(
   sub: unknown,
 ): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' {
-  if (subscriptionHasFutureCancellation(sub)) return 'cancelling';
   const st = subscriptionStatus(sub);
-  if (st === 'trialing') return 'trialing';
-  if (st === 'active') return 'active';
-  if (st === 'past_due') return 'past_due';
+  // Terminal Stripe states are evaluated first so a subscription that has actually ended is never
+  // mislabelled 'cancelling' just because `cancel_at_period_end` is still set on the object. A
+  // `canceled` sub still inside its paid window keeps access ('cancelling'); once the period end has
+  // passed it is fully 'cancelled'.
   if (st === 'canceled') {
     const periodEnd = subscriptionPeriodEndIso(sub);
     if (periodEnd && Date.parse(periodEnd) > Date.now()) {
@@ -84,6 +84,11 @@ export function mapStripeSubscriptionToPlanStatus(
   if (st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
     return 'cancelled';
   }
+  // Non-terminal subscription scheduled to cancel at (or before) period end: still has access.
+  if (subscriptionHasFutureCancellation(sub)) return 'cancelling';
+  if (st === 'trialing') return 'trialing';
+  if (st === 'active') return 'active';
+  if (st === 'past_due') return 'past_due';
   if (st === 'incomplete') return 'past_due';
   return 'past_due';
 }

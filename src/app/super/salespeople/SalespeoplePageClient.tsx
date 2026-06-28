@@ -47,6 +47,28 @@ interface TierDraft {
   amountPounds: string;
 }
 
+interface MonthlyStatement {
+  period_month: string;
+  signups_count: number;
+  validated_count: number;
+  lump_sum_pence: number;
+  revenue_share_pence: number;
+  bonus_pence: number;
+  active_subscribers_end: number;
+  total_pence: number;
+}
+
+interface EarningsPayload {
+  current_month: MonthlyStatement;
+  statements: MonthlyStatement[];
+}
+
+interface EarningsState {
+  loading: boolean;
+  error: string | null;
+  data: EarningsPayload | null;
+}
+
 const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
 
@@ -65,6 +87,15 @@ function formatShortDate(iso: string | null | undefined): string {
     });
   } catch {
     return '—';
+  }
+}
+
+function formatMonth(iso: string): string {
+  try {
+    const d = new Date(`${iso}T00:00:00.000Z`);
+    return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  } catch {
+    return iso;
   }
 }
 
@@ -98,6 +129,7 @@ export function SalespeoplePageClient() {
   const [revenueSharePercent, setRevenueSharePercent] = useState('0');
   const [revenueShareMonths, setRevenueShareMonths] = useState('12');
   const [initialTrialDays, setInitialTrialDays] = useState('30');
+  const [customCode, setCustomCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -113,6 +145,41 @@ export function SalespeoplePageClient() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Per-salesperson monthly earnings, lazily fetched the first time a row is expanded.
+  const [earningsOpen, setEarningsOpen] = useState<Set<string>>(new Set());
+  const [earnings, setEarnings] = useState<Record<string, EarningsState>>({});
+
+  const loadEarnings = useCallback(async (id: string) => {
+    setEarnings((prev) => ({ ...prev, [id]: { loading: true, error: null, data: prev[id]?.data ?? null } }));
+    try {
+      const res = await fetch(`/api/platform/salespeople/${encodeURIComponent(id)}/earnings`, {
+        credentials: 'same-origin',
+      });
+      const body = (await res.json().catch(() => ({}))) as EarningsPayload & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `Failed to load (${res.status})`);
+      setEarnings((prev) => ({ ...prev, [id]: { loading: false, error: null, data: body } }));
+    } catch (e) {
+      setEarnings((prev) => ({
+        ...prev,
+        [id]: { loading: false, error: e instanceof Error ? e.message : 'Failed to load', data: prev[id]?.data ?? null },
+      }));
+    }
+  }, []);
+
+  const toggleEarnings = useCallback(
+    (id: string) => {
+      const willOpen = !earningsOpen.has(id);
+      setEarningsOpen((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      if (willOpen && !earnings[id]?.loading) void loadEarnings(id);
+    },
+    [earningsOpen, earnings, loadEarnings],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -156,6 +223,7 @@ export function SalespeoplePageClient() {
           revenue_share_percent: parseFloat(revenueSharePercent) || 0,
           revenue_share_months: parseInt(revenueShareMonths, 10) || 12,
           trial_days: clampSalesTrialDays(parseInt(initialTrialDays, 10)),
+          code: customCode.trim() ? customCode.trim().toUpperCase() : undefined,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -179,6 +247,7 @@ export function SalespeoplePageClient() {
       setRevenueSharePercent('0');
       setRevenueShareMonths('12');
       setInitialTrialDays('30');
+      setCustomCode('');
       await load();
     } catch {
       setFormError('Network error');
@@ -392,6 +461,18 @@ export function SalespeoplePageClient() {
                 value={revenueShareMonths}
                 onChange={(e) => setRevenueShareMonths(e.target.value)}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Custom code (optional)</label>
+              <input
+                className={inputClass}
+                placeholder="Auto-generated if blank"
+                value={customCode}
+                onChange={(e) => setCustomCode(e.target.value.toUpperCase())}
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                3 to 40 letters, numbers, or hyphens, e.g. SELLER-1-2M.
+              </p>
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
               <label className="mb-1 block text-xs font-medium text-slate-600">
@@ -626,6 +707,13 @@ export function SalespeoplePageClient() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
+                        onClick={() => toggleEarnings(row.id)}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        {earningsOpen.has(row.id) ? 'Hide earnings' : 'Monthly earnings'}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => startEdit(row)}
                         className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                       >
@@ -640,6 +728,13 @@ export function SalespeoplePageClient() {
                         {busy ? 'Working…' : 'Revoke'}
                       </button>
                     </div>
+                  )}
+
+                  {earningsOpen.has(row.id) && (
+                    <SalespersonEarningsPanel
+                      state={earnings[row.id]}
+                      onRetry={() => void loadEarnings(row.id)}
+                    />
                   )}
                 </div>
               );
@@ -705,6 +800,7 @@ function CodesManager({
   const [addLabel, setAddLabel] = useState('');
   const [addCode, setAddCode] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCode, setEditCode] = useState('');
   const [editTrial, setEditTrial] = useState('');
   const [editLabel, setEditLabel] = useState('');
   const [busy, setBusy] = useState(false);
@@ -753,6 +849,7 @@ function CodesManager({
 
   function startEdit(c: CodeRow) {
     setEditingId(c.id);
+    setEditCode(c.code);
     setEditTrial(String(c.trial_days));
     setEditLabel(c.label ?? '');
   }
@@ -778,9 +875,11 @@ function CodesManager({
     }
   }
 
-  async function saveEdit(id: string) {
+  async function saveEdit(id: string, currentCode: string) {
     const t = parseInt(editTrial, 10);
+    const nextCode = editCode.trim().toUpperCase();
     await mutate(id, 'PATCH', {
+      code: nextCode && nextCode !== currentCode ? nextCode : undefined,
       trial_days: Number.isFinite(t) ? clampSalesTrialDays(t) : undefined,
       label: editLabel.trim() ? editLabel.trim() : null,
     });
@@ -814,6 +913,18 @@ function CodesManager({
             <li key={c.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
               {editingId === c.id ? (
                 <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">Code</label>
+                    <input
+                      className={inputClass}
+                      value={editCode}
+                      onChange={(e) => setEditCode(e.target.value.toUpperCase())}
+                    />
+                    <p className="mt-1 text-[11px] text-amber-600">
+                      Renaming takes effect immediately. Links already shared with the old code will stop
+                      working. To keep the old one live too, add a separate code instead.
+                    </p>
+                  </div>
                   <TrialDaysInput value={editTrial} onChange={setEditTrial} />
                   <input
                     className={inputClass}
@@ -825,7 +936,7 @@ function CodesManager({
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => void saveEdit(c.id)}
+                      onClick={() => void saveEdit(c.id, c.code)}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
                       {busy ? 'Saving…' : 'Save'}
@@ -927,6 +1038,132 @@ function CodesManager({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Per-salesperson monthly earnings: an "owed at a glance" strip (this month so far + last finalised
+ * month) and a per-calendar-month breakdown table. The in-progress month is a live running total,
+ * the rest are finalised statements. Figures match the salesperson's own /sales dashboard exactly.
+ */
+function SalespersonEarningsPanel({
+  state,
+  onRetry,
+}: {
+  state: EarningsState | undefined;
+  onRetry: () => void;
+}) {
+  if (!state || state.loading) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+        Loading monthly earnings…
+      </div>
+    );
+  }
+
+  if (state.error || !state.data) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <span>{state.error ?? 'Unable to load earnings'}</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const { current_month, statements } = state.data;
+  const lastFinalised = statements[0] ?? null;
+
+  return (
+    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-amber-700">
+            This month so far ({formatMonth(current_month.period_month)})
+          </p>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+            {formatGbp(current_month.total_pence)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-amber-700">Running total, not yet finalised.</p>
+        </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">
+            Last finalised{lastFinalised ? ` (${formatMonth(lastFinalised.period_month)})` : ''}
+          </p>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+            {lastFinalised ? formatGbp(lastFinalised.total_pence) : 'None yet'}
+          </p>
+          <p className="mt-0.5 text-[11px] text-emerald-700">Owed for the most recent completed month.</p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-2.5 font-medium">Month</th>
+              <th className="px-4 py-2.5 font-medium">Signups</th>
+              <th className="px-4 py-2.5 font-medium">Validated</th>
+              <th className="px-4 py-2.5 font-medium">Lump sum</th>
+              <th className="px-4 py-2.5 font-medium">Rev. share</th>
+              <th className="px-4 py-2.5 font-medium">Bonus</th>
+              <th className="px-4 py-2.5 font-medium">Subscribers</th>
+              <th className="px-4 py-2.5 font-medium text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            <tr className="bg-amber-50/50">
+              <td className="px-4 py-2.5 font-medium text-slate-900">
+                <span className="flex items-center gap-2">
+                  {formatMonth(current_month.period_month)}
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                    In progress
+                  </span>
+                </span>
+              </td>
+              <td className="px-4 py-2.5 text-slate-600">{current_month.signups_count}</td>
+              <td className="px-4 py-2.5 text-slate-600">{current_month.validated_count}</td>
+              <td className="px-4 py-2.5 text-slate-600">{formatGbp(current_month.lump_sum_pence)}</td>
+              <td className="px-4 py-2.5 text-slate-600">{formatGbp(current_month.revenue_share_pence)}</td>
+              <td className="px-4 py-2.5 text-slate-600">{formatGbp(current_month.bonus_pence)}</td>
+              <td className="px-4 py-2.5 text-slate-600">{current_month.active_subscribers_end}</td>
+              <td className="px-4 py-2.5 text-right font-semibold text-slate-900">
+                {formatGbp(current_month.total_pence)}
+              </td>
+            </tr>
+            {statements.map((s) => (
+              <tr key={s.period_month} className="hover:bg-slate-50/60">
+                <td className="px-4 py-2.5 font-medium text-slate-900">{formatMonth(s.period_month)}</td>
+                <td className="px-4 py-2.5 text-slate-600">{s.signups_count}</td>
+                <td className="px-4 py-2.5 text-slate-600">{s.validated_count}</td>
+                <td className="px-4 py-2.5 text-slate-600">{formatGbp(s.lump_sum_pence)}</td>
+                <td className="px-4 py-2.5 text-slate-600">{formatGbp(s.revenue_share_pence)}</td>
+                <td className="px-4 py-2.5 text-slate-600">{formatGbp(s.bonus_pence)}</td>
+                <td className="px-4 py-2.5 text-slate-600">{s.active_subscribers_end}</td>
+                <td className="px-4 py-2.5 text-right font-semibold text-slate-900">{formatGbp(s.total_pence)}</td>
+              </tr>
+            ))}
+            {statements.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-4 text-center text-xs text-slate-500">
+                  No finalised months yet. The first statement is generated after this month closes.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[11px] text-slate-400">
+        Finalised on the 1st of each month (UTC). Figures are informational. Payment happens outside ResNeo.
+      </p>
     </div>
   );
 }

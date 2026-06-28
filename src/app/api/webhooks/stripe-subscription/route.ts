@@ -27,6 +27,7 @@ import {
 } from '@/lib/webhooks/stripe-event-idempotency';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
 import { sendNewSignupNotification } from '@/lib/emails/internal-signup-notification';
+import { sendWelcomeEmail } from '@/lib/emails/welcome-email';
 import {
   maybeCreditReferrerForInvoice,
   markReferralsFailedForReferee,
@@ -471,6 +472,11 @@ async function handleCheckoutCompleted(
     referralCode: (metadata.referral_code ?? '').trim() || null,
     source: 'stripe_webhook',
   });
+
+  // Friendly customer welcome from hello@resneo.com (reply-to hello@). Sits beside the internal
+  // notification so it sends once per signup. Never throws, so it cannot fail the webhook or
+  // trigger a Stripe retry.
+  await sendWelcomeEmail({ to: userEmail ?? null });
 
   // Referral programme: attach the referrals row if this venue signed up via a link.
   // We do NOT eagerly create the new venue's own referral_codes row here — it's

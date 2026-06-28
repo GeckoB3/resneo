@@ -5,6 +5,7 @@ import {
   resolveVenueEnabledModelLabels,
 } from '@/lib/platform/subscriber-report';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
+import { effectivePlanStatus } from '@/lib/billing/subscription-entitlement';
 
 function parseUtcDateStart(isoDate: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
@@ -170,7 +171,13 @@ export async function GET(req: NextRequest) {
         slug: (v as { slug: string }).slug,
         email: (v as { email?: string | null }).email ?? null,
         pricing_tier: tier ?? '',
-        plan_status: ((v as { plan_status?: string }).plan_status ?? '') as string,
+        // Effective status: a row stuck at 'cancelling' past its paid period end (missed/late
+        // Stripe deleted webhook) reads as 'cancelled' rather than appearing among current subscribers.
+        plan_status: effectivePlanStatus(
+          (v as { plan_status?: string }).plan_status,
+          (v as { subscription_current_period_end?: string | null }).subscription_current_period_end ?? null,
+          now,
+        ),
         billing_access_source: (v as { billing_access_source?: string | null }).billing_access_source ?? null,
         booking_model: (v as { booking_model?: string }).booking_model ?? 'table_reservation',
         enabled_model_labels: enabledLabels,

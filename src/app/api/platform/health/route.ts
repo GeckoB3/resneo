@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 import { planDisplayName } from '@/lib/pricing-constants';
+import { effectivePlanStatus } from '@/lib/billing/subscription-entitlement';
 
 export type HealthBand = 'healthy' | 'watch' | 'at_risk';
 
@@ -33,7 +34,7 @@ export async function GET() {
     const [venuesRes, statsRes] = await Promise.all([
       admin
         .from('venues')
-        .select('id, name, slug, pricing_tier, plan_status, billing_access_source, onboarding_completed, created_at')
+        .select('id, name, slug, pricing_tier, plan_status, billing_access_source, onboarding_completed, created_at, subscription_current_period_end')
         .eq('is_test', false),
       admin.rpc('platform_venue_health_stats'),
     ]);
@@ -67,6 +68,7 @@ export async function GET() {
       billing_access_source: string | null;
       onboarding_completed: boolean;
       created_at: string;
+      subscription_current_period_end: string | null;
     }>).map((v) => {
       const st = statsByVenue.get(v.id);
       const last30 = st ? n(st.bookings_last_30) : 0;
@@ -74,7 +76,8 @@ export async function GET() {
       const last7 = st ? n(st.bookings_last_7) : 0;
       const upcoming = st ? n(st.upcoming_bookings) : 0;
       const lastBookingAt = st?.last_booking_at ?? null;
-      const status = (v.plan_status ?? '').toLowerCase().trim();
+      // Effective status: a venue stuck at 'cancelling' past its period end scores/flags as 'cancelled'.
+      const status = effectivePlanStatus(v.plan_status, v.subscription_current_period_end, now);
       const ageDays = Math.floor((now - new Date(v.created_at).getTime()) / msDay);
       const daysSinceLastBooking = lastBookingAt
         ? Math.floor((now - new Date(lastBookingAt).getTime()) / msDay)

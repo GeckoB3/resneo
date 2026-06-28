@@ -109,6 +109,36 @@ async function insertGeneratedSalesCode(
   throw new Error('Could not generate unique sales code');
 }
 
+/**
+ * Validate a custom/vanity sales code and confirm it is free across BOTH the sales and referral
+ * namespaces (they share one field on the signup page). Returns the normalised (uppercased) code,
+ * or throws a 400/409. Pass `excludeCodeId` when renaming an existing code so it does not clash
+ * with itself.
+ */
+async function assertCustomSalesCodeAvailable(
+  admin: SupabaseClient,
+  rawCode: string,
+  excludeCodeId?: string | null,
+): Promise<string> {
+  const code = normaliseSalesCodeInput(rawCode);
+  if (!code) {
+    throw Object.assign(
+      new Error('Custom code must be 3 to 40 characters using letters, numbers, or hyphens.'),
+      { status: 400 },
+    );
+  }
+  if (await referralCodeExists(admin, code)) {
+    throw Object.assign(new Error('That code is already in use by the referral programme.'), { status: 409 });
+  }
+  let query = admin.from('sales_codes').select('id').ilike('code', code).limit(1);
+  if (excludeCodeId) query = query.neq('id', excludeCodeId);
+  const { data: salesClash } = await query;
+  if (salesClash && salesClash.length > 0) {
+    throw Object.assign(new Error('That code is already taken.'), { status: 409 });
+  }
+  return code;
+}
+
 async function insertCustomSalesCode(
   admin: SupabaseClient,
   salespersonId: string,
@@ -116,20 +146,7 @@ async function insertCustomSalesCode(
   trialDays: number,
   label: string | null,
 ): Promise<string> {
-  const code = normaliseSalesCodeInput(rawCode);
-  if (!code) {
-    throw Object.assign(
-      new Error('Custom code must be 3–40 characters using letters, numbers, or hyphens.'),
-      { status: 400 },
-    );
-  }
-  if (await referralCodeExists(admin, code)) {
-    throw Object.assign(new Error('That code is already in use by the referral programme.'), { status: 409 });
-  }
-  const { data: salesClash } = await admin.from('sales_codes').select('id').ilike('code', code).limit(1);
-  if (salesClash && salesClash.length > 0) {
-    throw Object.assign(new Error('That code is already taken.'), { status: 409 });
-  }
+  const code = await assertCustomSalesCodeAvailable(admin, rawCode);
   const { data, error } = await admin
     .from('sales_codes')
     .insert({ salesperson_id: salespersonId, code, trial_days: trialDays, label })
@@ -258,6 +275,34 @@ async function assertNoActiveSalespersonForEmail(admin: SupabaseClient, email: s
   }
 }
 
+/**
+ * Mint the salesperson's first code. If it fails (for example a rare custom-code race that loses
+ * the final insert), revoke the just-created salesperson row so the record is not left
+ * half-created: revoked rows do not trip assertNoActiveSalespersonForEmail, so the superuser can
+ * simply retry the same email.
+ */
+async function mintFirstCodeOrRollback(
+  admin: SupabaseClient,
+  salespersonId: string,
+  displayName: string,
+  trialDays: number | undefined,
+  customCode: string | null | undefined,
+): Promise<string> {
+  try {
+    return await addSalesCode(admin, salespersonId, displayName, { trialDays, customCode: customCode ?? null });
+  } catch (e) {
+    try {
+      await admin
+        .from('salespeople')
+        .update({ revoked_at: new Date().toISOString(), active: false })
+        .eq('id', salespersonId);
+    } catch (rollbackErr) {
+      console.error('[sales/admin] rollback after first-code mint failure also failed', rollbackErr);
+    }
+    throw e;
+  }
+}
+
 export async function createSalespersonWithPassword(params: {
   admin: SupabaseClient;
   email: string;
@@ -269,9 +314,16 @@ export async function createSalespersonWithPassword(params: {
   revenue_share_months?: number;
   /** Free-trial length for the salesperson's first auto-generated code (defaults to one month). */
   trial_days?: number;
+  /** Optional custom/vanity code for the first code; auto-generated when omitted. */
+  custom_code?: string;
 }): Promise<{ user_id: string; salesperson_id: string; code: string }> {
   const email = params.email.trim().toLowerCase();
   await assertNoActiveSalespersonForEmail(params.admin, email);
+  // Validate the custom code up front so an invalid/taken code fails before we create any auth
+  // user or salesperson row (avoids leaving a half-created salesperson behind).
+  if (params.custom_code && params.custom_code.trim()) {
+    await assertCustomSalesCodeAvailable(params.admin, params.custom_code);
+  }
 
   const existingId = await lookupAuthUserIdByEmail(params.admin, email);
   let userId = existingId;
@@ -323,12 +375,12 @@ export async function createSalespersonWithPassword(params: {
 
   const salespersonId = spRow.id as string;
   await seedDefaultBonusTiers(params.admin, salespersonId);
-  const code = await insertGeneratedSalesCode(
+  const code = await mintFirstCodeOrRollback(
     params.admin,
     salespersonId,
     params.name || email,
-    clampSalesTrialDays(params.trial_days ?? SALES_SIGNUP_TRIAL_DAYS),
-    null,
+    params.trial_days,
+    params.custom_code,
   );
 
   return { user_id: userId!, salesperson_id: salespersonId, code };
@@ -345,9 +397,15 @@ export async function createSalespersonWithMagicLink(params: {
   revenue_share_months?: number;
   /** Free-trial length for the salesperson's first auto-generated code (defaults to one month). */
   trial_days?: number;
+  /** Optional custom/vanity code for the first code; auto-generated when omitted. */
+  custom_code?: string;
 }): Promise<{ user_id: string; salesperson_id: string; code: string; channel: 'sendgrid' | 'supabase_invite' }> {
   const email = params.email.trim().toLowerCase();
   await assertNoActiveSalespersonForEmail(params.admin, email);
+  // Validate the custom code up front (see createSalespersonWithPassword) before any mutation.
+  if (params.custom_code && params.custom_code.trim()) {
+    await assertCustomSalesCodeAvailable(params.admin, params.custom_code);
+  }
 
   const existingAtStart = await lookupAuthUserIdByEmail(params.admin, email);
   const sendGridConfigured = Boolean(process.env.SENDGRID_API_KEY?.trim());
@@ -469,12 +527,12 @@ export async function createSalespersonWithMagicLink(params: {
 
   const salespersonId = spRow.id as string;
   await seedDefaultBonusTiers(params.admin, salespersonId);
-  const code = await insertGeneratedSalesCode(
+  const code = await mintFirstCodeOrRollback(
     params.admin,
     salespersonId,
     params.name || email,
-    clampSalesTrialDays(params.trial_days ?? SALES_SIGNUP_TRIAL_DAYS),
-    null,
+    params.trial_days,
+    params.custom_code,
   );
 
   return {
@@ -533,19 +591,30 @@ export async function addSalesCode(
   return insertGeneratedSalesCode(admin, salespersonId, displayName, trialDays, label);
 }
 
-/** Update a single code's reward/label/active flag. Only the provided fields change. */
+/** Update a single code's string/reward/label/active flag. Only the provided fields change. */
 export async function updateSalesCode(
   admin: SupabaseClient,
   codeId: string,
-  updates: { trial_days?: number; label?: string | null; active?: boolean },
+  updates: { code?: string; trial_days?: number; label?: string | null; active?: boolean },
 ): Promise<void> {
   const patch: Record<string, unknown> = {};
+  if (updates.code !== undefined) {
+    // Rename the code in place: validate format + uniqueness, excluding this row so saving the
+    // same string is a no-op rather than a self-collision.
+    patch.code = await assertCustomSalesCodeAvailable(admin, updates.code, codeId);
+  }
   if (updates.trial_days !== undefined) patch.trial_days = clampSalesTrialDays(updates.trial_days);
   if (updates.label !== undefined) patch.label = normaliseCodeLabel(updates.label);
   if (updates.active !== undefined) patch.active = updates.active;
   if (Object.keys(patch).length === 0) return;
   const { error } = await admin.from('sales_codes').update(patch).eq('id', codeId);
-  if (error) throw new Error(error.message);
+  if (error) {
+    const isUnique =
+      (error as { code?: string } | null)?.code === '23505' || /duplicate key/i.test(error.message ?? '');
+    throw isUnique
+      ? Object.assign(new Error('That code is already taken.'), { status: 409 })
+      : new Error(error.message);
+  }
 }
 
 export async function setSalesCodeActive(

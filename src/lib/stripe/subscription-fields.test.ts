@@ -49,4 +49,40 @@ describe('subscription period helpers', () => {
 
     expect(mapStripeSubscriptionToPlanStatus(sub)).toBe('cancelling');
   });
+
+  it('treats a canceled subscription still inside its paid period as cancelling', () => {
+    const sub = {
+      status: 'canceled',
+      cancel_at_period_end: true,
+      current_period_end: Math.floor(Date.now() / 1000) + 86_400,
+    };
+
+    expect(mapStripeSubscriptionToPlanStatus(sub)).toBe('cancelling');
+  });
+
+  it('treats a canceled, period-ended subscription as cancelled even if cancel_at_period_end lingers', () => {
+    const sub = {
+      status: 'canceled',
+      cancel_at_period_end: true,
+      current_period_end: Math.floor(Date.now() / 1000) - 86_400,
+    };
+
+    expect(mapStripeSubscriptionToPlanStatus(sub)).toBe('cancelled');
+  });
+
+  it('treats terminal unpaid/paused subscriptions as cancelled even with a lingering cancel flag', () => {
+    // Terminal/dead Stripe states must not retain access just because cancel_at_period_end is set.
+    expect(
+      mapStripeSubscriptionToPlanStatus({ status: 'unpaid', cancel_at_period_end: true }),
+    ).toBe('cancelled');
+    expect(
+      mapStripeSubscriptionToPlanStatus({
+        status: 'paused',
+        cancel_at: Math.floor(Date.now() / 1000) + 86_400,
+      }),
+    ).toBe('cancelled');
+    expect(
+      mapStripeSubscriptionToPlanStatus({ status: 'incomplete_expired', cancel_at_period_end: true }),
+    ).toBe('cancelled');
+  });
 });

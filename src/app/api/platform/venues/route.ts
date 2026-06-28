@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
+import { effectivePlanStatus } from '@/lib/billing/subscription-entitlement';
 
 const PAGE_SIZE = 50;
 
@@ -58,15 +59,29 @@ export async function GET(req: NextRequest) {
   if (status) {
     query = query.eq('plan_status', status);
   }
+  // "Effectively cancelled" = fully ended subscription with no remaining access:
+  //   plan_status = 'cancelled', OR a 'cancelling' venue whose paid period has already ended
+  //   (a missed/late Stripe `customer.subscription.deleted` webhook can leave a row stuck at
+  //   'cancelling' past its period end). A 'cancelling' venue with a future or unknown period
+  //   end still has access and stays in 'live'. Milliseconds are stripped from the cutoff so the
+  //   timestamp carries no '.' that PostgREST could mis-parse inside an or() group.
+  // One cutoff instant shared by the SQL filter and the displayed status, so a row can never sit in
+  // the live tab yet render the 'cancelled' label (or vice versa). Milliseconds are stripped so the
+  // timestamp carries no '.' that PostgREST could mis-parse inside an or() group; cutoffMs is parsed
+  // back from the same (second-floored) string so both sides compare against the identical instant.
+  const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const cutoffMs = Date.parse(nowIso);
+  const effectivelyCancelled = `plan_status.eq.cancelled,and(plan_status.eq.cancelling,subscription_current_period_end.lte.${nowIso})`;
+  const notEffectivelyCancelled = `plan_status.neq.cancelling,subscription_current_period_end.gt.${nowIso},subscription_current_period_end.is.null`;
+
   if (env === 'test') {
     query = query.eq('is_test', true);
   } else if (env === 'cancelled') {
     // Real venues whose subscription has fully ended (no remaining access).
-    // 'cancelling' venues keep access until period end, so they stay in 'live'.
-    query = query.eq('is_test', false).eq('plan_status', 'cancelled');
+    query = query.eq('is_test', false).or(effectivelyCancelled);
   } else if (env !== 'all') {
-    // live: real venues that still have access — exclude fully-cancelled.
-    query = query.eq('is_test', false).neq('plan_status', 'cancelled');
+    // live: real venues that still have access — exclude fully-cancelled and period-ended cancelling.
+    query = query.eq('is_test', false).neq('plan_status', 'cancelled').or(notEffectivelyCancelled);
   }
 
   const { data: venues, count, error } = await query;
@@ -76,8 +91,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch venues' }, { status: 500 });
   }
 
+  // Present the *effective* status so a row stuck at 'cancelling' past its period end reads as
+  // 'cancelled' on the Cancelled / All tabs, matching the env filtering above (same cutoffMs).
+  const rows = (venues ?? []).map((v) => ({
+    ...v,
+    plan_status: effectivePlanStatus(
+      (v as { plan_status?: string | null }).plan_status,
+      (v as { subscription_current_period_end?: string | null }).subscription_current_period_end,
+      cutoffMs,
+    ),
+  }));
+
   return NextResponse.json({
-    venues: venues ?? [],
+    venues: rows,
     total: count ?? 0,
     page,
     pageSize: PAGE_SIZE,

@@ -685,9 +685,287 @@ function ResourcesSlotsSvg() {
   );
 }
 
+function ServiceBookingModeSvg() {
+  return (
+    <svg
+      viewBox="0 0 560 296"
+      className="mx-auto h-auto w-full max-w-[560px]"
+      role="img"
+      aria-label="The 'How will clients book this service?' card with two choices. One fixed offering is selected, for one duration, buffer and price on every booking. Multiple bookable options lets guests pick a version, such as a length or style, before choosing a time."
+    >
+      {/* Outer card */}
+      <rect x="10" y="10" width="540" height="276" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+
+      {/* Title + sub */}
+      <text x="30" y="42" fill="#0f172a" fontSize="13" fontWeight="700">How will clients book this service?</text>
+      <text x="30" y="62" fill="#64748b" fontSize="10">Choose one structure. Use multiple options when guests must pick a tier</text>
+      <text x="30" y="76" fill="#64748b" fontSize="10">first (e.g. duration or style). Use one fixed offering when every booking is the same.</text>
+
+      {/* Card A - One fixed offering (selected) */}
+      <rect x="30" y="92" width="500" height="60" rx="12" fill="#eff6fc" stroke="#00305C" strokeWidth="1.5" />
+      <circle cx="52" cy="122" r="7" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
+      <circle cx="52" cy="122" r="3.5" fill="#00305C" />
+      <text x="72" y="117" fill="#0f172a" fontSize="12" fontWeight="700">One fixed offering</text>
+      <text x="72" y="137" fill="#64748b" fontSize="10">One duration, buffer, and price. What you set above applies to every booking.</text>
+
+      {/* Card B - Multiple bookable options (unselected) */}
+      <rect x="30" y="164" width="500" height="106" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <circle cx="52" cy="192" r="7" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="72" y="196" fill="#0f172a" fontSize="12" fontWeight="700">Multiple bookable options</text>
+      <text x="72" y="216" fill="#64748b" fontSize="10">Guests choose an option before picking a time. Set up one option at a time,</text>
+      <text x="72" y="232" fill="#64748b" fontSize="10">then add the next. Each option has its own duration, buffer, price, optional</text>
+      <text x="72" y="248" fill="#64748b" fontSize="10">description, and optional deposit override.</text>
+    </svg>
+  );
+}
+
+function ServiceVariantsSvg() {
+  const cols = [
+    { x: 40, label: 'Duration *', value: '60' },
+    { x: 162, label: 'Buffer', value: '10' },
+    { x: 284, label: 'Price (£)', value: '65.00' },
+    { x: 406, label: 'Deposit (£)', value: '10.00' },
+  ];
+  return (
+    <svg
+      viewBox="0 0 560 548"
+      className="mx-auto h-auto w-full max-w-[560px]"
+      role="img"
+      aria-label="The Bookable options editor. Option 1 is complete and marked Ready, with a name, optional description, duration, buffer, price and deposit, plus an Offer this option to clients checkbox. Option 2 is In progress because its price is empty, which is required for an option you offer online when you charge full payment, so the Add another option button is greyed out until it is finished."
+    >
+      {/* Outer panel */}
+      <rect x="10" y="10" width="540" height="528" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+
+      {/* Header */}
+      <text x="30" y="40" fill="#0f172a" fontSize="13" fontWeight="700">Bookable options</text>
+      <rect x="156" y="28" width="74" height="18" rx="9" fill="#E8EFF6" stroke="#cdddec" />
+      <text x="193" y="41" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="700">2 options</text>
+      <text x="30" y="60" fill="#64748b" fontSize="10">Add another once an option has a name, a valid duration, and a price for options you offer online.</text>
+
+      {/* Option 1 card - Ready */}
+      <rect x="26" y="76" width="508" height="224" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="40" y="90" width="62" height="18" rx="5" fill="#f1f5f9" />
+      <text x="71" y="103" textAnchor="middle" fill="#334155" fontSize="10" fontWeight="700">Option 1</text>
+      <text x="112" y="103" fill="#059669" fontSize="10" fontWeight="600">Ready</text>
+      <rect x="462" y="89" width="56" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="490" y="104" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Remove</text>
+      <line x1="40" y1="118" x2="518" y2="118" stroke="#f1f5f9" strokeWidth="1" />
+
+      {/* Option 1 name */}
+      <rect x="40" y="126" width="478" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="54" y="145" fill="#0f172a" fontSize="11" fontWeight="500">60 minutes</text>
+
+      {/* Option 1 description */}
+      <text x="40" y="172" fill="#64748b" fontSize="9" fontWeight="600">Optional description (shown when they pick this option)</text>
+      <rect x="40" y="178" width="478" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="54" y="197" fill="#64748b" fontSize="10">Includes a warm towel and short consultation.</text>
+
+      {/* Option 1 grid */}
+      {cols.map((c) => (
+        <g key={c.label}>
+          <text x={c.x} y="228" fill="#64748b" fontSize="9" fontWeight="600">{c.label}</text>
+          <rect x={c.x} y="234" width="110" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+          <text x={c.x + 12} y="253" fill="#0f172a" fontSize="11" fontWeight="500">{c.value}</text>
+        </g>
+      ))}
+
+      {/* Option 1 offer checkbox */}
+      <rect x="40" y="276" width="14" height="14" rx="4" fill="#00305C" />
+      <path d="M44 283 l3 3 l5 -6" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <text x="62" y="287" fill="#334155" fontSize="10" fontWeight="500">Offer this option to clients</text>
+
+      {/* Option 2 card - In progress */}
+      <rect x="26" y="312" width="508" height="152" rx="12" fill="#ffffff" stroke="#fbbf24" strokeWidth="1.5" />
+      <rect x="40" y="326" width="62" height="18" rx="5" fill="#f1f5f9" />
+      <text x="71" y="339" textAnchor="middle" fill="#334155" fontSize="10" fontWeight="700">Option 2</text>
+      <text x="112" y="339" fill="#d97706" fontSize="10" fontWeight="600">In progress</text>
+      <rect x="462" y="325" width="56" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="490" y="340" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Remove</text>
+      <line x1="40" y1="354" x2="518" y2="354" stroke="#f1f5f9" strokeWidth="1" />
+      <rect x="40" y="362" width="478" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="54" y="381" fill="#0f172a" fontSize="11" fontWeight="500">90 minutes</text>
+      {[
+        { x: 40, label: 'Duration *', value: '90', empty: false },
+        { x: 162, label: 'Buffer', value: '10', empty: false },
+        { x: 284, label: 'Price (£)', value: '', empty: true },
+        { x: 406, label: 'Deposit (£)', value: '', empty: false },
+      ].map((c) => (
+        <g key={`o2-${c.label}`}>
+          <text x={c.x} y="408" fill="#64748b" fontSize="9" fontWeight="600">{c.label}</text>
+          <rect x={c.x} y="414" width="110" height="28" rx="8" fill={c.empty ? '#fffbeb' : '#ffffff'} stroke={c.empty ? '#f59e0b' : '#e2e8f0'} />
+          {c.empty ? (
+            <text x={c.x + 12} y="433" fill="#cbd5e1" fontSize="11">0.00</text>
+          ) : (
+            <text x={c.x + 12} y="433" fill="#0f172a" fontSize="11" fontWeight="500">{c.value}</text>
+          )}
+        </g>
+      ))}
+
+      {/* Add another option (disabled) + hint */}
+      <text x="30" y="492" fill="#64748b" fontSize="10">Complete every option above to unlock adding another.</text>
+      <rect x="356" y="476" width="178" height="32" rx="9" fill="#f1f5f9" stroke="#e2e8f0" />
+      <text x="445" y="496" textAnchor="middle" fill="#94a3b8" fontSize="11" fontWeight="700">+ Add another option</text>
+    </svg>
+  );
+}
+
+function ServiceAddonsSvg() {
+  const options = [
+    { name: 'Hot stones', extra: '+£15.00 · +15 min' },
+    { name: 'Scalp massage', extra: '+£10.00' },
+    { name: 'Aromatherapy oils', extra: '+£5.00' },
+  ];
+  return (
+    <svg
+      viewBox="0 0 560 256"
+      className="mx-auto h-auto w-full max-w-[560px]"
+      role="img"
+      aria-label="The Add-ons card in the service editor, with Use existing group and Add group buttons, and one linked group called Optional extras set to pick any with a maximum of two. The group lists three options, each with an extra price and some with extra minutes, plus reorder, Edit and Remove controls."
+    >
+      {/* Outer card */}
+      <rect x="10" y="10" width="540" height="234" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+
+      {/* Header */}
+      <text x="30" y="40" fill="#0f172a" fontSize="13" fontWeight="700">Add-ons</text>
+      <text x="30" y="58" fill="#64748b" fontSize="10">Optional extras a client can add at booking time. Each group sets its own</text>
+      <text x="30" y="72" fill="#64748b" fontSize="10">rules: pick one, pick many, required, or optional.</text>
+
+      {/* Buttons */}
+      <rect x="296" y="26" width="124" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="358" y="43" textAnchor="middle" fill="#334155" fontSize="10" fontWeight="600">Use existing group</text>
+      <rect x="428" y="26" width="92" height="26" rx="8" fill="#00305C" />
+      <text x="474" y="43" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">+ Add group</text>
+
+      {/* Linked group row */}
+      <rect x="30" y="90" width="500" height="140" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="46" y="114" fill="#0f172a" fontSize="12" fontWeight="700">Optional extras</text>
+      <text x="46" y="132" fill="#64748b" fontSize="10">Pick any, max 2 · 3 options</text>
+
+      {/* Controls */}
+      <text x="350" y="119" fill="#94a3b8" fontSize="13">↑</text>
+      <text x="372" y="119" fill="#94a3b8" fontSize="13">↓</text>
+      <rect x="392" y="102" width="52" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="418" y="118" textAnchor="middle" fill="#334155" fontSize="10" fontWeight="600">Edit</text>
+      <rect x="452" y="102" width="68" height="24" rx="7" fill="#ffffff" stroke="#fecaca" />
+      <text x="486" y="118" textAnchor="middle" fill="#b91c1c" fontSize="10" fontWeight="600">Remove</text>
+
+      {/* Option list */}
+      {options.map((o, i) => {
+        const y = 160 + i * 24;
+        return (
+          <g key={o.name}>
+            <text x="46" y={y} fill="#334155" fontSize="10.5">{o.name}</text>
+            <text x="514" y={y} textAnchor="end" fill="#0f172a" fontSize="10" fontWeight="500">{o.extra}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function AddonGroupEditorSvg() {
+  return (
+    <svg
+      viewBox="0 0 560 632"
+      className="mx-auto h-auto w-full max-w-[560px]"
+      role="img"
+      aria-label="The Add an add-on group dialog: a Group name, a Prompt to client question, a Selection choice of Pick one or Pick multiple with Minimum and Maximum, a Hide from online booking page checkbox, and an Options list where each extra has a name, description, an extra price, extra minutes and an Active toggle, ending in Cancel and Add group buttons."
+    >
+      {/* Modal */}
+      <rect x="10" y="10" width="540" height="612" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="10" y="10" width="540" height="46" rx="14" fill="#f8fafc" />
+      <rect x="10" y="42" width="540" height="14" fill="#f8fafc" />
+      <text x="30" y="40" fill="#0f172a" fontSize="15" fontWeight="700">Add an add-on group</text>
+      <text x="522" y="40" textAnchor="end" fill="#64748b" fontSize="16" fontWeight="600">×</text>
+      <line x1="10" y1="56" x2="550" y2="56" stroke="#e2e8f0" strokeWidth="1" />
+
+      {/* Group name */}
+      <text x="30" y="80" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">GROUP NAME <tspan fill="#dc2626">*</tspan></text>
+      <rect x="30" y="88" width="500" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="44" y="108" fill="#0f172a" fontSize="11" fontWeight="500">Optional extras</text>
+      <text x="30" y="132" fill="#94a3b8" fontSize="9">Internal label. Shown to clients only if the prompt is blank.</text>
+
+      {/* Prompt to client */}
+      <text x="30" y="156" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">PROMPT TO CLIENT</text>
+      <rect x="30" y="164" width="500" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="44" y="184" fill="#0f172a" fontSize="11" fontWeight="500">Would you like any extras?</text>
+      <text x="30" y="208" fill="#94a3b8" fontSize="9">Shown above the options at booking. Falls back to the group name.</text>
+
+      {/* Selection */}
+      <text x="30" y="234" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">SELECTION</text>
+      <circle cx="46" cy="252" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="60" y="256" fill="#0f172a" fontSize="11">Pick one</text>
+      <circle cx="148" cy="252" r="6" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
+      <circle cx="148" cy="252" r="3" fill="#00305C" />
+      <text x="162" y="256" fill="#0f172a" fontSize="11" fontWeight="600">Pick multiple</text>
+
+      {/* Min / Max */}
+      <text x="30" y="291" fill="#64748b" fontSize="10">Minimum</text>
+      <rect x="96" y="277" width="50" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="121" y="294" textAnchor="middle" fill="#0f172a" fontSize="11">0</text>
+      <text x="166" y="291" fill="#64748b" fontSize="10">Maximum</text>
+      <rect x="236" y="277" width="50" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="261" y="294" textAnchor="middle" fill="#0f172a" fontSize="11">2</text>
+
+      {/* Hide from online */}
+      <rect x="30" y="314" width="14" height="14" rx="4" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="52" y="325" fill="#334155" fontSize="10">Hide from online booking page (staff-only)</text>
+      <line x1="30" y1="348" x2="530" y2="348" stroke="#f1f5f9" strokeWidth="1" />
+
+      {/* Options header */}
+      <text x="30" y="370" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">OPTIONS</text>
+      <rect x="436" y="356" width="94" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="483" y="372" textAnchor="middle" fill="#334155" fontSize="10" fontWeight="600">+ Add option</text>
+
+      {/* Option row 1 */}
+      <rect x="30" y="386" width="500" height="104" rx="10" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="44" y="396" width="360" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="56" y="412" fill="#0f172a" fontSize="10.5" fontWeight="500">Hot stones</text>
+      <rect x="44" y="424" width="360" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="56" y="440" fill="#64748b" fontSize="10">Smooth heated stones across the back.</text>
+      <text x="44" y="466" fill="#64748b" fontSize="9">Extra price (£)</text>
+      <rect x="132" y="454" width="56" height="20" rx="6" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="140" y="468" fill="#0f172a" fontSize="10">15.00</text>
+      <text x="202" y="466" fill="#64748b" fontSize="9">Extra minutes</text>
+      <rect x="284" y="454" width="44" height="20" rx="6" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="292" y="468" fill="#0f172a" fontSize="10">15</text>
+      <rect x="342" y="454" width="14" height="14" rx="4" fill="#00A0A4" />
+      <path d="M346 461 l3 3 l5 -6" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <text x="362" y="466" fill="#334155" fontSize="10">Active</text>
+      <text x="512" y="410" fill="#94a3b8" fontSize="14">×</text>
+
+      {/* Option row 2 */}
+      <rect x="30" y="500" width="500" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="44" y="510" width="360" height="24" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="56" y="526" fill="#0f172a" fontSize="10.5" fontWeight="500">Aromatherapy oils</text>
+      <text x="44" y="556" fill="#64748b" fontSize="9">Extra price (£)</text>
+      <rect x="132" y="544" width="56" height="20" rx="6" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="140" y="558" fill="#0f172a" fontSize="10">5.00</text>
+      <text x="202" y="556" fill="#64748b" fontSize="9">Extra minutes</text>
+      <rect x="284" y="544" width="44" height="20" rx="6" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="292" y="558" fill="#0f172a" fontSize="10">0</text>
+      <rect x="342" y="544" width="14" height="14" rx="4" fill="#00A0A4" />
+      <path d="M346 551 l3 3 l5 -6" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <text x="362" y="556" fill="#334155" fontSize="10">Active</text>
+      <text x="512" y="524" fill="#94a3b8" fontSize="14">×</text>
+
+      {/* Footer */}
+      <line x1="10" y1="582" x2="550" y2="582" stroke="#e2e8f0" strokeWidth="1" />
+      <rect x="346" y="590" width="80" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="386" y="608" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="600">Cancel</text>
+      <rect x="434" y="590" width="96" height="28" rx="8" fill="#00305C" />
+      <text x="482" y="608" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Add group</text>
+    </svg>
+  );
+}
+
 export const CATALOGUE_FIGURES: Record<string, { title: string; caption: string; node: ReactNode }> = {
   "services-editor": { title: "Add Service form", caption: "The service editor showing the core fields a guest booking depends on.", node: <ServicesEditorSvg /> },
   "services-flow": { title: "From service to booking page", caption: "How a service becomes bookable for guests in three steps.", node: <ServicesFlowSvg /> },
+  "service-booking-mode": { title: "How will clients book this service?", caption: "Pick one fixed offering for an identical booking every time, or multiple bookable options to let clients choose a version first.", node: <ServiceBookingModeSvg /> },
+  "service-variants": { title: "Bookable options", caption: "Build each option in turn (name, duration, buffer, price), then add the next. Add another unlocks once the current option is complete.", node: <ServiceVariantsSvg /> },
+  "service-addons": { title: "Add-ons", caption: "Optional extras grouped by question. Each group can be pick one or pick multiple, required or optional, with its own price and extra time.", node: <ServiceAddonsSvg /> },
+  "addon-group-editor": { title: "Add an add-on group", caption: "Name the group, ask the client a prompt, choose how many they can pick, then list each option with an extra price and extra minutes.", node: <AddonGroupEditorSvg /> },
   "classes-type": { title: "New class type", caption: "Create the template guests book: name, duration, capacity, calendar, and price.", node: <ClassesTypeSvg /> },
   "classes-schedule": { title: "Schedule classes", caption: "Put a class type onto real dates: one date, weekly, or custom dates.", node: <ClassesScheduleSvg /> },
   "classes-timetable": { title: "Upcoming sessions", caption: "Each scheduled session shows a booked-of-capacity count so you can see how full it is.", node: <ClassesTimetableSvg /> },

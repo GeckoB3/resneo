@@ -22,6 +22,7 @@ const createBodySchema = z
     revenue_share_percent: z.number().min(0).max(100).optional(),
     revenue_share_months: z.number().int().min(1).max(120).optional(),
     trial_days: z.number().int().min(MIN_SALES_TRIAL_DAYS).max(MAX_SALES_TRIAL_DAYS).optional(),
+    code: z.string().max(40).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.method === 'password' && (!data.password || data.password.length < 8)) {
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
       revenue_share_percent: body.revenue_share_percent,
       revenue_share_months: body.revenue_share_months,
       trial_days: body.trial_days,
+      custom_code: body.code,
     };
 
     if (body.method === 'password') {

@@ -87,7 +87,7 @@ export function SalesDashboard() {
   const [data, setData] = useState<SalesDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,13 +109,15 @@ export function SalesDashboard() {
     void load();
   }, [load]);
 
-  async function copyShareLink(link: string) {
+  async function copyValue(token: string, text: string) {
     try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(token);
+      // Only clear if this token is still the one showing, so a second copy within the window
+      // does not get its "copied" label cut short by an earlier button's timeout.
+      setTimeout(() => setCopied((cur) => (cur === token ? null : cur)), 2000);
     } catch {
-      // Clipboard unavailable (e.g. insecure context) — the link is still visible to copy manually.
+      // Clipboard unavailable (e.g. insecure context); the value stays visible to copy manually.
     }
   }
 
@@ -140,10 +142,14 @@ export function SalesDashboard() {
     );
   }
 
-  const { summary, bonus_ladder, codes, statements, attributions, salesperson } = data;
+  const { summary, bonus_ladder, codes, statements, attributions, salesperson, current_month } = data;
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.resneo.com';
-  const primaryCode = codes.find((c) => c.active)?.code ?? codes[0]?.code ?? '';
-  const shareLink = `${origin}/signup/choose-plan?sales=${encodeURIComponent(primaryCode)}`;
+  const linkForCode = (code: string) => `${origin}/signup/choose-plan?sales=${encodeURIComponent(code)}`;
+  const activeCodes = codes.filter((c) => c.active);
+  // Only ever surface an ACTIVE code here: an inactive code fails signup validation, so copying it
+  // (or its link) would hand out a dead code. The hero hides when there are no active codes.
+  const primaryCode = activeCodes[0]?.code ?? '';
+  const shareLink = linkForCode(primaryCode);
 
   const nextTier = bonus_ladder.next_tier;
   const prevThreshold = nextTier
@@ -178,18 +184,35 @@ export function SalesDashboard() {
           </div>
           {primaryCode && (
             <div className="shrink-0 rounded-2xl bg-white/10 p-4 backdrop-blur">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-300">Your code</p>
-              <p className="mt-1 font-mono text-xl font-bold tracking-wide text-white">{primaryCode}</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-300">
+                {activeCodes.length > 1 ? 'Your main code' : 'Your code'}
+              </p>
               <button
                 type="button"
-                onClick={() => void copyShareLink(shareLink)}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm transition-colors hover:bg-blue-50"
+                onClick={() => void copyValue('hero-code', primaryCode)}
+                title="Copy code"
+                className="mt-1 inline-flex items-center gap-2 font-mono text-xl font-bold tracking-wide text-white transition-colors hover:text-blue-200"
+              >
+                {primaryCode}
+                <span className="font-sans text-[10px] font-medium text-blue-200">
+                  {copied === 'hero-code' ? 'copied' : 'copy'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyValue('hero-link', shareLink)}
+                className="mt-3 flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm transition-colors hover:bg-blue-50"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
                 </svg>
-                {copied ? 'Copied!' : 'Copy signup link'}
+                {copied === 'hero-link' ? 'Copied!' : 'Copy signup link'}
               </button>
+              {activeCodes.length > 1 && (
+                <p className="mt-2 text-[11px] text-slate-300">
+                  You have {activeCodes.length} active codes. See and copy each one below.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -225,35 +248,51 @@ export function SalesDashboard() {
           {codes.length > 0 && (
             <div className="mt-4 border-t border-slate-100 pt-4">
               <p className="text-xs font-medium text-slate-500">Your codes &amp; free-trial offers</p>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Each code gives the venue a different free trial — pick the longer offer for prospects
-                leaving software with a long cancellation notice.
-              </p>
               <ul className="mt-3 space-y-2">
                 {codes.map((c) => (
                   <li
                     key={c.code}
-                    className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${
+                    className={`rounded-xl border px-3 py-2.5 ${
                       c.active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    <div className="min-w-0">
+                    <div className="flex items-center justify-between gap-3">
+                      {c.active ? (
+                        <button
+                          type="button"
+                          onClick={() => void copyValue(`code:${c.code}`, c.code)}
+                          title="Copy code"
+                          className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-blue-800 transition-colors hover:text-blue-900"
+                        >
+                          {c.code}
+                          <span className="font-sans text-[10px] font-medium text-blue-500">
+                            {copied === `code:${c.code}` ? 'copied' : 'copy'}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="font-mono text-xs font-semibold text-slate-400 line-through">{c.code}</span>
+                      )}
                       <span
-                        className={`font-mono text-xs font-semibold ${
-                          c.active ? 'text-blue-800' : 'text-slate-400 line-through'
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          c.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                         }`}
                       >
-                        {c.code}
+                        {c.active ? salesTrialRewardLabel(c.trial_days) : 'inactive'}
                       </span>
-                      {c.label && <p className="truncate text-[11px] text-slate-400">{c.label}</p>}
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                        c.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      {c.active ? salesTrialRewardLabel(c.trial_days) : 'inactive'}
-                    </span>
+                    {c.label && <p className="mt-1 truncate text-[11px] text-slate-400">{c.label}</p>}
+                    {c.active && (
+                      <button
+                        type="button"
+                        onClick={() => void copyValue(`link:${c.code}`, linkForCode(c.code))}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                        </svg>
+                        {copied === `link:${c.code}` ? 'Link copied!' : 'Copy signup link'}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -335,44 +374,67 @@ export function SalesDashboard() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-6 py-4">
           <h2 className="text-sm font-semibold text-slate-900">Monthly statements</h2>
-          <p className="text-xs text-slate-500">Finalised on the 1st of each month (UTC). Payment follows outside ResNeo.</p>
+          <p className="text-xs text-slate-500">
+            The top row is this month so far and updates as subscribers pay. Each month is finalised on the
+            1st (UTC), then paid outside ResNeo.
+          </p>
         </div>
-        {statements.length === 0 ? (
-          <div className="px-6 py-10 text-center">
-            <p className="text-sm text-slate-500">No statements yet — your first statement is generated after your first full month.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-5 py-3 font-medium">Month</th>
-                  <th className="px-5 py-3 font-medium">Signups</th>
-                  <th className="px-5 py-3 font-medium">Validated</th>
-                  <th className="px-5 py-3 font-medium">Lump sum</th>
-                  <th className="px-5 py-3 font-medium">Rev. share</th>
-                  <th className="px-5 py-3 font-medium">Bonus</th>
-                  <th className="px-5 py-3 font-medium">Subscribers</th>
-                  <th className="px-5 py-3 font-medium text-right">Total</th>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Month</th>
+                <th className="px-5 py-3 font-medium">Signups</th>
+                <th className="px-5 py-3 font-medium">Validated</th>
+                <th className="px-5 py-3 font-medium">Lump sum</th>
+                <th className="px-5 py-3 font-medium">Rev. share</th>
+                <th className="px-5 py-3 font-medium">Bonus</th>
+                <th className="px-5 py-3 font-medium">Subscribers</th>
+                <th className="px-5 py-3 font-medium text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              <tr key={`current-${current_month.period_month}`} className="bg-amber-50/50">
+                <td className="px-5 py-3.5 font-medium text-slate-900">
+                  <span className="flex items-center gap-2">
+                    {formatMonth(current_month.period_month)}
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                      In progress
+                    </span>
+                  </span>
+                </td>
+                <td className="px-5 py-3.5 text-slate-600">{current_month.signups_count}</td>
+                <td className="px-5 py-3.5 text-slate-600">{current_month.validated_count}</td>
+                <td className="px-5 py-3.5 text-slate-600">{formatGbp(current_month.lump_sum_pence)}</td>
+                <td className="px-5 py-3.5 text-slate-600">{formatGbp(current_month.revenue_share_pence)}</td>
+                <td className="px-5 py-3.5 text-slate-600">{formatGbp(current_month.bonus_pence)}</td>
+                <td className="px-5 py-3.5 text-slate-600">{current_month.active_subscribers_end}</td>
+                <td className="px-5 py-3.5 text-right font-semibold text-slate-900">
+                  {formatGbp(current_month.total_pence)}
+                </td>
+              </tr>
+              {statements.map((s) => (
+                <tr key={s.period_month} className="hover:bg-slate-50/60">
+                  <td className="px-5 py-3.5 font-medium text-slate-900">{formatMonth(s.period_month)}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{s.signups_count}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{s.validated_count}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.lump_sum_pence)}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.revenue_share_pence)}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.bonus_pence)}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{s.active_subscribers_end}</td>
+                  <td className="px-5 py-3.5 text-right font-semibold text-slate-900">{formatGbp(s.total_pence)}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {statements.map((s) => (
-                  <tr key={s.period_month} className="hover:bg-slate-50/60">
-                    <td className="px-5 py-3.5 font-medium text-slate-900">{formatMonth(s.period_month)}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{s.signups_count}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{s.validated_count}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.lump_sum_pence)}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.revenue_share_pence)}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{formatGbp(s.bonus_pence)}</td>
-                    <td className="px-5 py-3.5 text-slate-600">{s.active_subscribers_end}</td>
-                    <td className="px-5 py-3.5 text-right font-semibold text-slate-900">{formatGbp(s.total_pence)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))}
+              {statements.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-4 text-center text-xs text-slate-500">
+                    No finalised months yet. Your first statement is generated after this month closes.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Attributed signups */}

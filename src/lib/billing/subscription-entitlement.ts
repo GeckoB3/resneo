@@ -39,6 +39,29 @@ export function parseSubscriptionPeriodEndMs(iso: string | null | undefined): nu
 }
 
 /**
+ * Effective subscription status for display and filtering.
+ *
+ * A venue scheduled to cancel is stored as `'cancelling'` and keeps that label until its paid
+ * period ends, at which point Stripe's `customer.subscription.deleted` webhook is expected to flip
+ * it to `'cancelled'`. When that webhook is missed or late the row stays `'cancelling'` even though
+ * the period end is in the past — so the stored status alone cannot be trusted. Once
+ * `subscription_current_period_end` is in the past, a `'cancelling'` venue has effectively cancelled
+ * and should read as `'cancelled'`. A `'cancelling'` venue with a future or unknown period end keeps
+ * its label. All other statuses pass through unchanged.
+ */
+export function effectivePlanStatus(
+  planStatusRaw: string | null | undefined,
+  subscriptionCurrentPeriodEnd: string | null | undefined,
+  nowMs: number = Date.now(),
+): string {
+  const planStatus = normalizePlanStatus(planStatusRaw);
+  if (planStatus !== 'cancelling') return planStatus;
+  const endMs = parseSubscriptionPeriodEndMs(subscriptionCurrentPeriodEnd);
+  if (endMs !== null && endMs <= nowMs) return 'cancelled';
+  return 'cancelling';
+}
+
+/**
  * True when the venue still has paid-through access after a cancellation request or Stripe `canceled`
  * object whose period end is still in the future.
  */
@@ -63,8 +86,9 @@ export function isExpiredCancelledAccess(
   subscriptionCurrentPeriodEnd: string | null | undefined,
   nowMs: number,
 ): boolean {
-  const planStatus = normalizePlanStatus(planStatusRaw);
-  if (planStatus !== 'cancelled') return false;
+  // A 'cancelling' venue whose period end has passed (e.g. a missed Stripe `customer.subscription.deleted`
+  // webhook left it stuck) is effectively cancelled, exactly like a 'cancelled' venue past its paid-through date.
+  if (effectivePlanStatus(planStatusRaw, subscriptionCurrentPeriodEnd, nowMs) !== 'cancelled') return false;
   if (hasPaidAccessUntilPeriodEnd(planStatusRaw, subscriptionCurrentPeriodEnd, nowMs)) return false;
   return true;
 }
@@ -89,11 +113,15 @@ export function resolveVenueSubscriptionEntitlement(
     return { kind: 'active_like' };
   }
 
-  if (planStatus === 'cancelling') {
+  // 'cancelling' (scheduled) and 'cancelled' both keep paid access until the period end, then expire.
+  // A 'cancelling' row stuck past its period end (missed Stripe `customer.subscription.deleted` webhook)
+  // is treated as effectively cancelled and loses access, matching what /super displays. A 'cancelling'
+  // row with no stored period end keeps access — never block on missing data.
+  const effective = effectivePlanStatus(fields.plan_status, fields.subscription_current_period_end, nowMs);
+  if (effective === 'cancelling') {
     return { kind: 'active_like' };
   }
-
-  if (planStatus === 'cancelled') {
+  if (effective === 'cancelled') {
     if (hasPaidAccessUntilPeriodEnd(fields.plan_status, fields.subscription_current_period_end, nowMs)) {
       return { kind: 'active_like' };
     }

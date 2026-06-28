@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 import { recordPlatformAuditEvent } from '@/lib/platform/audit';
 import { planDisplayName } from '@/lib/pricing-constants';
+import { effectivePlanStatus } from '@/lib/billing/subscription-entitlement';
 
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
 
       if (error) throw new Error(error.message);
 
+      const nowMs = Date.now();
       csv = toCsv(
         [
           'Venue', 'Slug', 'Email', 'Phone', 'Plan', 'Status', 'Billing source',
@@ -62,7 +64,12 @@ export async function GET(req: NextRequest) {
           v.email,
           v.phone,
           planDisplayName(v.pricing_tier as string | null),
-          v.plan_status,
+          // Effective status: a venue stuck at 'cancelling' past its period end exports as 'cancelled'.
+          effectivePlanStatus(
+            v.plan_status as string | null,
+            v.subscription_current_period_end as string | null,
+            nowMs,
+          ),
           v.billing_access_source ?? 'stripe',
           (v.onboarding_completed as boolean) ? 'yes' : 'no',
           Array.isArray(v.staff) ? v.staff.length : 0,

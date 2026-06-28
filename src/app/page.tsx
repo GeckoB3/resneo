@@ -484,22 +484,6 @@ export default function Home() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <div className="flex flex-col items-center gap-3 sm:items-start">
-            {/* Official Apple App Store badge (hosted by Apple's marketing tools). */}
-            <a
-              href="https://apps.apple.com/gb/app/resneo/id6780271109?itscg=30200&itsct=apps_box_badge&mttnsubad=6780271109"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Download ResNeo on the App Store"
-              className="inline-block transition-transform hover:-translate-y-0.5"
-            >
-              <img
-                src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1782432000"
-                alt="Download on the App Store"
-                width={124}
-                height={41}
-                style={{ width: 124, height: 41, objectFit: "contain" }}
-              />
-            </a>
             <p className="max-w-xl text-center leading-snug sm:text-left">
               &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
             </p>

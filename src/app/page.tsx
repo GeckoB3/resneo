@@ -7,6 +7,7 @@ import { normalizePublicBaseUrl } from "@/lib/public-base-url";
 import HomeFaq from "@/components/home/HomeFaq";
 import { PricingSection } from "@/components/home/PricingSection";
 import { HomeReveal } from "@/components/home/HomeReveal";
+import { AppShowcase } from "@/components/home/AppShowcase";
 import {
   BookingConfirmedCard,
   BookingFlowMock,
@@ -14,8 +15,6 @@ import {
   DepositCard,
   ReminderMock,
 } from "@/components/home/HomeGraphics";
-import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
-import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 
 /**
  * "Book a demo" embed: the ResNeo Demo venue (resneodemo@resneo.com) booking widget,
@@ -25,41 +24,7 @@ const demoPublicOrigin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL
 const demoEmbedSrc = `${demoPublicOrigin}/embed/resneo-demo?start=service`;
 const demoResizeScriptSrc = `${demoPublicOrigin}/embed/resize.js`;
 
-/** Secondary platform capabilities shown as a compact icon grid. */
-const platformFeatures = [
-  {
-    title: "Deposit collection",
-    description: `Per-head deposits via Stripe Connect. ${RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD}`,
-    icon: CreditCardIcon,
-  },
-  {
-    title: "Smart communications",
-    description:
-      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS.",
-    icon: ChatIcon,
-  },
-  {
-    title: "Real-time dashboard",
-    description:
-      "Bookings, calendars, client records, and reporting in one place, updated live as bookings come in.",
-    icon: DashboardIcon,
-  },
-  {
-    title: "Easy setup",
-    description: "Embed the booking widget on your website or print a QR code. Up and running in minutes.",
-    icon: BoltIcon,
-  },
-  {
-    title: "Any bookable business",
-    description: "Barbers, salons, studios, clinics, courts, escape rooms, and restaurants. If it's bookable, ResNeo handles it.",
-    icon: GridIcon,
-  },
-  {
-    title: "Honest, human support",
-    description: "Real people who know the product, with no commissions and no hidden fees.",
-    icon: LifebuoyIcon,
-  },
-];
+
 
 const businessTypes = [
   "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
@@ -273,23 +238,8 @@ export default function Home() {
             </HomeReveal>
           </div>
 
-          {/* Secondary capabilities */}
-          <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {platformFeatures.map((f, i) => (
-              <HomeReveal key={f.title} delay={(i % 3) * 70}>
-                <div className="group h-full rounded-2xl border border-slate-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
-                    <f.icon />
-                  </div>
-                  <h3 className="mt-4 text-base font-semibold text-slate-900">{f.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-500">{f.description}</p>
-                </div>
-              </HomeReveal>
-            ))}
-          </div>
-          <p className="mx-auto mt-8 max-w-2xl text-center text-xs leading-relaxed text-slate-400">
-            {STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}
-          </p>
+          {/* App showcase */}
+          <AppShowcase />
         </div>
       </section>
 
@@ -533,9 +483,27 @@ export default function Home() {
       {/* ── Footer ──────────────────────────────────────────── */}
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-          <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-          </p>
+          <div className="flex flex-col items-center gap-3 sm:items-start">
+            {/* Official Apple App Store badge (hosted by Apple's marketing tools). */}
+            <a
+              href="https://apps.apple.com/gb/app/resneo/id6780271109?itscg=30200&itsct=apps_box_badge&mttnsubad=6780271109"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Download ResNeo on the App Store"
+              className="inline-block transition-transform hover:-translate-y-0.5"
+            >
+              <img
+                src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1782432000"
+                alt="Download on the App Store"
+                width={124}
+                height={41}
+                style={{ width: 124, height: 41, objectFit: "contain" }}
+              />
+            </a>
+            <p className="max-w-xl text-center leading-snug sm:text-left">
+              &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
+            </p>
+          </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
             <Link href="/solutions" className="transition-colors hover:text-slate-900">Solutions</Link>
             <Link href="/about" className="transition-colors hover:text-slate-900">About</Link>
@@ -576,50 +544,4 @@ function BentoTile({
   );
 }
 
-function CreditCardIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
-    </svg>
-  );
-}
 
-function ChatIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
-    </svg>
-  );
-}
-
-function DashboardIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-    </svg>
-  );
-}
-
-function BoltIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
-    </svg>
-  );
-}
-
-function GridIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
-    </svg>
-  );
-}
-
-function LifebuoyIcon() {
-  return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.712 4.33a9.027 9.027 0 0 1 1.652 1.306c.51.51.944 1.064 1.306 1.652M16.712 4.33l-3.448 4.138m3.448-4.138a9.014 9.014 0 0 0-9.424 0M19.67 7.288l-4.138 3.448m4.138-3.448a9.014 9.014 0 0 1 0 9.424m-4.138-5.976a3.736 3.736 0 0 0-.88-1.388 3.737 3.737 0 0 0-1.388-.88m2.268 2.268a3.765 3.765 0 0 1 0 2.528m-2.268-4.796a3.765 3.765 0 0 0-2.528 0m4.796 4.796c-.181.506-.475.96-.88 1.388a3.736 3.736 0 0 1-1.388.88m2.268-2.268 4.138 3.448m0 0a9.027 9.027 0 0 1-1.306 1.652c-.51.51-1.064.944-1.652 1.306m0 0-3.448-4.138m3.448 4.138a9.014 9.014 0 0 1-9.424 0m5.976-4.138a3.765 3.765 0 0 1-2.528 0m0 0a3.736 3.736 0 0 1-1.388-.88 3.737 3.737 0 0 1-.88-1.388m2.268 2.268L7.288 19.67m0 0a9.024 9.024 0 0 1-1.652-1.306 9.027 9.027 0 0 1-1.306-1.652m0 0 4.138-3.448M4.33 16.712a9.014 9.014 0 0 1 0-9.424m4.138 5.976a3.765 3.765 0 0 1 0-2.528m0 0c.181-.506.475-.96.88-1.388a3.736 3.736 0 0 1 1.388-.88m-2.268 2.268L4.33 7.288m6.406 1.18L7.288 4.33m0 0a9.024 9.024 0 0 0-1.652 1.306A9.025 9.025 0 0 0 4.33 7.288" />
-    </svg>
-  );
-}

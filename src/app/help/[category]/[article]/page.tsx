@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { AppointmentsHelpArticleBody } from '@/components/help/AppointmentsHelpArticleBody';
+import { GettingStartedHelpArticleBody } from '@/components/help/GettingStartedHelpArticleBody';
 import { HelpArticleContent } from '@/components/help/HelpArticleContent';
 import { HelpBreadcrumb } from '@/components/help/HelpBreadcrumb';
 import { isHelpCategorySlugVisible } from '@/lib/help/filter-help-for-audience';
@@ -61,6 +62,8 @@ export default async function HelpArticlePage({ params }: { params: Promise<{ ca
       >
         {isAppointments ? (
           <AppointmentsHelpArticleBody markdown={articleMarkdown} />
+        ) : isGettingStarted ? (
+          <GettingStartedHelpArticleBody markdown={articleMarkdown} />
         ) : (
           <HelpArticleContent markdown={articleMarkdown} />
         )}

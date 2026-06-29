@@ -3,6 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { describeStripeConnectError } from '@/lib/stripe/connect-error-message';
 import { z } from 'zod';
 
 interface StripeConnectPostResponse {
@@ -22,27 +23,6 @@ const postBodySchema = z
     refresh_path: z.string().optional(),
   })
   .optional();
-
-/**
- * Turn a thrown error into an admin-facing message. Stripe surfaces actionable
- * config/credential problems (Connect not enabled, invalid/rotated API key,
- * unknown account, etc.) in `error.message`. These routes are operator-facing,
- * so showing the real reason beats a generic 500 that hides the cause.
- */
-function describeStripeRouteError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    const e = err as { type?: unknown; message?: unknown };
-    if (
-      typeof e.type === 'string' &&
-      e.type.startsWith('Stripe') &&
-      typeof e.message === 'string' &&
-      e.message.trim()
-    ) {
-      return `Stripe error: ${e.message}`;
-    }
-  }
-  return 'Internal server error';
-}
 
 /** POST /api/venue/stripe-connect - create or resume Stripe Connect onboarding. */
 export async function POST(request: NextRequest) {
@@ -128,7 +108,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url: accountLink.url } satisfies StripeConnectPostResponse);
   } catch (err) {
     console.error('POST /api/venue/stripe-connect failed:', err);
-    return NextResponse.json({ error: describeStripeRouteError(err) }, { status: 500 });
+    return NextResponse.json({ error: describeStripeConnectError(err) }, { status: 500 });
   }
 }
 
@@ -165,6 +145,6 @@ export async function GET(request: NextRequest) {
     } satisfies StripeConnectGetResponse);
   } catch (err) {
     console.error('GET /api/venue/stripe-connect failed:', err);
-    return NextResponse.json({ error: describeStripeRouteError(err) }, { status: 500 });
+    return NextResponse.json({ error: describeStripeConnectError(err) }, { status: 500 });
   }
 }

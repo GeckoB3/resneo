@@ -1,19 +1,17 @@
 /**
- * Map an error thrown while starting Stripe Connect onboarding into a clear,
- * admin-facing message.
+ * Map an error thrown while starting Stripe Connect onboarding into a short,
+ * user-facing message. Live venue admins see these, so they stay deliberately
+ * brief. The route logs the full Stripe error server-side, and the short `ref`
+ * token in each message is enough for us to identify the cause from a report.
  *
- * Stripe surfaces actionable config/credential problems (invalid/rotated API key,
- * unknown account, etc.) in `error.message`, and these routes are operator-facing,
- * so by default we show the real reason rather than a generic 500.
- *
- * One case gets special handling: Stripe blocks creating LIVE connected accounts
- * until the platform profile's "responsibilities of managing losses" step is
- * completed AND Stripe has finished reviewing it. Both states surface the same raw
- * error pointing at the platform profile, which is confusing for an admin who has
- * already completed it, so we replace it with one plain message that covers both.
+ * The platform-profile / managing-losses case gets its own ref because Stripe
+ * returns it both when that step is incomplete and while it is under review.
  */
 export const STRIPE_PLATFORM_PROFILE_MESSAGE =
-  'Stripe is still getting your account ready for live payments. If you have just completed your Stripe platform profile, Stripe is reviewing it (usually a day or two) and you will be able to connect as soon as they approve it. If you have not completed it yet, finish the managing losses step in your Stripe settings at https://dashboard.stripe.com/settings/connect/platform-profile.';
+  'Payment setup is not ready yet. Please try again later. (ref: connect-not-ready)';
+
+export const STRIPE_GENERIC_ERROR_MESSAGE =
+  'We could not start payment setup. Please try again. (ref: connect-stripe)';
 
 /** True when a Stripe message is the platform-profile / managing-losses gate (incomplete or under review). */
 export function isPlatformProfileError(message: string): boolean {
@@ -37,7 +35,7 @@ export function describeStripeConnectError(err: unknown): string {
       if (isPlatformProfileError(e.message)) {
         return STRIPE_PLATFORM_PROFILE_MESSAGE;
       }
-      return `Stripe error: ${e.message}`;
+      return STRIPE_GENERIC_ERROR_MESSAGE;
     }
   }
   return 'Internal server error';

@@ -121,12 +121,29 @@ export async function POST(request: Request) {
           onboarding_completed: false,
           founding_free_period_ends_at: foundingEnd.toISOString(),
           email: ownerEmail,
+          // Idempotency key for the founding path (no Stripe customer id to dedupe on).
+          // Backed by venues_founding_creator_unique so a double-submit fails with 23505.
+          created_by_user_id: user.id,
           daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
         })
         .select('id')
         .single();
 
       if (venueError || !venue) {
+        // A concurrent founding submit won the race (venues_founding_creator_unique → 23505).
+        // Resolve to the already-created founding venue instead of erroring or double-creating.
+        if (venueError?.code === '23505') {
+          const { data: racedVenue } = await admin
+            .from('venues')
+            .select('id')
+            .eq('created_by_user_id', user.id)
+            .eq('pricing_tier', 'founding')
+            .maybeSingle();
+          if (racedVenue) {
+            await clearSignupPendingUserMetadata(admin, user.id);
+            return NextResponse.json({ redirect_url: '/onboarding' });
+          }
+        }
         return NextResponse.json(
           { error: 'Failed to create venue: ' + (venueError?.message ?? 'unknown') },
           { status: 500 },

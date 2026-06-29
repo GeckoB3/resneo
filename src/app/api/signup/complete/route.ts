@@ -13,6 +13,7 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     const { data: existingStaff } = await admin
       .from('staff')
       .select('venue_id')
-      .ilike('email', (user.email ?? '').toLowerCase().trim())
+      .ilike('email', escapeLikePattern((user.email ?? '').toLowerCase().trim()))
       .order('venue_id', { ascending: true })
       .limit(10);
 

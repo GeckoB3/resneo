@@ -133,6 +133,88 @@ describe('resolvePostLoginDestination — no active subscription (existing behav
   });
 });
 
+describe('resolvePostLoginDestination — signup resume (pendingSignup)', () => {
+  it('resumes a payment-ready, venue-less user to /signup/payment', async () => {
+    const admin = makeAdmin({});
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: 'appointments', businessType: null },
+      }),
+    ).resolves.toBe('/signup/payment');
+  });
+
+  it('resumes to /signup/payment even when the user already has a guest account', async () => {
+    const admin = makeAdmin({ guestCount: 1 });
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: 'plus', businessType: null },
+      }),
+    ).resolves.toBe('/signup/payment');
+  });
+
+  it('sends a partial selection (restaurant, no business type) to /signup/business-type', async () => {
+    const admin = makeAdmin({ guestCount: 1 });
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: 'restaurant', businessType: null },
+      }),
+    ).resolves.toBe('/signup/business-type');
+  });
+
+  it('does NOT resume a user who already finished (active subscription wins)', async () => {
+    const admin = makeAdmin({ staffVenueIds: ['v1'], venues: { v1: ACTIVE } });
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: 'appointments', businessType: null },
+      }),
+    ).resolves.toBe('/dashboard');
+  });
+
+  it('does NOT resume a user who already has a venue (no stale yank into signup)', async () => {
+    const admin = makeAdmin({ staffVenueIds: ['v1'], venues: { v1: EXPIRED } });
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: 'appointments', businessType: null },
+      }),
+    ).resolves.toBe('/dashboard');
+  });
+
+  it('ignores junk pending metadata and falls back to /account', async () => {
+    const admin = makeAdmin({});
+    await expect(
+      resolvePostLoginDestination({
+        ...base,
+        admin,
+        pendingSignup: { plan: null, businessType: null },
+      }),
+    ).resolves.toBe('/account');
+  });
+
+  it('honours an explicit /signup resume next for a venue-less user', async () => {
+    const admin = makeAdmin({ guestCount: 1 });
+    await expect(
+      resolvePostLoginDestination({ ...base, admin, rawNext: '/signup/payment' }),
+    ).resolves.toBe('/signup/payment');
+  });
+
+  it('does NOT honour an explicit /signup next once the user has a venue', async () => {
+    const admin = makeAdmin({ staffVenueIds: ['v1'], venues: { v1: ACTIVE } });
+    await expect(
+      resolvePostLoginDestination({ ...base, admin, rawNext: '/signup/payment' }),
+    ).resolves.toBe('/dashboard');
+  });
+});
+
 describe('resolvePostLoginDestination — explicit intent and platform roles', () => {
   it('honours an explicit ?next= even for an active subscriber', async () => {
     const admin = makeAdmin({ staffVenueIds: ['v1'], venues: { v1: ACTIVE } });

@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveAuthIdentity } from '@/lib/auth/resolve-auth-identity';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
 import { isPlatformSuperuser, isPlatformRoleInJwt } from '@/lib/platform-auth';
 import {
@@ -123,7 +124,7 @@ async function resolveStaffIdentityUncached(
   const { data: rows, error } = await admin
     .from('staff')
     .select('id, venue_id, email, role, user_id')
-    .ilike('email', normalised)
+    .ilike('email', escapeLikePattern(normalised))
     .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
@@ -335,7 +336,7 @@ export async function resolveStaffVenueIdForAuthenticatedUser(
   const { data: byEmail, error: emailErr } = await admin
     .from('staff')
     .select('venue_id')
-    .ilike('email', normalised)
+    .ilike('email', escapeLikePattern(normalised))
     .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
@@ -374,7 +375,7 @@ export async function authenticatedUserHasStaffMembership(
   const { count: byEmail } = await admin
     .from('staff')
     .select('id', { count: 'exact', head: true })
-    .ilike('email', normalised)
+    .ilike('email', escapeLikePattern(normalised))
     .is('revoked_at', null);
 
   return (byEmail ?? 0) > 0;

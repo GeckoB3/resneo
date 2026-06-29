@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { redirect } from 'next/navigation';
 import { isSalesAgent } from '@/lib/sales/auth';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 
 export default async function ChooseDestinationPage() {
   const supabase = await createClient();
@@ -26,12 +27,12 @@ export default async function ChooseDestinationPage() {
       ? admin
           .from('staff')
           .select('id', { count: 'exact', head: true })
-          .ilike('email', emailNorm)
+          .ilike('email', escapeLikePattern(emailNorm))
           .is('revoked_at', null)
       : Promise.resolve({ count: 0 }),
     admin.from('guests').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
     emailNorm
-      ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', emailNorm)
+      ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', escapeLikePattern(emailNorm))
       : Promise.resolve({ count: 0 }),
   ]);
 

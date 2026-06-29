@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { isSalesAgent } from '@/lib/sales/auth';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { SalesSidebar } from './SalesSidebar';
 
 export default async function SalesLayout({ children }: { children: React.ReactNode }) {
@@ -41,11 +42,11 @@ export default async function SalesLayout({ children }: { children: React.ReactN
         ? admin
             .from('staff')
             .select('id', { count: 'exact', head: true })
-            .ilike('email', emailNorm)
+            .ilike('email', escapeLikePattern(emailNorm))
             .is('revoked_at', null)
         : Promise.resolve({ count: 0 }),
       emailNorm
-        ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', emailNorm)
+        ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', escapeLikePattern(emailNorm))
         : Promise.resolve({ count: 0 }),
     ]);
     displayName = (sp as { name: string | null } | null)?.name ?? null;

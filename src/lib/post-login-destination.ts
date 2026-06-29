@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { resolveAuthNextPath, isPublicBookingAuthReturnPath } from '@/lib/safe-auth-redirect';
+import { resolveAuthNextPath, isPublicBookingAuthReturnPath, isSignupResumePath } from '@/lib/safe-auth-redirect';
 import { SET_PASSWORD_PATH } from '@/lib/auth-link';
 import { resolveVenueSubscriptionEntitlement } from '@/lib/billing/subscription-entitlement';
+import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 
 export interface PostLoginDestinationInput {
   admin: SupabaseClient;
@@ -14,6 +16,13 @@ export interface PostLoginDestinationInput {
   isSalesAgent?: boolean;
   /** When true, caller should send user to set-password first (caller wraps next). */
   needsSetPassword: boolean;
+  /**
+   * Durable in-progress signup selection from the auth user's `user_metadata`
+   * (see {@link readSignupPendingFromMetadata}). When the user has chosen a plan
+   * but has not finished paying (no venue / no active subscription yet), this is
+   * what lets login resume the funnel instead of stranding them on /account.
+   */
+  pendingSignup?: { plan: string | null; businessType: string | null };
 }
 
 /**
@@ -74,12 +83,12 @@ export async function resolvePostLoginDestination(
         ? admin
             .from('staff')
             .select('id', { count: 'exact', head: true })
-            .ilike('email', emailNorm)
+            .ilike('email', escapeLikePattern(emailNorm))
             .is('revoked_at', null)
         : Promise.resolve({ count: 0 }),
       admin.from('guests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       emailNorm
-        ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', emailNorm)
+        ? admin.from('guests').select('id', { count: 'exact', head: true }).ilike('email', escapeLikePattern(emailNorm))
         : Promise.resolve({ count: 0 }),
     ]);
 
@@ -119,7 +128,7 @@ export async function resolvePostLoginDestination(
     admin
       .from('staff')
       .select('id, venue_id')
-      .ilike('email', emailNorm)
+      .ilike('email', escapeLikePattern(emailNorm))
       .is('revoked_at', null)
       .limit(5),
   ]);
@@ -152,7 +161,7 @@ export async function resolvePostLoginDestination(
       ? admin
           .from('guests')
           .select('id', { count: 'exact', head: true })
-          .ilike('email', emailNorm)
+          .ilike('email', escapeLikePattern(emailNorm))
       : Promise.resolve({ count: 0 }),
     venueIds.length
       ? admin
@@ -201,6 +210,24 @@ export async function resolvePostLoginDestination(
       return '/auth/choose-destination';
     }
     return '/dashboard';
+  }
+
+  // Resume an in-progress signup. A user who created an account and chose a plan
+  // but never finished paying has no venue and no active subscription (we are past
+  // the hasActiveSubscription block, and !hasStaff means no venue). Route them back
+  // into the funnel rather than stranding them on /account. This must win over the
+  // guest -> /account and default -> /account fall-throughs below, but never over an
+  // active subscription (handled above) or an explicit caller next (handled earlier).
+  if (!hasStaff) {
+    // Honour an explicit signup resume target carried by a link
+    // (e.g. /login?redirectTo=/signup/payment or a branded magic link), which the
+    // generic next-allowlist above intentionally does not cover.
+    if (callerProvidedNext && isSignupResumePath(next)) return next;
+    if (input.pendingSignup) {
+      const { plan, businessType } = input.pendingSignup;
+      if (isSignupPaymentReady(plan, businessType)) return '/signup/payment';
+      if (plan) return '/signup/business-type';
+    }
   }
 
   if (pref === 'account') return '/account';

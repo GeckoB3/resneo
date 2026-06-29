@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { getBusinessConfig } from '@/lib/business-config';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
@@ -44,7 +45,7 @@ const provisionBodySchema = z
   });
 
 async function staffEmailExists(admin: ReturnType<typeof getSupabaseAdminClient>, email: string): Promise<boolean> {
-  const { data, error } = await admin.from('staff').select('id').ilike('email', email).limit(1);
+  const { data, error } = await admin.from('staff').select('id').ilike('email', escapeLikePattern(email)).limit(1);
   if (error) {
     console.error('[platform/provision-venue] staff lookup failed:', error);
     return true;

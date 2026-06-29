@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMagicLinkConfirmNextQuery,
+  isSignupResumePath,
   resolveAuthNextPath,
   sanitizeAuthNextPath,
   sanitizeMagicLinkNextPath,
@@ -27,6 +28,7 @@ describe('sanitizeMagicLinkNextPath', () => {
     expect(sanitizeMagicLinkNextPath('/dashboard/reports')).toBe('/dashboard/reports');
     expect(sanitizeMagicLinkNextPath('/account')).toBe('/account');
     expect(sanitizeMagicLinkNextPath('/account/bookings')).toBe('/account/bookings');
+    expect(sanitizeMagicLinkNextPath('/signup/payment')).toBe('/signup/payment');
     expect(sanitizeMagicLinkNextPath('/book/my-venue')).toBe('/book/my-venue');
     expect(sanitizeMagicLinkNextPath('/book/my-venue?tab=classes')).toBe('/book/my-venue?tab=classes');
     expect(sanitizeMagicLinkNextPath('/embed/my-venue')).toBe('/embed/my-venue');
@@ -43,6 +45,21 @@ describe('resolveAuthNextPath', () => {
   it('unwraps callback next query for booking pages', () => {
     expect(resolveAuthNextPath('/auth/callback?next=%2Fbook%2Fmy-venue')).toBe('/book/my-venue');
     expect(resolveAuthNextPath('/book/my-venue?tab=classes')).toBe('/book/my-venue?tab=classes');
+  });
+});
+
+describe('isSignupResumePath', () => {
+  it('matches the resumable signup funnel steps', () => {
+    expect(isSignupResumePath('/signup/payment')).toBe(true);
+    expect(isSignupResumePath('/signup/booking-models')).toBe(true);
+    expect(isSignupResumePath('/signup/business-type')).toBe(true);
+    expect(isSignupResumePath('/signup/plan')).toBe(true);
+    expect(isSignupResumePath('/signup/payment?x=1')).toBe(true);
+  });
+  it('rejects non-resume paths', () => {
+    expect(isSignupResumePath('/signup')).toBe(false);
+    expect(isSignupResumePath('/dashboard')).toBe(false);
+    expect(isSignupResumePath('/signup/success')).toBe(false);
   });
 });
 

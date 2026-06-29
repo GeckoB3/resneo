@@ -6,6 +6,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sanitizeAuthNextPath, resolveAuthNextPath } from '@/lib/safe-auth-redirect';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
+import { readSignupPendingFromMetadata } from '@/lib/signup-pending-selection';
 
 function getBaseUrl(requestUrl: string): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
@@ -69,6 +70,7 @@ export async function GET(request: Request) {
         rawNext: fallbackNext,
         isPlatformSuperuser: isSuper,
         needsSetPassword,
+        pendingSignup: readSignupPendingFromMetadata(meta),
       });
 
       destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper);

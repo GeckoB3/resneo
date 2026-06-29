@@ -23,6 +23,27 @@ const postBodySchema = z
   })
   .optional();
 
+/**
+ * Turn a thrown error into an admin-facing message. Stripe surfaces actionable
+ * config/credential problems (Connect not enabled, invalid/rotated API key,
+ * unknown account, etc.) in `error.message`. These routes are operator-facing,
+ * so showing the real reason beats a generic 500 that hides the cause.
+ */
+function describeStripeRouteError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const e = err as { type?: unknown; message?: unknown };
+    if (
+      typeof e.type === 'string' &&
+      e.type.startsWith('Stripe') &&
+      typeof e.message === 'string' &&
+      e.message.trim()
+    ) {
+      return `Stripe error: ${e.message}`;
+    }
+  }
+  return 'Internal server error';
+}
+
 /** POST /api/venue/stripe-connect - create or resume Stripe Connect onboarding. */
 export async function POST(request: NextRequest) {
   try {
@@ -70,7 +91,9 @@ export async function POST(request: NextRequest) {
       const account = await stripe.accounts.create({
         type: 'express',
         country: 'GB',
-        email: staff.email,
+        // Stripe rejects an empty-string email (StripeInvalidRequestError: email_invalid).
+        // Omit it when blank so onboarding still starts; Stripe will collect it.
+        email: staff.email?.trim() || undefined,
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
@@ -105,7 +128,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url: accountLink.url } satisfies StripeConnectPostResponse);
   } catch (err) {
     console.error('POST /api/venue/stripe-connect failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: describeStripeRouteError(err) }, { status: 500 });
   }
 }
 
@@ -142,6 +165,6 @@ export async function GET(request: NextRequest) {
     } satisfies StripeConnectGetResponse);
   } catch (err) {
     console.error('GET /api/venue/stripe-connect failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: describeStripeRouteError(err) }, { status: 500 });
   }
 }

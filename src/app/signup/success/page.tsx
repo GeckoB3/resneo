@@ -14,8 +14,14 @@ export default function SignupSuccessPage() {
     sessionId ? null : 'No session ID found. Please try again.',
   );
 
+  // Bumping `attempt` re-runs the completion effect. Provisioning is idempotent
+  // (it re-checks existing venue/staff), so "Try again" safely re-runs
+  // /api/signup/complete rather than starting a SECOND paid checkout.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     if (!sessionId) return;
+    let cancelled = false;
 
     async function completeSignup(sid: string) {
       try {
@@ -26,6 +32,7 @@ export default function SignupSuccessPage() {
         });
 
         const data = await res.json();
+        if (cancelled) return;
 
         if (!res.ok) {
           setStatus('error');
@@ -38,20 +45,20 @@ export default function SignupSuccessPage() {
         clearReferralCodeCookie();
         clearSalesCodeCookie();
 
-        if (data.redirect_url) {
-          router.push(data.redirect_url);
-          return;
-        }
-
-        router.push('/onboarding');
+        router.push(data.redirect_url || '/onboarding');
       } catch {
-        setStatus('error');
-        setError('Network error. Please refresh the page.');
+        if (!cancelled) {
+          setStatus('error');
+          setError('Network error. Please refresh the page.');
+        }
       }
     }
 
     void completeSignup(sessionId);
-  }, [sessionId, router]);
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, router, attempt]);
 
   if (status === 'error') {
     return (
@@ -66,7 +73,15 @@ export default function SignupSuccessPage() {
           <p className="mt-2 text-sm text-slate-500">{error}</p>
           <button
             type="button"
-            onClick={() => router.push('/signup/payment')}
+            onClick={() => {
+              if (sessionId) {
+                setStatus('loading');
+                setError(null);
+                setAttempt((n) => n + 1);
+              } else {
+                router.push('/signup/payment');
+              }
+            }}
             className="mt-6 rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
           >
             Try again

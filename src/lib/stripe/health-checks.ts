@@ -112,6 +112,56 @@ export async function checkAccount(client: Stripe): Promise<AccountCheck> {
 }
 
 // ---------------------------------------------------------------------------
+// Connect (can venues onboard for payments?)
+// ---------------------------------------------------------------------------
+
+export interface ConnectCheck {
+  severity: Severity;
+  /** Connect API reachable in this mode (the platform can list connected accounts). */
+  enabled: boolean;
+  /** Whether at least one connected account already exists (null when the probe failed). */
+  has_connected_accounts: boolean | null;
+  error: string | null;
+  issues: string[];
+}
+
+/**
+ * Passive Connect probe: confirms the platform can talk to the Connect API in the
+ * current key mode. Connect is configured per-mode, so this catches the common
+ * live-only gap where Connect was enabled in test but never activated in live —
+ * the failure behind a "Start Stripe setup" 500.
+ *
+ * This is intentionally coarse: listing accounts can still succeed when the
+ * platform profile is incomplete (which blocks *creating* Express accounts). The
+ * "Connect onboarding" smoke test actually creates and deletes an account to
+ * verify that exact path end to end.
+ */
+export async function checkConnect(client: Stripe): Promise<ConnectCheck> {
+  try {
+    const res = await client.accounts.list({ limit: 1 });
+    return {
+      severity: 'ok',
+      enabled: true,
+      has_connected_accounts: res.data.length > 0,
+      error: null,
+      issues: [],
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to reach the Connect API';
+    return {
+      severity: 'fail',
+      enabled: false,
+      has_connected_accounts: null,
+      error: message,
+      issues: [
+        `Stripe Connect is not available in this mode: ${message}`,
+        'Venues cannot start payment onboarding until Connect is enabled and the platform profile is complete in this mode.',
+      ],
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plan prices
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { stripe } from '@/lib/stripe';
 import {
   subscriptionCancelAtIso,
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     const { data: staffRows } = await admin
       .from('staff')
       .select('venue_id, role')
-      .ilike('email', (user.email ?? '').toLowerCase().trim())
+      .ilike('email', escapeLikePattern((user.email ?? '').toLowerCase().trim()))
       .limit(1);
     const staffRow = staffRows?.[0] ?? null;
 

@@ -19,6 +19,13 @@ interface AccountCheck {
   details_submitted: boolean | null;
   error: string | null;
 }
+interface ConnectCheck {
+  severity: Severity;
+  enabled: boolean;
+  has_connected_accounts: boolean | null;
+  error: string | null;
+  issues: string[];
+}
 interface PriceCheck {
   severity: Severity;
   label: string;
@@ -58,6 +65,7 @@ interface HealthPayload {
   overall: Severity;
   mode: ModeCheck;
   account: AccountCheck;
+  connect: ConnectCheck;
   prices: PriceCheck[];
   webhooks: {
     endpoints: WebhookEndpointCheck[];
@@ -90,6 +98,17 @@ interface SmokeResult {
 interface SmokePayload {
   ok: boolean;
   results: SmokeResult[];
+  note: string;
+  generated_at: string;
+}
+interface ConnectSmokePayload {
+  ok: boolean;
+  account_created: boolean;
+  account_link_created: boolean;
+  cleaned_up: boolean;
+  account_id: string | null;
+  error: string | null;
+  cleanup_error: string | null;
   note: string;
   generated_at: string;
 }
@@ -132,6 +151,10 @@ export function StripeHealthPageClient() {
   const [smokeLoading, setSmokeLoading] = useState(false);
   const [smokeError, setSmokeError] = useState<string | null>(null);
 
+  const [connectSmoke, setConnectSmoke] = useState<ConnectSmokePayload | null>(null);
+  const [connectSmokeLoading, setConnectSmokeLoading] = useState(false);
+  const [connectSmokeError, setConnectSmokeError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -166,6 +189,24 @@ export function StripeHealthPageClient() {
       setSmokeError(e instanceof Error ? e.message : 'Smoke test failed');
     } finally {
       setSmokeLoading(false);
+    }
+  }, []);
+
+  const runConnectSmoke = useCallback(async () => {
+    setConnectSmokeLoading(true);
+    setConnectSmokeError(null);
+    try {
+      const res = await fetch('/api/platform/stripe-health/smoke-test/connect', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const body = (await res.json().catch(() => ({}))) as ConnectSmokePayload & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Connect onboarding test failed');
+      setConnectSmoke(body);
+    } catch (e) {
+      setConnectSmokeError(e instanceof Error ? e.message : 'Connect onboarding test failed');
+    } finally {
+      setConnectSmokeLoading(false);
     }
   }, []);
 
@@ -216,7 +257,7 @@ export function StripeHealthPageClient() {
           <OverallBanner severity={data.overall} generatedAt={data.generated_at} />
 
           {/* Summary tiles */}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
             <SeverityTile
               label="Keys & mode"
               severity={data.mode.severity}
@@ -228,6 +269,12 @@ export function StripeHealthPageClient() {
               severity={data.account.severity}
               value={data.account.ok ? (data.account.charges_enabled ? 'Charges on' : 'Charges off') : 'Error'}
               hint={data.account.id ?? data.account.error ?? 'unknown'}
+            />
+            <SeverityTile
+              label="Connect"
+              severity={data.connect.severity}
+              value={data.connect.enabled ? 'Enabled' : 'Unavailable'}
+              hint={data.connect.enabled ? 'venues can onboard for payments' : 'venue payment onboarding blocked'}
             />
             <SeverityTile
               label="Plan prices"
@@ -251,6 +298,76 @@ export function StripeHealthPageClient() {
               <Field label="Aligned" value={data.mode.consistent ? 'yes' : 'no'} />
             </dl>
             <IssueList issues={data.mode.issues} />
+          </Section>
+
+          {/* Connect / payment onboarding */}
+          <Section
+            title="Payment onboarding (Connect)"
+            severity={data.connect.severity}
+            subtitle="Whether a venue can start Stripe payment onboarding in this mode. Connect is configured per mode (test vs live)."
+          >
+            <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
+              <Field label="Connect API" value={data.connect.enabled ? 'reachable' : 'unavailable'} />
+              <Field
+                label="Connected accounts"
+                value={
+                  data.connect.has_connected_accounts == null
+                    ? '—'
+                    : data.connect.has_connected_accounts
+                      ? 'present'
+                      : 'none yet'
+                }
+              />
+            </dl>
+            <IssueList issues={data.connect.issues} />
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-700">Onboarding smoke test</p>
+                  <p className="text-xs text-slate-500">
+                    Creates a throwaway Express account and onboarding link exactly as venue setup does, then deletes it.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runConnectSmoke()}
+                  disabled={connectSmokeLoading}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {connectSmokeLoading ? 'Running…' : 'Run onboarding test'}
+                </button>
+              </div>
+              {connectSmokeError ? <p className="mt-3 text-sm text-rose-700">{connectSmokeError}</p> : null}
+              {connectSmoke ? (
+                <div className="mt-4 space-y-2">
+                  <div
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2.5 text-sm ${
+                      connectSmoke.ok ? 'border-slate-200 bg-white' : 'border-rose-200 bg-rose-50/50'
+                    }`}
+                  >
+                    <span className="font-medium text-slate-800">
+                      {connectSmoke.ok
+                        ? 'A venue can start payment onboarding right now.'
+                        : 'Onboarding would fail for venues.'}
+                    </span>
+                    <SeverityPill severity={connectSmoke.ok ? 'ok' : 'fail'} />
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <StepPill ok={connectSmoke.account_created} label="account created" />
+                    <StepPill ok={connectSmoke.account_link_created} label="onboarding link" />
+                    <StepPill ok={connectSmoke.cleaned_up} label="cleaned up" />
+                  </div>
+                  {connectSmoke.error ? <p className="text-xs text-rose-700">{connectSmoke.error}</p> : null}
+                  {connectSmoke.cleanup_error ? (
+                    <p className="text-xs text-amber-700">
+                      Test account {connectSmoke.account_id} could not be deleted automatically: {connectSmoke.cleanup_error}
+                    </p>
+                  ) : null}
+                  <p className="text-[11px] text-slate-400">{connectSmoke.note}</p>
+                </div>
+              ) : null}
+            </div>
           </Section>
 
           {/* Prices */}
@@ -520,6 +637,18 @@ function SeverityPill({ severity }: { severity: Severity }) {
   return (
     <span className={`inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${SEV_PILL[severity]}`}>
       {SEV_PILL_LABEL[severity]}
+    </span>
+  );
+}
+
+function StepPill({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+        ok ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+      }`}
+    >
+      {ok ? '✓' : '–'} {label}
     </span>
   );
 }

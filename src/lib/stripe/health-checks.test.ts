@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type Stripe from 'stripe';
 import {
+  checkConnect,
   checkEnvPresence,
   checkKeyMode,
   detectKeyMode,
@@ -110,6 +111,40 @@ describe('evaluatePrice', () => {
   it('warns on a non-monthly interval', () => {
     const p = makePrice({ recurring: { interval: 'year', usage_type: 'licensed' } as Stripe.Price.Recurring });
     expect(evaluatePrice(BASE_SPEC, p).severity).toBe('warn');
+  });
+});
+
+describe('checkConnect', () => {
+  function clientWith(list: () => Promise<{ data: unknown[] }>): Stripe {
+    return { accounts: { list } } as unknown as Stripe;
+  }
+
+  it('is ok and reports existing accounts when the Connect API is reachable', async () => {
+    const r = await checkConnect(clientWith(async () => ({ data: [{ id: 'acct_1' }] })));
+    expect(r.severity).toBe('ok');
+    expect(r.enabled).toBe(true);
+    expect(r.has_connected_accounts).toBe(true);
+    expect(r.issues).toHaveLength(0);
+  });
+
+  it('is ok with no accounts yet', async () => {
+    const r = await checkConnect(clientWith(async () => ({ data: [] })));
+    expect(r.severity).toBe('ok');
+    expect(r.enabled).toBe(true);
+    expect(r.has_connected_accounts).toBe(false);
+  });
+
+  it('fails and surfaces the Stripe message when Connect is unavailable', async () => {
+    const r = await checkConnect(
+      clientWith(async () => {
+        throw new Error('signed up for Connect');
+      }),
+    );
+    expect(r.severity).toBe('fail');
+    expect(r.enabled).toBe(false);
+    expect(r.has_connected_accounts).toBeNull();
+    expect(r.error).toContain('signed up for Connect');
+    expect(r.issues.length).toBeGreaterThan(0);
   });
 });
 

@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 import {
   checkAccount,
+  checkConnect,
   checkEnvPresence,
   checkKeyMode,
   checkPrices,
@@ -36,8 +37,9 @@ export async function GET() {
     const mode = checkKeyMode();
     const env = checkEnvPresence();
 
-    const [account, prices, endpoints, lastWebhookRes, webhook24hRes, billingRes] = await Promise.all([
+    const [account, connect, prices, endpoints, lastWebhookRes, webhook24hRes, billingRes] = await Promise.all([
       checkAccount(stripe),
+      checkConnect(stripe),
       checkPrices(stripe),
       checkWebhookEndpoints(stripe, { mode: mode.secret_key_mode }),
       admin
@@ -69,6 +71,7 @@ export async function GET() {
     const overall = rollupSeverity([
       mode.severity,
       account.severity,
+      connect.severity,
       env.severity,
       ...prices.map((p) => p.severity),
       ...endpoints.map((w) => w.severity),
@@ -80,6 +83,7 @@ export async function GET() {
       overall,
       mode,
       account,
+      connect,
       prices,
       webhooks: {
         endpoints,

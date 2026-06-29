@@ -15,6 +15,21 @@ export function isPublicBookingAuthReturnPath(raw: string): boolean {
   );
 }
 
+/**
+ * Signup-funnel steps a half-finished signup can be safely resumed to after auth.
+ * Used to honour an explicit resume target (e.g. /login?redirectTo=/signup/payment)
+ * that the generic post-login routing would otherwise drop.
+ */
+export function isSignupResumePath(raw: string): boolean {
+  const pathOnly = authNextPathOnly(raw);
+  return (
+    pathOnly === '/signup/payment' ||
+    pathOnly === '/signup/booking-models' ||
+    pathOnly === '/signup/business-type' ||
+    pathOnly === '/signup/plan'
+  );
+}
+
 function isAllowedMagicLinkDestination(pathWithOptionalQuery: string): boolean {
   const pathOnly = authNextPathOnly(pathWithOptionalQuery);
   return (
@@ -26,6 +41,8 @@ function isAllowedMagicLinkDestination(pathWithOptionalQuery: string): boolean {
     pathOnly.startsWith('/onboarding/') ||
     pathOnly === '/account' ||
     pathOnly.startsWith('/account/') ||
+    pathOnly === '/signup' ||
+    pathOnly.startsWith('/signup/') ||
     pathOnly === '/book' ||
     pathOnly.startsWith('/book/') ||
     pathOnly === '/embed' ||

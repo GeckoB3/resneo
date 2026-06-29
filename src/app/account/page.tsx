@@ -157,7 +157,14 @@ export default async function AccountHomePage() {
             icon: 'building' as const,
           },
         ]
-      : []),
+      : [
+          {
+            href: '/signup/business-type',
+            title: 'Set up your business',
+            description: 'Create a venue and start taking bookings on ResNeo.',
+            icon: 'building' as const,
+          },
+        ]),
   ];
 
   return (

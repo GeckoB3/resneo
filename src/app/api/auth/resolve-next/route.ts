@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { hasSalesAgentJwtRole } from '@/lib/sales/auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
+import { readSignupPendingFromMetadata } from '@/lib/signup-pending-selection';
 
 /**
  * GET /api/auth/resolve-next?next=
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
       isPlatformSuperuser: isSuper,
       isSalesAgent: isSales,
       needsSetPassword,
+      pendingSignup: readSignupPendingFromMetadata(meta),
     });
 
     destination = withSetPasswordGateIfNeeded(destination, needsSetPassword && !isSuper);

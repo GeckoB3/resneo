@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 
 export interface ExistingVenueRow {
   venue_id: string;
@@ -8,7 +9,11 @@ export interface ExistingVenueRow {
 }
 
 /**
- * If the user email is linked to a staff row, returns that venue's tier (first match).
+ * Whether the user already OWNS a venue (is an active admin), returning that venue's tier.
+ *
+ * Scoped to active admin rows: a person who is only non-admin staff at someone else's
+ * venue does not own one and must still be able to create their own via /signup. Ordered
+ * for a deterministic pick when a user admins more than one venue.
  */
 export async function getExistingVenueForUserEmail(
   admin: SupabaseClient,
@@ -20,7 +25,10 @@ export async function getExistingVenueForUserEmail(
   const { data: staffRows, error: staffErr } = await admin
     .from('staff')
     .select('venue_id')
-    .ilike('email', normalized)
+    .ilike('email', escapeLikePattern(normalized))
+    .eq('role', 'admin')
+    .is('revoked_at', null)
+    .order('venue_id', { ascending: true })
     .limit(1);
 
   if (staffErr || !staffRows?.length) return null;

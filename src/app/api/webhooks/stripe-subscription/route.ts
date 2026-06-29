@@ -6,7 +6,6 @@ import { getBusinessConfig } from '@/lib/business-config';
 import {
   mapStripeSubscriptionToPlanStatus,
   subscriptionCancelAtIso,
-  subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
   subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
@@ -33,6 +32,8 @@ import {
   markReferralsFailedForReferee,
 } from '@/lib/referrals/credit-referrer';
 import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
+import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
+import { escapeLikePattern } from '@/lib/db/like-escape';
 import { recordSalesInvoiceRevenue } from '@/lib/sales/invoice-revenue';
 import { syncSalesAttributionWithPlanStatus } from '@/lib/sales/churn';
 import { recordPlatformInvoice } from '@/lib/platform/invoices';
@@ -330,6 +331,7 @@ async function handleCheckoutCompleted(
 
     if (existingVenue) {
       console.log('[Subscription webhook] Venue already exists for customer', customerId);
+      await clearSignupPendingUserMetadata(supabase, supabaseUserId);
       return;
     }
   }
@@ -341,11 +343,12 @@ async function handleCheckoutCompleted(
     const { count: existingStaffCount } = await supabase
       .from('staff')
       .select('*', { count: 'exact', head: true })
-      .ilike('email', userEmail.toLowerCase().trim())
+      .ilike('email', escapeLikePattern(userEmail.toLowerCase().trim()))
       .limit(1);
 
     if ((existingStaffCount ?? 0) > 0) {
       console.log('[Subscription webhook] Staff record already exists for', userEmail);
+      await clearSignupPendingUserMetadata(supabase, supabaseUserId);
       return;
     }
   }
@@ -505,6 +508,11 @@ async function handleCheckoutCompleted(
   } catch (e) {
     console.error('[Subscription webhook] sales/referral wiring failed (non-fatal):', e);
   }
+
+  // Signup is now provisioned by the webhook (the success-page POST may never have run).
+  // Clear the durable pending-signup metadata so post-login routing and the /signup
+  // resume redirect stop sending this already-paid user back into a second checkout.
+  await clearSignupPendingUserMetadata(supabase, supabaseUserId);
 }
 
 async function handleSubscriptionUpdated(

@@ -6,7 +6,12 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { getSignupResumePath } from '@/lib/signup-resume';
 import { persistPendingSignupSelection } from '@/lib/signup-pending-client';
-import { isSignupPaymentReady, type SignupPendingPlan } from '@/lib/signup-pending-selection';
+import {
+  isSignupPaymentReady,
+  SIGNUP_PENDING_BUSINESS_TYPE_KEY,
+  SIGNUP_PENDING_PLAN_KEY,
+  type SignupPendingPlan,
+} from '@/lib/signup-pending-selection';
 import {
   loadReferralCodeFromCookieOrUrl,
   persistReferralCodeCookie,
@@ -230,11 +235,30 @@ export default function SignupPage() {
     const resumePath = getSignupResumePath();
     const emailRedirectTo = `${origin}/auth/callback?next=${encodeURIComponent(resumePath)}`;
 
+    // Persist the chosen plan into user_metadata atomically at account creation, so the
+    // signup can be resumed after email confirmation or on a different device where
+    // sessionStorage is unavailable. Mirrors the keys /api/signup/pending-selection writes.
+    const storedPlanAtSignup = sessionStorage.getItem('signup_plan');
+    const storedBtAtSignup = sessionStorage.getItem('signup_business_type');
+    const signupMetadata: Record<string, string> = {};
+    if (storedPlanAtSignup && isSignupPaymentReady(storedPlanAtSignup, storedBtAtSignup)) {
+      signupMetadata[SIGNUP_PENDING_PLAN_KEY] = storedPlanAtSignup;
+      if (
+        (storedPlanAtSignup === 'restaurant' || storedPlanAtSignup === 'founding') &&
+        storedBtAtSignup?.trim()
+      ) {
+        signupMetadata[SIGNUP_PENDING_BUSINESS_TYPE_KEY] = storedBtAtSignup.trim();
+      }
+    }
+
     setLoading(true);
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { emailRedirectTo },
+      options: {
+        emailRedirectTo,
+        ...(Object.keys(signupMetadata).length > 0 ? { data: signupMetadata } : {}),
+      },
     });
     setLoading(false);
 

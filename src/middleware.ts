@@ -7,6 +7,7 @@ import {
   SIGNUP_PENDING_BUSINESS_TYPE_KEY,
   SIGNUP_PENDING_PLAN_KEY,
   isSignupPaymentReady,
+  readSignupPendingFromMetadata,
 } from '@/lib/signup-pending-selection';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveStaffVenueIdForAuthenticatedUser } from '@/lib/venue-auth';
@@ -289,6 +290,7 @@ export async function middleware(request: NextRequest) {
       isPlatformSuperuser: false,
       isSalesAgent: jwtSales,
       needsSetPassword,
+      pendingSignup: readSignupPendingFromMetadata(meta),
     });
     dest = withSetPasswordGateIfNeeded(dest, needsSetPassword);
     return NextResponse.redirect(new URL(dest, request.url));

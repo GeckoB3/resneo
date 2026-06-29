@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   describeStripeConnectError,
   isPlatformProfileError,
+  STRIPE_GENERIC_ERROR_MESSAGE,
   STRIPE_PLATFORM_PROFILE_MESSAGE,
 } from './connect-error-message';
 
@@ -25,7 +26,7 @@ describe('isPlatformProfileError', () => {
 });
 
 describe('describeStripeConnectError', () => {
-  it('returns the friendly review message for the platform-profile gate', () => {
+  it('returns the short review message for the platform-profile gate', () => {
     expect(
       describeStripeConnectError(
         stripeErr('Please review the responsibilities of managing losses for connected accounts at https://dashboard.stripe.com/settings/connect/platform-profile.'),
@@ -33,9 +34,9 @@ describe('describeStripeConnectError', () => {
     ).toBe(STRIPE_PLATFORM_PROFILE_MESSAGE);
   });
 
-  it('surfaces other Stripe errors verbatim with a prefix', () => {
+  it('returns a short generic message for other Stripe errors (detail stays in server logs)', () => {
     expect(describeStripeConnectError(stripeErr('Invalid API Key provided'))).toBe(
-      'Stripe error: Invalid API Key provided',
+      STRIPE_GENERIC_ERROR_MESSAGE,
     );
   });
 
@@ -44,7 +45,10 @@ describe('describeStripeConnectError', () => {
     expect(describeStripeConnectError(null)).toBe('Internal server error');
   });
 
-  it('friendly message contains no em-dash (user-facing copy rule)', () => {
-    expect(STRIPE_PLATFORM_PROFILE_MESSAGE).not.toContain('—');
+  it('user-facing messages are short and have no em-dash', () => {
+    for (const msg of [STRIPE_PLATFORM_PROFILE_MESSAGE, STRIPE_GENERIC_ERROR_MESSAGE]) {
+      expect(msg).not.toContain('—');
+      expect(msg.length).toBeLessThan(100);
+    }
   });
 });

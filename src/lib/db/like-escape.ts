@@ -8,5 +8,7 @@
  * can make staff/guest identity resolution ambiguous, or match the wrong row.
  */
 export function escapeLikePattern(value: string): string {
+  // The character class includes the backslash itself, so every metacharacter
+  // (\, %, _) is escaped exactly once in a single pass.
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }

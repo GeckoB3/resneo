@@ -3,7 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { requireCompliancePlan } from '@/lib/compliance/auth';
 import { complianceTypePatchSchema } from '@/lib/compliance/zod-schemas';
-import { getComplianceTypeWithVersion } from '@/lib/compliance/types-service';
+import { createComplianceTypeVersion, getComplianceTypeWithVersion } from '@/lib/compliance/types-service';
 import { writeComplianceAuditEvent } from '@/lib/compliance/audit';
 
 interface RouteCtx {
@@ -57,6 +57,22 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       .maybeSingle();
     if (!existing) return NextResponse.json({ error: 'Compliance type not found.' }, { status: 404 });
 
+    // Single-request save (audit U7): publish a new version first when the builder sends a
+    // form_schema, so an invalid schema aborts before any metadata change. The version
+    // service validates the schema against the type's result_type.
+    let version: { versionId: string; versionNumber: number } | null = null;
+    if (parsed.data.form_schema !== undefined) {
+      const verResult = await createComplianceTypeVersion(staff.db, {
+        venueId: staff.venue_id,
+        staffId: staff.id,
+        typeId: id,
+        formSchema: parsed.data.form_schema,
+        changelog: parsed.data.changelog ?? null,
+      });
+      if (!verResult.ok) return NextResponse.json({ error: verResult.error }, { status: verResult.status });
+      version = verResult.value;
+    }
+
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const key of [
       'name',
@@ -92,7 +108,7 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       metadata: { fields: Object.keys(update).filter((k) => k !== 'updated_at') },
     });
 
-    return NextResponse.json({ type: updated });
+    return NextResponse.json({ type: updated, version });
   } catch (err) {
     console.error('PATCH /api/venue/compliance/types/[id] failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

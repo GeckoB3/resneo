@@ -291,6 +291,63 @@ export async function listComplianceTypesWithCounts(
   }));
 }
 
+/**
+ * Restore a prior version by creating a NEW version that copies its schema (keeps
+ * version numbers monotonic and the audit trail intact, rather than pointing
+ * `current_version_id` backwards). Reuses {@link createComplianceTypeVersion}.
+ */
+export async function restoreComplianceTypeVersion(
+  admin: SupabaseClient,
+  params: { venueId: string; staffId: string; typeId: string; versionId: string },
+): Promise<ServiceResult<{ versionId: string; versionNumber: number }>> {
+  const { data: src } = await admin
+    .from('compliance_type_versions')
+    .select('form_schema, version_number')
+    .eq('id', params.versionId)
+    .eq('compliance_type_id', params.typeId)
+    .eq('venue_id', params.venueId)
+    .maybeSingle();
+  if (!src) return { ok: false, error: 'Version not found.', status: 404 };
+  const source = src as { form_schema: unknown; version_number: number };
+  return createComplianceTypeVersion(admin, {
+    venueId: params.venueId,
+    staffId: params.staffId,
+    typeId: params.typeId,
+    formSchema: source.form_schema,
+    changelog: `Restored from v${source.version_number}`,
+  });
+}
+
+/**
+ * Duplicate a type into a new, independent type ("{name} (copy)") carrying the same
+ * settings and current form schema. Reuses {@link createComplianceType}, so the copy
+ * gets a fresh slug, its own first version, and audit events.
+ */
+export async function duplicateComplianceType(
+  admin: SupabaseClient,
+  params: { venueId: string; staffId: string; typeId: string },
+): Promise<ServiceResult<{ type: TypeRow; versionId: string }>> {
+  const existing = await getComplianceTypeWithVersion(admin, params.venueId, params.typeId);
+  if (!existing.ok) return existing;
+  const t = existing.value.type;
+  const schema = existing.value.version?.form_schema;
+  if (!schema) return { ok: false, error: 'This type has no form to duplicate.', status: 400 };
+  return createComplianceType(admin, {
+    venueId: params.venueId,
+    staffId: params.staffId,
+    name: `${(t.name as string | null) ?? 'Compliance type'} (copy)`,
+    category: t.category as ComplianceCategory,
+    resultType: t.result_type as ComplianceResultType,
+    validityPeriodDays: (t.validity_period_days as number | null) ?? null,
+    captureMethods: (t.capture_methods as ComplianceCaptureMethod[] | null) ?? [],
+    description: (t.description as string | null) ?? null,
+    formLinkExpiryDays: (t.form_link_expiry_days as number | null) ?? null,
+    onlineUnmetMessage: (t.online_unmet_message as string | null) ?? null,
+    formSchema: schema,
+    libraryTemplateSlug: null,
+  });
+}
+
 /** Fetch a single type with its current (or latest) version's form schema. */
 export async function getComplianceTypeWithVersion(
   admin: SupabaseClient,

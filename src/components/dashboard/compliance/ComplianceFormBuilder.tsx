@@ -22,7 +22,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
-import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
+import { complianceJsonFetcher, formatComplianceDate } from '@/components/dashboard/compliance/shared';
 import {
   COMPLIANCE_FIELD_TYPES,
   COMPLIANCE_RESULT_TYPES,
@@ -106,9 +106,9 @@ const DEFAULT_META: BuilderMeta = {
 
 export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; typeId?: string }) {
   const router = useRouter();
-  const { data: loaded, isLoading } = useSWR<{
+  const { data: loaded, isLoading, mutate: mutateType } = useSWR<{
     type: BuilderMeta & { id: string };
-    version: { form_schema: ComplianceFormSchema } | null;
+    version: { version_number: number; form_schema: ComplianceFormSchema } | null;
   }>(mode === 'edit' && typeId ? `/api/venue/compliance/types/${typeId}` : null, complianceJsonFetcher);
 
   const [meta, setMeta] = useState<BuilderMeta | null>(mode === 'new' ? DEFAULT_META : null);
@@ -119,6 +119,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [changelog, setChangelog] = useState('');
   const [hydrated, setHydrated] = useState(mode === 'new');
 
   // Hydrate edit state once the type loads.
@@ -253,6 +254,8 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
           return;
         }
       } else if (typeId) {
+        // Single request (audit U7): update settings and publish the new version together,
+        // so a failure can no longer leave settings saved but the form unsaved.
         const patchRes = await fetch(`/api/venue/compliance/types/${typeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -263,20 +266,12 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             capture_methods: meta.capture_methods,
             form_link_expiry_days: meta.form_link_expiry_days,
             online_unmet_message: meta.online_unmet_message,
+            form_schema: schema,
+            changelog: changelog.trim() || undefined,
           }),
         });
         if (!patchRes.ok) {
           const b = await patchRes.json().catch(() => ({}));
-          setErrors([b.error ?? 'Could not update type details.']);
-          return;
-        }
-        const verRes = await fetch(`/api/venue/compliance/types/${typeId}/versions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ form_schema: schema }),
-        });
-        if (!verRes.ok) {
-          const b = await verRes.json().catch(() => ({}));
           setErrors([b.error ?? 'Could not save the form.']);
           return;
         }
@@ -332,8 +327,12 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                   </option>
                 ))}
               </select>
-              {mode === 'edit' && (
+              {mode === 'edit' ? (
                 <p className="mt-1 text-xs text-slate-400">Result type can’t change after creation.</p>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">
+                  Choose carefully: this can’t be changed once the form is created.
+                </p>
               )}
             </div>
             <ValidityEditor meta={meta} setMeta={setMeta} />
@@ -466,6 +465,32 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
         </div>
       )}
 
+      {mode === 'edit' && (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">What changed (optional)</label>
+          <input
+            className={inputClass}
+            value={changelog}
+            onChange={(e) => setChangelog(e.target.value)}
+            placeholder="e.g. Added a question about medication"
+          />
+          <p className="mt-1 text-xs text-slate-500">Saved with this version so you can see what changed later.</p>
+        </div>
+      )}
+
+      {mode === 'edit' && typeId && (
+        <VersionHistory
+          typeId={typeId}
+          currentVersionNumber={loaded?.version?.version_number ?? null}
+          onRestored={async () => {
+            // Pull the restored (now current) version, then re-hydrate the editor from it.
+            await mutateType();
+            setChangelog('');
+            setHydrated(false);
+          }}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
@@ -484,6 +509,113 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
         </button>
       </div>
     </div>
+  );
+}
+
+interface VersionRow {
+  id: string;
+  version_number: number;
+  changelog: string | null;
+  created_at: string;
+}
+
+/**
+ * Read-only version history with one-click restore (audit U4). "Restore" publishes a
+ * new version copying the chosen one, so version numbers stay monotonic and existing
+ * records keep the version they were captured against.
+ */
+function VersionHistory({
+  typeId,
+  currentVersionNumber,
+  onRestored,
+}: {
+  typeId: string;
+  currentVersionNumber: number | null;
+  onRestored: () => void | Promise<void>;
+}) {
+  const { data, mutate, isLoading } = useSWR<{ versions: VersionRow[] }>(
+    `/api/venue/compliance/types/${typeId}/versions`,
+    complianceJsonFetcher,
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const versions = data?.versions ?? [];
+
+  async function restore(versionId: string) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Restore this version? It becomes a new current version and replaces any unsaved edits here.')
+    ) {
+      return;
+    }
+    setBusyId(versionId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/types/${typeId}/versions/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version_id: versionId }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not restore this version.');
+        return;
+      }
+      await mutate();
+      await onRestored();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Nothing worth showing until there's more than the first version.
+  if (!isLoading && versions.length <= 1) return null;
+
+  return (
+    <SectionCard>
+      <SectionCard.Header
+        title="Version history"
+        description="Each save publishes a new version. Existing records keep the version they were captured against."
+      />
+      <SectionCard.Body>
+        {error && (
+          <div className="mb-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">{error}</div>
+        )}
+        {isLoading ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {versions.map((v) => {
+              const isCurrent = v.version_number === currentVersionNumber;
+              return (
+                <li key={v.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800">
+                      v{v.version_number}
+                      {isCurrent && <span className="ml-2 text-xs font-normal text-emerald-600">(current)</span>}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatComplianceDate(v.created_at)}
+                      {v.changelog ? ` · ${v.changelog}` : ''}
+                    </p>
+                  </div>
+                  {!isCurrent && (
+                    <button
+                      type="button"
+                      disabled={busyId === v.id}
+                      onClick={() => restore(v.id)}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {busyId === v.id ? 'Restoring…' : 'Restore'}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 

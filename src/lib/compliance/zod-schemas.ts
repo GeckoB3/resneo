@@ -30,7 +30,12 @@ export const complianceTypeCreateSchema = z.object({
 });
 export type ComplianceTypeCreateInput = z.infer<typeof complianceTypeCreateSchema>;
 
-/** Update non-schema fields only (schema edits go through a new version). */
+/**
+ * Update a type's non-schema fields. May ALSO carry `form_schema` (+ optional
+ * `changelog`) so the form-builder edit can update settings and publish a new
+ * immutable version in a single request (the service validates the schema and
+ * creates the version). Schema edits without these still go through the new-version route.
+ */
 export const complianceTypePatchSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
@@ -41,6 +46,8 @@ export const complianceTypePatchSchema = z
     form_link_expiry_days: z.number().int().min(1).max(365).nullable().optional(),
     online_unmet_message: z.string().max(500).nullable().optional(),
     is_active: z.boolean().optional(),
+    form_schema: z.unknown().optional(),
+    changelog: z.string().max(1000).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 export type ComplianceTypePatchInput = z.infer<typeof complianceTypePatchSchema>;

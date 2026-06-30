@@ -73,6 +73,22 @@ function TypesPanel({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  async function duplicate(t: ComplianceTypeSummary) {
+    setBusyId(t.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/types/${t.id}/duplicate`, { method: 'POST' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not duplicate this type.');
+        return;
+      }
+      await mutate();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <SectionCard elevated>
       <SectionCard.Header
@@ -140,6 +156,14 @@ function TypesPanel({ isAdmin }: { isAdmin: boolean }) {
                     >
                       Edit
                     </Link>
+                    <button
+                      type="button"
+                      onClick={() => duplicate(t)}
+                      disabled={busyId === t.id}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                    >
+                      Duplicate
+                    </button>
                     <button
                       type="button"
                       onClick={() => archiveToggle(t)}

@@ -16,6 +16,8 @@ import type { ComplianceLinkSentVia } from '@/lib/compliance/constants';
  */
 export interface DispatchResult {
   ok: boolean;
+  /** The channel the message actually went out on (may differ from requested after fallback). */
+  channel?: 'email' | 'sms';
   reason?: 'no_destination' | 'send_failed' | 'disabled' | 'not_found';
 }
 
@@ -138,14 +140,16 @@ export async function dispatchComplianceFormLink(
   };
 
   let outcome = await sendPolicyMessage({ ...baseOptions, channel: params.sentVia });
+  let usedChannel: 'email' | 'sms' = params.sentVia;
 
   // Compliance SMS isn't governed by a per-lane channel toggle in Settings →
   // Communications, so an SMS-preferring venue would otherwise receive nothing.
   // Fall back to email so the guest always gets the form link.
   if (!outcome.sent && params.sentVia === 'sms' && guestEmail) {
     outcome = await sendPolicyMessage({ ...baseOptions, channel: 'email' });
+    if (outcome.sent) usedChannel = 'email';
   }
 
-  if (outcome.sent) return { ok: true };
+  if (outcome.sent) return { ok: true, channel: usedChannel };
   return { ok: false, reason: outcome.reason === 'disabled' ? 'disabled' : 'send_failed' };
 }

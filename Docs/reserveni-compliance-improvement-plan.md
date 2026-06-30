@@ -1,6 +1,6 @@
 # Resneo Compliance — Competitive Review & Improvement Plan
 
-**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3.
+**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps. §10.4 Steps 1–5 are implemented ✅, and Step 6's worthwhile wins (U8 option-value guard, U9 library preview) too; the remaining Step 6 items (U14, U15, U16, U6, bulk) were deferred by judgment as net-negative or low-value for a polish pass. A final adversarial review (§10.5) then fixed five code bugs found in those changes, and a doc-vs-code audit verified this section is accurate. A later UX pass (§10.6) improved the settings menu and clarity, removed two dead settings, and merged the customer booking panels (U14) — see §10.**
 **Date:** June 2026 (Phase 1 shipped; §9 addendum added June 2026)
 **Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation, and a prioritised plan to close the gaps. The §9 addendum extends this with a full code audit and the in-booking form-collection design.
 
@@ -332,6 +332,295 @@ Guardrails from §7 still hold: never fail a booking because of compliance comms
 
 ---
 
+### 10.5 Final review (June 2026): bugs found and fixed
+
+A final adversarial code review of the §10 changes, plus a doc-vs-code accuracy
+audit, was run. The doc audit found §10 accurate (only the audit-time `path:line`
+citations drift, as the section already disclaims). The code review surfaced six
+items; the five substantive ones are now fixed, with tests green throughout.
+
+1. **Duplicate version on a retried single-request save / version churn. ✅ fixed.**
+   `createComplianceTypeVersion` now skips publishing when the submitted schema is
+   byte-identical to the current version (order-insensitive comparison), so a
+   single-request PATCH save retried after a transient metadata-update failure no
+   longer accumulates identical immutable versions, and a metadata-only edit no
+   longer creates a redundant version. (`types-service.ts`; new unit test.)
+2. **Non-UUID fallback draft id broke inline file uploads. ✅ fixed.**
+   `BookingComplianceForms` previously generated a non-UUID id where
+   `crypto.randomUUID` is unavailable (insecure origins / older browsers); the
+   pre-booking upload endpoint and booking-create both UUID-validate the draft id,
+   so uploads would 400. It now emits an RFC4122-v4 UUID (`makeDraftUuid`).
+3. **Submit-time draft clear could orphan uploads on a fail-then-reload; stale
+   cross-booking submissions. ✅ fixed.** The submit clear no longer removes the
+   stable draft id, so a reload after a failed submit reuses the same upload prefix
+   and already-uploaded files stay valid. Separately, the reported `submissions`
+   are now scoped to the current service set's forms, so a persisted draft from a
+   previously-abandoned booking (kept for resume) is never captured against a new
+   booking. (`BookingComplianceForms.tsx`.)
+4. **Signature pad wiped an in-progress stroke on resize. ✅ fixed.** The
+   `ResizeObserver` now skips re-measuring while a stroke is being drawn, so a
+   mid-stroke resize (e.g. a mobile URL bar collapsing) no longer erases the
+   current line. (`SignaturePad.tsx`.)
+5. **"Add option" could create a duplicate option value. ✅ fixed.** The button now
+   picks the next free `option_N`, closing the one gap the U8 de-dup didn't cover.
+   (`ComplianceFormBuilder.tsx`.)
+6. **Pass/fail mapping when a staff-only select already exists. No change needed.**
+   Switching to pass/fail with a pre-existing staff-only select leaves the mapping
+   empty, and save is correctly blocked until it is mapped (the auto-insert path
+   pre-fills pass/fail). Working as intended; noted for consistency only.
+
+Re-verified clean: tenant isolation on restore/duplicate/PATCH; auth/admin/plan
+gating on the new routes; draft-restore hydration (no SSR mismatch);
+`form-draft` quota/SSR/expiry handling; clear-on-success vs persist-on-change;
+public-mode `staff_only` stripping; and the version-number retry on unique
+collision. After the fixes: typecheck + lint + lint:modals clean; 1676 unit tests
+green.
+
+### 10.6 UX pass (June 2026): menus, clarity, and workflow
+
+A follow-up pass over the staff and guest surfaces to make the experience
+quicker and clearer. No migration; typecheck + lint + lint:modals clean; 1676
+tests green.
+
+- **Settings → Compliance now opens on General settings**, and the sub-tabs are
+  reordered to the setup flow (General → Templates & types → Service
+  requirements), so a venue lands where the feature is turned on.
+  (`ComplianceSettingsSection.tsx`.)
+- **Enable-toggle clarity:** "Enable compliance records" is now a prominent banner
+  with a plain-language explanation of what turning it on does; the
+  reminder-cadence and form-link-expiry fields gained help text.
+- **Removed two dead settings.** "Default capture method" and "Default lock period
+  (hours)" had **no consumers anywhere in the code**, so they misled staff; both
+  are removed from General settings. (Lead time was then given a real home in the
+  per-service requirement editor — see below.)
+  - **Lead-time UI — ✅ now added.** Lead-time enforcement (`lock_period_hours`,
+    the "patch test at least 48h before colour" differentiator) was enforced by
+    the engine but had no way to configure it in the dashboard. The per-service
+    requirement editor now exposes a **"Lead time: N hours before the
+    appointment"** control on each requirement (persists on blur) and in the
+    Add-requirement dialog. The whole server path already supported it
+    (`complianceRequirement{Create,Patch}Schema`, `addRequirement` /
+    `updateRequirement`, covered by tests), so this was UI-only.
+    (`ComplianceRequirementsEditor.tsx`.)
+- **U14 — booking-flow panels merged. ✅** The customer's pre-check notice and
+  inline-forms block now render inside one shared "Before you book" card. Each
+  gained an `embedded` mode (drops its own card chrome) and an `onActiveChange`
+  callback, so `AppointmentBookingFlow` shows the wrapper card and heading only
+  when at least one panel has content. (`CompliancePreCheckNotice.tsx`,
+  `BookingComplianceForms.tsx`, `AppointmentBookingFlow.tsx`.)
+- **Compliance dashboard:** a one-line summary strip (today / upcoming / expiring
+  / awaiting counts) and a friendly "You're all caught up" state.
+  (`ComplianceDashboardView.tsx`.)
+- **Forms (staff + guest):** a "Fields marked * are required" hint above the form.
+  (`ComplianceFormRenderer.tsx`.)
+- **Form builder:** field-type icons in the "Add field" palette and on field
+  cards, plus a friendlier empty state. (`ComplianceFormBuilder.tsx`.)
+
+### 10.7 End-to-end QA pass (June 2026): bugs found and fixed
+
+A further full review of staff and customer flows (three independent passes plus
+direct tracing). The functional core held up; the items below were fixed. No
+migration; typecheck + lint + lint:modals clean; 1676 tests green.
+
+**Bugs fixed**
+
+1. **Inline-booking drafts were never cleared after a successful booking →
+   stale answers on the next visit.** The clear was tied to the
+   `submittingBooking` prop, but `BookingComplianceForms` unmounts the instant
+   submission starts (the flow swaps to the submitting panel), so the prop was
+   never observed `true` and the effect never ran. Moved the clear to the parent,
+   firing when the flow reaches `confirmation`/`payment` (success). A failed
+   submit now correctly still resumes on reload; a completed booking no longer
+   leaves stale answers behind. (`BookingComplianceForms.clearBookingComplianceDrafts`,
+   `AppointmentBookingFlow.tsx`.)
+2. **Deep link to Templates & types opened the wrong tab.** Changing the default
+   sub-tab to General (§10.6) broke the `?sub=types` link from the requirements
+   editor, because the settings section never read the `sub` param. It now honours
+   `?sub=`. (`ComplianceSettingsSection.tsx`.)
+3. **Service requirements tab dead-ended when compliance was OFF.** The panel
+   hard-coded `complianceEnabled` to true, so with the feature off it fired
+   403-ing requests and sat on "Loading…". It now reads the real feature flag and
+   shows the same "turn it on in General settings" guidance the Types tab does.
+   (`ComplianceSettingsSection.tsx`.)
+4. **The dashboard "morning sweep" went stale after every action.** The dashboard
+   route caches per venue for 5 min and only busts the cache on `?refresh=1`, but
+   the client re-fetched the bare URL after a capture / send, so actioned items
+   lingered for up to 5 minutes. The client now revalidates against `?refresh=1`.
+   (`ComplianceDashboardView.tsx`.)
+5. **In-venue capture left a sent form link live.** Capturing a record staff-side
+   didn't retire a still-pending link, so it kept nagging in "awaiting client
+   submission" and the guest could still open the old link and create a duplicate
+   record. Staff capture now consumes any matching pending links (audited).
+   (`form-links-service.consumePendingLinksForCapture`, `records/route.ts`.)
+6. **Pre-check flashed contradictory "contact the venue" copy for inline forms.**
+   For a type that is both blocking and collected inline, the pre-check briefly
+   showed a scary block row until the inline component reported its type ids. The
+   pre-check now self-suppresses `inline` requirements from its own data (the
+   API already returns `online_collection`), removing the flash entirely.
+   (`CompliancePreCheckNotice.tsx`.)
+
+**Clarity / correctness polish**
+
+7. Record `result` now shows a friendly label (Pass / Fail / Inconclusive) in the
+   guest records list, not the raw token. (`shared.RESULT_LABELS`, `ComplianceSection.tsx`.)
+8. Form-link send/resend messages are honest when nothing was actually
+   dispatched ("we couldn't send it — no mobile/email on file, use Copy link")
+   instead of a reassuring "ready". (`ComplianceSection.tsx`.)
+9. A consumed-link submit race now shows the reassuring "thank you" state, not an
+   error banner. (`PublicComplianceForm.tsx`.)
+10. The requirement editor warns when a requirement blocks online booking but is
+    set to "Do not collect online" for a client-completable type (a dead-end
+    config). (`ComplianceRequirementsEditor.tsx`.)
+
+**Verified solid (no change needed):** signed-URL flow for signatures/files;
+pass/fail "needs decision"; void; form-link issue/dedup/revoke; the merged
+"Before you book" card never shows an empty card; stable draft UUID; draft
+restore/resume; signature-pad mobile resize; storage-path security guards;
+per-tenant isolation on every new path.
+
+**Follow-ups since picked up and implemented (§10.8):** the dashboard send-link
+channel fallback and per-field server errors. Still open:
+
+- **No client-side file size/type guard** before upload, so an oversized photo is
+  rejected only after a round trip on mobile.
+- **"Complete now" on the dashboard opens hand-to-client mode** by default; the
+  label and default could be aligned (kept as-is pending a product call).
+- Minor jargon ("lead time", "capture method") could carry a one-line hint;
+  multiselect groups can't take `aria-required`/`aria-invalid` (invalid ARIA), so
+  required/invalid is conveyed via the label asterisk + `aria-describedby` error.
+
+### 10.8 Follow-ups implemented (June 2026)
+
+Two of the §10.7 reported items, picked up. No migration; typecheck + lint +
+lint:modals clean; 1676 tests green.
+
+- **Dashboard "Send link" now just works for any guest.** The form-links route
+  resolves a deliverable channel itself: it uses the requested channel if the
+  guest has that destination, otherwise falls back to the other channel they do
+  have, and if neither is on file it still creates the link and returns
+  `dispatched:false` + `public_url`. The route now returns `sent_via` (the channel
+  actually used). The dashboard reports how it was sent and, when nothing could be
+  delivered, copies the link to the clipboard so a phone/email-less guest is never
+  a dead end; the per-guest panel messaging was aligned. No per-row channel toggle
+  was added (it would clutter the sweep). (`form-links/route.ts`,
+  `ComplianceDashboardView.tsx`, `ComplianceSection.tsx`.)
+- **Server field errors now show under the offending field.**
+  `ComplianceFormRenderer` gained a `serverErrors` prop that maps a server
+  rejection's `field_errors` onto the matching fields via react-hook-form
+  `setError`, reusing the existing inline-error + `aria-invalid`/`aria-describedby`
+  wiring. Wired into the public link form and the staff capture dialog (both
+  receive `field_errors` directly). The inline-booking-create path still surfaces
+  only the top-level message (its errors arrive at the whole-flow response and
+  routing them to the right sub-form is a larger change) — left as a follow-up.
+  (`ComplianceFormRenderer.tsx`, `PublicComplianceForm.tsx`,
+  `ComplianceCaptureDialog.tsx`.)
+
+### 10.9 Second end-to-end QA pass (June 2026)
+
+Another full staff + customer review (two independent passes plus direct
+tracing). The earlier fixes were verified solid; three further items were fixed.
+No migration; typecheck + lint + lint:modals clean; 1676 tests green.
+
+**Bugs fixed**
+
+1. **Group bookings had no compliance UI at all — a hard online dead-end.** The
+   "Before you book" card (pre-check + inline forms) rendered only in the
+   single/multi flow, while the `group_details` step had neither — yet
+   `create-group` enforces compliance and 409s a `block_online` requirement. So a
+   service bookable solo became un-bookable in a group with no online way to
+   satisfy it. Fixed by extracting the card into a self-contained
+   `BookingComplianceBlock` (which owns its own active-state, so no shared-flag
+   bugs) and rendering it in both the single and group details steps; the group
+   submit now gates on mandatory forms and threads `compliance_submissions` +
+   `compliance_draft_id` (the route already captured them before its gate). The
+   clear-on-success effect now also covers the group success steps.
+   (`BookingComplianceBlock.tsx`, `AppointmentBookingFlow.tsx`.)
+2. **Form links were mislabeled after an internal SMS→email fallback.**
+   `dispatchComplianceFormLink` silently re-sends by email when SMS fails but
+   returned `{ok:true}` with no channel, so the caller recorded `sent_via='sms'`
+   and the UI/audit said "sent by SMS" when it went by email. Dispatch now returns
+   the channel it actually used, and all four senders (manual send, resend,
+   auto-send reminders, expiry cron) persist/return that. (`dispatch.ts`,
+   `form-links/route.ts`, `.../resend/route.ts`, `auto-send.ts`, `expiry-cron.ts`.)
+3. **The venue "Default form-link channel" setting was ignored on manual sends.**
+   The Send-link buttons hard-coded `send_via:'email'`, so a venue set to SMS never
+   sent by SMS. The buttons now omit the channel and the route falls back to
+   `config.default_form_link_channel` (then to whatever destination the guest has).
+   (`zod-schemas.ts`, `form-links/route.ts`, `ComplianceDashboardView.tsx`,
+   `ComplianceSection.tsx`.)
+
+**Reviewed and confirmed solid:** the merged card's empty-state handling, the
+pre-check inline self-suppression, draft clear-on-success vs failed-submit resume,
+`consumePendingLinksForCapture` scoping, the `?refresh=1` dashboard revalidation,
+the `useSearchParams` sub-tab (no SSR/build concern), the canonicalJson save dedup,
+and the serverErrors plumbing on the public form + capture dialog.
+
+**Still open (low priority, by judgment):** inline-booking-create `field_errors`
+not shown per-field (the §10.8 follow-up — arrives at the flow level); the inline
+`mandatoryComplete` is vacuously true in the sub-second window before forms load
+(server re-checks, so no bypass — just a blunter error path); a client-side file
+size/type guard before upload.
+
+### 10.10 Third end-to-end review (June 2026)
+
+One more full staff + customer pass (two independent review agents plus direct
+tracing of the data layer and the booking reset path). The architecture and the
+prior fixes were re-confirmed solid; five items were tightened. No behaviour
+regressions; typecheck + eslint (no new errors) + lint:modals clean; 1676 tests
+green.
+
+**Bugs / correctness fixed**
+
+1. **Guest merge could still crash on duplicate pending links (source vs source).**
+   The §10.9-era fix (migration `20261230120000`) only revoked a *source's* pending
+   link when the *target* already held one of the same type. If two source guests
+   each held a pending link for the same compliance type (and the target held none),
+   re-pointing both to the target still violated `uq_compliance_form_links_pending`
+   and aborted the whole merge with 23505. New migration
+   `20261231120000_compliance_merge_guests_source_dedup.sql` keeps exactly one
+   pending link per type across the full {target} ∪ {sources} set (preferring the
+   target's, then the most recent) via `row_number()` and revokes the rest, before
+   re-pointing. Idempotent; covers every collision shape.
+2. **In-venue capture could audit a link it did not consume.** `consumePendingLinksForCapture`
+   selected pending link ids, updated them to `consumed` (guarded by `status='pending'`),
+   then wrote a `link.consumed` audit event for every selected id. If a concurrent
+   submit flipped one out of pending between the select and the update, the audit
+   trail claimed a consumption that did not happen. The UPDATE now uses `.select('id')`
+   and only the rows it actually changed are audited. (`form-links-service.ts`.)
+
+**Polish**
+
+3. **Send-link copy now distinguishes "no destination" from "send failed".** When a
+   dispatch could not go out, staff always saw "no email or phone on file" even when
+   the guest had contact details and the send simply errored. The create route now
+   returns `no_destination`, and both send surfaces show the matching message
+   (no contact on file vs we could not send it just now). (`form-links/route.ts`,
+   `ComplianceDashboardView.tsx`, `ComplianceSection.tsx`.)
+4. **Public form error banner is now announced.** The error banner on the public
+   link form gained `role="alert"` so screen readers hear submission failures, matching
+   the dashboard's pattern. (`PublicComplianceForm.tsx`.)
+5. **Booking reset now clears compliance state.** The booking-flow reset event cleared
+   ~30 pieces of state but not `bookingCompliance` / `precheckEmail`, so a fresh booking
+   started in the same mounted flow could carry the prior booking's collected forms.
+   Both are now reset (the pre-check email back to its signed-in prefill). Also narrowed
+   the create-link request schema so callers can only request `email`/`sms` (the
+   `manual_copy` channel is an internal fallback, never an input). (`AppointmentBookingFlow.tsx`,
+   `zod-schemas.ts`.)
+
+**Reviewed and confirmed solid:** atomic single-use link consumption with rollback,
+per-tenant RLS + app-layer admin checks, immutable per-version records, per-attendee
+group enforcement, the `BookingComplianceBlock` extraction (self-owned active-state),
+the dispatch channel-fallback accuracy from §10.9, rate-limited public endpoints, and
+staff-only field stripping in public mode.
+
+**Flagged for confirmation (not changed):** `bookingDatetime` in
+`resolve-requirements.ts` builds a `Date` from `booking_date`/`booking_time` in the
+*server's* local timezone, then compares it against venue-tz expiry/lead-time. On a
+UTC server this skews per-visit and lead-time checks by the venue's UTC offset (0 to a
+few hours). The impact is bounded and pre-existing, and the function feeds the shared
+booking engine, so it is flagged rather than changed unilaterally; the codebase already
+has `venueLocalDateTimeToUtcMs` if we decide to correct it.
+
 ## Sources
 
 - Vagaro — [Forms feature](https://www.vagaro.com/pro/forms), [Make Forms Mandatory](https://support.vagaro.com/hc/en-us/articles/24398220401819-Make-Forms-Mandatory-for-Your-Customers), [Dual‑signature forms](https://www.vagaro.com/learn/vagaros-dual-signature-forms-improve-intake-liability), [Notifications & reminders](https://support.vagaro.com/hc/en-us/articles/115000439594-Send-Notifications-and-Reminders-to-Your-Customers), [Check‑In Kiosks](https://support.vagaro.com/hc/en-us/articles/5024382031131-Manage-Your-Check-In-Kiosks), [Self check‑in](https://support.vagaro.com/hc/en-us/articles/115003955413-Self-Check-In-at-a-Business-for-Customers-of-a-Vagaro-Business)
@@ -339,3 +628,84 @@ Guardrails from §7 still hold: never fail a booking because of compliance comms
 - Booksy — [Introduces Custom Forms](https://biz.booksy.com/en-us/blog/booksy-introduces-custom-forms), [Introduces Consent Forms](https://biz.booksy.com/en-gb/blog/booksy-introduces-consent-forms)
 - Fresha — [Client forms overview](https://www.fresha.com/help-center/knowledge-base/clients/607-client-forms-overview), [Complete forms](https://www.fresha.com/help-center/knowledge-base/clients/183-complete-forms), [How clients complete consultation forms](https://support.fresha.com/hc/en-us/articles/360017574719-How-do-clients-complete-consultation-forms-), [Appointment reminders](https://www.fresha.com/help-center/knowledge-base/calendar/167-send-appointment-reminders)
 - Jane (health, comparison) — [Intake Form FAQ](https://jane.app/guide/intake-form-faq), [Consent forms](https://jane.app/guide/consent-forms)
+
+---
+
+## 10. Addendum (June 2026): staff-builder and guest-completion usability review
+
+This addendum was added after the §9 plan (Phases 0 to 5) shipped. §9 made the
+feature *functionally* complete and correct: enforcement is watertight, records
+are trustworthy, in-booking collection works, and the data/governance model is
+strong. This pass looked at a different layer — **how quick and easy the feature
+is to use** for (a) a salon staff member building and managing forms, and (b) a
+client completing a form or booking. Everything below is a usability, builder, or
+polish gap, not an architectural defect. Findings were verified against the code;
+file references are `path:line` at the time of review.
+
+> **Scope note.** None of these block the feature shipping or compromise data
+> integrity. They are the difference between "works" and "fast and pleasant." A
+> few overlap with §9 Low/deferred items (cross-referenced); the rest are new.
+
+### 10.1 Staff: building and managing forms
+
+| ID | Finding | Location | Impact |
+|---|---|---|---|
+| **U1 ✅** | **The custom form builder cannot set help text, character limits, or default values.** Each field card exposes only label, Required, Staff-only, and (for select/multiselect) options. The schema and renderer fully support `help_text`, `max_length`, and `default_value` (incl. date `'today'`), and the renderer *displays* help text — but there is no input for any of them, so a hand-built form can never carry guidance or a prefilled date. Only library templates (authored in TypeScript) can. | `ComplianceFormBuilder.tsx:494-558` (FieldCard); supported at `form-schema.ts:46-92`; rendered at `ComplianceFormRenderer.tsx:117` | **High.** Intake forms lean on help text; this is the most-felt builder gap. |
+| **U2 ✅** | **Pass/fail setup is back-to-front** — and pass/fail is the most common salon form (patch tests). Staff must first add a *staff-only select* field, then scroll to the amber box below the field list to nominate it as the result field and tag pass/fail values. Nothing guides the order; the rules (must be select + staff_only + required, values present, no overlap) surface only as save-time errors, inviting repeated fix cycles. | `ComplianceFormBuilder.tsx:603-682` (ResultMappingEditor); rules at `form-schema.ts:168-198` | **High.** Friction on the single most-used form type. |
+| **U3 ✅** | **Result type locks silently after creation.** The dropdown is disabled in edit mode with only a small grey note and no warning at creation time. A wrong choice means archiving and rebuilding the whole form. | `ComplianceFormBuilder.tsx:294-309` | Medium. |
+| **U4 ✅** | **No version history, changelog, or rollback in the UI.** Versions are stored immutably and `GET .../types/[id]/versions` exists, but no component consumes it, the builder never collects the `changelog` it already supports (the save POSTs `form_schema` only), and there is no view/restore of a prior version. A bad edit can only be superseded, not reverted. | builder save `ComplianceFormBuilder.tsx:245-254`; endpoint `types/[id]/versions/route.ts`; no UI caller | Medium. |
+| **U5 ◑** | **No "Duplicate type" and no bulk actions.** Making a variant means rebuilding by hand; archiving many types is one click each. (Duplicate shipped; bulk actions still open.) | `ComplianceSettingsSection.tsx` TypesPanel | Low/Medium. |
+| **U6** | **The feature is spread across three surfaces.** Daily work lives at `/dashboard/compliance` (the "morning sweep"); all setup (types, requirements, general) lives under `/dashboard/settings?tab=compliance`, and the builder is reachable only from there (`/dashboard/compliance-types` just redirects). Easy to get lost. | `dashboard/compliance/page.tsx`; `compliance-types/page.tsx` (redirect); `ComplianceSettingsSection.tsx` | Low. |
+| **U7 ✅** | **Editing a form fires two sequential saves that can half-apply.** Edit PATCHes the type meta, then POSTs a new version separately; if the first succeeds and the second fails, state is partially saved behind an error. | `ComplianceFormBuilder.tsx:227-255` | Low (robustness). |
+| **U8 ✅** | **Dropdown option values auto-derive from labels on every keystroke with no collision guard,** so two labels that slugify identically (e.g. "Yes" / "Yes!") silently share a value and can corrupt select validation or result mapping. | `ComplianceFormBuilder.tsx:574-579` | Low (edge case). |
+| **U9 ✅** | **Library templates can't be previewed before cloning** (only a field count is shown); slug collisions are silently suffixed. | `ComplianceSettingsSection.tsx` LibraryDialog | Low. |
+
+### 10.2 Guests: completing forms and booking
+
+| ID | Finding | Location | Impact |
+|---|---|---|---|
+| **U10 ✅** | **No save-progress / resume anywhere.** Inline booking forms live in React state; the public link form keeps nothing locally. A refresh, dropped mobile connection, or tab close loses all entry (and strands any in-progress upload). Worst on long forms on a phone. | `BookingComplianceForms.tsx`; `PublicComplianceForm.tsx` | **High.** |
+| **U11 ✅** | **Signature pad mobile bug.** The canvas backing store is sized once on mount from `getBoundingClientRect()` and never re-measured; if the width changes after mount (orientation change, or rendering inside an animating dialog) the live pointer mapping no longer matches the scaled backing store, so strokes land offset/distorted. Fixed 160px height is also cramped on phones. | `SignaturePad.tsx:27-47,91` | **High** (touch is the primary signing surface). |
+| **U12 ✅** | **"Cannot book online" can dead-end the guest.** When a service needs an in-venue-only type (e.g. patch test) with `block_online`, the per-type `online_unmet_message` (shipped in §9.3) explains next steps — but it is optional. Unset, the guest sees a generic "Must be completed before this can be booked online" with no action. | `CompliancePreCheckNotice.tsx:171-191`; message is an optional builder field | Medium. Extends §9.3. |
+| **U13 ✅** | **Returning clients with a different email read as MISSING.** Pre-check resolves "already on file" by venue+email; a regular who books under a second email is told the requirement is unmet and may be blocked online. Escape hatch is the "contact the venue" copy. | `pre-check` POST; `public-forms-service.ts` `publicPreCheckForGuest` | Medium. |
+| **U14 ✅** | **Two stacked "what you need" panels** in the details step (the pre-check notice and the inline forms block) risk reading as duplication, even though `suppressTypeIds` dedups type ids between them. Now merged into one shared "Before you book" card (§10.6). | `AppointmentBookingFlow.tsx` | Low/Medium. |
+| **U15** | **No self-service correction after submit.** A consumed public link shows "Already submitted, contact the venue" — a typo means a phone call. | `p/forms/[code]/page.tsx` consumed copy | Low. |
+| **U16** | **Expired links fail silently** — expiry happens on access/cron with no "your link expired" message, so guests may keep retrying a dead link. (Related to the §9.5 Low item on the expiry-reminder template, but distinct: this is the *link*, not the record.) | `public-forms-service.ts:112-122` | Low. |
+| **U17 ✅** | **Form renderer accessibility gaps** — no `aria-invalid`, `aria-describedby` (help text not linked), or `aria-required`; validation errors are not programmatically tied to their fields. Reinforces the §9.5 deferred "a11y label-association sweep." | `ComplianceFormRenderer.tsx` | Low/Medium. |
+
+### 10.3 Verification notes (claims checked and rejected)
+
+During this review three plausible-sounding concerns were checked and found to be
+non-issues, recorded here so they are not re-raised:
+
+- The public pre-check POST **is** rate-limited (30/IP/min). `pre-check/route.ts:42`.
+- Group bookings **do** enforce compliance per attendee (the "not wired" idea was a stale reading of §6/§9 history, not the code). `create-group/route.ts:504-528`.
+- Single-use link consumption **is** atomic with rollback on capture failure — no race. `public-forms-service.ts:214-258`.
+
+### 10.4 Suggested implementation order
+
+Sequenced by value-per-effort, front-loading the two changes a salon and a client
+feel most, and grouping by the surface each touches so work batches cleanly. All
+of it stays behind `compliance_records_enabled`, Appointments-tier, off by default.
+
+- **Step 1 — Builder field options (U1) + pass/fail flow (U2). ✅ implemented (June 2026).** `FieldCard` gained a help-text input on every field plus a `FieldExtras` block carrying character limit + default value (text/textarea), default selection (select), default selections (multiselect), and a No default / Today / specific-date control (date) — all already supported by the schema and renderer. Choosing result type = pass/fail now auto-inserts a ready-made staff-only `Result (staff decision)` select (`required`, options Pass/Fail) and wires `result_mapping`, so a valid pass/fail form exists immediately; the field and its options stay fully editable and the amber panel's copy was updated to match. All in `ComplianceFormBuilder.tsx`. Typecheck + lint clean; 169 compliance / 1664 total tests green.
+- **Step 2 — Signature pad mobile fix (U11) + guest accessibility (U17). ✅ implemented (June 2026).** `SignaturePad` now re-measures its canvas via a `ResizeObserver` (sizing was previously one-shot on mount, the cause of offset strokes after an orientation change or dialog open), redraws the saved signature to fit on each re-measure, and defaults to a taller 200px pad. `ComplianceFormRenderer` adds `aria-required` / `aria-invalid` / `aria-describedby` to every input, links help text and error text by id, marks the error `role="alert"`, and wraps the multiselect group in `role="group"` with `aria-labelledby`. No data-model change. Typecheck + lint clean; tests green.
+- **Step 3 — Draft persistence (U10). ✅ implemented (June 2026).** New `src/lib/compliance/form-draft.ts` holds SSR-guarded, best-effort localStorage helpers (`loadFormDraft` / `saveFormDraft` / `clearFormDraft` / `clearFormDraftsByPrefix`) with a 7-day TTL, covered by `form-draft.test.ts` (7 tests incl. TTL expiry, prefix clear, SSR + quota-throw safety). `ComplianceFormRenderer` gained an optional `draftKey`: it restores a saved draft once per key after mount (no SSR mismatch), autosaves on change (debounced 300ms), and clears on a clean submit only. The public link form passes `draftKey={`public:${code}`}` and now rethrows a failed submit so the draft is kept for retry. `BookingComplianceForms` persists a stable per-venue draft id and the completed-responses map, restores both on mount, gives each inline form its own `draftKey`, and clears all of a venue's booking drafts once the booking is submitted. Staff/preview contexts pass no `draftKey` (no drafts on shared devices). Typecheck + lint clean; 1671 tests green (7 new).
+- **Step 4 — Blocked-online guidance (U12) + returning-client lookup (U13). ✅ implemented (June 2026).** `CompliancePreCheckNotice` now shows actionable default copy when the venue has set no `online_unmet_message`: a blocked MISSING requirement reads "This needs to be on file before you can book online. Please contact the venue to arrange it." (the venue's own message still wins when set), an EXPIRED one points the guest to renew with the venue, and a `warn_client` requirement on an in-venue-only type no longer falsely promises an email link (it now says the team will complete it at the appointment) — using the `client_online` flag the pre-check API already returns, so no API change. For U13 the blocked MISSING copy adds a nudge that a returning client may have used a different email or phone last time and should check with the venue. **Note:** the deeper cross-email guest identity match was intentionally *not* changed — `findOrCreateGuest` deliberately skips phone matching for silent-auth public bookings (an account-linking safety measure), so the booking gate would still create a new guest and block; matching the pre-check on phone alone would produce a false "on file". The escape-hatch copy is the correct low-risk fix; a true cross-identity match belongs with the guest merge/dedup subsystem. Copy-only, no migration; typecheck + lint + lint:modals clean; 1671 tests green.
+- **Step 5 — Staff management niceties (U4, U5, U3, U7). ✅ implemented (June 2026).** New service functions `restoreComplianceTypeVersion` and `duplicateComplianceType` (`types-service.ts`, both reusing the existing create/version flows so slugs, audit and validation are consistent), with 4 new unit tests. New admin routes `POST /types/[id]/versions/restore` and `POST /types/[id]/duplicate`. **U4:** the edit builder now shows a read-only Version history panel (v-number, date, changelog, "(current)") with one-click Restore that re-publishes a prior version as a new monotonic version (records keep their captured version) and re-hydrates the editor; a "What changed" changelog field is saved with each version. **U3:** the new-form builder now warns under the result-type select that it can't be changed after creation. **U7:** `complianceTypePatchSchema` + the PATCH handler accept an optional `form_schema` (+ `changelog`) so the edit save updates settings and publishes the new version in a single request (validating the schema first, so an invalid form changes nothing); the builder no longer fires two sequential writes. **U5:** a Duplicate action in the settings types list creates an independent "{name} (copy)"; bulk actions were not included (lower value, left for Step 6). Typecheck + lint + lint:modals clean; 1675 tests green (4 new).
+- **Step 6 — Lower-priority polish. ◑ partially implemented (June 2026); the rest deferred by judgment.**
+  - **U8 ✅** — the builder's option editor now de-duplicates derived option values (appends `_2`, `_3`, …) so two labels that slugify the same no longer silently share a value and corrupt select validation / pass-fail mapping. (`ComplianceFormBuilder.tsx` OptionsEditor.)
+  - **U9 ✅** — `templateSummaries()` now carries each template's `form_schema`, and the "Add from library" dialog has a per-template **Preview** toggle that renders the form read-only (shared `ComplianceFormRenderer` in preview mode) before cloning. (`library/index.ts`, `ComplianceSettingsSection.tsx`.)
+  - **Deferred (with reasons), not done:**
+    - **U14 (two-panel consolidation): ✅ later implemented in §10.6** (the merge was done as part of the UX pass once it was explicitly requested).
+    - **U15 (self-service resubmit):** a consumed link's "already submitted, contact the venue" copy is already actionable; true self-correction means re-opening a consumed link and voiding/re-capturing a record that may already have been acted on — an integrity/audit concern best handled by staff, by design.
+    - **U16 (proactive expired-link email):** the on-page expired copy already tells the guest to ask the venue for a new link; a proactive email needs a new cron pass, message template and dispatch — infra-heavy for low value (sits with the §9.5 deferred expiry-reminder items).
+    - **U6 (navigation consolidation):** the daily dashboard and Settings already cross-link; unifying the IA is a broader, riskier dashboard change disproportionate to the benefit.
+    - **Bulk type actions (U5 remainder):** low value (venues have few types); deferred.
+
+Steps 1 to 5 are implemented, and Step 6's two worthwhile wins (U8, U9) with
+them — all with no migration. The remaining Step 6 items (U14, U15, U16, U6,
+bulk actions) were assessed and **deferred by judgment**: each is either
+net-negative to force (booking-flow regression risk, data-integrity concerns) or
+low-value infra for a polish pass. The reasons are recorded per item above. This
+completes the actionable usability work from the §10 review.

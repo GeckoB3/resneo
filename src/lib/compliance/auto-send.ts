@@ -162,7 +162,8 @@ async function defaultSendFormReminder(admin: SupabaseClient, t: FormReminderTar
       venueId: t.venueId,
       staffId: null,
       linkId: t.linkId,
-      sentVia,
+      // Record the channel actually used (dispatch may fall back sms→email).
+      sentVia: result.channel ?? sentVia,
       guestId: t.guestId,
       complianceTypeId: t.complianceTypeId,
     });

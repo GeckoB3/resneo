@@ -4,7 +4,6 @@ import {
   COMPLIANCE_CAPTURE_METHODS,
   COMPLIANCE_ENFORCEMENT_LEVELS,
   COMPLIANCE_CAPTURE_CHANNELS,
-  COMPLIANCE_LINK_SENT_VIA,
   COMPLIANCE_ONLINE_COLLECTION_MODES,
 } from '@/lib/compliance/constants';
 import { COMPLIANCE_RESULT_TYPES } from '@/lib/compliance/form-schema';
@@ -30,7 +29,12 @@ export const complianceTypeCreateSchema = z.object({
 });
 export type ComplianceTypeCreateInput = z.infer<typeof complianceTypeCreateSchema>;
 
-/** Update non-schema fields only (schema edits go through a new version). */
+/**
+ * Update a type's non-schema fields. May ALSO carry `form_schema` (+ optional
+ * `changelog`) so the form-builder edit can update settings and publish a new
+ * immutable version in a single request (the service validates the schema and
+ * creates the version). Schema edits without these still go through the new-version route.
+ */
 export const complianceTypePatchSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
@@ -41,6 +45,8 @@ export const complianceTypePatchSchema = z
     form_link_expiry_days: z.number().int().min(1).max(365).nullable().optional(),
     online_unmet_message: z.string().max(500).nullable().optional(),
     is_active: z.boolean().optional(),
+    form_schema: z.unknown().optional(),
+    changelog: z.string().max(1000).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 export type ComplianceTypePatchInput = z.infer<typeof complianceTypePatchSchema>;
@@ -117,6 +123,9 @@ export const complianceFormLinkCreateSchema = z.object({
   guest_id: z.string().uuid(),
   compliance_type_id: z.string().uuid(),
   booking_id: z.string().uuid().nullable().optional(),
-  send_via: z.enum(COMPLIANCE_LINK_SENT_VIA).default('email'),
+  // Optional: when omitted, the route uses the venue's default form-link channel.
+  // Only a real delivery channel can be requested; 'manual_copy' is an internal
+  // fallback the route resolves to when the guest has no email/phone, never a caller input.
+  send_via: z.enum(['email', 'sms']).optional(),
 });
 export type ComplianceFormLinkCreateInput = z.infer<typeof complianceFormLinkCreateSchema>;

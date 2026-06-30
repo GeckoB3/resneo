@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { marked } from 'marked';
@@ -11,6 +11,7 @@ import {
   type FileResponse,
   type SignatureResponse,
 } from '@/lib/compliance/form-schema';
+import { clearFormDraft, loadFormDraft, saveFormDraft } from '@/lib/compliance/form-draft';
 import { SignaturePad } from '@/components/dashboard/compliance/SignaturePad';
 
 const inputClass =
@@ -35,6 +36,14 @@ export interface ComplianceFormRendererProps {
   preview?: boolean;
   /** Endpoint for `file` field uploads (public submissions). */
   fileUploadUrl?: string;
+  /**
+   * When set, in-progress input is autosaved to localStorage under this key and
+   * restored on mount, so a reload resumes (improvement plan §10, U10). The draft is
+   * cleared on a successful submit. Omit for staff/preview contexts (shared devices).
+   */
+  draftKey?: string;
+  /** Field-id → message, from a server-side validation rejection; shown under the field. */
+  serverErrors?: Record<string, string>;
 }
 
 export function ComplianceFormRenderer({
@@ -46,6 +55,8 @@ export function ComplianceFormRenderer({
   submitLabel = 'Submit',
   preview = false,
   fileUploadUrl,
+  draftKey,
+  serverErrors,
 }: ComplianceFormRendererProps) {
   const fields = useMemo(
     () => schema.fields.filter((f) => mode === 'staff' || !f.staff_only),
@@ -81,15 +92,58 @@ export function ComplianceFormRenderer({
   const {
     control,
     handleSubmit,
+    reset,
+    watch,
+    setError,
     formState: { errors },
   } = useForm<Record<string, unknown>>({ resolver, defaultValues, mode: 'onSubmit' });
+
+  // Surface server-side field rejections under the matching field (reusing the inline
+  // error + aria wiring), so a guest sees *which* answer to fix, not just a top banner.
+  useEffect(() => {
+    if (!serverErrors) return;
+    for (const [name, message] of Object.entries(serverErrors)) {
+      if (message) setError(name, { type: 'server', message });
+    }
+  }, [serverErrors, setError]);
+
+  // Restore a saved draft once per key (after mount, so server and client first render
+  // match). Merges over the computed defaults so newly-added fields keep their defaults.
+  const restoredKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (preview || !draftKey || restoredKeyRef.current === draftKey) return;
+    restoredKeyRef.current = draftKey;
+    const draft = loadFormDraft(draftKey);
+    if (draft) reset({ ...defaultValues, ...draft });
+  }, [draftKey, preview, defaultValues, reset]);
+
+  // Autosave on change (debounced) so a reload mid-form resumes.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (preview || !draftKey) return;
+    const sub = watch((values) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => saveFormDraft(draftKey, values as Record<string, unknown>), 300);
+    });
+    return () => {
+      sub.unsubscribe();
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [draftKey, preview, watch]);
 
   const disabled = preview || submitting;
   const introHtml = schema.intro_markdown ? renderIntroMarkdown(schema.intro_markdown) : null;
 
   const submit = onSubmit
     ? handleSubmit(async (values) => {
-        await onSubmit(values);
+        try {
+          await onSubmit(values);
+          // Only a clean submit clears the draft; a throw (e.g. a failed network call
+          // the parent re-raised) keeps it so the guest can retry without re-entering.
+          if (draftKey) clearFormDraft(draftKey);
+        } catch {
+          // Parent surfaced the error; leave the draft in place.
+        }
       })
     : (e: React.FormEvent) => e.preventDefault();
 
@@ -102,19 +156,44 @@ export function ComplianceFormRenderer({
           dangerouslySetInnerHTML={{ __html: introHtml }}
         />
       )}
+      {fields.some((f) => f.required) && (
+        <p className="text-xs text-slate-500">
+          Fields marked <span className="text-rose-500">*</span> are required.
+        </p>
+      )}
 
       {fields.map((field) => {
         const error = errors[field.id]?.message as string | undefined;
+        const helpId = field.help_text ? `${field.id}-help` : null;
+        const errorId = error ? `${field.id}-error` : null;
+        const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
+        const ariaProps = {
+          'aria-required': field.required ? true : undefined,
+          'aria-invalid': error ? true : undefined,
+          'aria-describedby': describedBy,
+        } as const;
         return (
           <div key={field.id}>
-            <label htmlFor={field.id} className="mb-1 block text-sm font-medium text-slate-700">
+            <label
+              id={`${field.id}-label`}
+              htmlFor={field.id}
+              className="mb-1 block text-sm font-medium text-slate-700"
+            >
               {field.label}
-              {field.required && <span className="ml-0.5 text-rose-500">*</span>}
+              {field.required && (
+                <span className="ml-0.5 text-rose-500" aria-hidden>
+                  *
+                </span>
+              )}
               {mode === 'staff' && field.staff_only && (
                 <span className="ml-2 text-xs font-normal text-slate-400">(staff only)</span>
               )}
             </label>
-            {field.help_text && <p className="mb-1 text-xs text-slate-500">{field.help_text}</p>}
+            {field.help_text && (
+              <p id={helpId ?? undefined} className="mb-1 text-xs text-slate-500">
+                {field.help_text}
+              </p>
+            )}
 
             <Controller
               name={field.id}
@@ -131,6 +210,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'textarea':
@@ -143,6 +223,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'select':
@@ -154,6 +235,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       >
                         <option value="">Select…</option>
                         {field.options.map((o) => (
@@ -166,7 +248,12 @@ export function ComplianceFormRenderer({
                   case 'multiselect': {
                     const selected = Array.isArray(rhf.value) ? (rhf.value as string[]) : [];
                     return (
-                      <div className="space-y-1.5">
+                      <div
+                        role="group"
+                        aria-labelledby={`${field.id}-label`}
+                        aria-describedby={describedBy}
+                        className="space-y-1.5"
+                      >
                         {field.options.map((o) => (
                           <label key={o.value} className="flex items-center gap-2 text-sm text-slate-700">
                             <input
@@ -196,6 +283,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'signature':
@@ -220,7 +308,11 @@ export function ComplianceFormRenderer({
                 }
               }}
             />
-            {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
+            {error && (
+              <p id={errorId ?? undefined} role="alert" className="mt-1 text-sm text-rose-600">
+                {error}
+              </p>
+            )}
           </div>
         );
       })}

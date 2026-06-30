@@ -13,6 +13,7 @@ import {
   joinedTypeName,
   recordStatusPill,
   requirementStatePill,
+  RESULT_LABELS,
   type AuditEventRow,
   type ComplianceRecordRow,
   type FormLinkRow,
@@ -101,7 +102,6 @@ export function ComplianceSection({
           guest_id: guestId,
           compliance_type_id: typeId,
           booking_id: bookingId ?? null,
-          send_via: 'email',
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -110,7 +110,11 @@ export function ComplianceSection({
         return;
       }
       setActionMessage(
-        body.dispatched ? 'Form link sent.' : 'Form link created. Copy it to share manually.',
+        body.dispatched
+          ? `Form link sent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`
+          : body.no_destination
+            ? 'Link created, but there’s no email or phone on file to send it. Use Copy link below to share it.'
+            : 'Link created, but we couldn’t send it just now. Use Copy link below to share it.',
       );
       refresh();
     } finally {
@@ -132,7 +136,11 @@ export function ComplianceSection({
         setActionMessage(body.error ?? 'Could not resend the link.');
         return;
       }
-      setActionMessage(body.dispatched ? 'Form link resent.' : 'Form link ready. Copy it to share manually.');
+      setActionMessage(
+        body.dispatched
+          ? `Form link resent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`
+          : `We couldn’t send it (no ${sendVia === 'sms' ? 'mobile number' : 'email'} on file). Use Copy link instead.`,
+      );
       refresh();
     } finally {
       setLinkBusyId(null);
@@ -351,7 +359,7 @@ export function ComplianceSection({
                       {rec.expires_at
                         ? ` · ${new Date(rec.expires_at).getTime() <= Date.now() ? 'Expired' : 'Expires'} ${formatComplianceDate(rec.expires_at)}`
                         : ''}
-                      {rec.result ? ` · ${rec.result}` : ''}
+                      {rec.result ? ` · ${RESULT_LABELS[rec.result] ?? rec.result}` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

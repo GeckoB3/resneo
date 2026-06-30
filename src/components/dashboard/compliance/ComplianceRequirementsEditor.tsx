@@ -88,6 +88,24 @@ export function ComplianceRequirementsEditor({
   const updateEnforcement = (reqId: string, enforcement: string) => patchRequirement(reqId, { enforcement });
   const updateCollection = (reqId: string, online_collection: string) =>
     patchRequirement(reqId, { online_collection });
+  const updateLockPeriod = (reqId: string, lock_period_hours: number | null) =>
+    patchRequirement(reqId, { lock_period_hours });
+
+  /** Validate + persist a lead-time input on blur, skipping no-ops and invalid values. */
+  function commitLeadTime(r: RequirementRowData, raw: string) {
+    const trimmed = raw.trim();
+    const current = r.lock_period_hours ?? null;
+    let next: number | null;
+    if (trimmed === '') {
+      next = null;
+    } else {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return;
+      next = Math.max(0, Math.min(8760, Math.round(n)));
+    }
+    if (next === current) return;
+    void updateLockPeriod(r.id, next);
+  }
 
   async function removeRequirement(reqId: string) {
     setBusyId(reqId);
@@ -187,6 +205,29 @@ export function ComplianceRequirementsEditor({
                 {ENFORCEMENT_DESCRIPTIONS[r.enforcement] && (
                   <p className="mt-1.5 text-xs text-slate-500">{ENFORCEMENT_DESCRIPTIONS[r.enforcement]}</p>
                 )}
+                <div className="mt-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs font-medium text-slate-600" htmlFor={`lead-${r.id}`}>
+                      Lead time:
+                    </label>
+                    <input
+                      id={`lead-${r.id}`}
+                      type="number"
+                      min={0}
+                      max={8760}
+                      defaultValue={r.lock_period_hours ?? ''}
+                      disabled={busyId === r.id}
+                      onBlur={(e) => commitLeadTime(r, e.target.value)}
+                      placeholder="None"
+                      className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                    />
+                    <span className="text-xs text-slate-500">hours before the appointment</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Require the record to be completed at least this many hours before the visit (for example 48 for
+                    a patch test). Leave blank for no lead time.
+                  </p>
+                </div>
                 {typeSupportsClientOnline(captureMethodsByType.get(r.compliance_type_id)) ? (
                   <div className="mt-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -213,6 +254,14 @@ export function ComplianceRequirementsEditor({
                         {ONLINE_COLLECTION_DESCRIPTIONS[r.online_collection]}
                       </p>
                     )}
+                    {(r.enforcement === 'block_online' || r.enforcement === 'block_all') &&
+                      r.online_collection === 'none' && (
+                        <p className="mt-1 text-xs text-amber-600">
+                          This blocks online booking but isn’t offered online, so clients can’t complete it
+                          themselves. Choose how it’s collected online above, or add a message (on the type) telling
+                          them what to do.
+                        </p>
+                      )}
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-slate-500">
@@ -252,6 +301,7 @@ function AddRequirementDialog({
   const [typeId, setTypeId] = useState('');
   const [enforcement, setEnforcement] = useState('warn_staff');
   const [onlineCollection, setOnlineCollection] = useState('confirmation_link');
+  const [leadTime, setLeadTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -274,6 +324,8 @@ function AddRequirementDialog({
           compliance_type_id: typeId,
           enforcement,
           online_collection: supportsOnline ? onlineCollection : 'none',
+          lock_period_hours:
+            leadTime.trim() === '' ? null : Math.max(0, Math.min(8760, Math.round(Number(leadTime)))),
         }),
       });
       if (!res.ok) {
@@ -285,6 +337,7 @@ function AddRequirementDialog({
       setTypeId('');
       setEnforcement('warn_staff');
       setOnlineCollection('confirmation_link');
+      setLeadTime('');
       onOpenChange(false);
     } finally {
       setSubmitting(false);
@@ -352,6 +405,25 @@ function AddRequirementDialog({
           {ENFORCEMENT_DESCRIPTIONS[enforcement] && (
             <p className="mt-1.5 text-xs text-slate-500">{ENFORCEMENT_DESCRIPTIONS[enforcement]}</p>
           )}
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Lead time (optional)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={8760}
+              value={leadTime}
+              onChange={(e) => setLeadTime(e.target.value)}
+              placeholder="None"
+              className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+            <span className="text-sm text-slate-500">hours before the appointment</span>
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">
+            Require the record to be on file at least this many hours before the visit, for example 48 for a patch
+            test.
+          </p>
         </div>
         {supportsOnline && (
           <div>

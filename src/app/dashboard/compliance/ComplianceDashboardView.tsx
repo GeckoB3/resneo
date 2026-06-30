@@ -58,6 +58,10 @@ export function ComplianceDashboardView() {
     '/api/venue/compliance/dashboard',
     complianceJsonFetcher,
   );
+  // The dashboard route caches per venue for 5 min; after an action, pull a cache-busting
+  // refresh so the actioned item drops off the sweep immediately (not up to 5 min later).
+  const refresh = () =>
+    mutate(() => complianceJsonFetcher('/api/venue/compliance/dashboard?refresh=1'), { revalidate: false });
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureTarget | null>(null);
@@ -75,7 +79,7 @@ export function ComplianceDashboardView() {
       });
       const body = await res.json().catch(() => ({}));
       setMessage(res.ok ? (body.dispatched ? 'Form link sent.' : 'Form link created.') : body.error ?? 'Could not send link.');
-      if (res.ok) void mutate();
+      if (res.ok) void refresh();
     } finally {
       setSendingKey(null);
     }
@@ -336,7 +340,7 @@ export function ComplianceDashboardView() {
           initialChannel="client_walkin"
           onCaptured={() => {
             setMessage('Record captured.');
-            void mutate();
+            void refresh();
           }}
         />
       )}

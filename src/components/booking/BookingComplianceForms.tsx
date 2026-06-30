@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
 import {
@@ -59,6 +59,19 @@ function makeDraftUuid(): string {
   return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
 }
 
+/**
+ * Clear a venue's persisted booking-compliance drafts. Call this AFTER a booking
+ * succeeds (the parent reaches the confirmation/payment step). It is deliberately not
+ * done while submitting: this component unmounts the instant submission starts, and
+ * clearing only on success means a failed submit + reload still resumes the guest's
+ * answers (and keeps already-uploaded files under the same draft prefix).
+ */
+export function clearBookingComplianceDrafts(venueId: string): void {
+  clearFormDraftsByPrefix(`booking-inline:${venueId}:`);
+  clearFormDraft(`booking-responses:${venueId}`);
+  clearFormDraft(`booking-draftid:${venueId}`);
+}
+
 interface Props {
   venueId: string;
   /** Catalog service id(s) for the booking (one per chosen service / multi-service segment). */
@@ -112,20 +125,6 @@ export default function BookingComplianceForms({
     saveFormDraft(responsesKey, responsesByType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, restored]);
-
-  // Clear persisted responses once the booking is being submitted (a success navigates away;
-  // a failed submit keeps the in-memory state so the guest can retry). The draft id is kept
-  // stable on purpose (review #3): if a failed submit is followed by a reload, reusing the
-  // same upload prefix keeps any already-uploaded files valid instead of orphaning them.
-  const clearedRef = useRef(false);
-  useEffect(() => {
-    if (submittingBooking && !clearedRef.current) {
-      clearedRef.current = true;
-      clearFormDraftsByPrefix(`booking-inline:${venueId}:`);
-      clearFormDraft(responsesKey);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submittingBooking, venueId]);
 
   const serviceKey = useMemo(() => [...new Set(serviceIds.filter(Boolean))].sort().join(','), [serviceIds]);
   const uniqueServiceIds = useMemo(() => serviceKey.split(',').filter(Boolean), [serviceKey]);

@@ -6,7 +6,10 @@ import { usePublicBookingAccountGateContext } from '@/components/booking/PublicB
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
 import CompliancePreCheckNotice from './CompliancePreCheckNotice';
-import BookingComplianceForms, { type BookingComplianceState } from './BookingComplianceForms';
+import BookingComplianceForms, {
+  clearBookingComplianceDrafts,
+  type BookingComplianceState,
+} from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
@@ -624,6 +627,15 @@ export function AppointmentBookingFlow({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Clear persisted inline-compliance drafts once a booking has actually succeeded (the flow
+  // reaches confirmation/payment). Doing it here, not on submit start, means a failed submit
+  // still resumes on reload, while a completed booking doesn't leave stale answers behind.
+  useEffect(() => {
+    if (isPublicGuest && (step === 'confirmation' || step === 'payment')) {
+      clearBookingComplianceDrafts(venue.id);
+    }
+  }, [step, isPublicGuest, venue.id]);
 
   // Single booking state
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(() => editBooking?.service_id ?? preselectedServiceId ?? null);

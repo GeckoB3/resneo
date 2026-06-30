@@ -32,6 +32,12 @@ export function PublicComplianceForm({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // If the link was already completed (e.g. a double-submit race), show the same
+        // reassuring "thank you" state rather than a scary error, and let the draft clear.
+        if (json.reason === 'consumed' || json.reason === 'already_consumed') {
+          setDone(true);
+          return;
+        }
         setFormError(json.error ?? 'We could not submit your form. Please try again.');
         // Throw so the renderer keeps the saved draft for a retry (it only clears on success).
         throw new Error('submit failed');

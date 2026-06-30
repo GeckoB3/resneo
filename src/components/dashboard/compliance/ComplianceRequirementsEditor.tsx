@@ -254,6 +254,14 @@ export function ComplianceRequirementsEditor({
                         {ONLINE_COLLECTION_DESCRIPTIONS[r.online_collection]}
                       </p>
                     )}
+                    {(r.enforcement === 'block_online' || r.enforcement === 'block_all') &&
+                      r.online_collection === 'none' && (
+                        <p className="mt-1 text-xs text-amber-600">
+                          This blocks online booking but isn’t offered online, so clients can’t complete it
+                          themselves. Choose how it’s collected online above, or add a message (on the type) telling
+                          them what to do.
+                        </p>
+                      )}
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-slate-500">

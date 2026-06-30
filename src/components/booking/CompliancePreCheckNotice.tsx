@@ -25,6 +25,8 @@ interface PreCheckRequirement {
   online_unmet_message?: string | null;
   /** Whether the client can complete this themselves online (vs in-venue only). */
   client_online?: boolean;
+  /** Where the client completes this online: `inline` types are shown as forms, not here. */
+  online_collection?: string;
 }
 
 type PreCheckState = 'SATISFIED' | 'MISSING' | 'EXPIRED' | 'LOCK_PASSED';
@@ -168,7 +170,12 @@ export default function CompliancePreCheckNotice({
     () =>
       (requirements ?? []).filter(
         (r) =>
-          (isBlocking(r.enforcement) || r.enforcement === 'warn_client') && !suppress.has(r.compliance_type_id),
+          (isBlocking(r.enforcement) || r.enforcement === 'warn_client') &&
+          !suppress.has(r.compliance_type_id) &&
+          // `inline` types render as fillable forms below, not as a pre-check row. Excluding
+          // them here (from the pre-check's own data) avoids a flash of contradictory
+          // "contact the venue" copy before the inline component reports its type ids.
+          r.online_collection !== 'inline',
       ),
     [requirements, suppress],
   );

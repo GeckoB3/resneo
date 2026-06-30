@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -33,8 +33,16 @@ const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string }> = [
   { id: 'requirements', label: 'Service requirements' },
 ];
 
+function isSubTab(v: string | null): v is SubTab {
+  return v === 'general' || v === 'types' || v === 'requirements';
+}
+
 export function ComplianceSettingsSection({ isAdmin }: { isAdmin: boolean }) {
-  const [sub, setSub] = useState<SubTab>('general');
+  // Honour a ?sub= deep link (e.g. "Create one in Settings → Compliance" links to types),
+  // otherwise default to General settings where the feature is enabled.
+  const searchParams = useSearchParams();
+  const subParam = searchParams.get('sub');
+  const [sub, setSub] = useState<SubTab>(isSubTab(subParam) ? subParam : 'general');
 
   return (
     <div className="space-y-4">
@@ -291,10 +299,15 @@ interface ServiceRow {
 }
 
 function RequirementsPanel() {
+  const { data: flags } = useSWR<{ raw: { compliance_records_enabled?: boolean } }>(
+    '/api/venue/feature-flags',
+    complianceJsonFetcher,
+  );
   const { data, isLoading } = useSWR<{ services: ServiceRow[] }>(
     '/api/venue/appointment-services',
     complianceJsonFetcher,
   );
+  const complianceEnabled = flags?.raw?.compliance_records_enabled ?? false;
   const services = (data?.services ?? []).filter((s) => s.is_active !== false);
 
   return (
@@ -305,7 +318,12 @@ function RequirementsPanel() {
         description="Connect compliance types to the services that need them. You can also do this from the service editor."
       />
       <SectionCard.Body>
-        {isLoading ? (
+        {flags && !complianceEnabled ? (
+          <p className="text-sm text-slate-500">
+            Turn on <span className="font-medium">Enable compliance records</span> in the General settings tab to
+            connect services to compliance types.
+          </p>
+        ) : isLoading ? (
           <p className="text-sm text-slate-500">Loading services…</p>
         ) : services.length === 0 ? (
           <p className="text-sm text-slate-500">No services to configure yet.</p>
@@ -315,7 +333,7 @@ function RequirementsPanel() {
               <details key={s.id} className="rounded-lg border border-slate-200">
                 <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-800">{s.name}</summary>
                 <div className="border-t border-slate-100 p-3">
-                  <ComplianceRequirementsEditor appointmentServiceId={s.id} complianceEnabled />
+                  <ComplianceRequirementsEditor appointmentServiceId={s.id} complianceEnabled={complianceEnabled} />
                 </div>
               </details>
             ))}

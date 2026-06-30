@@ -416,6 +416,85 @@ tests green.
 - **Form builder:** field-type icons in the "Add field" palette and on field
   cards, plus a friendlier empty state. (`ComplianceFormBuilder.tsx`.)
 
+### 10.7 End-to-end QA pass (June 2026): bugs found and fixed
+
+A further full review of staff and customer flows (three independent passes plus
+direct tracing). The functional core held up; the items below were fixed. No
+migration; typecheck + lint + lint:modals clean; 1676 tests green.
+
+**Bugs fixed**
+
+1. **Inline-booking drafts were never cleared after a successful booking →
+   stale answers on the next visit.** The clear was tied to the
+   `submittingBooking` prop, but `BookingComplianceForms` unmounts the instant
+   submission starts (the flow swaps to the submitting panel), so the prop was
+   never observed `true` and the effect never ran. Moved the clear to the parent,
+   firing when the flow reaches `confirmation`/`payment` (success). A failed
+   submit now correctly still resumes on reload; a completed booking no longer
+   leaves stale answers behind. (`BookingComplianceForms.clearBookingComplianceDrafts`,
+   `AppointmentBookingFlow.tsx`.)
+2. **Deep link to Templates & types opened the wrong tab.** Changing the default
+   sub-tab to General (§10.6) broke the `?sub=types` link from the requirements
+   editor, because the settings section never read the `sub` param. It now honours
+   `?sub=`. (`ComplianceSettingsSection.tsx`.)
+3. **Service requirements tab dead-ended when compliance was OFF.** The panel
+   hard-coded `complianceEnabled` to true, so with the feature off it fired
+   403-ing requests and sat on "Loading…". It now reads the real feature flag and
+   shows the same "turn it on in General settings" guidance the Types tab does.
+   (`ComplianceSettingsSection.tsx`.)
+4. **The dashboard "morning sweep" went stale after every action.** The dashboard
+   route caches per venue for 5 min and only busts the cache on `?refresh=1`, but
+   the client re-fetched the bare URL after a capture / send, so actioned items
+   lingered for up to 5 minutes. The client now revalidates against `?refresh=1`.
+   (`ComplianceDashboardView.tsx`.)
+5. **In-venue capture left a sent form link live.** Capturing a record staff-side
+   didn't retire a still-pending link, so it kept nagging in "awaiting client
+   submission" and the guest could still open the old link and create a duplicate
+   record. Staff capture now consumes any matching pending links (audited).
+   (`form-links-service.consumePendingLinksForCapture`, `records/route.ts`.)
+6. **Pre-check flashed contradictory "contact the venue" copy for inline forms.**
+   For a type that is both blocking and collected inline, the pre-check briefly
+   showed a scary block row until the inline component reported its type ids. The
+   pre-check now self-suppresses `inline` requirements from its own data (the
+   API already returns `online_collection`), removing the flash entirely.
+   (`CompliancePreCheckNotice.tsx`.)
+
+**Clarity / correctness polish**
+
+7. Record `result` now shows a friendly label (Pass / Fail / Inconclusive) in the
+   guest records list, not the raw token. (`shared.RESULT_LABELS`, `ComplianceSection.tsx`.)
+8. Form-link send/resend messages are honest when nothing was actually
+   dispatched ("we couldn't send it — no mobile/email on file, use Copy link")
+   instead of a reassuring "ready". (`ComplianceSection.tsx`.)
+9. A consumed-link submit race now shows the reassuring "thank you" state, not an
+   error banner. (`PublicComplianceForm.tsx`.)
+10. The requirement editor warns when a requirement blocks online booking but is
+    set to "Do not collect online" for a client-completable type (a dead-end
+    config). (`ComplianceRequirementsEditor.tsx`.)
+
+**Verified solid (no change needed):** signed-URL flow for signatures/files;
+pass/fail "needs decision"; void; form-link issue/dedup/revoke; the merged
+"Before you book" card never shows an empty card; stable draft UUID; draft
+restore/resume; signature-pad mobile resize; storage-path security guards;
+per-tenant isolation on every new path.
+
+**Reported, not changed (recommended follow-ups, by judgment):**
+
+- **Dashboard "Send link" is email-only.** A guest with a phone but no email
+  can't be sent a link from the dashboard (the per-guest panel can do SMS/copy).
+  Worth an email/SMS choice or a copy-link fallback on the dashboard rows.
+- **Server `field_errors` aren't shown per-field** on the public form / inline
+  booking — only as a top banner. The renderer already has the `aria` wiring;
+  plumbing server field errors into it would localise them. (Client-side
+  validation catches most, so this is an edge.)
+- **No client-side file size/type guard** before upload, so an oversized photo is
+  rejected only after a round trip on mobile.
+- **"Complete now" on the dashboard opens hand-to-client mode** by default; the
+  label and default could be aligned (kept as-is pending a product call).
+- Minor jargon ("lead time", "capture method") could carry a one-line hint;
+  multiselect groups can't take `aria-required`/`aria-invalid` (invalid ARIA), so
+  required/invalid is conveyed via the label asterisk + `aria-describedby` error.
+
 ## Sources
 
 - Vagaro — [Forms feature](https://www.vagaro.com/pro/forms), [Make Forms Mandatory](https://support.vagaro.com/hc/en-us/articles/24398220401819-Make-Forms-Mandatory-for-Your-Customers), [Dual‑signature forms](https://www.vagaro.com/learn/vagaros-dual-signature-forms-improve-intake-liability), [Notifications & reminders](https://support.vagaro.com/hc/en-us/articles/115000439594-Send-Notifications-and-Reminders-to-Your-Customers), [Check‑In Kiosks](https://support.vagaro.com/hc/en-us/articles/5024382031131-Manage-Your-Check-In-Kiosks), [Self check‑in](https://support.vagaro.com/hc/en-us/articles/115003955413-Self-Check-In-at-a-Business-for-Customers-of-a-Vagaro-Business)

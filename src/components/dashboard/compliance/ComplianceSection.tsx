@@ -13,6 +13,7 @@ import {
   joinedTypeName,
   recordStatusPill,
   requirementStatePill,
+  RESULT_LABELS,
   type AuditEventRow,
   type ComplianceRecordRow,
   type FormLinkRow,
@@ -110,7 +111,9 @@ export function ComplianceSection({
         return;
       }
       setActionMessage(
-        body.dispatched ? 'Form link sent.' : 'Form link created. Copy it to share manually.',
+        body.dispatched
+          ? 'Form link sent.'
+          : 'Link created, but we couldn’t send it (check the client has an email on file). Use Copy link to share it.',
       );
       refresh();
     } finally {
@@ -132,7 +135,11 @@ export function ComplianceSection({
         setActionMessage(body.error ?? 'Could not resend the link.');
         return;
       }
-      setActionMessage(body.dispatched ? 'Form link resent.' : 'Form link ready. Copy it to share manually.');
+      setActionMessage(
+        body.dispatched
+          ? `Form link resent by ${sendVia === 'sms' ? 'SMS' : 'email'}.`
+          : `We couldn’t send it (no ${sendVia === 'sms' ? 'mobile number' : 'email'} on file). Use Copy link instead.`,
+      );
       refresh();
     } finally {
       setLinkBusyId(null);
@@ -351,7 +358,7 @@ export function ComplianceSection({
                       {rec.expires_at
                         ? ` · ${new Date(rec.expires_at).getTime() <= Date.now() ? 'Expired' : 'Expires'} ${formatComplianceDate(rec.expires_at)}`
                         : ''}
-                      {rec.result ? ` · ${rec.result}` : ''}
+                      {rec.result ? ` · ${RESULT_LABELS[rec.result] ?? rec.result}` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

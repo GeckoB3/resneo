@@ -577,7 +577,9 @@ export async function loadPublicCombinedCatalogue(
   // Eligible venues (Appointments-family, active plan) + name/slug.
   const { data: venues } = await admin
     .from('venues')
-    .select('id, name, slug, pricing_tier, plan_status, booking_model')
+    .select(
+      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+    )
     .in('id', memberVenueIds);
   const venueInfo: Record<string, { name: string; slug: string; eligible: boolean }> = {};
   for (const v of venues ?? []) {
@@ -588,6 +590,9 @@ export async function loadPublicCombinedCatalogue(
         pricing_tier: (v.pricing_tier as string | null) ?? null,
         plan_status: (v.plan_status as string | null) ?? null,
         booking_model: (v.booking_model as string | null) ?? null,
+        subscription_current_period_end:
+          (v.subscription_current_period_end as string | null) ?? null,
+        billing_access_source: (v.billing_access_source as string | null) ?? null,
       }).canCreate,
     };
   }

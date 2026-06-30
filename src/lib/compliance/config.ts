@@ -12,7 +12,7 @@ import { z } from 'zod';
 export const COMPLIANCE_DEFAULT_CAPTURE_METHODS = ['staff_in_venue', 'client_online', 'both'] as const;
 export type ComplianceDefaultCaptureMethod = (typeof COMPLIANCE_DEFAULT_CAPTURE_METHODS)[number];
 
-export const COMPLIANCE_FORM_LINK_CHANNELS = ['email', 'sms', 'both'] as const;
+export const COMPLIANCE_FORM_LINK_CHANNELS = ['email', 'sms'] as const;
 export type ComplianceFormLinkChannel = (typeof COMPLIANCE_FORM_LINK_CHANNELS)[number];
 
 /** v1 only supports `warn_only`; `block_check_in` is deferred to v2 (no check-in scan surface yet). */
@@ -39,8 +39,6 @@ export const complianceConfigSchema = z
       .min(1)
       .max(90)
       .default(COMPLIANCE_PLATFORM_DEFAULT_LINK_EXPIRY_DAYS),
-    /** Auto-send a form link when a booking is created with an unmet online-capturable requirement. */
-    auto_send_on_booking: z.boolean().default(false),
     /** Behaviour when a client arrives with an incomplete required form. */
     incomplete_behaviour: z.enum(COMPLIANCE_INCOMPLETE_BEHAVIOURS).default('warn_only'),
   })

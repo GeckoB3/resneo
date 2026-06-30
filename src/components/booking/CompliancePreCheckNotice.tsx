@@ -22,6 +22,7 @@ interface PreCheckRequirement {
   compliance_type_name: string;
   enforcement: string;
   lock_period_hours: number | null;
+  online_unmet_message?: string | null;
 }
 
 type PreCheckState = 'SATISFIED' | 'MISSING' | 'EXPIRED' | 'LOCK_PASSED';
@@ -47,10 +48,12 @@ interface Props {
   serviceIds: string[];
   /** Guest email once known (signed-in prefill or typed in the details form). */
   email?: string | null;
+  /** Type ids being collected inline in the booking flow — suppressed here to avoid duplication. */
+  suppressTypeIds?: string[];
   className?: string;
 }
 
-export default function CompliancePreCheckNotice({ venueId, serviceIds, email, className }: Props) {
+export default function CompliancePreCheckNotice({ venueId, serviceIds, email, suppressTypeIds, className }: Props) {
   const [requirements, setRequirements] = useState<PreCheckRequirement[] | null>(null);
   const [resolved, setResolved] = useState<Map<string, PreCheckState> | null>(null);
 
@@ -146,9 +149,14 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, c
 
   // Only requirements the guest can act on are shown publicly: blocking ones (must
   // be on file to book) and warn_client (soft heads-up). warn_staff is staff-only.
+  const suppress = useMemo(() => new Set(suppressTypeIds ?? []), [suppressTypeIds]);
   const visible = useMemo(
-    () => (requirements ?? []).filter((r) => isBlocking(r.enforcement) || r.enforcement === 'warn_client'),
-    [requirements],
+    () =>
+      (requirements ?? []).filter(
+        (r) =>
+          (isBlocking(r.enforcement) || r.enforcement === 'warn_client') && !suppress.has(r.compliance_type_id),
+      ),
+    [requirements, suppress],
   );
 
   if (uniqueServiceIds.length === 0 || visible.length === 0) return null;
@@ -158,14 +166,18 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, c
     const state = resolved?.get(req.compliance_type_id) ?? null;
     const blocking = isBlocking(req.enforcement);
     if (state === 'SATISFIED') {
-      return { name: req.compliance_type_name, tone: 'ok', detail: 'Already on file — nothing to do.' };
+      return { name: req.compliance_type_name, tone: 'ok', detail: 'Already on file, nothing to do.' };
     }
     if (blocking) {
+      // Venue's own guidance wins when set (e.g. "Please book a patch test first").
+      if (req.online_unmet_message && req.online_unmet_message.trim()) {
+        return { name: req.compliance_type_name, tone: 'block', detail: req.online_unmet_message.trim() };
+      }
       if (state === 'LOCK_PASSED') {
         return {
           name: req.compliance_type_name,
           tone: 'block',
-          detail: 'Needs to be completed ahead of your visit — there may not be enough time to do this online. Please contact the venue.',
+          detail: 'Needs to be completed ahead of your visit, and there may not be enough time to do this online. Please contact the venue.',
         };
       }
       // MISSING / EXPIRED / not-yet-resolved: this blocks an online booking.
@@ -184,12 +196,12 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, c
       tone: 'warn',
       detail:
         state === 'EXPIRED'
-          ? 'Your previous record has expired — we’ll email a secure link to renew it.'
+          ? 'Your previous record has expired. We’ll email a secure link to renew it.'
           : 'We’ll email you a secure link to complete this before your visit.',
     };
   });
 
-  const hasBlock = rows.some((r) => r.tone === 'block' && r.detail !== 'Already on file — nothing to do.');
+  const hasBlock = rows.some((r) => r.tone === 'block' && r.detail !== 'Already on file, nothing to do.');
   const hasWarn = rows.some((r) => r.tone === 'warn');
   const allOk = rows.every((r) => r.tone === 'ok');
 
@@ -202,7 +214,7 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, c
   const heading = hasBlock
     ? 'Before you can book online'
     : allOk
-      ? 'Compliance — you’re all set'
+      ? 'Compliance: you’re all set'
       : 'Forms needed for this booking';
 
   return (
@@ -219,7 +231,7 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, c
             </span>
             <span className={palette.body}>
               <span className="font-medium">{row.name}</span>
-              {' — '}
+              {': '}
               {row.detail}
             </span>
           </li>

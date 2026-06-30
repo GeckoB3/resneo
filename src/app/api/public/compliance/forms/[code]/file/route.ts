@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import {
-  COMPLIANCE_BUCKET,
-  COMPLIANCE_FILE_ALLOWED_MIME,
-  COMPLIANCE_FILE_MAX_BYTES,
-} from '@/lib/compliance/files';
+import { uploadComplianceFile } from '@/lib/compliance/files';
 import { clientIpFromHeaders, rateLimit } from '@/lib/compliance/rate-limit';
 
 const CODE_RE = /^[0-9a-z]{8,12}$/;
-const EXT_BY_MIME: Record<string, string> = {
-  'application/pdf': 'pdf',
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/heic': 'heic',
-  'image/webp': 'webp',
-};
 
 /**
  * POST /api/public/compliance/forms/[code]/file — upload a `file`-field document for
@@ -50,34 +39,13 @@ export async function POST(request: NextRequest, ctx: { params: { code: string }
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'No file provided.' }, { status: 400 });
     }
-    if (!COMPLIANCE_FILE_ALLOWED_MIME.includes(file.type as (typeof COMPLIANCE_FILE_ALLOWED_MIME)[number])) {
-      return NextResponse.json(
-        { error: 'Unsupported file type. Use PDF, JPEG, PNG, HEIC or WebP.' },
-        { status: 400 },
-      );
-    }
-    if (file.size <= 0 || file.size > COMPLIANCE_FILE_MAX_BYTES) {
-      return NextResponse.json({ error: 'File must be between 0 and 10 MB.' }, { status: 400 });
-    }
 
-    const ext = EXT_BY_MIME[file.type] ?? 'bin';
-    const storagePath = `venues/${l.venue_id}/uploads/${code}/${crypto.randomUUID()}.${ext}`;
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const { error: upErr } = await admin.storage.from(COMPLIANCE_BUCKET).upload(storagePath, bytes, {
-      contentType: file.type,
-      upsert: false,
+    const uploaded = await uploadComplianceFile(admin, {
+      storagePrefix: `venues/${l.venue_id}/uploads/${code}`,
+      file,
     });
-    if (upErr) {
-      console.error('[public compliance file upload] failed:', upErr.message);
-      return NextResponse.json({ error: 'Upload failed. Please try again.' }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      storage_path: storagePath,
-      file_name: file.name.slice(0, 500),
-      mime_type: file.type,
-      file_size_bytes: file.size,
-    });
+    if (!uploaded.ok) return NextResponse.json({ error: uploaded.error }, { status: uploaded.status });
+    return NextResponse.json(uploaded.value);
   } catch (err) {
     console.error('POST /api/public/compliance/forms/[code]/file failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

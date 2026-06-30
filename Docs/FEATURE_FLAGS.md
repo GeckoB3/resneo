@@ -21,8 +21,9 @@ When `compliance_records_enabled` is on, venues can set a `compliance` config ob
 | `reminder_cadence_days` | int 0–90 (default 7) | Days before expiry to remind the client (0 = off) |
 | `lock_period_hours` | int 0–720 (default 0) | Default lead-time a record must pre-date a booking |
 | `form_link_expiry_days` | int 1–90 (default 14) | Venue-level link expiry (per-type override still wins) |
-| `auto_send_on_booking` | boolean (default `false`) | Auto-send a form link on booking with unmet online requirement |
 | `incomplete_behaviour` | `warn_only` (v1) | Behaviour when a client arrives with an incomplete form |
+
+> `auto_send_on_booking` was removed in the in-booking-collection work (improvement plan §9.3). Whether a form is shown in the booking flow, emailed in the confirmation, or left for staff is now set per service requirement via `service_compliance_requirements.online_collection` (`inline` \| `confirmation_link` \| `none`).
 
 When `any_available_practitioner` is on, venues can set `any_available_practitioner_config` in the same JSONB:
 

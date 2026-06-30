@@ -1,8 +1,8 @@
 # Resneo Compliance — Competitive Review & Improvement Plan
 
-**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7; G8 deferred — optional)
-**Date:** June 2026 (Phase 1 shipped)
-**Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation — and a prioritised plan to close the gaps.
+**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3.
+**Date:** June 2026 (Phase 1 shipped; §9 addendum added June 2026)
+**Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation, and a prioritised plan to close the gaps. The §9 addendum extends this with a full code audit and the in-booking form-collection design.
 
 > **Phase 1 status (G1–G3): DONE.** Auto-issue links for unmet client-online requirements when a booking is made; the form is carried in the **booking confirmation** (email HTML + text) and on the **`/manage` page**; pending links are **chased before the appointment** (capped, throttled, stops on completion). All off the booking critical path and fail-safe. Wired via `src/lib/compliance/auto-send.ts`, `send-templated.ts` (`enrichBookingForConfirmation`), `renderer.ts`, the nightly `compliance-expiry` cron, `/api/confirm`, and the Settings → Compliance toggle. Migration `20261206120000`. 11 new tests (212 green across compliance/comms/emails). Phases 2–4 below remain.
 
@@ -183,6 +183,152 @@ Guardrails throughout:
 ## 8. Recommendation
 
 Do **Phase 1** next. It is the smallest change that moves Resneo from "manual, separate‑email compliance" to the competitor‑standard "**book → auto‑sent → chased → completed in the same flow**" experience, while leaning entirely on infrastructure that already exists and is tested. Phase 2 then makes the *online booking* experience first‑class, and Phase 3 covers the in‑venue reality of reception desks. With Phases 1–3, Resneo matches the seamlessness of Fresha/Phorest/Booksy/Vagaro **and** retains compliance capabilities (lead‑time enforcement, blocking, validity, versioned audit) that none of them offer.
+
+---
+
+## 9. Addendum (June 2026): end-to-end audit and in-booking form collection
+
+This addendum was added after Phases 1 to 4 shipped. It records two things the original competitive review did not cover:
+
+1. **A full end-to-end code audit** of the compliance feature (enablement and navigation, the four enforcement modes, every booking write path, types and templates and versioning, records and form links and the public form, the cron and comms, and the data model, RLS and GDPR). Each material finding was verified against the code.
+2. **A new product requirement:** guests must be able to complete a compliance or intake form *during* the online booking itself, with the venue controlling whether it is mandatory, whether it appears in the booking flow or only as a link in the confirmation email, and who completes it (guest vs staff). This promotes the previously deferred **G8** (§6, Phase 4) into a specified design.
+
+> **Important correction to §6.** §6 (Phase 4, G6) records group-booking enforcement as complete and implies booking-write coverage is comprehensive. The June 2026 audit found three further Model B write paths that create or modify bookings **without** calling `checkBookingCompliance`, so a `block_online` / `block_all` requirement is currently evadable online. These are C1, C2 and H1 in §9.1 and are the first work item in the updated plan (§9.4, Phase 0).
+
+### 9.1 Audit findings (severity-ranked)
+
+**Confirmed working end to end:** enablement toggle → server flag resolution → sidebar tab → page guards (tier + `compliance_records_enabled`); the pure resolver state machine (`resolve-requirements.ts`) with lock-window logic; block enforcement on the *main* public-single, staff-create and staff-edit paths (with admin override on staff); race-safe form-link dedup and atomic single-use consumption; immutable versioning (records pin to their captured version); the nightly cron (idempotent expiry, single-shot reminders, working SMS-to-email fallback); auto-send carried in the confirmation; venue-isolation RLS on all six tables with a trigger-enforced append-only audit; public-form staff_only stripping and storage-path scoping.
+
+**Findings.** Severity reflects user impact. File references are `path:line` at the time of the audit.
+
+#### Critical (online block is evadable)
+
+| ID | Finding | Location | Fix |
+|---|---|---|---|
+| **C1** | **Guest self-reschedule bypasses compliance.** `/api/confirm` action `modify` rewrites a booking's service/date/time straight to the `bookings` row and never calls `checkBookingCompliance` (the file imports no compliance gate). A guest books a no-requirement slot, then self-reschedules onto a `block_online`/`block_all` service with no record on file. | `src/app/api/confirm/route.ts:1170-1431`; reached from `AppointmentBookingFlow.tsx:2202` | Gate the modify branch with context `online` before the update; return `409 COMPLIANCE_REQUIREMENT_UNMET` + `complianceUnmetMessage`. |
+| **C2** | **Multi-service create never gates.** `/api/booking/create-multi-service` inserts one Model B row per segment with the service FK set, has zero compliance calls, and is publicly reachable from the booking page. A regulated service booked inside any 2+ service chain evades the online block. | `src/app/api/booking/create-multi-service/route.ts` | Resolve and gate each segment (context `online`); abort the whole group with 409 if any segment is blocked. |
+
+#### High
+
+| ID | Finding | Location | Fix |
+|---|---|---|---|
+| **H1** | **Walk-in route skips the staff gate.** `/api/venue/bookings/walk-in` inserts a Model B appointment with no `checkBookingCompliance`, so `block_all` (which should block staff too, subject to override) is silently unenforced on walk-ins. | `src/app/api/venue/bookings/walk-in/route.ts:339-441` | Add a staff-context gate + admin override; branch on `useUnifiedAppointmentStorage` so it does not no-op for unified-storage venues. |
+| **H2** | **Captured signatures and files are unviewable.** The `compliance-files` bucket is private with no read RLS, and there is no venue route that signs a URL; the record dialog prints "Signature on file" / the file name as plain text. The drawn-signature data URL is dropped after upload, so the only copy is unreachable. Defeats the evidentiary purpose for `signed` / `file_uploaded` types. | `ComplianceRecordViewDialog.tsx:25-48`; `supabase/migrations/20261203120000_compliance_records.sql:327-329` | Add an authenticated, venue-scoped `GET .../records/[id]/file` returning `createSignedUrl(...)`; render an `<img>` / download link. |
+| **H3** | **Staff cannot attach a file in-venue.** `ComplianceCaptureDialog` renders the form without a `fileUploadUrl`, so file fields are permanently disabled ("File upload is available on the public form"); a required file field then fails validation. `file_uploaded` types can only ever be satisfied by sending a link. | `ComplianceCaptureDialog.tsx:129`; `ComplianceFormRenderer.tsx:214` | Add a venue-authenticated upload endpoint and pass it as `fileUploadUrl`. |
+| **H4** | **Failed/null pass-fail records still satisfy (safety-critical).** `isRecordValidForBooking` checks status/void/expiry/lock but never `result`. Because the pass/fail field must be `staff_only` (stripped from public forms), every client-submitted patch test lands `result = null` and counts as satisfied; a failed PPD/lash test is treated as a pass. | `src/lib/compliance/resolve-requirements.ts:59-74` | Exclude `fail`/`inconclusive`/null-`pass_fail` from the valid-record filter; require a staff pass/fail decision before a client-submitted `pass_fail` record counts. (Pairs with M7.) |
+| **H5** | **Guest merge crashes on duplicate pending links.** `merge_guests_into` re-points `compliance_form_links` with no conflict handling, violating the later `uq_compliance_form_links_pending` partial unique index (23505 aborts the whole merge). The exact duplicate-guest case a merge exists to fix. | `supabase/migrations/20261205120000_compliance_merge_guests.sql:68-70` vs `20261207120000_compliance_form_link_dedup.sql:30-32` | Dedupe/revoke duplicate pending links (per venue, guest, type) before re-pointing. |
+
+#### Medium
+
+| ID | Finding | Location |
+|---|---|---|
+| **M1** | **No helper text on the four enforcement options** (bare dropdown labels). Copy proposed in §9.3. | `ComplianceRequirementsEditor.tsx:142`; `shared.ts:14` |
+| **M2** | **`warn_staff` gives no booking-time warning,** only a passive amber flag visually identical to every other unmet state. Consider a non-blocking `warnings` array from `checkBookingCompliance` surfaced in the staff modal. | `enforce-booking.ts:91`; `booking-flags.ts:155` |
+| **M3** | **"Both" form-link channel never sends SMS** for automated reminders (both senders collapse it to email via `=== 'sms' ? 'sms' : 'email'`); the settings helper text actively promises SMS. | `expiry-cron.ts:55`; `auto-send.ts:148` |
+| **M4** | **No form-link management UI.** Revoke/resend/manual-copy/SMS endpoints exist but have no caller; the staff surface hardcodes `send_via:'email'` and discards the returned `public_url`. | `ComplianceSection.tsx:92`; `ComplianceDashboardView.tsx:74` |
+| **M5** | **Per-visit (`validity_period_days = 0`) records expire at the capture instant,** so a just-completed form never satisfies a future-dated blocking requirement. A shipped, advertised config. | `form-schema.ts:381`; `resolve-requirements.ts:66` |
+| **M6** | **Archived types are hidden from the public pre-check but still enforced at create,** so the guest gets no warning then a surprise 409 (the two paths disagree). | `public-forms-service.ts:318` |
+| **M7** | **Pass/fail result field is not validated as `required`,** enabling the null-result satisfaction in H4. | `form-schema.ts:167-194` |
+| **M8** | **Orphaned uploaded files** for abandoned/revoked/expired links are never deleted and survive guest GDPR erasure (only swept at venue hard-delete), since `eraseGuestCompliance` collects paths only from `compliance_records.responses`. | `gdpr.ts:23`; `form-links-service.ts` revoke; `public-forms-service.ts` expire |
+| **M9** | **Em-dashes in user-facing copy** (CLAUDE.md violation), 6 locations: `ComplianceSettingsSection.tsx:81`; `CompliancePreCheckNotice.tsx:161,168,187,205,222` (guest-facing; line 192's `hasBlock` guard string-matches line 161, edit together); `shared.ts:179,185`; `ComplianceRecordViewDialog.tsx:26`; `ComplianceDashboardView.tsx:111` ("Check-in — today"); `SignaturePad.tsx:90` (aria-label). | as listed |
+
+#### Low
+
+`warn_client` is invisible when staff book for the client (only the public flow renders it) · public create hardcodes context `online` even for `phone`/`walk-in` source (`create/route.ts:1529`) · booking import creates Model B rows without evaluation (likely by design, document it) · submit/file endpoints rate-limited per-code not per-IP · `access_count` non-atomic read-then-write · GDPR erase writes no audit event · expiry reminder gives no date or days-remaining · booking-time math ignores venue timezone in lock/reminder windows · settings disabled-state inferred from an API error rather than the known flag · `file_uploaded` result conflated with `completed` in `computeResult` · most compliance selects/textareas lack `htmlFor`/`id` (the enforcement select has no accessible name) · raw record `result` rendered verbatim as a pill · archiving a type does not warn about attached service requirements.
+
+### 9.2 The new requirement, mapped to today's primitives
+
+The product ask is that a guest can complete a form in the booking journey, the venue decides mandatory vs optional and where the form appears, some forms are staff-only, and an unmet hard requirement shows a venue-set message telling the guest what to do.
+
+| Requirement | Today | Gap |
+|---|---|---|
+| Complete a form during online booking | Forms are completable only via an emailed link after booking (`auto-send.ts`) or in-venue by staff. The booking-page pre-check only *displays* status. | No inline form capability exists. |
+| Venue sets mandatory vs optional | Partial: `enforcement` (`block_*` ≈ mandatory, `warn_*` ≈ optional). But "mandatory" today means "a record must already exist," not "complete it now." | No "complete inline to proceed" concept. |
+| Optional: in-flow vs confirmation-email link | Only a venue-wide `auto_send_on_booking` toggle (email link only). | No per-form choice; no in-flow option. |
+| Form saved to the guest's records | Capture logic exists; `compliance_records.booking_id` exists. But capture needs a form-link `code` and an existing `guest_id`. | No path to capture during booking creation. |
+| Staff-only forms (PPD patch test) | **Exists:** `compliance_types.capture_methods` (`staff_in_venue` / `client_online`); auto-send already skips staff-only types. | Booking flow just needs to honour it. |
+| Block online + venue-set message | `block_online`/`block_all` block; messages are hardcoded in `CompliancePreCheckNotice` / `complianceUnmetMessage`. | No venue-configurable message field anywhere. |
+
+### 9.3 Design: in-booking form collection (promotes G8)
+
+**Principle (unchanged):** reuse the engine. Keep `enforcement` as the mandatory/optional axis and `capture_methods` as the audience axis; add one per-requirement field for *where* the form appears and one message field. No new enforcement semantics.
+
+**Data model (one additive migration):**
+- `service_compliance_requirements.online_collection` enum `inline` | `confirmation_link` | `none`, default `confirmation_link` (preserves current behaviour). Only meaningful when the type supports `client_online`.
+- `compliance_types.online_unmet_message text` (nullable, max ~500 chars): the venue's "do this first" message for the blocked-and-cannot-self-resolve case. Per-type for v1 (it describes the document, e.g. "Please book a patch test first"); a per-requirement override can be added later.
+- Add a `client_booking` value to the `compliance_records.capture_channel` CHECK and to `COMPLIANCE_CAPTURE_CHANNELS`, so inline-during-booking records are attributable.
+
+**Venue-facing configurations** that fall out of `enforcement` × `online_collection` × `capture_methods`:
+
+| Venue intent | enforcement | online_collection | type capture_methods | Behaviour in the flow |
+|---|---|---|---|---|
+| Mandatory, complete in the booking | `block_online` (or `block_all`) | `inline` | includes `client_online` | Form renders in the flow; cannot confirm until completed (the saved record satisfies the gate). |
+| Optional, in the booking flow | `warn_client` | `inline` | includes `client_online` | Form offered inline, guest may skip; record saved if completed. |
+| Optional, link in confirmation email | `warn_client` | `confirmation_link` | includes `client_online` | Not shown in flow; link carried in the confirmation (today's auto-send, now per-form). |
+| Staff-only / "book something first" (PPD) | `block_online` | `none` | `staff_in_venue` only | Guest is blocked and shown `online_unmet_message`; no form offered (they cannot self-complete it). |
+
+This stays internally consistent: `block_*` always means "cannot book online while unmet"; whether the guest can resolve it inline depends on the type being client-completable and `online_collection = inline`, otherwise they see the venue message.
+
+**Booking-flow UX.** Expand the existing pre-check anchor in `AppointmentBookingFlow` (after the details step, where email/identity is known) into an interactive "Forms for this booking" section:
+- For each unmet, client-completable, `inline` requirement: render the form via the shared `ComplianceFormRenderer` in public mode (staff_only fields stripped).
+- Mandatory (block): disable Confirm until completed. Optional (warn): allow Confirm; save if filled.
+- For a blocked requirement the guest cannot self-resolve (staff-only / `none`): show `online_unmet_message` and block Confirm, with no form.
+- The server always re-validates: the create routes capture the submitted record(s), then run `checkBookingCompliance`, which now passes. The client pre-check is never trusted.
+
+**API.**
+- Extend `/api/booking/create`, `/api/booking/create-multi-service`, `/api/booking/create-group` to accept `compliance_submissions: [{ compliance_type_id, responses }]`. Server flow: resolve/create the guest by email, validate each submission against the type's current version in public mode (reuse `buildResponseSchema` + `captureComplianceRecord`), capture records with `capture_channel = 'client_booking'` and `booking_id` set, then run the gate, then create the booking.
+- New public endpoint to fetch inline form schemas for the chosen service(s) (extend the existing `GET /api/public/compliance/pre-check` to include the current `form_schema` for `client_online` + `inline` requirements, staff_only stripped).
+
+**Settings UI.**
+- `ComplianceRequirementsEditor`: add the `online_collection` control (shown only when the selected type supports `client_online`) plus the helper text (M1).
+- Type editor: add `online_unmet_message`.
+
+**Proposed enforcement helper text (M1)** (no em-dashes, accurate to the model above):
+- **Warn staff:** "The booking still goes through. Your team sees an outstanding-form flag on the calendar and booking so they can collect the record before the appointment. The client is not told."
+- **Warn client:** "The booking still goes through. When the client books online they see a note that a form is needed, and your team sees the flag too."
+- **Block online booking:** "Clients cannot book this service online until a valid record is on file. Your team can still book them in from the dashboard."
+- **Block all bookings:** "No one can book this service until a valid record is on file, online or from the dashboard. An admin can override when booking from the dashboard."
+
+### 9.4 Design decisions (resolved June 2026)
+
+1. **Inline file/signature uploads: build full inline support.** A secure short-lived pre-booking upload endpoint will let file and signature fields be completed inline (not just text/choice). Built in Phase 2b.
+2. **`online_unmet_message` scope: per compliance type.** One message per type (e.g. a patch test shows "Please book a patch test first" wherever it blocks). A per-requirement override can be added later.
+3. **Per-form placement replaces the venue-wide toggle.** The old `auto_send_on_booking` venue toggle is removed; each requirement's `online_collection` (`inline` / `confirmation_link` / `none`) fully decides whether and where the form is offered. Implemented in Phase 2a (the toggle's value is migrated into per-requirement `online_collection`).
+
+### 9.5 Updated plan (supersedes the remaining work in §6)
+
+- **Phase 0: close the enforcement bypasses (C1, C2, H1). ✅ implemented (June 2026).** Added a centralised `enforceBookingCompliance` helper (`src/lib/compliance/enforce-booking.ts`) that wraps `checkBookingCompliance`, applies the staff admin-override, and returns the canonical 409 body. Wired it into the three unguarded Model B write paths: `/api/confirm` appointment self-reschedule (context `online`, C1), `/api/booking/create-multi-service` (per segment, context by source, C2), and `/api/venue/bookings/walk-in` (context `staff` + admin override, branching on `useUnifiedAppointmentStorage`, H1; added an `override_compliance` field). 5 new unit tests on the helper (153 compliance tests green); typecheck and lint clean. Note: the repo has no route-level integration-test harness, so the regression guard is the shared helper's unit tests plus identical call shape across all sites; a route-level harness remains a worthwhile follow-up.
+- **Phase 1: direct asks (M1 helper text, M9 em-dash cleanup). ✅ implemented (June 2026).** Added a `description` to each `ENFORCEMENT_OPTIONS` entry (`shared.ts`) plus an `ENFORCEMENT_DESCRIPTIONS` map, and rendered the selected mode's explanation under both the inline requirement-row select and the Add-requirement dialog select (`ComplianceRequirementsEditor.tsx`), with an `sr-only` label on the previously-unlabelled inline select. The copy matches §9.3 and describes the model Phase 2 will complete. Removed the 6 user-facing em-dashes flagged in M9: `ComplianceSettingsSection.tsx` (colon), `CompliancePreCheckNotice.tsx` (5 guest-facing strings, including the row separator and the line-192 guard kept in sync), the `Today’s check-ins` dashboard card title, the `SignaturePad` aria-label (colon), and the empty-value placeholders in `shared.ts` / `ComplianceRecordViewDialog.tsx` (now en-dashes, which the house rule permits); test assertions updated. Remaining em-dashes in the feature are in code comments only (out of scope). Typecheck/lint clean; 156 compliance tests green.
+- **Phase 2: in-booking form collection (§9.3, promotes G8).** Built in three increments:
+  - **2a — Foundation. ✅ implemented (June 2026).** Migration `20261229120000_compliance_in_booking_collection.sql` adds `service_compliance_requirements.online_collection` (`inline`/`confirmation_link`/`none`, with the old `auto_send_on_booking` venue toggle migrated into it: on → confirmation_link, off → none), `compliance_types.online_unmet_message`, and the `client_booking` capture channel. Constants, zod, requirements-service and routes carry `online_collection`; the resolver loads it; `auto-send` now gates per requirement (`confirmation_link`) instead of the removed venue toggle. The Service-requirements editor gained an "Online booking" placement control (shown only for client-completable types; staff-only types show an in-venue note); the venue-wide auto-send toggle was removed from Settings. `online_unmet_message` column added (editor field + display land in 2c). Typecheck/lint clean; 157 compliance tests green.
+  - **2b — Server capture + endpoints. ✅ implemented (June 2026).** Shared `uploadComplianceFile` helper extracted in `files.ts` (the existing public form-link upload now reuses it). New unauthenticated pre-booking upload endpoint `POST /api/public/compliance/booking-upload?venue_id=&draft_id=` (per-IP rate limit, UUID-format guards, compliance-enabled-venue check; stores under `venues/{venueId}/uploads/booking-draft/{draftId}/` and returns the FileResponse the renderer expects). New public schema endpoint `GET /api/public/compliance/inline-forms?venue_id=&service_id=` returns the client-completable, `inline` requirements of a service with their current-version form schema (staff_only stripped via `stripStaffOnlyFields`). New `src/lib/compliance/booking-capture.ts`: `captureBookingComplianceSubmissions` validates each submission against the type's current version in public mode, rejects staff-only types (a guest cannot self-certify a patch test), confines `file` paths to the draft prefix (`submissionStoragePathsAreSafe`), and captures via `captureComplianceRecord` (channel `client_booking`, `bookingId` null); `linkBookingComplianceRecords` backfills `booking_id` after insert. All three create routes (`/api/booking/create`, `/create-multi-service`, `/create-group`) accept `compliance_submissions` + `compliance_draft_id`, capture after guest resolution and BEFORE the gate (so a just-completed mandatory form satisfies it), and backfill the booking id after insert. 8 new tests (162 compliance tests green); typecheck/lint clean.
+  - **2c — Booking-flow UI. ✅ implemented (June 2026).** New `src/components/booking/BookingComplianceForms.tsx`: fetches `/inline-forms` for the chosen service(s), renders each via the shared `ComplianceFormRenderer` (public mode) with `fileUploadUrl` pointed at the booking-upload endpoint + a generated `draft_id`, captures each form on submit (per-form validation is free), shows a completed/Edit state, and reports up the collected submissions + whether every mandatory (block_*) form is done. Mounted in `AppointmentBookingFlow`'s public details step beside `CompliancePreCheckNotice`; `handleDetailsSubmit` blocks Confirm until mandatory forms are complete and threads `compliance_submissions` + `compliance_draft_id` into the single- and multi-service create bodies (group inline forms deferred, matching the existing pre-check scoping; the server still gates + accepts submissions there). The `online_unmet_message` is now wired editor-to-display: a textarea in `ComplianceFormBuilder` (create + edit + hydrate), through the zod create/patch schemas, `createComplianceType`, and the PATCH allowlist; surfaced to guests on a blocked pre-check row (`publicServiceRequirements` returns it; `CompliancePreCheckNotice` shows the venue's message and suppresses types already rendered inline via a new `suppressTypeIds` prop). Typecheck clean; 165 compliance tests green; 0 lint errors.
+
+  **Phase 2 (in-booking form collection) is complete.** Remaining browser/E2E verification needs a seeded venue (compliance enabled + an `inline` client-online requirement on a bookable service).
+- **Phase 3: records trustworthy (H4, M7, H2, H3). ✅ implemented (June 2026).**
+  - **H4** — `isRecordValidForBooking` now rejects a pass_fail record unless `result === 'pass'` (a `fail`/`inconclusive`/undecided-`null` record, e.g. a client-submitted patch test awaiting a staff decision, no longer satisfies a booking). `result_type` is threaded onto `ResolverRecord`, loaded via a `compliance_types!inner(result_type)` join in all three record-load sites (`resolve-requirements.ts`, `booking-flags.ts`, `dashboard-service.ts`); non-pass_fail types are unaffected.
+  - **M7** — `validateFormSchemaForType` now requires the pass/fail result field to be `required: true` (the shipped patch-test templates already comply).
+  - **H2** — new authenticated `GET /api/venue/compliance/records/[id]/file?field=` returns a 120s signed URL after venue-scoping the record and confirming the path is the one stored on that record under the venue prefix; logs a `record.viewed` audit event. `ComplianceRecordViewDialog` renders "View signature" / "Download {file}" buttons instead of plain text.
+  - **H3** — new authenticated `POST /api/venue/compliance/records/upload` (reuses `uploadComplianceFile`, stores under `venues/{venueId}/uploads/staff/{nonce}/`); `ComplianceCaptureDialog` passes it as `fileUploadUrl`, so staff can attach files when capturing in venue (works in both staff and hand-to-client tablet modes). Completes the "everything inline incl. files" decision (§9.4.1).
+  - 4 new tests (pass_fail validity + required-result-field); 169 compliance tests green; typecheck + lint clean.
+- **Phase 4: operability (M4 link management, M2 `warn_staff`, M3 channel, M5 per-visit, H5 merge). ✅ implemented (June 2026).**
+  - **M4** — `ComplianceSection` lists the guest's form links with a status pill and, for pending links, Copy link / Resend email / Resend SMS / Revoke (existing `resend` + `revoke` endpoints; Copy builds `/p/forms/{code}`).
+  - **M2** — `summariseBlocking` + `checkBookingCompliance` now return a non-blocking `warnings` array; the staff create route returns `compliance_warnings`; `AppointmentBookingFlow`'s staff confirmation shows an "Outstanding compliance forms" notice.
+  - **M3** — "Both" removed from `COMPLIANCE_FORM_LINK_CHANNELS` + the settings dropdown; `parseComplianceConfig` coerces a stored `both` back to the `email` default.
+  - **M5** — per-visit (`validity 0`) now expires at the end of the capture day in venue local time via `endOfCaptureDayInVenueTimezone` (`venue-local-clock.ts`), threaded through `computeExpiresAt` and `captureComplianceRecord`.
+  - **H5** — migration `20261230120000_compliance_merge_guests_dedup.sql` revokes a source's duplicate pending links before re-pointing, fixing the 23505 merge crash.
+  - **NEW "needs staff decision" prompt** (follow-on to H4): records PATCH accepts a pass/fail `result` (pass_fail types only, audited `record.updated`); `ComplianceRecordViewDialog` shows a "Needs a pass or fail decision" control for undecided pass_fail records; `ComplianceSection` flags them with an "Awaiting decision" badge.
+  - 169 compliance tests green; typecheck + lint clean.
+- **Phase 5: hygiene (M6, M8, and the Low items). ✅ implemented (June 2026).**
+  - **M6** — `publicServiceRequirements` no longer filters out archived types, so the public pre-check matches what the create gate enforces (the requirement row persists when only the type is archived). No more surprise 409.
+  - **M8** — `eraseGuestCompliance` now also removes each of the guest's form-link upload prefixes (`venues/{venueId}/uploads/{code}/`, via a new `removeStoragePrefix` helper) and writes a `guest.compliance_erased` audit event with counts; `revokeFormLink` reaps the revoked link's orphaned uploads. (Auto-expired-link orphans for never-erased guests remain covered by the erase path + the venue-deletion sweep; an inline expire-time reap was skipped to avoid public-page latency.)
+  - **Low** — public `/api/booking/create` derives `staff` vs `online` context from `source` (no longer over-blocks a phone/walk-in on `block_online`); the public submit endpoint adds a per-IP limiter alongside per-code (blunts enumeration); GDPR erasure is now audited (`guest.compliance_erased`, see M8); the record dialog shows friendly result labels (Pass/Fail/…) instead of raw tokens.
+  - **Deliberately deferred** (lower value or cross-cutting, tracked for a later pass): the a11y label-association sweep across compliance selects/textareas; venue-timezone in the lock-period / reminder-window math (a known cross-cutting booking-engine nuance, not compliance-specific); atomic `access_count` increment (analytics-only, needs an RPC); a date/days-remaining in the expiry-reminder template; the settings "disabled" hint reading the resolved flag instead of an API error; an archive-confirmation warning when a type still has service requirements; and documenting that booking import intentionally bypasses compliance.
+  - 169 compliance tests green; typecheck + lint clean.
+
+**The §9 plan (Phases 0 to 5) is implemented.** Remaining items are the deferred Low items above and end-to-end browser verification on a seeded venue.
+
+Guardrails from §7 still hold: never fail a booking because of compliance comms (the gate already fails open on internal error); respect SMS allowance; preserve lead-time, validity, blocking, versioning and audit; everything stays behind `compliance_records_enabled`, Appointments-tier, off by default.
 
 ---
 

@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
       captureMethods: parsed.data.capture_methods,
       description: parsed.data.description ?? null,
       formLinkExpiryDays: parsed.data.form_link_expiry_days ?? null,
+      onlineUnmetMessage: parsed.data.online_unmet_message ?? null,
       formSchema: parsed.data.form_schema,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });

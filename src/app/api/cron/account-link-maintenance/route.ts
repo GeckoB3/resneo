@@ -24,6 +24,8 @@ interface VenueState {
   pricing_tier: string | null;
   plan_status: string | null;
   booking_model: string | null;
+  subscription_current_period_end: string | null;
+  billing_access_source: string | null;
 }
 
 /**
@@ -38,6 +40,9 @@ async function handleGet(request: NextRequest) {
   if (denied) return denied;
 
   const admin = getSupabaseAdminClient();
+  // One timestamp for the whole run so a venue inside (or just past) its cancellation
+  // window is classified consistently across the suspend and resume passes.
+  const nowMs = Date.now();
   const results = {
     expired_requests: 0,
     lapse_warnings: 0,
@@ -69,7 +74,9 @@ async function handleGet(request: NextRequest) {
     if (venueCache.has(id)) return venueCache.get(id) ?? null;
     const { data } = await admin
       .from('venues')
-      .select('id, name, pricing_tier, plan_status, booking_model')
+      .select(
+        'id, name, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+      )
       .eq('id', id)
       .maybeSingle();
     const state = data
@@ -79,6 +86,9 @@ async function handleGet(request: NextRequest) {
           pricing_tier: (data.pricing_tier as string | null) ?? null,
           plan_status: (data.plan_status as string | null) ?? null,
           booking_model: (data.booking_model as string | null) ?? null,
+          subscription_current_period_end:
+            (data.subscription_current_period_end as string | null) ?? null,
+          billing_access_source: (data.billing_access_source as string | null) ?? null,
         }
       : null;
     venueCache.set(id, state);
@@ -214,8 +224,8 @@ async function handleGet(request: NextRequest) {
         const high = await getVenue(link.venue_high_id as string);
         if (!low || !high) continue;
 
-        const lowElig = evaluateLinkEligibility(low);
-        const highElig = evaluateLinkEligibility(high);
+        const lowElig = evaluateLinkEligibility(low, nowMs);
+        const highElig = evaluateLinkEligibility(high, nowMs);
 
         // Venue moved to an ineligible product (e.g. restaurant) — terminate.
         if (!lowElig.feature || !highElig.feature) {
@@ -276,8 +286,8 @@ async function handleGet(request: NextRequest) {
         const low = await getVenue(link.venue_low_id as string);
         const high = await getVenue(link.venue_high_id as string);
         if (!low || !high) continue;
-        const lowElig = evaluateLinkEligibility(low);
-        const highElig = evaluateLinkEligibility(high);
+        const lowElig = evaluateLinkEligibility(low, nowMs);
+        const highElig = evaluateLinkEligibility(high, nowMs);
 
         if (lowElig.canCreate && highElig.canCreate) {
           await admin

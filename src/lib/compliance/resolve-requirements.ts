@@ -2,8 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   COMPLIANCE_EXPIRING_SOON_DAYS,
   type ComplianceEnforcement,
+  type ComplianceOnlineCollection,
   type ComplianceRequirementState,
 } from '@/lib/compliance/constants';
+import type { ComplianceResultType } from '@/lib/compliance/form-schema';
 
 /**
  * Requirements Resolution Algorithm (spec §5.0–§5.4).
@@ -27,6 +29,8 @@ export interface ResolverRecord {
   captured_at: Date;
   result: string | null;
   captured_by_staff_id: string | null;
+  /** The type's result semantics, so pass/fail records only satisfy when result = 'pass' (§5.1, audit H4). */
+  result_type: ComplianceResultType;
 }
 
 /** A service compliance requirement, reduced to what resolution needs. */
@@ -38,6 +42,8 @@ export interface ResolverRequirement {
   lock_period_hours: number | null;
   /** Whether the underlying type is archived (surfaced as a read-only warning). */
   type_is_active: boolean;
+  /** Where a client-online form is offered online (spec §9.3). Optional: only loaded by the DB loader. */
+  online_collection?: ComplianceOnlineCollection;
 }
 
 export interface ResolvedRequirement {
@@ -63,6 +69,9 @@ export function isRecordValidForBooking(
 ): boolean {
   if (record.status !== 'completed') return false;
   if (record.voided_at !== null) return false;
+  // Pass/fail records only satisfy on an explicit 'pass' (audit H4): a 'fail', 'inconclusive',
+  // or undecided (null, e.g. a client-submitted patch test awaiting a staff decision) must not.
+  if (record.result_type === 'pass_fail' && record.result !== 'pass') return false;
   if (record.expires_at !== null && record.expires_at.getTime() <= bookingDatetime.getTime()) {
     return false;
   }
@@ -167,30 +176,40 @@ export function isBlocking(
   }
 }
 
-export interface BlockingSummary {
-  blocked: boolean;
-  unmet: Array<{
-    compliance_type_id: string;
-    compliance_type_name: string;
-    enforcement: ComplianceEnforcement;
-    state: ComplianceRequirementState;
-  }>;
+export interface ComplianceRequirementBrief {
+  compliance_type_id: string;
+  compliance_type_name: string;
+  enforcement: ComplianceEnforcement;
+  state: ComplianceRequirementState;
 }
 
-/** Summarise which resolved requirements block creation in the given context. */
+export interface BlockingSummary {
+  blocked: boolean;
+  unmet: ComplianceRequirementBrief[];
+  /** Unmet warn_staff / warn_client requirements: do not block, but worth flagging to staff (audit M2). */
+  warnings: ComplianceRequirementBrief[];
+}
+
+/** Summarise which resolved requirements block creation, and which only warn, in the given context. */
 export function summariseBlocking(
   resolved: ResolvedRequirement[],
   context: EnforcementContext,
 ): BlockingSummary {
-  const unmet = resolved
-    .filter((r) => isBlocking(r.state, r.requirement.enforcement, context))
-    .map((r) => ({
-      compliance_type_id: r.requirement.compliance_type_id,
-      compliance_type_name: r.requirement.compliance_type_name,
-      enforcement: r.requirement.enforcement,
-      state: r.state,
-    }));
-  return { blocked: unmet.length > 0, unmet };
+  const brief = (r: ResolvedRequirement): ComplianceRequirementBrief => ({
+    compliance_type_id: r.requirement.compliance_type_id,
+    compliance_type_name: r.requirement.compliance_type_name,
+    enforcement: r.requirement.enforcement,
+    state: r.state,
+  });
+  const unmet = resolved.filter((r) => isBlocking(r.state, r.requirement.enforcement, context)).map(brief);
+  const warnings = resolved
+    .filter(
+      (r) =>
+        (r.state === 'missing' || r.state === 'expired') &&
+        (r.requirement.enforcement === 'warn_staff' || r.requirement.enforcement === 'warn_client'),
+    )
+    .map(brief);
+  return { blocked: unmet.length > 0, unmet, warnings };
 }
 
 // ─── DB loader ──────────────────────────────────────────────────────────────
@@ -235,7 +254,7 @@ export async function loadAndResolveServiceRequirements(
   let query = admin
     .from('service_compliance_requirements')
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, compliance_types!inner(id, name, is_active)',
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(id, name, is_active)',
     )
     .eq('venue_id', venueId);
   query = appointmentServiceId
@@ -254,6 +273,7 @@ export async function loadAndResolveServiceRequirements(
       compliance_type_id: string;
       enforcement: ComplianceEnforcement;
       lock_period_hours: number | null;
+      online_collection: ComplianceOnlineCollection | null;
       compliance_types: { name?: string; is_active?: boolean } | { name?: string; is_active?: boolean }[] | null;
     };
     const typeJoin = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
@@ -264,6 +284,7 @@ export async function loadAndResolveServiceRequirements(
       enforcement: r.enforcement,
       lock_period_hours: r.lock_period_hours,
       type_is_active: typeJoin?.is_active ?? true,
+      online_collection: r.online_collection ?? 'confirmation_link',
     };
   });
 
@@ -280,7 +301,9 @@ export async function loadAndResolveServiceRequirements(
   const typeIds = [...new Set(requirements.map((r) => r.compliance_type_id))];
   const { data: recordRows, error: recErr } = await admin
     .from('compliance_records')
-    .select('id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id')
+    .select(
+      'id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id, compliance_types!inner(result_type)',
+    )
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
     .in('compliance_type_id', typeIds);
@@ -300,7 +323,9 @@ export async function loadAndResolveServiceRequirements(
       captured_at: string;
       result: string | null;
       captured_by_staff_id: string | null;
+      compliance_types: { result_type?: string } | { result_type?: string }[] | null;
     };
+    const typeJoin = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
     return {
       id: r.id,
       compliance_type_id: r.compliance_type_id,
@@ -310,6 +335,7 @@ export async function loadAndResolveServiceRequirements(
       captured_at: toDate(r.captured_at) ?? new Date(0),
       result: r.result,
       captured_by_staff_id: r.captured_by_staff_id,
+      result_type: (typeJoin?.result_type as ComplianceResultType) ?? 'completed',
     };
   });
 

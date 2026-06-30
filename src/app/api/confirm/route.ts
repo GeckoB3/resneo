@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import { loadOutstandingBookingFormLinks } from "@/lib/compliance/form-links-service";
+import { enforceBookingCompliance } from "@/lib/compliance/enforce-booking";
 import { stripe } from "@/lib/stripe";
 import { sendCancellationNotification } from "@/lib/communications/send-templated";
 import type { BookingEmailData } from "@/lib/emails/types";
@@ -1326,6 +1327,25 @@ export async function POST(request: NextRequest) {
           refund_window_hours: refundWindowHours,
           policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
         };
+
+        // Compliance gate (§5.1, audit C1): a guest self-reschedule onto a
+        // regulated service/date must satisfy the same online block as the create
+        // flow, otherwise block_online / block_all is trivially evadable by booking
+        // a no-requirement slot and then moving it.
+        const reschedCompliance = await enforceBookingCompliance(supabase, {
+          venueId: booking.venue_id as string,
+          guestId: (booking.guest_id as string | null) ?? null,
+          appointmentServiceId:
+            currentBookingModel === "unified_scheduling" ? null : bodyAppointmentServiceId,
+          serviceItemId:
+            currentBookingModel === "unified_scheduling" ? bodyAppointmentServiceId : null,
+          bookingDate: newDate,
+          bookingTime: newTime,
+          context: "online",
+        });
+        if (reschedCompliance.blocked) {
+          return NextResponse.json(reschedCompliance.body, { status: 409 });
+        }
 
         const nowIso = new Date().toISOString();
         const prevUpdatedAt = booking.updated_at as string;

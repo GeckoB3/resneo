@@ -75,6 +75,7 @@ export function ComplianceSection({
   } | null>(null);
   const [viewRecordId, setViewRecordId] = useState<string | null>(null);
   const [sendingTypeId, setSendingTypeId] = useState<string | null>(null);
+  const [linkBusyId, setLinkBusyId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   if (!complianceEnabled) return null;
@@ -116,6 +117,61 @@ export function ComplianceSection({
       setSendingTypeId(null);
     }
   }
+
+  async function resendLink(linkId: string, sendVia: 'email' | 'sms') {
+    setLinkBusyId(linkId);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/form-links/${linkId}/resend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ send_via: sendVia }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage(body.error ?? 'Could not resend the link.');
+        return;
+      }
+      setActionMessage(body.dispatched ? 'Form link resent.' : 'Form link ready. Copy it to share manually.');
+      refresh();
+    } finally {
+      setLinkBusyId(null);
+    }
+  }
+
+  async function revokeLink(linkId: string) {
+    setLinkBusyId(linkId);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/form-links/${linkId}/revoke`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage(body.error ?? 'Could not revoke the link.');
+        return;
+      }
+      setActionMessage('Form link revoked.');
+      refresh();
+    } finally {
+      setLinkBusyId(null);
+    }
+  }
+
+  async function copyLink(code: string) {
+    const url = `${window.location.origin}/p/forms/${code}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setActionMessage('Link copied to the clipboard.');
+    } catch {
+      setActionMessage(`Link: ${url}`);
+    }
+  }
+
+  const linkStatusPill: Record<string, { variant: 'compliance-current' | 'compliance-expiring' | 'compliance-expired' | 'compliance-voided'; label: string }> = {
+    pending: { variant: 'compliance-expiring', label: 'Awaiting completion' },
+    consumed: { variant: 'compliance-current', label: 'Completed' },
+    expired: { variant: 'compliance-expired', label: 'Expired' },
+    revoked: { variant: 'compliance-voided', label: 'Revoked' },
+  };
 
   return (
     <div className="space-y-5">
@@ -211,6 +267,69 @@ export function ComplianceSection({
         </div>
       )}
 
+      {(guestData?.form_links?.length ?? 0) > 0 && (
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Form links</h4>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {guestData!.form_links.map((link) => {
+              const pill = linkStatusPill[link.status] ?? { variant: 'compliance-voided' as const, label: link.status };
+              const isPending = link.status === 'pending';
+              return (
+                <li key={link.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">{joinedTypeName(link.compliance_types)}</p>
+                    <p className="text-xs text-slate-500">
+                      {link.sent_via ? `Sent by ${link.sent_via === 'sms' ? 'SMS' : link.sent_via}` : 'Not yet sent'}
+                      {link.expires_at ? ` · Expires ${formatComplianceDate(link.expires_at)}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Pill variant={pill.variant} size="sm" dot>
+                      {pill.label}
+                    </Pill>
+                    {isPending && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => copyLink(link.code)}
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Copy link
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusyId === link.id}
+                          onClick={() => resendLink(link.id, 'email')}
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Resend email
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusyId === link.id}
+                          onClick={() => resendLink(link.id, 'sms')}
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Resend SMS
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusyId === link.id}
+                          onClick={() => revokeLink(link.id)}
+                          className="rounded-md border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          Revoke
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       <div>
         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           All compliance records
@@ -236,6 +355,12 @@ export function ComplianceSection({
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* A completed record with no result is an undecided pass/fail (e.g. client-submitted). */}
+                    {rec.status === 'completed' && rec.result == null && (
+                      <Pill variant="compliance-expiring" size="sm" dot>
+                        Awaiting decision
+                      </Pill>
+                    )}
                     <Pill variant={pill.variant} size="sm" dot>
                       {pill.label}
                     </Pill>

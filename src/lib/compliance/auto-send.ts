@@ -67,7 +67,7 @@ export async function ensureComplianceFormLinksForBooking(
     if (!params.appointmentServiceId && !params.serviceItemId) return [];
 
     const ctx = await loadVenueComplianceContext(admin, params.venueId);
-    if (!ctx.enabled || !ctx.config.auto_send_on_booking) return [];
+    if (!ctx.enabled) return [];
 
     const bookingDt = bookingDatetime(params.bookingDate, params.bookingTime);
     const hoursUntil = (bookingDt.getTime() - Date.now()) / MS_PER_HOUR;
@@ -100,6 +100,9 @@ export async function ensureComplianceFormLinksForBooking(
     const links: BookingFormLink[] = [];
     for (const req of unmet) {
       if (!onlineTypeIds.has(req.requirement.compliance_type_id)) continue;
+      // Only requirements set to email the link in the confirmation are auto-sent. 'inline'
+      // forms are completed during the booking flow (Phase 2c) and 'none' is not surfaced online.
+      if (req.requirement.online_collection !== 'confirmation_link') continue;
       // Online submission window closed (lead-time requirement) — leave for in-venue capture.
       if (
         req.requirement.lock_period_hours !== null &&

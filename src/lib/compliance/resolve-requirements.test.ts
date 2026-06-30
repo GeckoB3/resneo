@@ -36,6 +36,7 @@ function rec(overrides: Partial<ResolverRecord> = {}): ResolverRecord {
     captured_at: new Date('2026-05-01T10:00:00Z'),
     result: 'pass',
     captured_by_staff_id: 'staff1',
+    result_type: 'pass_fail',
     ...overrides,
   };
 }
@@ -67,6 +68,24 @@ describe('isRecordValidForBooking', () => {
     expect(isRecordValidForBooking(captured12hBefore, BOOKING, 48)).toBe(false);
     const capturedWeekBefore = rec({ captured_at: new Date('2026-06-01T10:00:00Z') });
     expect(isRecordValidForBooking(capturedWeekBefore, BOOKING, 48)).toBe(true);
+  });
+
+  // audit H4: pass/fail records only satisfy on an explicit 'pass'.
+  it('rejects a pass_fail record whose result is fail / inconclusive / null', () => {
+    expect(isRecordValidForBooking(rec({ result_type: 'pass_fail', result: 'fail' }), BOOKING, null)).toBe(false);
+    expect(isRecordValidForBooking(rec({ result_type: 'pass_fail', result: 'inconclusive' }), BOOKING, null)).toBe(
+      false,
+    );
+    expect(isRecordValidForBooking(rec({ result_type: 'pass_fail', result: null }), BOOKING, null)).toBe(false);
+  });
+  it('accepts a pass_fail record whose result is pass', () => {
+    expect(isRecordValidForBooking(rec({ result_type: 'pass_fail', result: 'pass' }), BOOKING, null)).toBe(true);
+  });
+  it('ignores result for non-pass_fail types (signed / completed)', () => {
+    expect(isRecordValidForBooking(rec({ result_type: 'signed', result: null }), BOOKING, null)).toBe(true);
+    expect(isRecordValidForBooking(rec({ result_type: 'completed', result: 'completed' }), BOOKING, null)).toBe(
+      true,
+    );
   });
 });
 

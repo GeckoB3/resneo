@@ -5,6 +5,7 @@ import {
   COMPLIANCE_ENFORCEMENT_LEVELS,
   COMPLIANCE_CAPTURE_CHANNELS,
   COMPLIANCE_LINK_SENT_VIA,
+  COMPLIANCE_ONLINE_COLLECTION_MODES,
 } from '@/lib/compliance/constants';
 import { COMPLIANCE_RESULT_TYPES } from '@/lib/compliance/form-schema';
 
@@ -22,6 +23,8 @@ export const complianceTypeCreateSchema = z.object({
   validity_period_days: validityPeriodDaysSchema.default(null),
   capture_methods: captureMethodsSchema,
   form_link_expiry_days: z.number().int().min(1).max(365).nullable().optional(),
+  /** Message shown when an online booking is blocked by this requirement and the guest cannot self-complete it. */
+  online_unmet_message: z.string().max(500).nullable().optional(),
   /** The full form_schema document; validated against result_type in the service. */
   form_schema: z.unknown(),
 });
@@ -36,6 +39,7 @@ export const complianceTypePatchSchema = z
     validity_period_days: validityPeriodDaysSchema.optional(),
     capture_methods: captureMethodsSchema.optional(),
     form_link_expiry_days: z.number().int().min(1).max(365).nullable().optional(),
+    online_unmet_message: z.string().max(500).nullable().optional(),
     is_active: z.boolean().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
@@ -58,6 +62,7 @@ export const complianceRequirementCreateSchema = z.object({
   compliance_type_id: z.string().uuid(),
   enforcement: z.enum(COMPLIANCE_ENFORCEMENT_LEVELS),
   lock_period_hours: lockPeriodHoursSchema.optional(),
+  online_collection: z.enum(COMPLIANCE_ONLINE_COLLECTION_MODES).optional(),
 });
 export type ComplianceRequirementCreateInput = z.infer<typeof complianceRequirementCreateSchema>;
 
@@ -65,9 +70,21 @@ export const complianceRequirementPatchSchema = z
   .object({
     enforcement: z.enum(COMPLIANCE_ENFORCEMENT_LEVELS).optional(),
     lock_period_hours: lockPeriodHoursSchema.optional(),
+    online_collection: z.enum(COMPLIANCE_ONLINE_COLLECTION_MODES).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
 export type ComplianceRequirementPatchInput = z.infer<typeof complianceRequirementPatchSchema>;
+
+// ─── In-booking form submissions (captured during online booking) ────────────
+
+/** One compliance form a guest completed inline while booking (spec §9.3, Phase 2b). */
+export const complianceBookingSubmissionSchema = z.object({
+  compliance_type_id: z.string().uuid(),
+  responses: z.record(z.string(), z.unknown()),
+});
+export type ComplianceBookingSubmissionInput = z.infer<typeof complianceBookingSubmissionSchema>;
+
+export const complianceBookingSubmissionsSchema = z.array(complianceBookingSubmissionSchema).max(20);
 
 // ─── Record capture (staff in venue) ─────────────────────────────────────────
 
@@ -85,9 +102,14 @@ export const complianceRecordVoidSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
-export const complianceRecordNotesPatchSchema = z.object({
-  notes: z.string().max(2000).nullable(),
-});
+export const complianceRecordNotesPatchSchema = z
+  .object({
+    notes: z.string().max(2000).nullable().optional(),
+    /** Staff pass/fail decision recorded on a pass_fail record (e.g. a client-submitted patch
+     * test that arrived undecided). Only applies to pass_fail types; enforced in the route. */
+    result: z.enum(['pass', 'fail', 'inconclusive']).optional(),
+  })
+  .refine((d) => d.notes !== undefined || d.result !== undefined, { message: 'No fields to update' });
 
 // ─── Form links ──────────────────────────────────────────────────────────────
 

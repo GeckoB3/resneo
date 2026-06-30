@@ -14,6 +14,7 @@ export type ComplianceAuditEventType =
   | 'record.updated'
   | 'record.voided'
   | 'record.viewed'
+  | 'guest.compliance_erased'
   | 'link.issued'
   | 'link.sent'
   | 'link.consumed'

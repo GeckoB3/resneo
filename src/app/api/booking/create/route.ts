@@ -56,6 +56,11 @@ import {
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
+import {
+  captureBookingComplianceSubmissions,
+  linkBookingComplianceRecords,
+} from '@/lib/compliance/booking-capture';
+import { complianceBookingSubmissionsSchema } from '@/lib/compliance/zod-schemas';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isGuestBookingDateAllowed, entityBookingWindowFromRow, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -140,6 +145,9 @@ const createBookingSchema = z.object({
   waitlist_offer_id: z.string().uuid().optional(),
   /** Optional add-ons stacked on the service at booking time. */
   addons: bookingAddonSelectionArraySchema.optional(),
+  /** Compliance forms completed inline during booking (§9.3) + the draft id used for any file uploads. */
+  compliance_submissions: complianceBookingSubmissionsSchema.optional(),
+  compliance_draft_id: z.string().uuid().optional(),
   /** Client-address services: where staff travel to (mandatory for public sources). */
   ...clientAddressRequestFields,
 });
@@ -1413,6 +1421,27 @@ async function handleNonTableBooking(
     guestLinkOptions,
   );
 
+  // Capture any compliance forms the guest completed inline (§9.3, Phase 2b) BEFORE the
+  // gate, so a just-completed mandatory form satisfies it. booking_id is backfilled below.
+  let complianceRecordIds: string[] = [];
+  if (data.compliance_submissions && data.compliance_submissions.length > 0) {
+    const cap = await captureBookingComplianceSubmissions(supabase, {
+      venueId: venue_id,
+      guestId: guest.id,
+      draftId: data.compliance_draft_id ?? null,
+      submissions: data.compliance_submissions,
+      captureIp: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip'),
+      captureUserAgent: request.headers.get('user-agent'),
+    });
+    if (!cap.ok) {
+      return NextResponse.json(
+        { error: cap.error, ...(cap.fieldErrors ? { field_errors: cap.fieldErrors } : {}) },
+        { status: cap.status },
+      );
+    }
+    complianceRecordIds = cap.recordIds;
+  }
+
   const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
     supabase,
     venueId: venue_id,
@@ -1517,8 +1546,10 @@ async function handleNonTableBooking(
     }
   }
 
-  // Compliance requirements gate (§5.1). Online context blocks on `block_online`
-  // and `block_all`. No-ops when the feature is off or the booking is not Model B.
+  // Compliance requirements gate (§5.1). Online context blocks on `block_online` and
+  // `block_all`; a staff-entered phone/walk-in via this endpoint is a 'staff' context so
+  // `block_online` does not over-block it. No-ops when off or the booking is not Model B.
+  const bookingContext = source === 'phone' || source === 'walk-in' ? 'staff' : 'online';
   const onlineCompliance = await checkBookingCompliance(supabase, {
     venueId: venue_id,
     guestId: guest.id,
@@ -1526,13 +1557,13 @@ async function handleNonTableBooking(
     serviceItemId: (bookingInsert.service_item_id as string | null) ?? null,
     bookingDate: booking_date,
     bookingTime: timeForDb,
-    context: 'online',
+    context: bookingContext,
   });
   if (onlineCompliance.blocked) {
     return NextResponse.json(
       {
         error: COMPLIANCE_REQUIREMENT_UNMET,
-        message: complianceUnmetMessage(onlineCompliance.details, 'online'),
+        message: complianceUnmetMessage(onlineCompliance.details, bookingContext),
         details: onlineCompliance.details,
       },
       { status: 409 },
@@ -1565,6 +1596,15 @@ async function handleNonTableBooking(
     }
     console.error('Booking insert failed:', bookErr);
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+  }
+
+  // Attach any inline-captured compliance records to the new booking.
+  if (complianceRecordIds.length > 0) {
+    await linkBookingComplianceRecords(supabase, {
+      venueId: venue_id,
+      recordIds: complianceRecordIds,
+      bookingId: booking.id,
+    });
   }
 
   if (activeWaitlistOffer) {

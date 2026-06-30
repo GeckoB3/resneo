@@ -135,6 +135,9 @@ export function ComplianceCaptureDialog({
             submitting={submitting}
             submitLabel={selfComplete ? 'Submit & save' : 'Save record'}
             onSubmit={handleSubmit}
+            // audit H3: enable in-venue file capture. The staff session is authenticated, so the
+            // venue upload route works in both staff and hand-to-client (tablet) modes.
+            fileUploadUrl="/api/venue/compliance/records/upload"
           />
         )}
       </div>

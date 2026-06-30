@@ -13,6 +13,61 @@ export const COMPLIANCE_FILE_ALLOWED_MIME = [
 ] as const;
 export const COMPLIANCE_FILE_MAX_BYTES = 10 * 1024 * 1024;
 
+const COMPLIANCE_FILE_EXT_BY_MIME: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/heic': 'heic',
+  'image/webp': 'webp',
+};
+
+export interface ComplianceFileUploadResult {
+  storage_path: string;
+  file_name: string;
+  mime_type: string;
+  file_size_bytes: number;
+}
+
+/**
+ * Validate (MIME + size, spec §13.3) and store an uploaded `file`-field document under
+ * `storagePrefix`, returning the FileResponse the form renderer expects. Shared by the
+ * public form-link upload (`.../forms/[code]/file`) and the in-booking draft upload
+ * (`.../booking-upload`). The caller decides + authorises the prefix.
+ */
+export async function uploadComplianceFile(
+  admin: SupabaseClient,
+  params: { storagePrefix: string; file: File },
+): Promise<{ ok: true; value: ComplianceFileUploadResult } | { ok: false; error: string; status: number }> {
+  const { file, storagePrefix } = params;
+  if (!COMPLIANCE_FILE_ALLOWED_MIME.includes(file.type as (typeof COMPLIANCE_FILE_ALLOWED_MIME)[number])) {
+    return { ok: false, error: 'Unsupported file type. Use PDF, JPEG, PNG, HEIC or WebP.', status: 400 };
+  }
+  if (file.size <= 0 || file.size > COMPLIANCE_FILE_MAX_BYTES) {
+    return { ok: false, error: 'File must be between 0 and 10 MB.', status: 400 };
+  }
+  const ext = COMPLIANCE_FILE_EXT_BY_MIME[file.type] ?? 'bin';
+  const prefix = storagePrefix.endsWith('/') ? storagePrefix : `${storagePrefix}/`;
+  const storagePath = `${prefix}${crypto.randomUUID()}.${ext}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const { error } = await admin.storage.from(COMPLIANCE_BUCKET).upload(storagePath, bytes, {
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) {
+    console.error('[uploadComplianceFile] failed:', error.message);
+    return { ok: false, error: 'Upload failed. Please try again.', status: 500 };
+  }
+  return {
+    ok: true,
+    value: {
+      storage_path: storagePath,
+      file_name: file.name.slice(0, 500),
+      mime_type: file.type,
+      file_size_bytes: file.size,
+    },
+  };
+}
+
 const DATA_URL_RE = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/;
 
 /** Decode a drawn-signature data URL into bytes + content type, or null if malformed/too large. */

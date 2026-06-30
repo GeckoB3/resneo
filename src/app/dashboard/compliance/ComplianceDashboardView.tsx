@@ -108,7 +108,7 @@ export function ComplianceDashboardView() {
       <SectionCard elevated>
         <SectionCard.Header
           eyebrow="Compliance"
-          title="Check-in — today"
+          title="Today’s check-ins"
           description="Today’s bookings with a required form still outstanding. Complete it on a venue device or send a link."
         />
         <SectionCard.Body>

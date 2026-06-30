@@ -95,6 +95,8 @@ export function StripeConnectSection({
     stripeAccountId ? { kind: 'loading' } : { kind: 'not_connected' },
   );
   const [redirecting, setRedirecting] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!stripeAccountId) {
@@ -165,6 +167,34 @@ export function StripeConnectSection({
       setRedirecting(false);
     }
   }, [stripeAccountLinkPaths]);
+
+  const openStripeDashboard = useCallback(async () => {
+    setDashboardError(null);
+    setDashboardLoading(true);
+    // Open the tab synchronously on click so the browser doesn't block it as a popup;
+    // we set its location once the single-use login link is minted.
+    const win = typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null;
+    try {
+      const res = await fetch('/api/venue/stripe-connect/login-link', { method: 'POST' });
+      const body = await readResponseJson<{ url?: string; error?: string }>(res);
+      if (!res.ok || !body.url) {
+        win?.close();
+        setDashboardError(body.error ?? 'Could not open the Stripe dashboard.');
+        return;
+      }
+      if (win) {
+        win.opener = null; // sever the opener reference (avoid reverse tabnabbing)
+        win.location.href = body.url;
+      } else {
+        window.location.href = body.url;
+      }
+    } catch {
+      win?.close();
+      setDashboardError('Network error. Please try again.');
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, []);
 
   return (
     <SectionCard elevated>
@@ -272,6 +302,21 @@ export function StripeConnectSection({
             <span className="text-sm font-medium text-green-700">Stripe connected; charges enabled</span>
           </div>
           <p className="mt-2 text-xs text-neutral-400">Account: {state.accountId}</p>
+          {isAdmin ? (
+            <div className="mt-4">
+              <button
+                onClick={openStripeDashboard}
+                disabled={dashboardLoading}
+                className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                {dashboardLoading ? 'Opening Stripe…' : 'Open Stripe dashboard'}
+              </button>
+              <p className="mt-2 text-xs text-neutral-400">
+                View payouts, balance, and transactions in your Stripe dashboard.
+              </p>
+              {dashboardError ? <p className="mt-2 text-sm text-red-600">{dashboardError}</p> : null}
+            </div>
+          ) : null}
         </div>
       )}
 

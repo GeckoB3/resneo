@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolvePartySizeBoundsForVenueServices } from '@/lib/booking/party-size-bounds';
 import { resolveVenueMode } from '@/lib/venue-mode';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 import { fetchEngineInput } from '@/lib/availability';
 import { getDayOfWeek, resolveDuration, selectServiceForWalkInTime, timeToMinutes } from '@/lib/availability/engine';
@@ -15,6 +15,7 @@ import { normaliseGuestNamePart } from '@/lib/guests/name';
 import { findOrCreateGuest } from '@/lib/guests';
 import type { GuestRecord } from '@/lib/guests';
 import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
+import { enforceBookingCompliance } from '@/lib/compliance/enforce-booking';
 
 async function incrementGuestVisitAfterWalkIn(
   admin: ReturnType<typeof getSupabaseAdminClient>,
@@ -66,6 +67,8 @@ const walkInSchema = z.object({
   duration_minutes: z.number().int().min(15).max(300).optional(),
   /** When no `table_ids` are sent, scopes service inference, suggestions, and temporary tables to this dining area. */
   area_id: z.string().uuid().optional(),
+  /** Admin-only: acknowledge and proceed past an unmet compliance block (§5.2). */
+  override_compliance: z.boolean().optional(),
 });
 
 function isUuid(value: string | null): value is string {
@@ -398,6 +401,28 @@ export async function POST(request: NextRequest) {
         );
       }
       const { guest: apptGuest, created: apptGuestCreated } = guestResolved;
+
+      // Compliance gate (§5.1, audit H1). Staff context blocks only on `block_all`;
+      // an admin may acknowledge and proceed (§5.2). Mirrors POST /api/venue/bookings,
+      // including the unified-vs-legacy service-column branch so it does not no-op for
+      // unified-storage venues. The resolved walk-in guest is kept on a block so staff
+      // can capture the record and re-seat them.
+      const useUnifiedAppointmentStorage =
+        venueMode.bookingModel === 'unified_scheduling' ||
+        venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
+      const walkInCompliance = await enforceBookingCompliance(admin, {
+        venueId: staff.venue_id,
+        guestId: apptGuest.id,
+        appointmentServiceId: useUnifiedAppointmentStorage ? null : appointment_service_id,
+        serviceItemId: useUnifiedAppointmentStorage ? appointment_service_id : null,
+        bookingDate: today,
+        bookingTime: walkInTime,
+        context: 'staff',
+        adminOverride: staff.role === 'admin' && parsed.data.override_compliance === true,
+      });
+      if (walkInCompliance.blocked) {
+        return NextResponse.json(walkInCompliance.body, { status: 409 });
+      }
 
       const { data: apptBooking, error: apptBookErr } = await admin
         .from('bookings')

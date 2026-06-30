@@ -47,6 +47,16 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
+import {
+  enforceBookingCompliance,
+  complianceUnmetMessage,
+  COMPLIANCE_REQUIREMENT_UNMET,
+} from '@/lib/compliance/enforce-booking';
+import {
+  captureBookingComplianceSubmissions,
+  linkBookingComplianceRecords,
+} from '@/lib/compliance/booking-capture';
+import { complianceBookingSubmissionsSchema } from '@/lib/compliance/zod-schemas';
 
 const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
@@ -74,6 +84,9 @@ const createMultiServiceSchema = z.object({
   collective_id: z.string().uuid().optional(),
   /** Combined page: the offering that produced this booking (attribution). */
   collective_service_item_id: z.string().uuid().optional(),
+  /** Compliance forms completed inline during booking (§9.3) + the draft id used for any file uploads. */
+  compliance_submissions: complianceBookingSubmissionsSchema.optional(),
+  compliance_draft_id: z.string().uuid().optional(),
   /** Client-address services: where staff travel to (mandatory for public sources). */
   ...clientAddressRequestFields,
 });
@@ -463,6 +476,74 @@ export async function POST(request: NextRequest) {
       guestLinkOptions,
     );
 
+    // Capture any compliance forms the guest completed inline (§9.3, Phase 2b) BEFORE the
+    // gate, so a just-completed mandatory form satisfies it. booking_id is backfilled below.
+    let complianceRecordIds: string[] = [];
+    if (parsed.data.compliance_submissions && parsed.data.compliance_submissions.length > 0) {
+      const cap = await captureBookingComplianceSubmissions(supabase, {
+        venueId: venue_id,
+        guestId: guest.id,
+        draftId: parsed.data.compliance_draft_id ?? null,
+        submissions: parsed.data.compliance_submissions,
+        captureIp: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip'),
+        captureUserAgent: request.headers.get('user-agent'),
+      });
+      if (!cap.ok) {
+        return NextResponse.json(
+          { error: cap.error, ...(cap.fieldErrors ? { field_errors: cap.fieldErrors } : {}) },
+          { status: cap.status },
+        );
+      }
+      complianceRecordIds = cap.recordIds;
+    }
+
+    // Compliance gate per segment (§5.1, audit C2). Mirrors the single-booking and
+    // group-create flows: all segments share one guest, so a single record satisfies
+    // every segment requiring that type. Runs before any insert so a blocked booking
+    // creates nothing. Online-like sources block on block_online/block_all; staff
+    // sources (phone/walk-in) block only on block_all.
+    const msComplianceContext = isOnlineLikeSource ? 'online' : 'staff';
+    const msBlockedDetails: Array<{
+      service_id: string;
+      compliance_type_id: string;
+      compliance_type_name: string;
+      enforcement: string;
+      state: string;
+    }> = [];
+    const msBlockedUnmet: Array<{
+      compliance_type_id: string;
+      compliance_type_name: string;
+      enforcement: string;
+      state: string;
+    }> = [];
+    for (const seg of validated) {
+      const segCheck = await enforceBookingCompliance(supabase, {
+        venueId: venue_id,
+        guestId: guest.id,
+        appointmentServiceId: useUnifiedBookingRows ? null : seg.appointment_service_id,
+        serviceItemId: useUnifiedBookingRows ? seg.appointment_service_id : null,
+        bookingDate: seg.booking_date,
+        bookingTime: seg.booking_time + ':00',
+        context: msComplianceContext,
+      });
+      if (segCheck.blocked) {
+        for (const d of segCheck.details) {
+          msBlockedDetails.push({ service_id: seg.appointment_service_id, ...d });
+          msBlockedUnmet.push(d);
+        }
+      }
+    }
+    if (msBlockedUnmet.length > 0) {
+      return NextResponse.json(
+        {
+          error: COMPLIANCE_REQUIREMENT_UNMET,
+          message: complianceUnmetMessage(msBlockedUnmet, msComplianceContext),
+          details: msBlockedDetails,
+        },
+        { status: 409 },
+      );
+    }
+
     const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];
 
@@ -570,6 +651,15 @@ export async function POST(request: NextRequest) {
       }
 
       bookingIds.push(booking.id);
+    }
+
+    // Attach any inline-captured compliance records to the (first) booking of the group.
+    if (complianceRecordIds.length > 0 && bookingIds[0]) {
+      await linkBookingComplianceRecords(supabase, {
+        venueId: venue_id,
+        recordIds: complianceRecordIds,
+        bookingId: bookingIds[0],
+      });
     }
 
     let client_secret: string | null = null;

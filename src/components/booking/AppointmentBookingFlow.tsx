@@ -6,6 +6,7 @@ import { usePublicBookingAccountGateContext } from '@/components/booking/PublicB
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
 import CompliancePreCheckNotice from './CompliancePreCheckNotice';
+import BookingComplianceForms, { type BookingComplianceState } from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
@@ -580,6 +581,10 @@ export function AppointmentBookingFlow({
   const [precheckEmail, setPrecheckEmail] = useState<string>(
     () => (isPublicGuest ? accountGate.guestDetailsPrefill?.email?.trim() ?? '' : ''),
   );
+  // Inline compliance forms the guest completes during booking (Phase 2c): collected
+  // submissions + whether every mandatory form is done (gates Confirm) + the type ids
+  // (so the pre-check notice suppresses the forms it is already rendering).
+  const [bookingCompliance, setBookingCompliance] = useState<BookingComplianceState | null>(null);
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -646,6 +651,8 @@ export function AppointmentBookingFlow({
     deposit_amount_pence: number;
     cancellation_notice_hours: number;
     payment_url?: string;
+    /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
+    compliance_warnings?: Array<{ compliance_type_name: string }>;
   } | null>(null);
 
   // Keyed by booking id so host re-renders (new callback identity) don't re-fire the notify.
@@ -1979,6 +1986,19 @@ export function AppointmentBookingFlow({
           return;
         }
       }
+      // Block until every mandatory inline compliance form is completed (Phase 2c). The
+      // server also re-checks, so this is a friendly guard, not the security boundary.
+      if (isPublicGuest && bookingCompliance && !bookingCompliance.mandatoryComplete) {
+        setError('Please complete the required form(s) above before booking.');
+        return;
+      }
+      const complianceCreateFields =
+        isPublicGuest && bookingCompliance && bookingCompliance.submissions.length > 0
+          ? {
+              compliance_submissions: bookingCompliance.submissions,
+              compliance_draft_id: bookingCompliance.draftId,
+            }
+          : {};
       const chain = multiServiceSegments;
       // Single-service create reads add-ons from segment 0 (the authoritative store once a
       // slot is picked), falling back to the working buffer for edit/prefill entry paths.
@@ -2017,6 +2037,7 @@ export function AppointmentBookingFlow({
               marketing_consent: details.marketing_consent,
               collective_id: collectiveId,
               collective_service_item_id: collectiveServiceItemId,
+              ...complianceCreateFields,
             }),
           });
           const data = await res.json();
@@ -2106,6 +2127,7 @@ export function AppointmentBookingFlow({
             deposit_amount_pence: 0,
             cancellation_notice_hours: refundNoticeHours,
             payment_url: data.payment_url,
+            compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
           });
           setStep('confirmation');
           staffFlowStartedAtRef.current = Date.now();
@@ -2138,6 +2160,7 @@ export function AppointmentBookingFlow({
               ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
               : {}),
             ...(waitlistOfferEntryId ? { waitlist_offer_id: waitlistOfferEntryId } : {}),
+            ...complianceCreateFields,
           }),
         });
         const data = await res.json();
@@ -2162,6 +2185,7 @@ export function AppointmentBookingFlow({
       }
     },
     [
+      bookingCompliance,
       venue.id,
       date,
       selectedTime,
@@ -3962,17 +3986,32 @@ export function AppointmentBookingFlow({
           ) : (
             <>
               {isPublicGuest && (
-                <CompliancePreCheckNotice
-                  venueId={venue.id}
-                  serviceIds={
-                    multiServiceSegments && multiServiceSegments.length > 0
-                      ? multiServiceSegments.map((s) => s.serviceId)
-                      : selectedServiceId
-                        ? [selectedServiceId]
-                        : []
-                  }
-                  email={precheckEmail}
-                />
+                <>
+                  <CompliancePreCheckNotice
+                    venueId={venue.id}
+                    serviceIds={
+                      multiServiceSegments && multiServiceSegments.length > 0
+                        ? multiServiceSegments.map((s) => s.serviceId)
+                        : selectedServiceId
+                          ? [selectedServiceId]
+                          : []
+                    }
+                    email={precheckEmail}
+                    suppressTypeIds={bookingCompliance?.inlineTypeIds ?? []}
+                  />
+                  <BookingComplianceForms
+                    venueId={venue.id}
+                    serviceIds={
+                      multiServiceSegments && multiServiceSegments.length > 0
+                        ? multiServiceSegments.map((s) => s.serviceId)
+                        : selectedServiceId
+                          ? [selectedServiceId]
+                          : []
+                    }
+                    submittingBooking={submitting}
+                    onChange={setBookingCompliance}
+                  />
+                </>
               )}
             <DetailsStep
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
@@ -4119,6 +4158,17 @@ export function AppointmentBookingFlow({
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
+          ) : null}
+          {isStaff && createResult?.compliance_warnings && createResult.compliance_warnings.length > 0 ? (
+            <div className="mt-4 max-w-sm mx-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+              <p className="text-xs font-semibold text-amber-900">Outstanding compliance forms</p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                The booking is made, but{' '}
+                {createResult.compliance_warnings.map((w) => w.compliance_type_name).join(', ')}{' '}
+                {createResult.compliance_warnings.length === 1 ? 'is' : 'are'} not on file yet. Collect the record or
+                send the form before the appointment.
+              </p>
+            </div>
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
         </div>

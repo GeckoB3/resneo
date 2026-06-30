@@ -91,6 +91,7 @@ export interface BuilderMeta {
   validity_period_days: number | null;
   capture_methods: ComplianceCaptureMethod[];
   form_link_expiry_days: number | null;
+  online_unmet_message: string | null;
 }
 
 const DEFAULT_META: BuilderMeta = {
@@ -100,6 +101,7 @@ const DEFAULT_META: BuilderMeta = {
   validity_period_days: null,
   capture_methods: ['staff_in_venue', 'client_online'],
   form_link_expiry_days: null,
+  online_unmet_message: null,
 };
 
 export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; typeId?: string }) {
@@ -129,6 +131,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
       validity_period_days: t.validity_period_days,
       capture_methods: t.capture_methods,
       form_link_expiry_days: t.form_link_expiry_days,
+      online_unmet_message: t.online_unmet_message ?? null,
     });
     const schema = loaded.version?.form_schema;
     setFields(schema?.fields ?? []);
@@ -212,6 +215,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             validity_period_days: meta.validity_period_days,
             capture_methods: meta.capture_methods,
             form_link_expiry_days: meta.form_link_expiry_days,
+            online_unmet_message: meta.online_unmet_message,
             form_schema: schema,
           }),
         });
@@ -230,6 +234,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             validity_period_days: meta.validity_period_days,
             capture_methods: meta.capture_methods,
             form_link_expiry_days: meta.form_link_expiry_days,
+            online_unmet_message: meta.online_unmet_message,
           }),
         });
         if (!patchRes.ok) {
@@ -339,6 +344,23 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
               value={introMarkdown}
               onChange={(e) => setIntroMarkdown(e.target.value)}
             />
+          </div>
+          <div className="mt-4">
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Message when a booking is blocked (optional)
+            </label>
+            <textarea
+              className={inputClass}
+              rows={2}
+              maxLength={500}
+              placeholder="For example: Please book a patch test at least 48 hours before this appointment."
+              value={meta.online_unmet_message ?? ''}
+              onChange={(e) => setMeta({ ...meta, online_unmet_message: e.target.value || null })}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Shown to clients who try to book online without a valid record, when this form is one they cannot
+              complete themselves (for example a patch test your team carries out). Tell them what to do next.
+            </p>
           </div>
         </SectionCard.Body>
       </SectionCard>

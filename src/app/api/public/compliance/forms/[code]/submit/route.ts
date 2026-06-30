@@ -5,6 +5,7 @@ import { clientIpFromHeaders, rateLimit } from '@/lib/compliance/rate-limit';
 
 const CODE_RE = /^[0-9a-z]{8,12}$/;
 const SUBMITS_PER_CODE_PER_HOUR = 10;
+const SUBMITS_PER_IP_PER_HOUR = 40;
 
 /** POST /api/public/compliance/forms/[code]/submit — submit responses (no auth, single-use). */
 export async function POST(request: NextRequest, ctx: { params: { code: string } | Promise<{ code: string }> }) {
@@ -14,19 +15,22 @@ export async function POST(request: NextRequest, ctx: { params: { code: string }
       return NextResponse.json({ error: 'Invalid link.', reason: 'not_found' }, { status: 404 });
     }
 
-    const limit = rateLimit(`compliance-submit:${code}`, SUBMITS_PER_CODE_PER_HOUR, 60 * 60 * 1000);
-    if (!limit.allowed) {
-      return NextResponse.json(
-        { error: 'Too many attempts. Please try again later.' },
-        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } },
-      );
+    const ip = clientIpFromHeaders(request.headers);
+    const tooMany = { error: 'Too many attempts. Please try again later.' };
+    // Per-code (a single link) AND per-IP (across many codes, blunting enumeration, audit Low).
+    const codeLimit = rateLimit(`compliance-submit:${code}`, SUBMITS_PER_CODE_PER_HOUR, 60 * 60 * 1000);
+    if (!codeLimit.allowed) {
+      return NextResponse.json(tooMany, { status: 429, headers: { 'Retry-After': String(codeLimit.retryAfterSeconds) } });
+    }
+    const ipLimit = rateLimit(`compliance-submit-ip:${ip}`, SUBMITS_PER_IP_PER_HOUR, 60 * 60 * 1000);
+    if (!ipLimit.allowed) {
+      return NextResponse.json(tooMany, { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSeconds) } });
     }
 
     const body = await request.json().catch(() => null);
     const responses = body && typeof body === 'object' ? (body as { responses?: unknown }).responses : null;
 
     const admin = getSupabaseAdminClient();
-    const ip = clientIpFromHeaders(request.headers);
     const userAgent = request.headers.get('user-agent');
 
     const result = await submitPublicForm(admin, { code, responses, ip, userAgent });

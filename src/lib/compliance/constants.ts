@@ -18,9 +18,20 @@ export const COMPLIANCE_CAPTURE_CHANNELS = [
   'client_email',
   'client_sms',
   'client_walkin',
+  'client_booking',
   'import',
 ] as const;
 export type ComplianceCaptureChannel = (typeof COMPLIANCE_CAPTURE_CHANNELS)[number];
+
+/**
+ * Where a client-online requirement's form is offered during online booking
+ * (`service_compliance_requirements.online_collection`, spec §9.3):
+ *   inline            — rendered as a step in the booking flow
+ *   confirmation_link — link carried in the booking confirmation email
+ *   none              — not surfaced to the guest online (staff handle it)
+ */
+export const COMPLIANCE_ONLINE_COLLECTION_MODES = ['inline', 'confirmation_link', 'none'] as const;
+export type ComplianceOnlineCollection = (typeof COMPLIANCE_ONLINE_COLLECTION_MODES)[number];
 
 export const COMPLIANCE_RECORD_STATUSES = ['completed', 'expired', 'voided'] as const;
 export type ComplianceRecordStatus = (typeof COMPLIANCE_RECORD_STATUSES)[number];

@@ -1379,6 +1379,8 @@ export async function POST(request: NextRequest) {
           booking_id: apptBooking.id,
           payment_url: payment_url ?? undefined,
           message: payment_url ? 'Appointment created. Deposit link sent.' : 'Appointment created.',
+          // audit M2: surface unmet warn_staff/warn_client requirements so the staff UI can flag them.
+          ...(apptCompliance.warnings.length > 0 ? { compliance_warnings: apptCompliance.warnings } : {}),
         },
         { status: 201 },
       );

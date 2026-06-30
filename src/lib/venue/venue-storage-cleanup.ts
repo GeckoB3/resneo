@@ -89,6 +89,23 @@ async function listAllObjectPaths(
   return paths;
 }
 
+/**
+ * Delete every object under a single bucket prefix (best-effort list + chunked remove).
+ * Used to reap orphaned compliance uploads under a form link's temp prefix (audit M8).
+ * Throws on a storage error so callers can log; callers treat it as best-effort.
+ */
+export async function removeStoragePrefix(admin: AdminClientLike, bucket: string, prefix: string): Promise<number> {
+  const storage = (admin as { storage: StorageLike }).storage;
+  const paths = await listAllObjectPaths(storage, bucket, prefix);
+  let removed = 0;
+  for (const batch of chunk(paths, REMOVE_CHUNK_SIZE)) {
+    const { error } = await storage.from(bucket).remove(batch);
+    if (error) throw new Error(error.message);
+    removed += batch.length;
+  }
+  return removed;
+}
+
 export interface PurgeVenueStorageResult {
   removed: number;
   errors: Array<{ bucket: string; error: string }>;

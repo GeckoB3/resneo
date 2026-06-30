@@ -69,22 +69,43 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
 
     const { data: existing } = await staff.db
       .from('compliance_records')
-      .select('id, guest_id, compliance_type_id')
+      .select('id, guest_id, compliance_type_id, compliance_types!inner(result_type)')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
     if (!existing) return NextResponse.json({ error: 'Record not found.' }, { status: 404 });
 
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const fields: string[] = [];
+    if (parsed.data.notes !== undefined) {
+      update.notes = parsed.data.notes;
+      fields.push('notes');
+    }
+    if (parsed.data.result !== undefined) {
+      // A pass/fail decision can only be recorded on a pass_fail type.
+      const typeJoin = (existing as { compliance_types?: { result_type?: string } | { result_type?: string }[] })
+        .compliance_types;
+      const resultType = (Array.isArray(typeJoin) ? typeJoin[0] : typeJoin)?.result_type;
+      if (resultType !== 'pass_fail') {
+        return NextResponse.json(
+          { error: 'A pass/fail decision can only be recorded on a pass/fail record.' },
+          { status: 400 },
+        );
+      }
+      update.result = parsed.data.result;
+      fields.push('result');
+    }
+
     const { data: updated, error } = await staff.db
       .from('compliance_records')
-      .update({ notes: parsed.data.notes, updated_at: new Date().toISOString() })
+      .update(update)
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .select()
       .single();
     if (error) {
-      console.error('PATCH compliance record notes failed:', error.message);
-      return NextResponse.json({ error: 'Failed to update notes.' }, { status: 500 });
+      console.error('PATCH compliance record failed:', error.message);
+      return NextResponse.json({ error: 'Failed to update record.' }, { status: 500 });
     }
 
     await writeComplianceAuditEvent(staff.db, {
@@ -95,7 +116,7 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       guestId: (existing as { guest_id: string }).guest_id,
       complianceRecordId: id,
       complianceTypeId: (existing as { compliance_type_id: string }).compliance_type_id,
-      metadata: { fields: ['notes'] },
+      metadata: { fields, ...(parsed.data.result !== undefined ? { result: parsed.data.result } : {}) },
     });
 
     return NextResponse.json({ record: updated });

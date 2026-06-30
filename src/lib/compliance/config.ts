@@ -29,7 +29,7 @@ export const complianceConfigSchema = z
     /** Default channel for sending form links. */
     default_form_link_channel: z.enum(COMPLIANCE_FORM_LINK_CHANNELS).default('email'),
     /** Days before a record's expiry to remind the client (0 = no reminder). */
-    reminder_cadence_days: z.number().int().min(0).max(90).default(7),
+    reminder_cadence_days: z.number().int().min(0).max(90).default(0),
     /** Hours before a booking the client must complete required forms (default applied to new requirements). */
     lock_period_hours: z.number().int().min(0).max(720).default(0),
     /** Venue-level form-link expiry override (days). Per-type override still wins. */

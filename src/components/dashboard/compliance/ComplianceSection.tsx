@@ -83,6 +83,12 @@ export function ComplianceSection({
 
   const records = guestData?.records ?? [];
   const requirements = bookingData?.applicable ? bookingData.requirements : [];
+  // Only links still awaiting completion belong here. Once a link is completed, expired,
+  // or revoked, its outcome already shows under "All compliance records" and the audit
+  // trail, so listing it again here was redundant and confusing: a form completed at
+  // booking (or via the confirmation email) has no staff send recorded, so it appeared
+  // as "Not yet sent" alongside a "Completed" pill.
+  const pendingFormLinks = (guestData?.form_links ?? []).filter((link) => link.status === 'pending');
 
   function refresh() {
     void mutateGuest();
@@ -275,11 +281,11 @@ export function ComplianceSection({
         </div>
       )}
 
-      {(guestData?.form_links?.length ?? 0) > 0 && (
+      {pendingFormLinks.length > 0 && (
         <div>
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Form links</h4>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-            {guestData!.form_links.map((link) => {
+            {pendingFormLinks.map((link) => {
               const pill = linkStatusPill[link.status] ?? { variant: 'compliance-voided' as const, label: link.status };
               const isPending = link.status === 'pending';
               return (
@@ -287,8 +293,8 @@ export function ComplianceSection({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-800">{joinedTypeName(link.compliance_types)}</p>
                     <p className="text-xs text-slate-500">
-                      {link.sent_via ? `Sent by ${link.sent_via === 'sms' ? 'SMS' : link.sent_via}` : 'Not yet sent'}
-                      {link.expires_at ? ` · Expires ${formatComplianceDate(link.expires_at)}` : ''}
+                      {link.sent_via ? `Sent by ${link.sent_via === 'sms' ? 'SMS' : link.sent_via} · ` : ''}
+                      Expires {formatComplianceDate(link.expires_at)}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">

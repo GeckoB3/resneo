@@ -6,6 +6,7 @@ import {
   type ResolverRequirement,
 } from '@/lib/compliance/resolve-requirements';
 import { COMPLIANCE_EXPIRING_SOON_DAYS } from '@/lib/compliance/constants';
+import { formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
 
 /** Read a `name` from a Supabase to-one join (object or single-element array). */
 function joinName(join: { name?: string } | { name?: string }[] | null | undefined): string {
@@ -58,6 +59,9 @@ export interface AwaitingLinkRow {
 }
 
 export interface ComplianceDashboardData {
+  /** Venue-local "today" (YYYY-MM-DD) the data was built for. The client uses this to
+   *  split today's check-ins from upcoming bookings, so both agree on the day boundary. */
+  today: string;
   expiring_soon: ExpiringRecordRow[];
   missing_for_bookings: MissingBookingRow[];
   awaiting_submission: AwaitingLinkRow[];
@@ -78,10 +82,19 @@ export async function loadComplianceDashboard(
 ): Promise<ComplianceDashboardData> {
   const nowIso = now.toISOString();
   const expiringHorizonIso = new Date(now.getTime() + COMPLIANCE_EXPIRING_SOON_DAYS * MS_PER_DAY).toISOString();
-  const bookingHorizonDate = new Date(now.getTime() + UPCOMING_BOOKING_WINDOW_DAYS * MS_PER_DAY)
-    .toISOString()
-    .slice(0, 10);
-  const todayDate = nowIso.slice(0, 10);
+
+  // "Today" and the upcoming-booking horizon are calendar dates compared against each
+  // booking's local `booking_date`, so they must be resolved in the venue's own timezone.
+  // Using server UTC here mis-buckets bookings by a day around midnight (and throughout
+  // BST for UK venues), e.g. showing tomorrow's booking under "Today's check-ins".
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('timezone')
+    .eq('id', venueId)
+    .maybeSingle();
+  const timezone = ((venueRow?.timezone as string | null) ?? '').trim() || 'Europe/London';
+  const todayDate = formatYmdInTimezone(now.getTime(), timezone);
+  const bookingHorizonDate = addDaysToYmd(todayDate, UPCOMING_BOOKING_WINDOW_DAYS);
 
   const [expiringRes, awaitingRes, bookingsRes] = await Promise.all([
     admin
@@ -142,7 +155,7 @@ export async function loadComplianceDashboard(
 
   const missing_for_bookings = await resolveMissingForBookings(admin, venueId, bookingsRes.data ?? [], now);
 
-  return { expiring_soon, missing_for_bookings, awaiting_submission };
+  return { today: todayDate, expiring_soon, missing_for_bookings, awaiting_submission };
 }
 
 async function resolveMissingForBookings(

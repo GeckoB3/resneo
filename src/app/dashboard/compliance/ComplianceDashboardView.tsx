@@ -15,6 +15,7 @@ import { groupTodaysCheckIns } from '@/lib/compliance/check-in';
 import type { ComplianceRequirementState } from '@/lib/compliance/constants';
 
 interface DashboardData {
+  today: string;
   expiring_soon: Array<{
     id: string;
     guest_id: string;
@@ -118,7 +119,10 @@ export function ComplianceDashboardView() {
   const missing = data?.missing_for_bookings ?? [];
   const awaiting = data?.awaiting_submission ?? [];
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Use the server's venue-local "today" so the today/upcoming split matches the day
+  // boundary the API queried against (a browser-UTC date would drift by a day near
+  // midnight and across BST). The fallback is only a guard for an unexpected null.
+  const todayStr = data?.today ?? new Date().toISOString().slice(0, 10);
   const checkIns = groupTodaysCheckIns(missing, todayStr);
   // Today's bookings live in the dedicated check-in panel; keep the forward list to >today.
   const upcomingMissing = missing.filter((m) => m.booking_date !== todayStr);
@@ -313,7 +317,7 @@ export function ComplianceDashboardView() {
         <SectionCard.Header
           eyebrow="Compliance"
           title="Awaiting client submission"
-          description="Form links sent that haven’t been completed yet."
+          description="Form links awaiting completion by the client."
         />
         <SectionCard.Body>
           {awaiting.length === 0 ? (
@@ -327,8 +331,8 @@ export function ComplianceDashboardView() {
                       {a.guest_name} · {a.compliance_type_name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {a.sent_at ? `Sent ${formatComplianceDate(a.sent_at)}` : 'Not yet sent'} · expires{' '}
-                      {formatComplianceDate(a.expires_at)}
+                      {a.sent_at ? `Sent ${formatComplianceDate(a.sent_at)} · ` : ''}
+                      Expires {formatComplianceDate(a.expires_at)}
                     </p>
                   </div>
                   <Pill variant="compliance-pending" size="sm" dot>Pending</Pill>
@@ -339,13 +343,17 @@ export function ComplianceDashboardView() {
         </SectionCard.Body>
       </SectionCard>
 
-      <p className="text-center text-xs text-slate-400">
-        Set up types and requirements in{' '}
-        <Link href="/dashboard/settings?tab=compliance" className="text-brand-600 underline">
-          Settings → Compliance
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-5 text-center">
+        <p className="max-w-md text-sm text-slate-600">
+          Create or update your compliance types and choose which forms each service needs.
+        </p>
+        <Link
+          href="/dashboard/settings?tab=compliance"
+          className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand-600/25 transition-colors hover:bg-brand-700"
+        >
+          Set up types and requirements
         </Link>
-        .
-      </p>
+      </div>
 
       {capture && (
         <ComplianceCaptureDialog

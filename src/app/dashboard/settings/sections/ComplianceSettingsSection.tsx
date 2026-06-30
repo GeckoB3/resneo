@@ -315,7 +315,7 @@ function RequirementsPanel() {
       <SectionCard.Header
         eyebrow="Compliance"
         title="Service requirements"
-        description="Connect compliance types to the services that need them. You can also do this from the service editor."
+        description="Choose which compliance types each service requires, such as a patch test or a signed consent form. When a service needs a type, its bookings warn or block until the client has a valid record on file. You can set the same requirements while editing a service."
       />
       <SectionCard.Body>
         {flags && !complianceEnabled ? (
@@ -479,16 +479,10 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
                 onChange={(e) => set('form_link_expiry_days', Number(e.target.value))}
               />
               <p className="mt-1 text-xs text-slate-500">
-                How long a form link stays valid after you send it. A type can override this.
+                How long a form link stays valid after you send it.
               </p>
             </div>
           </div>
-
-          <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            Whether a form shows during online booking, is emailed with the booking confirmation, or is left for
-            your team to collect is now set for each service in the{' '}
-            <span className="font-medium">Service requirements</span> tab.
-          </p>
 
           {isAdmin && (
             <div>

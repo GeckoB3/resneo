@@ -273,13 +273,18 @@ export async function consumePendingLinksForCapture(
     const ids = ((links ?? []) as Array<{ id: string }>).map((l) => l.id);
     if (ids.length === 0) return;
 
-    await admin
+    // Only audit the links this call actually consumed: a concurrent capture/submit may
+    // have flipped some out of 'pending' between the select and here, so re-read the
+    // updated rows rather than trusting the pre-update id list.
+    const { data: updated } = await admin
       .from('compliance_form_links')
       .update({ status: 'consumed', consumed_record_id: params.recordId, consumed_at: new Date().toISOString() })
       .in('id', ids)
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .select('id');
+    const consumedIds = ((updated ?? []) as Array<{ id: string }>).map((l) => l.id);
 
-    for (const id of ids) {
+    for (const id of consumedIds) {
       await writeComplianceAuditEvent(admin, {
         venueId: params.venueId,
         eventType: 'link.consumed',

@@ -112,7 +112,9 @@ export function ComplianceSection({
       setActionMessage(
         body.dispatched
           ? `Form link sent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`
-          : 'Link created, but there’s no email or phone on file to send it. Use Copy link below to share it.',
+          : body.no_destination
+            ? 'Link created, but there’s no email or phone on file to send it. Use Copy link below to share it.'
+            : 'Link created, but we couldn’t send it just now. Use Copy link below to share it.',
       );
       refresh();
     } finally {

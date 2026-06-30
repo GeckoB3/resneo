@@ -4,7 +4,6 @@ import {
   COMPLIANCE_CAPTURE_METHODS,
   COMPLIANCE_ENFORCEMENT_LEVELS,
   COMPLIANCE_CAPTURE_CHANNELS,
-  COMPLIANCE_LINK_SENT_VIA,
   COMPLIANCE_ONLINE_COLLECTION_MODES,
 } from '@/lib/compliance/constants';
 import { COMPLIANCE_RESULT_TYPES } from '@/lib/compliance/form-schema';
@@ -125,6 +124,8 @@ export const complianceFormLinkCreateSchema = z.object({
   compliance_type_id: z.string().uuid(),
   booking_id: z.string().uuid().nullable().optional(),
   // Optional: when omitted, the route uses the venue's default form-link channel.
-  send_via: z.enum(COMPLIANCE_LINK_SENT_VIA).optional(),
+  // Only a real delivery channel can be requested; 'manual_copy' is an internal
+  // fallback the route resolves to when the guest has no email/phone, never a caller input.
+  send_via: z.enum(['email', 'sms']).optional(),
 });
 export type ComplianceFormLinkCreateInput = z.infer<typeof complianceFormLinkCreateSchema>;

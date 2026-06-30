@@ -793,6 +793,9 @@ export function AppointmentBookingFlow({
       setSelectedAddonIds([]);
       setAddonFlowContext({ kind: 'primary' });
       setSubmitting(false);
+      // Clear any compliance collected for the previous booking so it can't leak into the next.
+      setBookingCompliance(null);
+      setPrecheckEmail(isPublicGuest ? accountGate.guestDetailsPrefill?.email?.trim() ?? '' : '');
       if (lockedPractitioner?.id && lockedPractitioner?.bookingSlug) {
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
@@ -803,7 +806,7 @@ export function AppointmentBookingFlow({
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff]);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {

@@ -85,12 +85,16 @@ export function ComplianceDashboardView() {
       if (body.dispatched) {
         setMessage(`Form link sent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`);
       } else if (body.public_url) {
-        // No email or phone on file: copy the link so staff can share it manually.
+        // Copy the link so staff can share it manually, with copy that matches why it
+        // wasn't sent: no destination on file vs a send that failed.
+        const reason = body.no_destination
+          ? 'This guest has no email or phone on file.'
+          : 'We couldn’t send it just now.';
         try {
           await navigator.clipboard.writeText(body.public_url as string);
-          setMessage('This guest has no email or phone on file. Link copied, paste it to share with them.');
+          setMessage(`${reason} Link copied, paste it to share with them.`);
         } catch {
-          setMessage(`No email or phone on file. Copy this link to share: ${body.public_url}`);
+          setMessage(`${reason} Copy this link to share: ${body.public_url}`);
         }
       } else {
         setMessage('Form link created.');

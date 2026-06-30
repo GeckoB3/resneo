@@ -104,6 +104,9 @@ export async function POST(request: NextRequest) {
         reused: issued.value.reused,
         dispatched,
         sent_via: sentChannel,
+        // Distinguish "nothing to send to" from "tried to send but it failed" so staff
+        // see accurate copy: manual_copy means no email/phone on file; otherwise dispatch erred.
+        no_destination: channel === 'manual_copy',
       },
       { status: issued.value.reused ? 200 : 201 },
     );

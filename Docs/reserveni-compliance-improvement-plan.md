@@ -561,6 +561,66 @@ not shown per-field (the §10.8 follow-up — arrives at the flow level); the in
 (server re-checks, so no bypass — just a blunter error path); a client-side file
 size/type guard before upload.
 
+### 10.10 Third end-to-end review (June 2026)
+
+One more full staff + customer pass (two independent review agents plus direct
+tracing of the data layer and the booking reset path). The architecture and the
+prior fixes were re-confirmed solid; five items were tightened. No behaviour
+regressions; typecheck + eslint (no new errors) + lint:modals clean; 1676 tests
+green.
+
+**Bugs / correctness fixed**
+
+1. **Guest merge could still crash on duplicate pending links (source vs source).**
+   The §10.9-era fix (migration `20261230120000`) only revoked a *source's* pending
+   link when the *target* already held one of the same type. If two source guests
+   each held a pending link for the same compliance type (and the target held none),
+   re-pointing both to the target still violated `uq_compliance_form_links_pending`
+   and aborted the whole merge with 23505. New migration
+   `20261231120000_compliance_merge_guests_source_dedup.sql` keeps exactly one
+   pending link per type across the full {target} ∪ {sources} set (preferring the
+   target's, then the most recent) via `row_number()` and revokes the rest, before
+   re-pointing. Idempotent; covers every collision shape.
+2. **In-venue capture could audit a link it did not consume.** `consumePendingLinksForCapture`
+   selected pending link ids, updated them to `consumed` (guarded by `status='pending'`),
+   then wrote a `link.consumed` audit event for every selected id. If a concurrent
+   submit flipped one out of pending between the select and the update, the audit
+   trail claimed a consumption that did not happen. The UPDATE now uses `.select('id')`
+   and only the rows it actually changed are audited. (`form-links-service.ts`.)
+
+**Polish**
+
+3. **Send-link copy now distinguishes "no destination" from "send failed".** When a
+   dispatch could not go out, staff always saw "no email or phone on file" even when
+   the guest had contact details and the send simply errored. The create route now
+   returns `no_destination`, and both send surfaces show the matching message
+   (no contact on file vs we could not send it just now). (`form-links/route.ts`,
+   `ComplianceDashboardView.tsx`, `ComplianceSection.tsx`.)
+4. **Public form error banner is now announced.** The error banner on the public
+   link form gained `role="alert"` so screen readers hear submission failures, matching
+   the dashboard's pattern. (`PublicComplianceForm.tsx`.)
+5. **Booking reset now clears compliance state.** The booking-flow reset event cleared
+   ~30 pieces of state but not `bookingCompliance` / `precheckEmail`, so a fresh booking
+   started in the same mounted flow could carry the prior booking's collected forms.
+   Both are now reset (the pre-check email back to its signed-in prefill). Also narrowed
+   the create-link request schema so callers can only request `email`/`sms` (the
+   `manual_copy` channel is an internal fallback, never an input). (`AppointmentBookingFlow.tsx`,
+   `zod-schemas.ts`.)
+
+**Reviewed and confirmed solid:** atomic single-use link consumption with rollback,
+per-tenant RLS + app-layer admin checks, immutable per-version records, per-attendee
+group enforcement, the `BookingComplianceBlock` extraction (self-owned active-state),
+the dispatch channel-fallback accuracy from §10.9, rate-limited public endpoints, and
+staff-only field stripping in public mode.
+
+**Flagged for confirmation (not changed):** `bookingDatetime` in
+`resolve-requirements.ts` builds a `Date` from `booking_date`/`booking_time` in the
+*server's* local timezone, then compares it against venue-tz expiry/lead-time. On a
+UTC server this skews per-visit and lead-time checks by the venue's UTC offset (0 to a
+few hours). The impact is bounded and pre-existing, and the function feeds the shared
+booking engine, so it is flagged rather than changed unilaterally; the codebase already
+has `venueLocalDateTimeToUtcMs` if we decide to correct it.
+
 ## Sources
 
 - Vagaro — [Forms feature](https://www.vagaro.com/pro/forms), [Make Forms Mandatory](https://support.vagaro.com/hc/en-us/articles/24398220401819-Make-Forms-Mandatory-for-Your-Customers), [Dual‑signature forms](https://www.vagaro.com/learn/vagaros-dual-signature-forms-improve-intake-liability), [Notifications & reminders](https://support.vagaro.com/hc/en-us/articles/115000439594-Send-Notifications-and-Reminders-to-Your-Customers), [Check‑In Kiosks](https://support.vagaro.com/hc/en-us/articles/5024382031131-Manage-Your-Check-In-Kiosks), [Self check‑in](https://support.vagaro.com/hc/en-us/articles/115003955413-Self-Check-In-at-a-Business-for-Customers-of-a-Vagaro-Business)

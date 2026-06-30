@@ -1,6 +1,6 @@
 # Resneo Compliance — Competitive Review & Improvement Plan
 
-**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps. §10.4 Steps 1–5 are implemented ✅, and Step 6's worthwhile wins (U8 option-value guard, U9 library preview) too; the remaining Step 6 items (U14, U15, U16, U6, bulk) were deferred by judgment as net-negative or low-value for a polish pass — see §10.**
+**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps. §10.4 Steps 1–5 are implemented ✅, and Step 6's worthwhile wins (U8 option-value guard, U9 library preview) too; the remaining Step 6 items (U14, U15, U16, U6, bulk) were deferred by judgment as net-negative or low-value for a polish pass. A final adversarial review (§10.5) then fixed five code bugs found in those changes, and a doc-vs-code audit verified this section is accurate — see §10.**
 **Date:** June 2026 (Phase 1 shipped; §9 addendum added June 2026)
 **Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation, and a prioritised plan to close the gaps. The §9 addendum extends this with a full code audit and the in-booking form-collection design.
 
@@ -331,6 +331,50 @@ This stays internally consistent: `block_*` always means "cannot book online whi
 Guardrails from §7 still hold: never fail a booking because of compliance comms (the gate already fails open on internal error); respect SMS allowance; preserve lead-time, validity, blocking, versioning and audit; everything stays behind `compliance_records_enabled`, Appointments-tier, off by default.
 
 ---
+
+### 10.5 Final review (June 2026): bugs found and fixed
+
+A final adversarial code review of the §10 changes, plus a doc-vs-code accuracy
+audit, was run. The doc audit found §10 accurate (only the audit-time `path:line`
+citations drift, as the section already disclaims). The code review surfaced six
+items; the five substantive ones are now fixed, with tests green throughout.
+
+1. **Duplicate version on a retried single-request save / version churn. ✅ fixed.**
+   `createComplianceTypeVersion` now skips publishing when the submitted schema is
+   byte-identical to the current version (order-insensitive comparison), so a
+   single-request PATCH save retried after a transient metadata-update failure no
+   longer accumulates identical immutable versions, and a metadata-only edit no
+   longer creates a redundant version. (`types-service.ts`; new unit test.)
+2. **Non-UUID fallback draft id broke inline file uploads. ✅ fixed.**
+   `BookingComplianceForms` previously generated a non-UUID id where
+   `crypto.randomUUID` is unavailable (insecure origins / older browsers); the
+   pre-booking upload endpoint and booking-create both UUID-validate the draft id,
+   so uploads would 400. It now emits an RFC4122-v4 UUID (`makeDraftUuid`).
+3. **Submit-time draft clear could orphan uploads on a fail-then-reload; stale
+   cross-booking submissions. ✅ fixed.** The submit clear no longer removes the
+   stable draft id, so a reload after a failed submit reuses the same upload prefix
+   and already-uploaded files stay valid. Separately, the reported `submissions`
+   are now scoped to the current service set's forms, so a persisted draft from a
+   previously-abandoned booking (kept for resume) is never captured against a new
+   booking. (`BookingComplianceForms.tsx`.)
+4. **Signature pad wiped an in-progress stroke on resize. ✅ fixed.** The
+   `ResizeObserver` now skips re-measuring while a stroke is being drawn, so a
+   mid-stroke resize (e.g. a mobile URL bar collapsing) no longer erases the
+   current line. (`SignaturePad.tsx`.)
+5. **"Add option" could create a duplicate option value. ✅ fixed.** The button now
+   picks the next free `option_N`, closing the one gap the U8 de-dup didn't cover.
+   (`ComplianceFormBuilder.tsx`.)
+6. **Pass/fail mapping when a staff-only select already exists. No change needed.**
+   Switching to pass/fail with a pre-existing staff-only select leaves the mapping
+   empty, and save is correctly blocked until it is mapped (the auto-insert path
+   pre-fills pass/fail). Working as intended; noted for consistency only.
+
+Re-verified clean: tenant isolation on restore/duplicate/PATCH; auth/admin/plan
+gating on the new routes; draft-restore hydration (no SSR mismatch);
+`form-draft` quota/SSR/expiry handling; clear-on-success vs persist-on-change;
+public-mode `staff_only` stripping; and the version-number retry on unique
+collision. After the fixes: typecheck + lint + lint:modals clean; 1676 unit tests
+green.
 
 ## Sources
 

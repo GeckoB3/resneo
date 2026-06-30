@@ -64,7 +64,11 @@ export function SignaturePad({
 
     setup();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => setup());
+    // Re-measuring clears the canvas; skip it mid-stroke so a resize (e.g. a mobile URL bar
+    // collapsing) doesn't wipe the line the user is currently drawing (review #4).
+    const observer = new ResizeObserver(() => {
+      if (!drawing.current) setup();
+    });
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [height]);

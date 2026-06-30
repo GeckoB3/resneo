@@ -30,6 +30,23 @@ export interface CreateTypeParams {
 
 export type ServiceResult<T> = { ok: true; value: T } | { ok: false; error: string; status: number };
 
+/** Order-insensitive JSON, for comparing two stored form schemas for equality. */
+function canonicalJson(value: unknown): string {
+  const sort = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sort);
+    if (v && typeof v === 'object') {
+      return Object.keys(v as Record<string, unknown>)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, k) => {
+          acc[k] = sort((v as Record<string, unknown>)[k]);
+          return acc;
+        }, {});
+    }
+    return v;
+  };
+  return JSON.stringify(sort(value));
+}
+
 interface TypeRow {
   id: string;
   [key: string]: unknown;
@@ -156,7 +173,7 @@ export async function createComplianceTypeVersion(
 ): Promise<ServiceResult<{ versionId: string; versionNumber: number }>> {
   const { data: typeRow, error: typeErr } = await admin
     .from('compliance_types')
-    .select('id, result_type')
+    .select('id, result_type, current_version_id')
     .eq('id', params.typeId)
     .eq('venue_id', params.venueId)
     .maybeSingle();
@@ -170,6 +187,24 @@ export async function createComplianceTypeVersion(
   const schemaValidation = validateFormSchemaForType(parsedSchema.schema, resultType);
   if (!schemaValidation.ok) {
     return { ok: false, error: schemaValidation.errors.join(' '), status: 400 };
+  }
+
+  // Idempotency / no churn (review #1): if the submitted schema is byte-identical to the
+  // current version, don't publish a duplicate. This makes the single-request PATCH save's
+  // retries safe (a retry after a metadata failure won't spam versions) and avoids creating
+  // a new identical version for a metadata-only edit.
+  const currentVersionId = (typeRow as { current_version_id?: string | null }).current_version_id ?? null;
+  if (currentVersionId) {
+    const { data: cur } = await admin
+      .from('compliance_type_versions')
+      .select('id, version_number, form_schema')
+      .eq('id', currentVersionId)
+      .eq('venue_id', params.venueId)
+      .maybeSingle();
+    const curRow = cur as { id: string; version_number: number; form_schema: unknown } | null;
+    if (curRow && canonicalJson(curRow.form_schema) === canonicalJson(parsedSchema.schema)) {
+      return { ok: true, value: { versionId: curRow.id, versionNumber: curRow.version_number } };
+    }
   }
 
   for (let attempt = 0; attempt < 5; attempt++) {

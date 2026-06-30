@@ -895,7 +895,14 @@ function OptionsEditor({
       ))}
       <button
         type="button"
-        onClick={() => onChange([...options, { value: `option_${options.length + 1}`, label: `Option ${options.length + 1}` }])}
+        onClick={() => {
+          // Pick the next free option_N so a freshly-added option can't collide with an
+          // existing value (review #5) before its label is edited.
+          const taken = new Set(options.map((x) => x.value));
+          let n = options.length + 1;
+          while (taken.has(`option_${n}`)) n += 1;
+          onChange([...options, { value: `option_${n}`, label: `Option ${n}` }]);
+        }}
         className="text-xs font-medium text-brand-600"
       >
         + Add option

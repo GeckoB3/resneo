@@ -109,17 +109,50 @@ describe('createComplianceTypeVersion', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(404);
   });
+
+  it('does not publish a duplicate when the schema is unchanged (idempotent retry / metadata-only save)', async () => {
+    const schema = { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+    const fake = new FakeSupabase({
+      compliance_types: [{ id: 'type-1', venue_id: VENUE, result_type: 'completed', current_version_id: 'v1' }],
+      // Stored as the parsed shape the service writes (defaults filled in), so the comparison
+      // matches a re-submit of the same logical schema.
+      compliance_type_versions: [
+        {
+          id: 'v1',
+          compliance_type_id: 'type-1',
+          venue_id: VENUE,
+          version_number: 1,
+          form_schema: {
+            schema_version: '1.0',
+            title: 'T',
+            fields: [{ id: 'a', type: 'text', label: 'A', required: false, staff_only: false }],
+          },
+        },
+      ],
+    });
+    const res = await createComplianceTypeVersion(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      typeId: 'type-1',
+      formSchema: schema,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.versionNumber).toBe(1); // returned the existing version
+    // No second version row was inserted.
+    expect((fake.tables.compliance_type_versions ?? []).filter((v) => v.compliance_type_id === 'type-1')).toHaveLength(1);
+  });
 });
 
 describe('restoreComplianceTypeVersion', () => {
-  const simpleSchema = { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+  const schemaV1 = { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+  const schemaV2 = { schema_version: '1.0', title: 'T', fields: [{ id: 'b', type: 'text', label: 'B' }] };
 
   function seedWithTwoVersions() {
     return new FakeSupabase({
       compliance_types: [{ id: 'type-1', venue_id: VENUE, result_type: 'completed', current_version_id: 'v2' }],
       compliance_type_versions: [
-        { id: 'v1', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 1, form_schema: simpleSchema },
-        { id: 'v2', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 2, form_schema: simpleSchema },
+        { id: 'v1', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 1, form_schema: schemaV1 },
+        { id: 'v2', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 2, form_schema: schemaV2 },
       ],
     });
   }

@@ -40,6 +40,25 @@ export interface BookingComplianceState {
 
 const isMandatory = (enforcement: string) => enforcement === 'block_online' || enforcement === 'block_all';
 
+/**
+ * A UUID. Falls back to an RFC4122-v4 string where `crypto.randomUUID` is unavailable
+ * (insecure origins / older browsers): the pre-booking upload endpoint and booking-create
+ * both require UUID-format ids, so a non-UUID draft id would 400 file uploads (review #2).
+ */
+function makeDraftUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+
 interface Props {
   venueId: string;
   /** Catalog service id(s) for the booking (one per chosen service / multi-service segment). */
@@ -66,11 +85,7 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
   // server and client first render agree). Creates + persists a stable id if none exists.
   useEffect(() => {
     const savedId = loadFormDraft(draftIdKey) as { id?: string } | null;
-    const id =
-      savedId?.id ??
-      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    const id = savedId?.id ?? makeDraftUuid();
     setDraftId(id);
     if (!savedId?.id) saveFormDraft(draftIdKey, { id });
     const savedResponses = loadFormDraft(responsesKey) as Record<string, Record<string, unknown>> | null;
@@ -86,15 +101,16 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, restored]);
 
-  // Clear persisted drafts once the booking is being submitted. A success navigates away;
-  // a failed submit keeps the in-memory state so the guest can retry without re-entering.
+  // Clear persisted responses once the booking is being submitted (a success navigates away;
+  // a failed submit keeps the in-memory state so the guest can retry). The draft id is kept
+  // stable on purpose (review #3): if a failed submit is followed by a reload, reusing the
+  // same upload prefix keeps any already-uploaded files valid instead of orphaning them.
   const clearedRef = useRef(false);
   useEffect(() => {
     if (submittingBooking && !clearedRef.current) {
       clearedRef.current = true;
       clearFormDraftsByPrefix(`booking-inline:${venueId}:`);
       clearFormDraft(responsesKey);
-      clearFormDraft(draftIdKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submittingBooking, venueId]);
@@ -141,10 +157,16 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
   // Report collected state up whenever the forms or captured responses change.
   useEffect(() => {
     const formList = forms ?? [];
-    const submissions = Object.entries(responsesByType).map(([compliance_type_id, responses]) => ({
-      compliance_type_id,
-      responses,
-    }));
+    // Only submit responses for forms required by the CURRENT service set. A persisted draft
+    // from a previously-abandoned booking (different services, same venue/device) is kept for
+    // resume but must not be captured against this booking (review #3).
+    const currentTypeIds = new Set(formList.map((f) => f.compliance_type_id));
+    const submissions = Object.entries(responsesByType)
+      .filter(([compliance_type_id]) => currentTypeIds.has(compliance_type_id))
+      .map(([compliance_type_id, responses]) => ({
+        compliance_type_id,
+        responses,
+      }));
     const mandatoryComplete = formList
       .filter((f) => isMandatory(f.enforcement))
       .every((f) => responsesByType[f.compliance_type_id] !== undefined);

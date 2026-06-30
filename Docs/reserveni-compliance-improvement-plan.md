@@ -391,16 +391,17 @@ tests green.
   reminder-cadence and form-link-expiry fields gained help text.
 - **Removed two dead settings.** "Default capture method" and "Default lock period
   (hours)" had **no consumers anywhere in the code**, so they misled staff; both
-  are removed from General settings.
-  - **Open finding — lead-time has no UI.** Lead-time enforcement
-    (`lock_period_hours`, the "patch test at least 48h before colour"
-    differentiator) is enforced by the engine but is **not configurable anywhere
-    in the dashboard** — neither the removed General default nor the per-service
-    requirement editor (`ComplianceRequirementsEditor`, which only exposes
-    enforcement + online collection) lets staff set it. Recommended future work:
-    add a "must be completed N hours before the appointment" control to the
-    requirement editor. Deferred per product decision (the dead settings were
-    removed rather than wired).
+  are removed from General settings. (Lead time was then given a real home in the
+  per-service requirement editor — see below.)
+  - **Lead-time UI — ✅ now added.** Lead-time enforcement (`lock_period_hours`,
+    the "patch test at least 48h before colour" differentiator) was enforced by
+    the engine but had no way to configure it in the dashboard. The per-service
+    requirement editor now exposes a **"Lead time: N hours before the
+    appointment"** control on each requirement (persists on blur) and in the
+    Add-requirement dialog. The whole server path already supported it
+    (`complianceRequirement{Create,Patch}Schema`, `addRequirement` /
+    `updateRequirement`, covered by tests), so this was UI-only.
+    (`ComplianceRequirementsEditor.tsx`.)
 - **U14 — booking-flow panels merged. ✅** The customer's pre-check notice and
   inline-forms block now render inside one shared "Before you book" card. Each
   gained an `embedded` mode (drops its own card chrome) and an `onActiveChange`

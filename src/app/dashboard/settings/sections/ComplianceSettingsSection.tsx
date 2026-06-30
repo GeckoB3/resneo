@@ -9,6 +9,8 @@ import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
+import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
+import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
 import {
   CATEGORY_LABELS,
   RESULT_TYPE_LABELS,
@@ -192,6 +194,7 @@ interface LibraryTemplateSummary {
   validity_period_days: number | null;
   description?: string;
   field_count: number;
+  form_schema: ComplianceFormSchema;
 }
 
 function LibraryDialog({
@@ -208,6 +211,7 @@ function LibraryDialog({
     complianceJsonFetcher,
   );
   const [cloningSlug, setCloningSlug] = useState<string | null>(null);
+  const [previewSlug, setPreviewSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const templates = data?.templates ?? [];
 
@@ -235,24 +239,40 @@ function LibraryDialog({
         )}
         <ul className="divide-y divide-slate-100">
           {templates.map((t) => (
-            <li key={t.slug} className="flex items-start justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-800">{t.name}</p>
-                {t.description && <p className="mt-0.5 text-xs text-slate-500">{t.description}</p>}
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                  <Pill variant="neutral" size="sm">{CATEGORY_LABELS[t.category] ?? t.category}</Pill>
-                  <span>· {validityLabel(t.validity_period_days)}</span>
-                  <span>· {t.field_count} field(s)</span>
+            <li key={t.slug} className="py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800">{t.name}</p>
+                  {t.description && <p className="mt-0.5 text-xs text-slate-500">{t.description}</p>}
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                    <Pill variant="neutral" size="sm">{CATEGORY_LABELS[t.category] ?? t.category}</Pill>
+                    <span>· {validityLabel(t.validity_period_days)}</span>
+                    <span>· {t.field_count} field(s)</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSlug((s) => (s === t.slug ? null : t.slug))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    {previewSlug === t.slug ? 'Hide' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => clone(t.slug)}
+                    disabled={cloningSlug === t.slug}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {cloningSlug === t.slug ? 'Adding…' : 'Add'}
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => clone(t.slug)}
-                disabled={cloningSlug === t.slug}
-                className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {cloningSlug === t.slug ? 'Adding…' : 'Add'}
-              </button>
+              {previewSlug === t.slug && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <ComplianceFormRenderer schema={t.form_schema} mode="public" preview />
+                </div>
+              )}
             </li>
           ))}
         </ul>

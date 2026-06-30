@@ -872,7 +872,13 @@ function OptionsEditor({
             value={o.label}
             onChange={(e) => {
               const label = e.target.value;
-              const value = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `option_${i + 1}`;
+              const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `option_${i + 1}`;
+              // Guard against two labels slugifying to the same value (audit U8): a silent
+              // value clash would corrupt select validation and pass/fail result mapping.
+              const taken = new Set(options.filter((_, j) => j !== i).map((x) => x.value));
+              let value = base;
+              let n = 2;
+              while (taken.has(value)) value = `${base}_${n++}`;
               onChange(options.map((x, j) => (j === i ? { value, label } : x)));
             }}
           />

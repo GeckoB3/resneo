@@ -5,6 +5,8 @@ import { generateComplianceFormCode } from '@/lib/compliance/short-code';
 import { resolveFormLinkExpiryDays, type ComplianceConfig } from '@/lib/compliance/config';
 import type { ComplianceLinkSentVia } from '@/lib/compliance/constants';
 import type { ServiceResult } from '@/lib/compliance/types-service';
+import { COMPLIANCE_BUCKET } from '@/lib/compliance/files';
+import { removeStoragePrefix } from '@/lib/venue/venue-storage-cleanup';
 
 /** Public URL for a form-link code (spec §3.4 / §4.6). */
 export function complianceFormPublicUrl(code: string): string {
@@ -205,7 +207,7 @@ export async function revokeFormLink(
 ): Promise<ServiceResult<Record<string, unknown>>> {
   const { data: existing } = await admin
     .from('compliance_form_links')
-    .select('id, status, guest_id, compliance_type_id')
+    .select('id, status, guest_id, compliance_type_id, code')
     .eq('id', params.linkId)
     .eq('venue_id', params.venueId)
     .maybeSingle();
@@ -235,6 +237,17 @@ export async function revokeFormLink(
     complianceFormLinkId: params.linkId,
     complianceTypeId: (existing as { compliance_type_id: string }).compliance_type_id,
   });
+
+  // A revoked link was never consumed, so any uploads under its temp prefix are orphaned
+  // (no record references them). Reap them so they do not accumulate (audit M8). Best-effort.
+  const revokedCode = (existing as { code?: string | null }).code;
+  if (revokedCode) {
+    try {
+      await removeStoragePrefix(admin, COMPLIANCE_BUCKET, `venues/${params.venueId}/uploads/${revokedCode}`);
+    } catch (e) {
+      console.error('[revokeFormLink] upload cleanup failed:', e instanceof Error ? e.message : e);
+    }
+  }
 
   return { ok: true, value: updated as Record<string, unknown> };
 }

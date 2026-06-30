@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { endOfCaptureDayInVenueTimezone } from '@/lib/venue/venue-local-clock';
 
 /**
  * Compliance form schema (spec §4.3.1) — the versioned JSONB document stored on
@@ -176,6 +177,10 @@ export function validateFormSchemaForType(
         errors.push('The result field referenced by result_mapping must be a select field.');
       } else if (!mapped.staff_only) {
         errors.push('The pass/fail result field must be marked staff_only.');
+      } else if (!mapped.required) {
+        // audit M7: an optional result field can be left blank, which would otherwise let a
+        // record with no pass/fail decision satisfy a booking (see audit H4).
+        errors.push('The pass/fail result field must be marked required so a decision is always recorded.');
       } else {
         const optionValues = new Set(mapped.options.map((o) => o.value));
         const declared = [...mapping.pass_values, ...mapping.fail_values];
@@ -370,14 +375,16 @@ export function computeResult(
 /**
  * Compute a record's `expires_at` from the type's validity period:
  *   null → lifetime (returns null)
- *   0    → single-use, immediately expired (returns capturedAt)
+ *   0    → "per visit": valid until the end of the capture day in venue local time
  *   >0   → capturedAt + N days
+ * `venueTimezone` is only used for the per-visit (0) case; defaults to Europe/London.
  */
 export function computeExpiresAt(
   validityPeriodDays: number | null | undefined,
   capturedAt: Date,
+  venueTimezone?: string,
 ): Date | null {
   if (validityPeriodDays == null) return null;
-  if (validityPeriodDays === 0) return new Date(capturedAt.getTime());
+  if (validityPeriodDays === 0) return endOfCaptureDayInVenueTimezone(capturedAt, venueTimezone ?? 'Europe/London');
   return new Date(capturedAt.getTime() + validityPeriodDays * 24 * 60 * 60 * 1000);
 }

@@ -65,6 +65,7 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       'validity_period_days',
       'capture_methods',
       'form_link_expiry_days',
+      'online_unmet_message',
       'is_active',
     ] as const) {
       if (parsed.data[key] !== undefined) update[key] = parsed.data[key];

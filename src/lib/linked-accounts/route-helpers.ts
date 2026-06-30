@@ -19,6 +19,8 @@ export interface LinkAdminContext {
     pricing_tier: string | null;
     plan_status: string | null;
     booking_model: string | null;
+    subscription_current_period_end: string | null;
+    billing_access_source: string | null;
   };
   eligibility: EligibilityResult;
   /** Auth user id of the acting admin, for audit attribution. */
@@ -74,7 +76,9 @@ export async function resolveLinkAdmin(): Promise<Resolution> {
   const admin = getSupabaseAdminClient();
   const { data: venueRow, error } = await admin
     .from('venues')
-    .select('id, name, slug, pricing_tier, plan_status, booking_model')
+    .select(
+      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+    )
     .eq('id', staff.venue_id)
     .maybeSingle();
 
@@ -92,6 +96,9 @@ export async function resolveLinkAdmin(): Promise<Resolution> {
     pricing_tier: (venueRow.pricing_tier as string | null) ?? null,
     plan_status: (venueRow.plan_status as string | null) ?? null,
     booking_model: (venueRow.booking_model as string | null) ?? null,
+    subscription_current_period_end:
+      (venueRow.subscription_current_period_end as string | null) ?? null,
+    billing_access_source: (venueRow.billing_access_source as string | null) ?? null,
   };
   const eligibility = evaluateLinkEligibility(venue);
 

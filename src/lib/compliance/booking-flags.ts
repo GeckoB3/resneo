@@ -116,11 +116,15 @@ export async function loadBookingComplianceFlags(
   if (typeIds.size > 0) {
     const { data: recRows } = await admin
       .from('compliance_records')
-      .select('id, guest_id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id')
+      .select(
+        'id, guest_id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id, compliance_types!inner(result_type)',
+      )
       .eq('venue_id', venueId)
       .in('guest_id', guestIds)
       .in('compliance_type_id', [...typeIds]);
     for (const r of (recRows ?? []) as Array<Record<string, unknown>>) {
+      const typeJoin = r.compliance_types as { result_type?: string } | { result_type?: string }[] | null;
+      const t = Array.isArray(typeJoin) ? typeJoin[0] : typeJoin;
       const rec: ResolverRecord = {
         id: r.id as string,
         compliance_type_id: r.compliance_type_id as string,
@@ -130,6 +134,7 @@ export async function loadBookingComplianceFlags(
         captured_at: r.captured_at ? new Date(r.captured_at as string) : new Date(0),
         result: (r.result as string | null) ?? null,
         captured_by_staff_id: (r.captured_by_staff_id as string | null) ?? null,
+        result_type: (t?.result_type as ResolverRecord['result_type']) ?? 'completed',
       };
       const gid = r.guest_id as string;
       const list = recordsByGuest.get(gid) ?? [];

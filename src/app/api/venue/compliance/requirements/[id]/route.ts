@@ -32,6 +32,7 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       requirementId: id,
       enforcement: parsed.data.enforcement,
       lockPeriodHours: parsed.data.lock_period_hours,
+      onlineCollection: parsed.data.online_collection,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ requirement: result.value });

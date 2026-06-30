@@ -1,136 +1,38 @@
-'use client';
-
-import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
-import { normalizePublicBaseUrl } from '@/lib/public-base-url';
-import { createClient } from '@/lib/supabase/browser';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { AuthMagicForm } from './AuthMagicForm';
 
 /**
- * Customer "email me a fresh sign-in link" page (uses branded `/api/auth/send-magic-link`).
+ * Customer sign-in landing page.
+ *
+ * Reached from the "View or sign in to your account" link in transactional
+ * emails. Two cases:
+ *   - Already signed in: skip sign-in entirely and go straight to the bookings
+ *     page (or the requested `redirect` path).
+ *   - Signed out: show a button-gated form that only emails a magic link when the
+ *     visitor explicitly asks for it (avoids accidental "I never requested this"
+ *     sign-in emails from a stray click).
  */
-function AuthMagicContent() {
-  const searchParams = useSearchParams();
-  const initialEmail = searchParams.get('email') ?? '';
-  const redirect = searchParams.get('redirect') || '/account/bookings';
-  const [email, setEmail] = useState(initialEmail);
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
-  const [showManualForm, setShowManualForm] = useState(!initialEmail.trim());
-  const autoSent = useRef(false);
+export default async function AuthMagicPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ email?: string; redirect?: string }>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const rawRedirect = sp.redirect;
+  // Same-origin guard (blocks `//evil.com` protocol-relative open redirects).
+  const redirectPath =
+    rawRedirect && rawRedirect.startsWith('/') && !rawRedirect.startsWith('//')
+      ? rawRedirect
+      : '/account/bookings';
 
-  async function sendMagicLink(targetEmail: string) {
-    setStatus('sending');
-    try {
-      const trimmed = targetEmail.trim();
-      const res = await fetch('/api/auth/send-magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: trimmed,
-          next: redirect.startsWith('/') ? redirect : '/account/bookings',
-        }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; fallback?: boolean; error?: string };
-
-      if (!res.ok) {
-        setStatus('error');
-        return;
-      }
-
-      const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
-        ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)
-        : (typeof window !== 'undefined' ? window.location.origin : '');
-      const dest = redirect.startsWith('/') ? redirect : '/account/bookings';
-      const callbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(dest)}`;
-
-      if (json.fallback) {
-        const supabase = createClient();
-        const { error } = await supabase.auth.signInWithOtp({
-          email: trimmed,
-          options: { emailRedirectTo: callbackUrl },
-        });
-        if (error) {
-          setStatus('error');
-          return;
-        }
-      }
-
-      setStatus('sent');
-    } catch {
-      setStatus('error');
-    }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    redirect(redirectPath);
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    await sendMagicLink(email);
-  }
-
-  useEffect(() => {
-    if (autoSent.current || !initialEmail.trim()) return;
-    autoSent.current = true;
-    void sendMagicLink(initialEmail);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialEmail]);
-
-  return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-4 py-12">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Sign in link</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          {status === 'sent' && !showManualForm
-            ? `We've sent a secure sign-in link to ${email}. Check your inbox to continue.`
-            : 'Enter the email you use for bookings. We will send a secure link (no password required).'}
-        </p>
-      </div>
-      {status === 'sent' && !showManualForm ? (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-          <p className="font-medium">Link sent</p>
-          <p className="mt-1">
-            If that email is registered, the sign-in link is on its way. It may take a minute to arrive.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowManualForm(true)}
-            className="mt-3 text-sm font-medium text-green-900 underline underline-offset-2"
-          >
-            Use a different email address
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={(ev) => void submit(ev)} className="space-y-4">
-          <label className="block text-sm font-medium text-slate-700">
-            Email
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(ev) => setEmail(ev.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={status === 'sending'}
-            className="w-full rounded-md bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-          >
-            {status === 'sending' ? 'Sending…' : 'Email me a link'}
-          </button>
-        </form>
-      )}
-      {status === 'sent' && showManualForm ? (
-        <p className="text-sm text-green-800">If that email is registered, we&apos;ve sent a link. Check your inbox.</p>
-      ) : null}
-      {status === 'error' ? (
-        <p className="text-sm text-red-700">Something went wrong. Try again shortly.</p>
-      ) : null}
-    </div>
-  );
-}
-
-export default function AuthMagicPage() {
-  return (
-    <Suspense fallback={<div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">Loading…</div>}>
-      <AuthMagicContent />
-    </Suspense>
-  );
+  return <AuthMagicForm initialEmail={sp.email?.trim() ?? ''} redirect={redirectPath} />;
 }

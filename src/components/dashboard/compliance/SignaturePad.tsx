@@ -87,7 +87,7 @@ export function SignaturePad({
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label="Signature pad — draw your signature here"
+        aria-label="Signature pad: draw your signature here"
         style={{ height, touchAction: 'none' }}
         className={`w-full rounded-lg border border-slate-300 bg-white ${disabled ? 'opacity-60' : 'cursor-crosshair'}`}
         onPointerDown={start}

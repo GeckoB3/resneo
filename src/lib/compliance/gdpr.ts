@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { COMPLIANCE_BUCKET } from '@/lib/compliance/files';
+import { removeStoragePrefix } from '@/lib/venue/venue-storage-cleanup';
+import { writeComplianceAuditEvent } from '@/lib/compliance/audit';
 
 /**
  * Erase a guest's compliance data for a GDPR right-to-erasure (spec §13.1).
@@ -37,9 +39,40 @@ export async function eraseGuestCompliance(
       }
     }
 
+    // 1b. Remove each form link's temp upload prefix (audit M8). A file uploaded against a
+    // pending/abandoned/revoked/expired link is not referenced by any record, so step 1 misses
+    // it; without this it would survive right-to-erasure. Best-effort per link.
+    const { data: links } = await admin
+      .from('compliance_form_links')
+      .select('code')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId);
+    for (const l of (links ?? []) as Array<{ code?: string | null }>) {
+      if (!l.code) continue;
+      try {
+        await removeStoragePrefix(admin, COMPLIANCE_BUCKET, `venues/${venueId}/uploads/${l.code}`);
+      } catch (e) {
+        console.error('[eraseGuestCompliance] link upload remove failed:', e instanceof Error ? e.message : e, {
+          venueId,
+          code: l.code,
+        });
+      }
+    }
+
     // 2. Delete form links (prefill PII) and records (special-category responses).
     await admin.from('compliance_form_links').delete().eq('venue_id', venueId).eq('guest_id', guestId);
     await admin.from('compliance_records').delete().eq('venue_id', venueId).eq('guest_id', guestId);
+
+    // 3. Record the erasure on the append-only audit trail (audit Low: accountability for the
+    // destruction of special-category data). guest_id survives the anonymise flow; on a hard
+    // delete it is SET NULL, leaving the counts for GDPR Article 30 record-keeping.
+    await writeComplianceAuditEvent(admin, {
+      venueId,
+      eventType: 'guest.compliance_erased',
+      actorType: 'system',
+      guestId,
+      metadata: { records_removed: records?.length ?? 0, links_removed: links?.length ?? 0 },
+    });
   } catch (err) {
     console.error('[eraseGuestCompliance] failed:', err instanceof Error ? err.message : err, { venueId, guestId });
   }

@@ -23,6 +23,7 @@ export interface CreateTypeParams {
   captureMethods: ComplianceCaptureMethod[];
   description?: string | null;
   formLinkExpiryDays?: number | null;
+  onlineUnmetMessage?: string | null;
   formSchema: unknown;
   libraryTemplateSlug?: string | null;
 }
@@ -80,6 +81,7 @@ export async function createComplianceType(
       validity_period_days: params.validityPeriodDays,
       capture_methods: params.captureMethods,
       form_link_expiry_days: params.formLinkExpiryDays ?? null,
+      online_unmet_message: params.onlineUnmetMessage ?? null,
       library_template_slug: params.libraryTemplateSlug ?? null,
       is_active: true,
     })

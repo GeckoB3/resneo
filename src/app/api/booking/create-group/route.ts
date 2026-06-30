@@ -51,6 +51,11 @@ import {
   complianceUnmetMessage,
   COMPLIANCE_REQUIREMENT_UNMET,
 } from '@/lib/compliance/enforce-booking';
+import {
+  captureBookingComplianceSubmissions,
+  linkBookingComplianceRecords,
+} from '@/lib/compliance/booking-capture';
+import { complianceBookingSubmissionsSchema } from '@/lib/compliance/zod-schemas';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -74,6 +79,9 @@ const createGroupSchema = z.object({
   people: z.array(personEntrySchema).min(1).max(10),
   dietary_notes: z.string().max(1000).optional(),
   marketing_consent: z.boolean().optional(),
+  /** Compliance forms completed inline during booking (§9.3) + the draft id used for any file uploads. */
+  compliance_submissions: complianceBookingSubmissionsSchema.optional(),
+  compliance_draft_id: z.string().uuid().optional(),
   /** Client-address services: where staff travel to (mandatory for public sources). */
   ...clientAddressRequestFields,
 });
@@ -453,6 +461,27 @@ export async function POST(request: NextRequest) {
       guestLinkOptions,
     );
 
+    // Capture any compliance forms the guest completed inline (§9.3, Phase 2b) BEFORE the
+    // gate, so a just-completed mandatory form satisfies it. booking_id is backfilled below.
+    let complianceRecordIds: string[] = [];
+    if (parsed.data.compliance_submissions && parsed.data.compliance_submissions.length > 0) {
+      const cap = await captureBookingComplianceSubmissions(supabase, {
+        venueId: venue_id,
+        guestId: guest.id,
+        draftId: parsed.data.compliance_draft_id ?? null,
+        submissions: parsed.data.compliance_submissions,
+        captureIp: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip'),
+        captureUserAgent: request.headers.get('user-agent'),
+      });
+      if (!cap.ok) {
+        return NextResponse.json(
+          { error: cap.error, ...(cap.fieldErrors ? { field_errors: cap.fieldErrors } : {}) },
+          { status: cap.status },
+        );
+      }
+      complianceRecordIds = cap.recordIds;
+    }
+
     // Compliance gate per attendee (improvement plan Phase 4 / G6) — mirrors the
     // single-booking enforcement. All siblings share one guest, so a single record
     // satisfies the requirement for every attendee whose service needs it. Runs
@@ -593,6 +622,15 @@ export async function POST(request: NextRequest) {
       }
 
       bookingIds.push(booking.id);
+    }
+
+    // Attach any inline-captured compliance records to the (first) booking of the group.
+    if (complianceRecordIds.length > 0 && bookingIds[0]) {
+      await linkBookingComplianceRecords(supabase, {
+        venueId: venue_id,
+        recordIds: complianceRecordIds,
+        bookingId: bookingIds[0],
+      });
     }
 
     let client_secret: string | null = null;

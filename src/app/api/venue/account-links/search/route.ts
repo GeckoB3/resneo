@@ -33,7 +33,9 @@ export async function GET(request: NextRequest) {
     const pattern = `%${term}%`;
     const { data: rows, error } = await ctx.admin
       .from('venues')
-      .select('id, name, slug, pricing_tier, plan_status, booking_model')
+      .select(
+        'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+      )
       .or(`name.ilike.${pattern},slug.ilike.${pattern}`)
       .order('name', { ascending: true })
       .limit(MAX_RESULTS + 1); // +1 so we can flag truncation
@@ -51,6 +53,8 @@ export async function GET(request: NextRequest) {
           pricing_tier: v.pricing_tier as string | null,
           plan_status: v.plan_status as string | null,
           booking_model: v.booking_model as string | null,
+          subscription_current_period_end: v.subscription_current_period_end as string | null,
+          billing_access_source: v.billing_access_source as string | null,
         });
         let eligible = true;
         let reason: string | null = null;

@@ -83,6 +83,16 @@ describe('validateFormSchemaForType', () => {
     expect(r.errors.some((e) => e.includes('must be a select field'))).toBe(true);
   });
 
+  it('requires the pass/fail result field to be marked required (audit M7)', () => {
+    const optionalResult: ComplianceFormSchema = {
+      ...passFailSchema,
+      fields: passFailSchema.fields.map((f) => (f.id === 'f_result' ? { ...f, required: false } : f)),
+    };
+    const r = validateFormSchemaForType(optionalResult, 'pass_fail');
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.includes('must be marked required'))).toBe(true);
+  });
+
   it('flags result_mapping values missing from options', () => {
     const schema: ComplianceFormSchema = {
       ...passFailSchema,
@@ -198,8 +208,12 @@ describe('computeExpiresAt', () => {
   it('null validity = lifetime (null)', () => {
     expect(computeExpiresAt(null, captured)).toBeNull();
   });
-  it('0 validity = immediately expired (= captured)', () => {
-    expect(computeExpiresAt(0, captured)?.toISOString()).toBe(captured.toISOString());
+  it('0 validity = per visit: end of the capture day in venue local time (audit M5)', () => {
+    // captured 2026-05-14T12:00Z; Europe/London (default) is BST (UTC+1), so the local day
+    // ends at 2026-05-15T00:00 BST = 2026-05-14T23:00Z, i.e. 22:59:59.999Z.
+    expect(computeExpiresAt(0, captured)?.toISOString()).toBe('2026-05-14T22:59:59.999Z');
+    // An explicit UTC venue ends the day at 23:59:59.999Z.
+    expect(computeExpiresAt(0, captured, 'UTC')?.toISOString()).toBe('2026-05-14T23:59:59.999Z');
   });
   it('positive validity = captured + N days', () => {
     expect(computeExpiresAt(180, captured)?.toISOString()).toBe('2026-11-10T12:00:00.000Z');

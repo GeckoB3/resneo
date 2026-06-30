@@ -280,7 +280,19 @@ export interface PreCheckRequirement {
   compliance_type_name: string;
   enforcement: string;
   lock_period_hours: number | null;
+  /** Whether a client can complete this form online at all (drives inline vs "contact venue"). */
+  client_online: boolean;
+  online_collection: string;
+  /** Venue's guidance shown when a booking is blocked by this unmet requirement. */
+  online_unmet_message: string | null;
 }
+
+type PreCheckTypeJoin = {
+  name?: string;
+  is_active?: boolean;
+  capture_methods?: string[];
+  online_unmet_message?: string | null;
+};
 
 /** GET pre-check: a service's requirements + enforcement, with no guest identity. */
 export async function publicServiceRequirements(
@@ -291,7 +303,9 @@ export async function publicServiceRequirements(
   const column = await resolveServiceFkColumn(admin, venueId);
   const { data, error } = await admin
     .from('service_compliance_requirements')
-    .select('compliance_type_id, enforcement, lock_period_hours, compliance_types!inner(name, is_active)')
+    .select(
+      'compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(name, is_active, capture_methods, online_unmet_message)',
+    )
     .eq('venue_id', venueId)
     .eq(column, serviceId);
   if (error) {
@@ -304,7 +318,8 @@ export async function publicServiceRequirements(
         compliance_type_id: string;
         enforcement: string;
         lock_period_hours: number | null;
-        compliance_types: { name?: string; is_active?: boolean } | { name?: string; is_active?: boolean }[] | null;
+        online_collection: string | null;
+        compliance_types: PreCheckTypeJoin | PreCheckTypeJoin[] | null;
       };
       const t = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
       return {
@@ -312,11 +327,112 @@ export async function publicServiceRequirements(
         compliance_type_name: t?.name ?? 'Compliance record',
         enforcement: r.enforcement,
         lock_period_hours: r.lock_period_hours,
-        type_is_active: t?.is_active ?? true,
+        client_online: (t?.capture_methods ?? []).includes('client_online'),
+        online_collection: r.online_collection ?? 'confirmation_link',
+        online_unmet_message: t?.online_unmet_message ?? null,
+      };
+    });
+  // audit M6: do NOT filter out archived types here. The booking-create gate still enforces an
+  // archived-type requirement (the requirement row persists when only the type is archived), so
+  // hiding it from the pre-check produced a surprise 409. Surfacing it keeps the two consistent.
+}
+
+export interface InlineFormRequirement {
+  compliance_type_id: string;
+  compliance_type_name: string;
+  enforcement: string;
+  lock_period_hours: number | null;
+  version_id: string;
+  /** Current version's form schema with staff_only fields removed (never exposed online). */
+  form_schema: ComplianceFormSchema;
+}
+
+/**
+ * GET inline-forms (§9.3, Phase 2b): a service's requirements that are client-completable
+ * AND set to `online_collection = 'inline'`, each with its current-version form schema
+ * (staff_only stripped) so the booking flow can render the form. Archived types and
+ * staff-only / email-link / none requirements are excluded.
+ */
+export async function publicInlineFormsForService(
+  admin: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+): Promise<InlineFormRequirement[]> {
+  const column = await resolveServiceFkColumn(admin, venueId);
+  const { data, error } = await admin
+    .from('service_compliance_requirements')
+    .select(
+      'compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(name, is_active, capture_methods, current_version_id)',
+    )
+    .eq('venue_id', venueId)
+    .eq(column, serviceId);
+  if (error) {
+    console.error('[publicInlineFormsForService] failed:', error.message);
+    return [];
+  }
+
+  type TypeJoin = {
+    name?: string;
+    is_active?: boolean;
+    capture_methods?: string[];
+    current_version_id?: string | null;
+  };
+  const eligible = (data ?? [])
+    .map((row) => {
+      const r = row as {
+        compliance_type_id: string;
+        enforcement: string;
+        lock_period_hours: number | null;
+        online_collection: string | null;
+        compliance_types: TypeJoin | TypeJoin[] | null;
+      };
+      const t = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
+      return {
+        compliance_type_id: r.compliance_type_id,
+        compliance_type_name: t?.name ?? 'Compliance record',
+        enforcement: r.enforcement,
+        lock_period_hours: r.lock_period_hours,
+        online_collection: r.online_collection ?? 'confirmation_link',
+        is_active: t?.is_active ?? true,
+        capture_methods: t?.capture_methods ?? [],
+        current_version_id: t?.current_version_id ?? null,
       };
     })
-    .filter((r) => r.type_is_active)
-    .map(({ type_is_active: _drop, ...rest }) => rest);
+    .filter(
+      (r) =>
+        r.is_active &&
+        r.online_collection === 'inline' &&
+        r.capture_methods.includes('client_online') &&
+        Boolean(r.current_version_id),
+    );
+  if (eligible.length === 0) return [];
+
+  const versionIds = [...new Set(eligible.map((r) => r.current_version_id as string))];
+  const { data: versions } = await admin
+    .from('compliance_type_versions')
+    .select('id, form_schema')
+    .eq('venue_id', venueId)
+    .in('id', versionIds);
+  const schemaByVersion = new Map<string, ComplianceFormSchema>();
+  for (const v of (versions ?? []) as Array<{ id: string; form_schema: unknown }>) {
+    const parsed = parseFormSchema(v.form_schema);
+    if (parsed.ok) schemaByVersion.set(v.id, stripStaffOnlyFields(parsed.schema));
+  }
+
+  const out: InlineFormRequirement[] = [];
+  for (const r of eligible) {
+    const schema = schemaByVersion.get(r.current_version_id as string);
+    if (!schema) continue;
+    out.push({
+      compliance_type_id: r.compliance_type_id,
+      compliance_type_name: r.compliance_type_name,
+      enforcement: r.enforcement,
+      lock_period_hours: r.lock_period_hours,
+      version_id: r.current_version_id as string,
+      form_schema: schema,
+    });
+  }
+  return out;
 }
 
 export type PreCheckState = 'SATISFIED' | 'MISSING' | 'EXPIRED' | 'LOCK_PASSED';

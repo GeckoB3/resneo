@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { writeComplianceAuditEvent } from '@/lib/compliance/audit';
-import type { ComplianceEnforcement } from '@/lib/compliance/constants';
+import type { ComplianceEnforcement, ComplianceOnlineCollection } from '@/lib/compliance/constants';
 import type { ServiceResult } from '@/lib/compliance/types-service';
 
 /**
@@ -43,6 +43,7 @@ export interface RequirementRow {
   compliance_type_id: string;
   enforcement: ComplianceEnforcement;
   lock_period_hours: number | null;
+  online_collection: ComplianceOnlineCollection;
   appointment_service_id: string | null;
   service_item_id: string | null;
   compliance_type_name: string;
@@ -61,6 +62,7 @@ function mapRequirementRow(row: Record<string, unknown>): RequirementRow {
     compliance_type_id: row.compliance_type_id as string,
     enforcement: row.enforcement as ComplianceEnforcement,
     lock_period_hours: (row.lock_period_hours as number | null) ?? null,
+    online_collection: (row.online_collection as ComplianceOnlineCollection | null) ?? 'confirmation_link',
     appointment_service_id: (row.appointment_service_id as string | null) ?? null,
     service_item_id: (row.service_item_id as string | null) ?? null,
     compliance_type_name: t?.name ?? 'Compliance record',
@@ -79,7 +81,7 @@ export async function listRequirementsForService(
   const { data, error } = await admin
     .from('service_compliance_requirements')
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
     )
     .eq('venue_id', venueId)
     .eq(column, serviceId);
@@ -99,6 +101,7 @@ export async function addRequirement(
     complianceTypeId: string;
     enforcement: ComplianceEnforcement;
     lockPeriodHours: number | null;
+    onlineCollection?: ComplianceOnlineCollection;
   },
 ): Promise<ServiceResult<RequirementRow>> {
   const column = await resolveServiceFkColumn(admin, params.venueId);
@@ -126,9 +129,10 @@ export async function addRequirement(
       compliance_type_id: params.complianceTypeId,
       enforcement: params.enforcement,
       lock_period_hours: params.lockPeriodHours,
+      ...(params.onlineCollection !== undefined ? { online_collection: params.onlineCollection } : {}),
     })
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
     )
     .single();
 
@@ -160,6 +164,7 @@ export async function updateRequirement(
     requirementId: string;
     enforcement?: ComplianceEnforcement;
     lockPeriodHours?: number | null;
+    onlineCollection?: ComplianceOnlineCollection;
   },
 ): Promise<ServiceResult<RequirementRow>> {
   const { data: existing } = await admin
@@ -173,6 +178,7 @@ export async function updateRequirement(
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (params.enforcement !== undefined) update.enforcement = params.enforcement;
   if (params.lockPeriodHours !== undefined) update.lock_period_hours = params.lockPeriodHours;
+  if (params.onlineCollection !== undefined) update.online_collection = params.onlineCollection;
 
   const { data: updated, error } = await admin
     .from('service_compliance_requirements')
@@ -180,7 +186,7 @@ export async function updateRequirement(
     .eq('id', params.requirementId)
     .eq('venue_id', params.venueId)
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
     )
     .single();
   if (error) {

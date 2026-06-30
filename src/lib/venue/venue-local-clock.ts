@@ -59,6 +59,18 @@ export function venueLocalDateTimeToUtcMs(dateYmd: string, timeHHmm: string, tim
 }
 
 /**
+ * End of the calendar day (last millisecond) of `capturedAtUtc` in the venue timezone,
+ * as a UTC Date. Used for "per visit" compliance records (validity_period_days = 0), which
+ * are valid for the day they were captured in venue local time, then need renewing.
+ */
+export function endOfCaptureDayInVenueTimezone(capturedAtUtc: Date, venueTimezone: string): Date {
+  const tz = venueTimezone.trim() || 'Europe/London';
+  const dayYmd = formatYmdInTimezone(capturedAtUtc.getTime(), tz);
+  const nextMidnightUtcMs = venueLocalDateTimeToUtcMs(addDaysToYmd(dayYmd, 1), '00:00', tz);
+  return new Date(nextMidnightUtcMs - 1);
+}
+
+/**
  * Weekday (0=Sunday … 6=Saturday) for a calendar date in the venue timezone.
  * Used for recurring rules keyed by JS getDay() conventions.
  */

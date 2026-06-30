@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { FakeSupabase } from '@/lib/compliance/test-utils/fake-supabase';
-import { checkBookingCompliance, complianceUnmetMessage } from '@/lib/compliance/enforce-booking';
+import {
+  checkBookingCompliance,
+  complianceUnmetMessage,
+  enforceBookingCompliance,
+  COMPLIANCE_REQUIREMENT_UNMET,
+} from '@/lib/compliance/enforce-booking';
 
 const VENUE = 'venue-1';
 const GUEST = 'guest-1';
@@ -105,12 +110,13 @@ describe('checkBookingCompliance enforcement', () => {
     expect(staff.blocked).toBe(false);
   });
 
-  it('never blocks warn_staff / warn_client', async () => {
+  it('never blocks warn_staff / warn_client, but surfaces them as warnings (audit M2)', async () => {
     const res = await checkBookingCompliance(
       fakeWith({ requirements: [reqRow('warn_staff'), reqRow('warn_client', 't2')] }).asClient(),
       { ...base, context: 'online' },
     );
     expect(res.blocked).toBe(false);
+    expect(res.warnings.map((w) => w.enforcement).sort()).toEqual(['warn_client', 'warn_staff']);
   });
 
   it('allows when a valid record satisfies the requirement', async () => {
@@ -164,5 +170,54 @@ describe('complianceUnmetMessage', () => {
 
   it('falls back when details are empty', () => {
     expect(complianceUnmetMessage([], 'online')).toMatch(/compliance record/i);
+  });
+});
+
+describe('enforceBookingCompliance (centralised gate)', () => {
+  it('allows and returns no body when nothing blocks', async () => {
+    const res = await enforceBookingCompliance(fakeWith({ requirements: [reqRow('warn_client')] }).asClient(), {
+      ...base,
+      context: 'online',
+    });
+    expect(res.blocked).toBe(false);
+    expect(res.body).toBeUndefined();
+  });
+
+  it('blocks online and prepares the canonical 409 body', async () => {
+    const res = await enforceBookingCompliance(fakeWith({ requirements: [reqRow('block_online')] }).asClient(), {
+      ...base,
+      context: 'online',
+    });
+    expect(res.blocked).toBe(true);
+    expect(res.body?.error).toBe(COMPLIANCE_REQUIREMENT_UNMET);
+    expect(res.body?.message).toMatch(/booking online/i);
+    expect(res.body?.details[0]!.enforcement).toBe('block_online');
+  });
+
+  it('lets an admin override a staff-context block', async () => {
+    const res = await enforceBookingCompliance(fakeWith({ requirements: [reqRow('block_all')] }).asClient(), {
+      ...base,
+      context: 'staff',
+      adminOverride: true,
+    });
+    expect(res.blocked).toBe(false);
+    expect(res.body).toBeUndefined();
+  });
+
+  it('still blocks staff context when no override is given', async () => {
+    const res = await enforceBookingCompliance(fakeWith({ requirements: [reqRow('block_all')] }).asClient(), {
+      ...base,
+      context: 'staff',
+    });
+    expect(res.blocked).toBe(true);
+  });
+
+  it('ignores override in the online context (a guest can never override)', async () => {
+    const res = await enforceBookingCompliance(fakeWith({ requirements: [reqRow('block_online')] }).asClient(), {
+      ...base,
+      context: 'online',
+      adminOverride: true,
+    });
+    expect(res.blocked).toBe(true);
   });
 });

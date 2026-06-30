@@ -78,7 +78,7 @@ function TypesPanel({ isAdmin }: { isAdmin: boolean }) {
       <SectionCard.Header
         eyebrow="Compliance"
         title="Templates and types"
-        description="The kinds of records this venue collects — patch tests, consent forms, intake questionnaires."
+        description="The kinds of records this venue collects: patch tests, consent forms, intake questionnaires."
         right={
           isAdmin ? (
             <div className="flex flex-wrap gap-2">
@@ -387,7 +387,7 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
               >
                 {COMPLIANCE_FORM_LINK_CHANNELS.map((c) => (
                   <option key={c} value={c}>
-                    {c === 'email' ? 'Email' : c === 'sms' ? 'SMS' : 'Both'}
+                    {c === 'email' ? 'Email' : 'SMS'}
                   </option>
                 ))}
               </select>
@@ -435,22 +435,11 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
             </div>
           </div>
 
-          <label className="flex items-start gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              disabled={!isAdmin}
-              checked={config.auto_send_on_booking}
-              onChange={(e) => set('auto_send_on_booking', e.target.checked)}
-            />
-            <span>
-              Automatically include the form in the booking confirmation
-              <span className="block text-xs text-slate-500">
-                When a client books a service that needs a form they can complete online, the link is added to
-                their confirmation and they’re reminded before the appointment.
-              </span>
-            </span>
-          </label>
+          <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            Whether a form shows during online booking, is emailed with the booking confirmation, or is left for
+            your team to collect is now set for each service in the{' '}
+            <span className="font-medium">Service requirements</span> tab.
+          </p>
 
           {isAdmin && (
             <div>

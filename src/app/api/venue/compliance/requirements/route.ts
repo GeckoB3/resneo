@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
       complianceTypeId: parsed.data.compliance_type_id,
       enforcement: parsed.data.enforcement,
       lockPeriodHours: parsed.data.lock_period_hours ?? null,
+      onlineCollection: parsed.data.online_collection,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ requirement: result.value }, { status: 201 });

@@ -3,6 +3,7 @@ import {
   describeStripeConnectError,
   isPlatformProfileError,
   STRIPE_GENERIC_ERROR_MESSAGE,
+  STRIPE_LOGIN_LINK_ERROR_MESSAGE,
   STRIPE_PLATFORM_PROFILE_MESSAGE,
 } from './connect-error-message';
 
@@ -46,7 +47,11 @@ describe('describeStripeConnectError', () => {
   });
 
   it('user-facing messages are short and have no em-dash', () => {
-    for (const msg of [STRIPE_PLATFORM_PROFILE_MESSAGE, STRIPE_GENERIC_ERROR_MESSAGE]) {
+    for (const msg of [
+      STRIPE_PLATFORM_PROFILE_MESSAGE,
+      STRIPE_GENERIC_ERROR_MESSAGE,
+      STRIPE_LOGIN_LINK_ERROR_MESSAGE,
+    ]) {
       expect(msg).not.toContain('—');
       expect(msg.length).toBeLessThan(100);
     }

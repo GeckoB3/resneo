@@ -22,8 +22,17 @@ interface RecordViewResponse {
   version: { version_number: number; form_schema: ComplianceFormSchema } | null;
 }
 
+/** Friendly labels for a record's stored `result` value (audit Low: no raw tokens in the UI). */
+const RESULT_LABELS: Record<string, string> = {
+  pass: 'Pass',
+  fail: 'Fail',
+  inconclusive: 'Inconclusive',
+  completed: 'Completed',
+  signed: 'Signed',
+};
+
 function renderAnswer(field: ComplianceField, value: unknown): string {
-  if (value == null || value === '') return '—';
+  if (value == null || value === '') return '–';
   switch (field.type) {
     case 'signature': {
       const v = value as { method?: string };
@@ -47,6 +56,45 @@ function renderAnswer(field: ComplianceField, value: unknown): string {
   }
 }
 
+/**
+ * Opens a captured signature/file via a short-lived signed URL from the venue file route
+ * (audit H2). The bucket is private, so we fetch the URL on demand and open it in a new tab.
+ */
+function RecordArtifactLink({ recordId, fieldId, label }: { recordId: string; fieldId: string; label: string }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function open() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch(
+        `/api/venue/compliance/records/${recordId}/file?field=${encodeURIComponent(fieldId)}`,
+      );
+      const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !body.url) {
+        setErr(body.error ?? 'Could not open the file.');
+        return;
+      }
+      window.open(body.url, '_blank', 'noopener,noreferrer');
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <span className="text-sm">
+      <button
+        type="button"
+        onClick={open}
+        disabled={loading}
+        className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+      >
+        {loading ? 'Opening…' : label}
+      </button>
+      {err && <span className="ml-2 text-xs text-rose-600">{err}</span>}
+    </span>
+  );
+}
+
 export function ComplianceRecordViewDialog({
   open,
   onOpenChange,
@@ -66,10 +114,40 @@ export function ComplianceRecordViewDialog({
   const [reason, setReason] = useState('');
   const [showVoid, setShowVoid] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<string | null>(null);
 
   const record = data?.record;
   const schema = data?.version?.form_schema ?? null;
   const isVoided = Boolean(record?.voided_at);
+  // A pass/fail record with no result is awaiting a staff decision (e.g. a client-submitted
+  // patch test): it does not satisfy a booking until pass/fail is recorded (audit H4).
+  const recordTypeJoin = record?.compliance_types;
+  const recordResultType = (Array.isArray(recordTypeJoin) ? recordTypeJoin[0] : recordTypeJoin) as
+    | { result_type?: string }
+    | undefined;
+  const needsDecision = Boolean(record) && !isVoided && recordResultType?.result_type === 'pass_fail' && record!.result == null;
+
+  async function recordDecision(result: 'pass' | 'fail' | 'inconclusive') {
+    if (!recordId) return;
+    setDeciding(result);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/records/${recordId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error ?? 'Could not record the decision.');
+        return;
+      }
+      await mutate();
+      onChanged();
+    } finally {
+      setDeciding(null);
+    }
+  }
 
   async function voidRecord() {
     if (!recordId || reason.trim().length === 0) {
@@ -114,8 +192,52 @@ export function ComplianceRecordViewDialog({
                 </Pill>
               );
             })()}
-            {record.result && <Pill variant="neutral" size="sm">{record.result}</Pill>}
+            {record.result && (
+              <Pill variant="neutral" size="sm">
+                {RESULT_LABELS[record.result] ?? record.result}
+              </Pill>
+            )}
           </div>
+
+          {needsDecision && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-medium text-amber-900">Needs a pass or fail decision</p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                The client completed this form. Record the result so it counts towards their booking.
+              </p>
+              {error && (
+                <p role="alert" className="mt-1 text-sm text-rose-600">
+                  {error}
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(deciding)}
+                  onClick={() => recordDecision('pass')}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {deciding === 'pass' ? 'Saving…' : 'Pass'}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(deciding)}
+                  onClick={() => recordDecision('fail')}
+                  className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {deciding === 'fail' ? 'Saving…' : 'Fail'}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(deciding)}
+                  onClick={() => recordDecision('inconclusive')}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+                >
+                  {deciding === 'inconclusive' ? 'Saving…' : 'Inconclusive'}
+                </button>
+              </div>
+            </div>
+          )}
 
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -135,12 +257,30 @@ export function ComplianceRecordViewDialog({
           )}
 
           <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
-            {(schema?.fields ?? []).map((field) => (
-              <div key={field.id} className="flex flex-col gap-0.5 px-3 py-2">
-                <span className="text-xs font-medium text-slate-500">{field.label}</span>
-                <span className="text-sm text-slate-800">{renderAnswer(field, record.responses?.[field.id])}</span>
-              </div>
-            ))}
+            {(schema?.fields ?? []).map((field) => {
+              const value = record.responses?.[field.id];
+              const storagePath =
+                value && typeof value === 'object' ? (value as { storage_path?: unknown }).storage_path : null;
+              const hasArtifact = typeof storagePath === 'string' && storagePath.length > 0;
+              const fileName =
+                value && typeof value === 'object' ? (value as { file_name?: string }).file_name : undefined;
+              return (
+                <div key={field.id} className="flex flex-col gap-0.5 px-3 py-2">
+                  <span className="text-xs font-medium text-slate-500">{field.label}</span>
+                  {field.type === 'signature' && hasArtifact ? (
+                    <RecordArtifactLink recordId={record.id} fieldId={field.id} label="View signature" />
+                  ) : field.type === 'file' && hasArtifact ? (
+                    <RecordArtifactLink
+                      recordId={record.id}
+                      fieldId={field.id}
+                      label={`Download ${fileName ?? 'file'}`}
+                    />
+                  ) : (
+                    <span className="text-sm text-slate-800">{renderAnswer(field, value)}</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {!isVoided && (

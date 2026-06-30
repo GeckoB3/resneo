@@ -11,17 +11,22 @@ import { COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/constants';
 
 export { COMPLIANCE_REQUIREMENT_UNMET };
 
-export interface BookingComplianceCheck {
-  blocked: boolean;
-  details: Array<{
-    compliance_type_id: string;
-    compliance_type_name: string;
-    enforcement: string;
-    state: string;
-  }>;
+interface ComplianceDetailBrief {
+  compliance_type_id: string;
+  compliance_type_name: string;
+  enforcement: string;
+  state: string;
 }
 
-const ALLOWED: BookingComplianceCheck = { blocked: false, details: [] };
+export interface BookingComplianceCheck {
+  blocked: boolean;
+  /** Unmet requirements that block creation in this context. */
+  details: ComplianceDetailBrief[];
+  /** Unmet warn_staff / warn_client requirements: non-blocking, surfaced to staff (audit M2). */
+  warnings: ComplianceDetailBrief[];
+}
+
+const ALLOWED: BookingComplianceCheck = { blocked: false, details: [], warnings: [] };
 
 /**
  * Friendly, guest-safe message for a blocked booking (improvement plan Phase 2).
@@ -89,7 +94,13 @@ export async function checkBookingCompliance(
   if (!resolution.applicable) return ALLOWED;
 
   const summary = summariseBlocking(resolution.resolved, params.context);
-  if (!summary.blocked) return ALLOWED;
+  const warnings = summary.warnings.map((w) => ({
+    compliance_type_id: w.compliance_type_id,
+    compliance_type_name: w.compliance_type_name,
+    enforcement: w.enforcement,
+    state: w.state,
+  }));
+  if (!summary.blocked) return { blocked: false, details: [], warnings };
 
   return {
     blocked: true,
@@ -99,5 +110,69 @@ export async function checkBookingCompliance(
       enforcement: u.enforcement,
       state: u.state,
     })),
+    warnings,
+  };
+}
+
+export interface ComplianceGateInput {
+  venueId: string;
+  guestId: string | null;
+  appointmentServiceId: string | null;
+  serviceItemId: string | null;
+  bookingDate: string;
+  bookingTime: string | null;
+  context: EnforcementContext;
+  /**
+   * Staff context only: when true (the CALLER must have verified the actor is an
+   * admin) a block is acknowledged and the booking proceeds (§5.2). Ignored in the
+   * online context, where a guest can never override a block.
+   */
+  adminOverride?: boolean;
+}
+
+export interface ComplianceGateResult {
+  /** True when the write must be rejected (blocked and not overridden). */
+  blocked: boolean;
+  details: BookingComplianceCheck['details'];
+  /** Canonical 409 JSON body to return when `blocked`; undefined otherwise. */
+  body?: {
+    error: typeof COMPLIANCE_REQUIREMENT_UNMET;
+    message: string;
+    details: BookingComplianceCheck['details'];
+  };
+}
+
+/**
+ * Single gate every Model B booking write path should call (spec §5.1). Wraps
+ * {@link checkBookingCompliance}, applies the staff admin-override (§5.2), and
+ * prepares the canonical 409 body so call sites cannot drift on shape. Callers
+ * that gate multiple segments (multi-service / group) should call this per
+ * segment and collect `details` from results where `blocked` is true.
+ */
+export async function enforceBookingCompliance(
+  admin: SupabaseClient,
+  input: ComplianceGateInput,
+): Promise<ComplianceGateResult> {
+  const check = await checkBookingCompliance(admin, {
+    venueId: input.venueId,
+    guestId: input.guestId,
+    appointmentServiceId: input.appointmentServiceId,
+    serviceItemId: input.serviceItemId,
+    bookingDate: input.bookingDate,
+    bookingTime: input.bookingTime,
+    context: input.context,
+  });
+  const overridden = input.context === 'staff' && input.adminOverride === true;
+  if (!check.blocked || overridden) {
+    return { blocked: false, details: check.details };
+  }
+  return {
+    blocked: true,
+    details: check.details,
+    body: {
+      error: COMPLIANCE_REQUIREMENT_UNMET,
+      message: complianceUnmetMessage(check.details, input.context),
+      details: check.details,
+    },
   };
 }

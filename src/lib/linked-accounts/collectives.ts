@@ -643,7 +643,9 @@ async function countEligibleActiveMembers(
   if (venueIds.length < 2) return venueIds.length;
   const { data: venues } = await admin
     .from('venues')
-    .select('id, pricing_tier, plan_status, booking_model')
+    .select(
+      'id, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+    )
     .in('id', venueIds);
   let eligible = 0;
   for (const v of venues ?? []) {
@@ -652,6 +654,9 @@ async function countEligibleActiveMembers(
         pricing_tier: (v.pricing_tier as string | null) ?? null,
         plan_status: (v.plan_status as string | null) ?? null,
         booking_model: (v.booking_model as string | null) ?? null,
+        subscription_current_period_end:
+          (v.subscription_current_period_end as string | null) ?? null,
+        billing_access_source: (v.billing_access_source as string | null) ?? null,
       }).canCreate
     ) {
       eligible += 1;
@@ -769,7 +774,9 @@ export async function loadPublicCollective(
   const venueIds = activeMembers.map((m) => m.venue_id as string);
   const { data: venues } = await admin
     .from('venues')
-    .select('id, name, slug, pricing_tier, plan_status, booking_model')
+    .select(
+      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+    )
     .in('id', venueIds);
   const venueLookup: Record<string, { name: string; slug: string; eligible: boolean }> = {};
   for (const v of venues ?? []) {
@@ -780,6 +787,9 @@ export async function loadPublicCollective(
         pricing_tier: (v.pricing_tier as string | null) ?? null,
         plan_status: (v.plan_status as string | null) ?? null,
         booking_model: (v.booking_model as string | null) ?? null,
+        subscription_current_period_end:
+          (v.subscription_current_period_end as string | null) ?? null,
+        billing_access_source: (v.billing_access_source as string | null) ?? null,
       }).canCreate,
     };
   }

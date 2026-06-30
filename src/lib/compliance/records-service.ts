@@ -69,7 +69,18 @@ export async function captureComplianceRecord(
 
   const capturedAt = new Date();
   const result = computeResult(ctx.formSchema, uploaded.responses, ctx.resultType);
-  const expiresAt = computeExpiresAt(ctx.validityPeriodDays, capturedAt);
+  // "Per visit" types (validity 0) expire at the end of the capture day in venue local time,
+  // so load the venue timezone only for that case (avoids a query on every capture).
+  let venueTimezone: string | undefined;
+  if (ctx.validityPeriodDays === 0) {
+    const { data: venueRow } = await admin
+      .from('venues')
+      .select('timezone')
+      .eq('id', ctx.venueId)
+      .maybeSingle();
+    venueTimezone = (venueRow as { timezone?: string | null } | null)?.timezone ?? undefined;
+  }
+  const expiresAt = computeExpiresAt(ctx.validityPeriodDays, capturedAt, venueTimezone);
 
   const { data: record, error } = await admin
     .from('compliance_records')

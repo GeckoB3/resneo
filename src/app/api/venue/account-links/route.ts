@@ -93,7 +93,9 @@ export async function POST(request: NextRequest) {
     const slug = parsed.data.targetSlug.trim().toLowerCase();
     const { data: targetRow } = await ctx.admin
       .from('venues')
-      .select('id, name, slug, pricing_tier, plan_status, booking_model')
+      .select(
+        'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+      )
       .ilike('slug', slug)
       .maybeSingle();
 
@@ -112,6 +114,8 @@ export async function POST(request: NextRequest) {
       pricing_tier: targetRow.pricing_tier as string | null,
       plan_status: targetRow.plan_status as string | null,
       booking_model: targetRow.booking_model as string | null,
+      subscription_current_period_end: targetRow.subscription_current_period_end as string | null,
+      billing_access_source: targetRow.billing_access_source as string | null,
     });
     if (!targetEligibility.feature) {
       return NextResponse.json(

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { HelpAudienceContext } from '@/lib/help/help-audience-context';
 import type { HelpCategory, HelpSearchDoc } from '@/lib/help/types';
-import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { HelpSidebar } from './HelpSidebar';
 import { HelpSearch } from './HelpSearch';
 
@@ -15,9 +15,6 @@ function audienceBannerLabel(ctx: HelpAudienceContext): string | null {
   }
   if (isRestaurantTableProductTier(ctx.pricingTier)) {
     return 'Showing help tailored to your Restaurant plan.';
-  }
-  if (isAppointmentPlanTier(ctx.pricingTier)) {
-    return 'Showing help tailored to your Appointments plan.';
   }
   return null;
 }

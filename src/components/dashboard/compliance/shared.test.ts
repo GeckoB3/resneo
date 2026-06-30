@@ -13,8 +13,8 @@ describe('formatComplianceDate', () => {
   });
 
   it('returns a dash for empty / invalid input', () => {
-    expect(formatComplianceDate(null)).toBe('—');
-    expect(formatComplianceDate(undefined)).toBe('—');
-    expect(formatComplianceDate('not-a-date')).toBe('—');
+    expect(formatComplianceDate(null)).toBe('–');
+    expect(formatComplianceDate(undefined)).toBe('–');
+    expect(formatComplianceDate('not-a-date')).toBe('–');
   });
 });

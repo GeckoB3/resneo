@@ -13,6 +13,10 @@ export const STRIPE_PLATFORM_PROFILE_MESSAGE =
 export const STRIPE_GENERIC_ERROR_MESSAGE =
   'We could not start payment setup. Please try again. (ref: connect-stripe)';
 
+/** Shown when minting the Express dashboard login link fails (account is already connected). */
+export const STRIPE_LOGIN_LINK_ERROR_MESSAGE =
+  'Could not open your Stripe dashboard. Please try again. (ref: connect-login-link)';
+
 /** True when a Stripe message is the platform-profile / managing-losses gate (incomplete or under review). */
 export function isPlatformProfileError(message: string): boolean {
   const m = message.toLowerCase();

@@ -34,7 +34,10 @@ const mockLoadViews = vi.mocked(loadLinkViewsForVenue);
 const VENUE_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const VENUE_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
-function mockCtx(overrides: Record<string, unknown> = {}) {
+function mockCtx(
+  overrides: Record<string, unknown> = {},
+  targetVenue: Record<string, unknown> = {},
+) {
   const insertMock = vi.fn().mockReturnValue({
     select: vi.fn().mockReturnValue({
       single: vi.fn().mockResolvedValue({ data: { id: 'link-1' }, error: null }),
@@ -54,6 +57,9 @@ function mockCtx(overrides: Record<string, unknown> = {}) {
               pricing_tier: 'appointments',
               plan_status: 'active',
               booking_model: 'appointments',
+              subscription_current_period_end: null,
+              billing_access_source: 'stripe',
+              ...targetVenue,
             },
             error: null,
           }),
@@ -153,5 +159,24 @@ describe('POST /api/venue/account-links', () => {
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.link).toBeTruthy();
+  });
+
+  // Regression: a venue on a free trial used to be rejected with a 400
+  // "subscription is inactive". A trial is paid-through access, so the request
+  // must go through.
+  it('allows a link request to a venue on a free trial', async () => {
+    mockResolve.mockResolvedValue(mockCtx({}, { plan_status: 'trialing' }) as never);
+    const req = new NextRequest('https://site.test/api/venue/account-links', {
+      method: 'POST',
+      body: JSON.stringify({
+        targetSlug: 'partner',
+        grants: {
+          mine: { calendar: 'full_details', pii: true, act: 'edit_existing' },
+          theirs: { calendar: 'time_only', pii: false, act: 'none' },
+        },
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
   });
 });

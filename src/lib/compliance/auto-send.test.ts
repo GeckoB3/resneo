@@ -11,19 +11,22 @@ const GUEST = 'guest-1';
 const future = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
 const futureDate = (days: number) => future(days).slice(0, 10);
 
-function venueRow(autoSend: boolean, enabled = true) {
+function venueRow(enabled = true) {
   return {
     id: VENUE,
     pricing_tier: enabled ? 'appointments' : 'restaurant',
-    feature_flags: enabled
-      ? { compliance_records_enabled: true, compliance: { auto_send_on_booking: autoSend } }
-      : {},
+    feature_flags: enabled ? { compliance_records_enabled: true } : {},
     booking_model: 'unified_scheduling',
     enabled_models: null,
   };
 }
 
-function reqRow(typeId: string, enforcement = 'warn_client', lock: number | null = null) {
+function reqRow(
+  typeId: string,
+  enforcement = 'warn_client',
+  lock: number | null = null,
+  onlineCollection = 'confirmation_link',
+) {
   return {
     id: `req-${typeId}`,
     venue_id: VENUE,
@@ -31,6 +34,7 @@ function reqRow(typeId: string, enforcement = 'warn_client', lock: number | null
     compliance_type_id: typeId,
     enforcement,
     lock_period_hours: lock,
+    online_collection: onlineCollection,
   };
 }
 
@@ -57,10 +61,10 @@ const baseParams = {
 };
 
 describe('ensureComplianceFormLinksForBooking', () => {
-  it('returns [] when auto-send is off', async () => {
+  it('returns [] when the requirement is not set to email a link (online_collection != confirmation_link)', async () => {
     const fake = new FakeSupabase({
-      venues: [venueRow(false)],
-      service_compliance_requirements: [reqRow('t1')],
+      venues: [venueRow()],
+      service_compliance_requirements: [reqRow('t1', 'warn_client', null, 'none')],
       compliance_types: [typeRow('t1', ['client_online'])],
       compliance_type_versions: [{ id: 'ver-t1' }],
       guests: [{ id: GUEST, venue_id: VENUE, email: 'g@x.com' }],
@@ -68,9 +72,22 @@ describe('ensureComplianceFormLinksForBooking', () => {
     expect(await ensureComplianceFormLinksForBooking(fake.asClient(), baseParams)).toEqual([]);
   });
 
+  it('does not auto-email an inline requirement (collected in the booking flow)', async () => {
+    const fake = new FakeSupabase({
+      venues: [venueRow()],
+      service_compliance_requirements: [reqRow('t1', 'block_online', null, 'inline')],
+      compliance_types: [typeRow('t1', ['client_online'])],
+      compliance_type_versions: [{ id: 'ver-t1' }],
+      compliance_records: [],
+      guests: [{ id: GUEST, venue_id: VENUE, email: 'g@x.com' }],
+    });
+    expect(await ensureComplianceFormLinksForBooking(fake.asClient(), baseParams)).toEqual([]);
+    expect(fake.tables.compliance_form_links ?? []).toHaveLength(0);
+  });
+
   it('issues a link for an unmet client-online requirement and returns it', async () => {
     const fake = new FakeSupabase({
-      venues: [venueRow(true)],
+      venues: [venueRow()],
       service_compliance_requirements: [reqRow('t1')],
       compliance_types: [typeRow('t1', ['client_online', 'staff_in_venue'])],
       compliance_type_versions: [{ id: 'ver-t1' }],
@@ -88,7 +105,7 @@ describe('ensureComplianceFormLinksForBooking', () => {
 
   it('skips a staff-only (non client-online) type', async () => {
     const fake = new FakeSupabase({
-      venues: [venueRow(true)],
+      venues: [venueRow()],
       service_compliance_requirements: [reqRow('t1')],
       compliance_types: [typeRow('t1', ['staff_in_venue'])],
       compliance_type_versions: [{ id: 'ver-t1' }],
@@ -101,7 +118,7 @@ describe('ensureComplianceFormLinksForBooking', () => {
 
   it('skips when the online submission window has passed (lock_period_hours)', async () => {
     const fake = new FakeSupabase({
-      venues: [venueRow(true)],
+      venues: [venueRow()],
       service_compliance_requirements: [reqRow('t1', 'block_online', 48)],
       compliance_types: [typeRow('t1', ['client_online'])],
       compliance_type_versions: [{ id: 'ver-t1' }],
@@ -120,7 +137,7 @@ describe('ensureComplianceFormLinksForBooking', () => {
 
   it('returns [] when the guest already has a valid record (satisfied)', async () => {
     const fake = new FakeSupabase({
-      venues: [venueRow(true)],
+      venues: [venueRow()],
       service_compliance_requirements: [reqRow('t1')],
       compliance_types: [typeRow('t1', ['client_online'])],
       compliance_type_versions: [{ id: 'ver-t1' }],
@@ -145,7 +162,7 @@ describe('ensureComplianceFormLinksForBooking', () => {
 describe('runComplianceFormReminders', () => {
   function setup(linkOverrides: Record<string, unknown> = {}, bookingOverrides: Record<string, unknown> = {}) {
     return new FakeSupabase({
-      venues: [venueRow(true)],
+      venues: [venueRow()],
       compliance_form_links: [
         {
           id: 'l1',

@@ -52,10 +52,22 @@ interface Props {
   email?: string | null;
   /** Type ids being collected inline in the booking flow — suppressed here to avoid duplication. */
   suppressTypeIds?: string[];
+  /** Drop the standalone card chrome so the host can group this inside one section. */
+  embedded?: boolean;
+  /** Reports whether this notice currently renders anything (for the host's shared wrapper). */
+  onActiveChange?: (active: boolean) => void;
   className?: string;
 }
 
-export default function CompliancePreCheckNotice({ venueId, serviceIds, email, suppressTypeIds, className }: Props) {
+export default function CompliancePreCheckNotice({
+  venueId,
+  serviceIds,
+  email,
+  suppressTypeIds,
+  embedded,
+  onActiveChange,
+  className,
+}: Props) {
   const [requirements, setRequirements] = useState<PreCheckRequirement[] | null>(null);
   const [resolved, setResolved] = useState<Map<string, PreCheckState> | null>(null);
 
@@ -161,7 +173,12 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, s
     [requirements, suppress],
   );
 
-  if (uniqueServiceIds.length === 0 || visible.length === 0) return null;
+  const active = uniqueServiceIds.length > 0 && visible.length > 0;
+  useEffect(() => {
+    onActiveChange?.(active);
+  }, [active, onActiveChange]);
+
+  if (!active) return null;
 
   type Row = { name: string; tone: 'ok' | 'warn' | 'block'; detail: string };
   const rows: Row[] = visible.map((req) => {
@@ -243,7 +260,7 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, s
 
   return (
     <div
-      className={`mb-4 rounded-xl border ${palette.border} ${palette.bg} p-3.5 ${className ?? ''}`}
+      className={`${embedded ? '' : 'mb-4'} rounded-xl border ${palette.border} ${palette.bg} p-3.5 ${className ?? ''}`}
       role={hasBlock ? 'alert' : 'status'}
     >
       <h4 className={`mb-2 text-xs font-semibold uppercase tracking-wider ${palette.heading}`}>{heading}</h4>

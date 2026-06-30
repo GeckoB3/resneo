@@ -1,6 +1,6 @@
 # Resneo Compliance — Competitive Review & Improvement Plan
 
-**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps. §10.4 Steps 1–5 are implemented ✅, and Step 6's worthwhile wins (U8 option-value guard, U9 library preview) too; the remaining Step 6 items (U14, U15, U16, U6, bulk) were deferred by judgment as net-negative or low-value for a polish pass. A final adversarial review (§10.5) then fixed five code bugs found in those changes, and a doc-vs-code audit verified this section is accurate — see §10.**
+**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps. §10.4 Steps 1–5 are implemented ✅, and Step 6's worthwhile wins (U8 option-value guard, U9 library preview) too; the remaining Step 6 items (U14, U15, U16, U6, bulk) were deferred by judgment as net-negative or low-value for a polish pass. A final adversarial review (§10.5) then fixed five code bugs found in those changes, and a doc-vs-code audit verified this section is accurate. A later UX pass (§10.6) improved the settings menu and clarity, removed two dead settings, and merged the customer booking panels (U14) — see §10.**
 **Date:** June 2026 (Phase 1 shipped; §9 addendum added June 2026)
 **Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation, and a prioritised plan to close the gaps. The §9 addendum extends this with a full code audit and the in-booking form-collection design.
 
@@ -376,6 +376,45 @@ public-mode `staff_only` stripping; and the version-number retry on unique
 collision. After the fixes: typecheck + lint + lint:modals clean; 1676 unit tests
 green.
 
+### 10.6 UX pass (June 2026): menus, clarity, and workflow
+
+A follow-up pass over the staff and guest surfaces to make the experience
+quicker and clearer. No migration; typecheck + lint + lint:modals clean; 1676
+tests green.
+
+- **Settings → Compliance now opens on General settings**, and the sub-tabs are
+  reordered to the setup flow (General → Templates & types → Service
+  requirements), so a venue lands where the feature is turned on.
+  (`ComplianceSettingsSection.tsx`.)
+- **Enable-toggle clarity:** "Enable compliance records" is now a prominent banner
+  with a plain-language explanation of what turning it on does; the
+  reminder-cadence and form-link-expiry fields gained help text.
+- **Removed two dead settings.** "Default capture method" and "Default lock period
+  (hours)" had **no consumers anywhere in the code**, so they misled staff; both
+  are removed from General settings.
+  - **Open finding — lead-time has no UI.** Lead-time enforcement
+    (`lock_period_hours`, the "patch test at least 48h before colour"
+    differentiator) is enforced by the engine but is **not configurable anywhere
+    in the dashboard** — neither the removed General default nor the per-service
+    requirement editor (`ComplianceRequirementsEditor`, which only exposes
+    enforcement + online collection) lets staff set it. Recommended future work:
+    add a "must be completed N hours before the appointment" control to the
+    requirement editor. Deferred per product decision (the dead settings were
+    removed rather than wired).
+- **U14 — booking-flow panels merged. ✅** The customer's pre-check notice and
+  inline-forms block now render inside one shared "Before you book" card. Each
+  gained an `embedded` mode (drops its own card chrome) and an `onActiveChange`
+  callback, so `AppointmentBookingFlow` shows the wrapper card and heading only
+  when at least one panel has content. (`CompliancePreCheckNotice.tsx`,
+  `BookingComplianceForms.tsx`, `AppointmentBookingFlow.tsx`.)
+- **Compliance dashboard:** a one-line summary strip (today / upcoming / expiring
+  / awaiting counts) and a friendly "You're all caught up" state.
+  (`ComplianceDashboardView.tsx`.)
+- **Forms (staff + guest):** a "Fields marked * are required" hint above the form.
+  (`ComplianceFormRenderer.tsx`.)
+- **Form builder:** field-type icons in the "Add field" palette and on field
+  cards, plus a friendlier empty state. (`ComplianceFormBuilder.tsx`.)
+
 ## Sources
 
 - Vagaro — [Forms feature](https://www.vagaro.com/pro/forms), [Make Forms Mandatory](https://support.vagaro.com/hc/en-us/articles/24398220401819-Make-Forms-Mandatory-for-Your-Customers), [Dual‑signature forms](https://www.vagaro.com/learn/vagaros-dual-signature-forms-improve-intake-liability), [Notifications & reminders](https://support.vagaro.com/hc/en-us/articles/115000439594-Send-Notifications-and-Reminders-to-Your-Customers), [Check‑In Kiosks](https://support.vagaro.com/hc/en-us/articles/5024382031131-Manage-Your-Check-In-Kiosks), [Self check‑in](https://support.vagaro.com/hc/en-us/articles/115003955413-Self-Check-In-at-a-Business-for-Customers-of-a-Vagaro-Business)
@@ -423,7 +462,7 @@ file references are `path:line` at the time of review.
 | **U11 ✅** | **Signature pad mobile bug.** The canvas backing store is sized once on mount from `getBoundingClientRect()` and never re-measured; if the width changes after mount (orientation change, or rendering inside an animating dialog) the live pointer mapping no longer matches the scaled backing store, so strokes land offset/distorted. Fixed 160px height is also cramped on phones. | `SignaturePad.tsx:27-47,91` | **High** (touch is the primary signing surface). |
 | **U12 ✅** | **"Cannot book online" can dead-end the guest.** When a service needs an in-venue-only type (e.g. patch test) with `block_online`, the per-type `online_unmet_message` (shipped in §9.3) explains next steps — but it is optional. Unset, the guest sees a generic "Must be completed before this can be booked online" with no action. | `CompliancePreCheckNotice.tsx:171-191`; message is an optional builder field | Medium. Extends §9.3. |
 | **U13 ✅** | **Returning clients with a different email read as MISSING.** Pre-check resolves "already on file" by venue+email; a regular who books under a second email is told the requirement is unmet and may be blocked online. Escape hatch is the "contact the venue" copy. | `pre-check` POST; `public-forms-service.ts` `publicPreCheckForGuest` | Medium. |
-| **U14** | **Two stacked "what you need" panels** in the details step (the pre-check notice and the inline forms block) risk reading as duplication, even though `suppressTypeIds` dedups type ids between them. | `AppointmentBookingFlow.tsx:3988-4013` | Low/Medium. |
+| **U14 ✅** | **Two stacked "what you need" panels** in the details step (the pre-check notice and the inline forms block) risk reading as duplication, even though `suppressTypeIds` dedups type ids between them. Now merged into one shared "Before you book" card (§10.6). | `AppointmentBookingFlow.tsx` | Low/Medium. |
 | **U15** | **No self-service correction after submit.** A consumed public link shows "Already submitted, contact the venue" — a typo means a phone call. | `p/forms/[code]/page.tsx` consumed copy | Low. |
 | **U16** | **Expired links fail silently** — expiry happens on access/cron with no "your link expired" message, so guests may keep retrying a dead link. (Related to the §9.5 Low item on the expiry-reminder template, but distinct: this is the *link*, not the record.) | `public-forms-service.ts:112-122` | Low. |
 | **U17 ✅** | **Form renderer accessibility gaps** — no `aria-invalid`, `aria-describedby` (help text not linked), or `aria-required`; validation errors are not programmatically tied to their fields. Reinforces the §9.5 deferred "a11y label-association sweep." | `ComplianceFormRenderer.tsx` | Low/Medium. |
@@ -452,7 +491,7 @@ of it stays behind `compliance_records_enabled`, Appointments-tier, off by defau
   - **U8 ✅** — the builder's option editor now de-duplicates derived option values (appends `_2`, `_3`, …) so two labels that slugify the same no longer silently share a value and corrupt select validation / pass-fail mapping. (`ComplianceFormBuilder.tsx` OptionsEditor.)
   - **U9 ✅** — `templateSummaries()` now carries each template's `form_schema`, and the "Add from library" dialog has a per-template **Preview** toggle that renders the form read-only (shared `ComplianceFormRenderer` in preview mode) before cloning. (`library/index.ts`, `ComplianceSettingsSection.tsx`.)
   - **Deferred (with reasons), not done:**
-    - **U14 (two-panel consolidation):** merging the pre-check notice and the inline-forms block means refactoring chrome in the high-traffic public booking flow for marginal gain; `suppressTypeIds` already prevents a type appearing twice. Not worth the regression risk in a polish pass.
+    - **U14 (two-panel consolidation): ✅ later implemented in §10.6** (the merge was done as part of the UX pass once it was explicitly requested).
     - **U15 (self-service resubmit):** a consumed link's "already submitted, contact the venue" copy is already actionable; true self-correction means re-opening a consumed link and voiding/re-capturing a record that may already have been acted on — an integrity/audit concern best handled by staff, by design.
     - **U16 (proactive expired-link email):** the on-page expired copy already tells the guest to ask the venue for a new link; a proactive email needs a new cron pass, message template and dispatch — infra-heavy for low value (sits with the §9.5 deferred expiry-reminder items).
     - **U6 (navigation consolidation):** the daily dashboard and Settings already cross-link; unifying the IA is a broader, riskier dashboard change disproportionate to the benefit.

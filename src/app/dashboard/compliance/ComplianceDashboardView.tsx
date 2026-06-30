@@ -99,11 +99,40 @@ export function ComplianceDashboardView() {
   // Today's bookings live in the dedicated check-in panel; keep the forward list to >today.
   const upcomingMissing = missing.filter((m) => m.booking_date !== todayStr);
 
+  const allClear =
+    checkIns.length === 0 && upcomingMissing.length === 0 && expiring.length === 0 && awaiting.length === 0;
+
   return (
     <div className="space-y-5">
       {message && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">{message}</div>
       )}
+
+      <SectionCard elevated>
+        <SectionCard.Body>
+          {allClear ? (
+            <p className="text-sm text-slate-600">
+              <span className="font-medium text-slate-800">You’re all caught up.</span> No outstanding forms,
+              nothing expiring, and no client submissions to wait on right now.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-600">
+              <span>
+                <span className="font-semibold text-slate-900">{checkIns.length}</span> for today
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{upcomingMissing.length}</span> upcoming
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{expiring.length}</span> expiring soon
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{awaiting.length}</span> awaiting clients
+              </span>
+            </div>
+          )}
+        </SectionCard.Body>
+      </SectionCard>
 
       <SectionCard elevated>
         <SectionCard.Header

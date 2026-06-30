@@ -143,6 +143,11 @@ export function ComplianceFormRenderer({
           dangerouslySetInnerHTML={{ __html: introHtml }}
         />
       )}
+      {fields.some((f) => f.required) && (
+        <p className="text-xs text-slate-500">
+          Fields marked <span className="text-rose-500">*</span> are required.
+        </p>
+      )}
 
       {fields.map((field) => {
         const error = errors[field.id]?.message as string | undefined;

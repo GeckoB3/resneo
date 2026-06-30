@@ -66,10 +66,22 @@ interface Props {
   /** Disable the forms while the parent is submitting the booking. */
   submittingBooking?: boolean;
   onChange: (state: BookingComplianceState) => void;
+  /** Drop the standalone card chrome so the host can group this inside one section. */
+  embedded?: boolean;
+  /** Reports whether any inline form is currently shown (for the host's shared wrapper). */
+  onActiveChange?: (active: boolean) => void;
   className?: string;
 }
 
-export default function BookingComplianceForms({ venueId, serviceIds, submittingBooking, onChange, className }: Props) {
+export default function BookingComplianceForms({
+  venueId,
+  serviceIds,
+  submittingBooking,
+  onChange,
+  embedded,
+  onActiveChange,
+  className,
+}: Props) {
   const [forms, setForms] = useState<InlineForm[] | null>(null);
   const [responsesByType, setResponsesByType] = useState<Record<string, Record<string, unknown>>>({});
   const [editingType, setEditingType] = useState<string | null>(null);
@@ -175,19 +187,38 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, forms, draftId]);
 
+  // Report whether any inline form is shown, so the host can render a shared wrapper.
+  useEffect(() => {
+    onActiveChange?.(Boolean(forms && forms.length > 0 && draftId));
+  }, [forms, draftId, onActiveChange]);
+
   if (!forms || forms.length === 0 || !draftId) return null;
 
   const fileUploadUrl = `/api/public/compliance/booking-upload?venue_id=${encodeURIComponent(venueId)}&draft_id=${encodeURIComponent(draftId)}`;
 
+  const instructions = (
+    <p className={embedded ? 'text-xs text-slate-500' : 'mt-0.5 text-xs text-slate-500'}>
+      Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before you
+      can book.
+    </p>
+  );
+
   return (
-    <div className={`mb-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 ${className ?? ''}`}>
-      <div>
-        <h4 className="text-sm font-semibold text-slate-900">Forms for this booking</h4>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before
-          you can book.
-        </p>
-      </div>
+    <div
+      className={
+        embedded
+          ? `space-y-4 ${className ?? ''}`
+          : `mb-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 ${className ?? ''}`
+      }
+    >
+      {embedded ? (
+        instructions
+      ) : (
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900">Forms for this booking</h4>
+          {instructions}
+        </div>
+      )}
       {forms.map((f) => {
         const done = responsesByType[f.compliance_type_id] !== undefined;
         const editing = editingType === f.compliance_type_id;

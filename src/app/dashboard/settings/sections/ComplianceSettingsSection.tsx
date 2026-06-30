@@ -19,7 +19,6 @@ import {
   type ComplianceTypeSummary,
 } from '@/components/dashboard/compliance/shared';
 import {
-  COMPLIANCE_DEFAULT_CAPTURE_METHODS,
   COMPLIANCE_FORM_LINK_CHANNELS,
   DEFAULT_COMPLIANCE_CONFIG,
   type ComplianceConfig,
@@ -415,21 +414,6 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Default capture method</label>
-              <select
-                disabled={!isAdmin}
-                className={fieldClass}
-                value={config.default_capture_method}
-                onChange={(e) => set('default_capture_method', e.target.value as ComplianceConfig['default_capture_method'])}
-              >
-                {COMPLIANCE_DEFAULT_CAPTURE_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {m === 'staff_in_venue' ? 'Staff in venue' : m === 'client_online' ? 'Client online' : 'Both'}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Default form-link channel</label>
               <select
                 disabled={!isAdmin}
@@ -479,18 +463,6 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
               <p className="mt-1 text-xs text-slate-500">
                 How long a form link stays valid after you send it. A type can override this.
               </p>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Default lock period (hours)</label>
-              <input
-                type="number"
-                min={0}
-                max={720}
-                disabled={!isAdmin}
-                className={fieldClass}
-                value={config.lock_period_hours}
-                onChange={(e) => set('lock_period_hours', Number(e.target.value))}
-              />
             </div>
           </div>
 

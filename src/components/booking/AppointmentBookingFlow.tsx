@@ -585,6 +585,10 @@ export function AppointmentBookingFlow({
   // submissions + whether every mandatory form is done (gates Confirm) + the type ids
   // (so the pre-check notice suppresses the forms it is already rendering).
   const [bookingCompliance, setBookingCompliance] = useState<BookingComplianceState | null>(null);
+  // Whether each compliance sub-panel currently has content, so the shared "Before you book"
+  // card (and its heading) only appears when there is actually something to show.
+  const [precheckActive, setPrecheckActive] = useState(false);
+  const [inlineComplianceActive, setInlineComplianceActive] = useState(false);
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -3986,32 +3990,47 @@ export function AppointmentBookingFlow({
           ) : (
             <>
               {isPublicGuest && (
-                <>
-                  <CompliancePreCheckNotice
-                    venueId={venue.id}
-                    serviceIds={
-                      multiServiceSegments && multiServiceSegments.length > 0
-                        ? multiServiceSegments.map((s) => s.serviceId)
-                        : selectedServiceId
-                          ? [selectedServiceId]
-                          : []
-                    }
-                    email={precheckEmail}
-                    suppressTypeIds={bookingCompliance?.inlineTypeIds ?? []}
-                  />
-                  <BookingComplianceForms
-                    venueId={venue.id}
-                    serviceIds={
-                      multiServiceSegments && multiServiceSegments.length > 0
-                        ? multiServiceSegments.map((s) => s.serviceId)
-                        : selectedServiceId
-                          ? [selectedServiceId]
-                          : []
-                    }
-                    submittingBooking={submitting}
-                    onChange={setBookingCompliance}
-                  />
-                </>
+                <div
+                  className={
+                    precheckActive || inlineComplianceActive
+                      ? 'mb-4 rounded-xl border border-slate-200 bg-white p-4'
+                      : ''
+                  }
+                >
+                  {(precheckActive || inlineComplianceActive) && (
+                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Before you book</h4>
+                  )}
+                  <div className="space-y-3">
+                    <CompliancePreCheckNotice
+                      venueId={venue.id}
+                      serviceIds={
+                        multiServiceSegments && multiServiceSegments.length > 0
+                          ? multiServiceSegments.map((s) => s.serviceId)
+                          : selectedServiceId
+                            ? [selectedServiceId]
+                            : []
+                      }
+                      email={precheckEmail}
+                      suppressTypeIds={bookingCompliance?.inlineTypeIds ?? []}
+                      embedded
+                      onActiveChange={setPrecheckActive}
+                    />
+                    <BookingComplianceForms
+                      venueId={venue.id}
+                      serviceIds={
+                        multiServiceSegments && multiServiceSegments.length > 0
+                          ? multiServiceSegments.map((s) => s.serviceId)
+                          : selectedServiceId
+                            ? [selectedServiceId]
+                            : []
+                      }
+                      submittingBooking={submitting}
+                      onChange={setBookingCompliance}
+                      embedded
+                      onActiveChange={setInlineComplianceActive}
+                    />
+                  </div>
+                </div>
               )}
             <DetailsStep
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}

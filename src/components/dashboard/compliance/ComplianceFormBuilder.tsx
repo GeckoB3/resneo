@@ -49,6 +49,16 @@ const FIELD_TYPE_LABELS: Record<ComplianceFieldType, string> = {
   file: 'File upload',
 };
 
+const FIELD_TYPE_ICONS: Record<ComplianceFieldType, string> = {
+  text: '📝',
+  textarea: '📄',
+  select: '🔽',
+  multiselect: '☑️',
+  date: '📅',
+  signature: '✍️',
+  file: '📎',
+};
+
 const CATEGORY_LABELS: Record<ComplianceCategory, string> = {
   test: 'Test',
   consent: 'Consent',
@@ -421,9 +431,10 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                     key={t}
                     type="button"
                     onClick={() => addField(t)}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    + {FIELD_TYPE_LABELS[t]}
+                    <span aria-hidden className="text-base leading-none">{FIELD_TYPE_ICONS[t]}</span>
+                    {FIELD_TYPE_LABELS[t]}
                   </button>
                 ))}
               </div>
@@ -435,7 +446,13 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             <SectionCard.Header title="Form fields" description="Drag to reorder. Click a field to edit its settings." />
             <SectionCard.Body>
               {fields.length === 0 ? (
-                <p className="text-sm text-slate-500">No fields yet. Add one from the left.</p>
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <p className="text-sm font-medium text-slate-700">No questions yet</p>
+                  <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
+                    Add your first field from the list on the left. Each field becomes a question on the form your
+                    client or team fills in. Drag fields to reorder them.
+                  </p>
+                </div>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                   <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
@@ -682,7 +699,8 @@ function FieldCard({
         </button>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              <span aria-hidden className="text-xs leading-none">{FIELD_TYPE_ICONS[field.type]}</span>
               {FIELD_TYPE_LABELS[field.type]}
             </span>
             <button type="button" onClick={onRemove} className="ml-auto text-xs font-medium text-rose-600">

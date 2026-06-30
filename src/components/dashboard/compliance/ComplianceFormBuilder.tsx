@@ -185,6 +185,34 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
     });
   }
 
+  // Switching to pass/fail auto-creates a ready-to-use staff-only Pass/Fail field and
+  // wires the result mapping, so a valid pass/fail form exists without the staff member
+  // hunting for the mapping box first (the field and its options stay fully editable).
+  function handleResultTypeChange(next: ComplianceResultType) {
+    setMeta((m) => (m ? { ...m, result_type: next } : m));
+    if (next !== 'pass_fail') return;
+    const list = fields ?? [];
+    const existing = list.find((f) => f.type === 'select' && f.staff_only);
+    if (existing) {
+      if (!resultMapping) setResultMapping({ field: existing.id, pass_values: [], fail_values: [] });
+      return;
+    }
+    const id = newFieldId();
+    const resultField = {
+      id,
+      type: 'select',
+      label: 'Result (staff decision)',
+      required: true,
+      staff_only: true,
+      options: [
+        { value: 'pass', label: 'Pass' },
+        { value: 'fail', label: 'Fail' },
+      ],
+    } as ComplianceField;
+    setFields([...list, resultField]);
+    setResultMapping({ field: id, pass_values: ['pass'], fail_values: ['fail'] });
+  }
+
   async function save() {
     if (!meta || !fields || !schema) return;
     setErrors([]);
@@ -296,7 +324,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                 className={inputClass}
                 value={meta.result_type}
                 disabled={mode === 'edit'}
-                onChange={(e) => setMeta({ ...meta, result_type: e.target.value as ComplianceResultType })}
+                onChange={(e) => handleResultTypeChange(e.target.value as ComplianceResultType)}
               >
                 {COMPLIANCE_RESULT_TYPES.map((r) => (
                   <option key={r} value={r}>
@@ -535,6 +563,12 @@ function FieldCard({
             onChange={(e) => onChange({ label: e.target.value })}
             placeholder="Question label"
           />
+          <input
+            className={inputClass}
+            value={field.help_text ?? ''}
+            onChange={(e) => onChange({ help_text: e.target.value || undefined })}
+            placeholder="Help text shown under the question (optional)"
+          />
           <div className="flex flex-wrap gap-4 text-xs text-slate-600">
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={field.required} onChange={(e) => onChange({ required: e.target.checked })} />
@@ -551,10 +585,142 @@ function FieldCard({
               onChange={(options) => onChange({ options } as Partial<ComplianceField>)}
             />
           )}
+          <FieldExtras field={field} onChange={onChange} />
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Type-specific field settings the builder previously couldn't reach: character
+ * limits and default values (text/textarea/select/multiselect/date). The schema
+ * and renderer already support these; this surfaces them in the editor.
+ */
+function FieldExtras({
+  field,
+  onChange,
+}: {
+  field: ComplianceField;
+  onChange: (patch: Partial<ComplianceField>) => void;
+}) {
+  const labelClass = 'mb-1 block text-xs font-medium text-slate-500';
+
+  if (field.type === 'text' || field.type === 'textarea') {
+    return (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Character limit (optional)</label>
+          <input
+            type="number"
+            min={1}
+            max={10000}
+            className={inputClass}
+            value={field.max_length ?? ''}
+            onChange={(e) =>
+              onChange({
+                max_length: e.target.value ? Math.max(1, Number(e.target.value)) : undefined,
+              } as Partial<ComplianceField>)
+            }
+          />
+        </div>
+        <div>
+          <label className={labelClass}>Default value (optional)</label>
+          <input
+            className={inputClass}
+            value={field.default_value ?? ''}
+            onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === 'select') {
+    return (
+      <div>
+        <label className={labelClass}>Default selection (optional)</label>
+        <select
+          className={inputClass}
+          value={field.default_value ?? ''}
+          onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+        >
+          <option value="">No default</option>
+          {field.options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (field.type === 'multiselect') {
+    const selected = Array.isArray(field.default_value) ? field.default_value : [];
+    return (
+      <div>
+        <label className={labelClass}>Default selections (optional)</label>
+        <div className="flex flex-wrap gap-3">
+          {field.options.map((o) => (
+            <label key={o.value} className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={selected.includes(o.value)}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [...selected, o.value]
+                    : selected.filter((v) => v !== o.value);
+                  onChange({ default_value: next.length ? next : undefined } as Partial<ComplianceField>);
+                }}
+              />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === 'date') {
+    const mode = field.default_value === 'today' ? 'today' : field.default_value ? 'date' : 'none';
+    return (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Default date (optional)</label>
+          <select
+            className={inputClass}
+            value={mode}
+            onChange={(e) => {
+              const v = e.target.value;
+              onChange({
+                default_value:
+                  v === 'today' ? 'today' : v === 'date' ? new Date().toISOString().slice(0, 10) : undefined,
+              } as Partial<ComplianceField>);
+            }}
+          >
+            <option value="none">No default</option>
+            <option value="today">Today (the date completed)</option>
+            <option value="date">A specific date</option>
+          </select>
+        </div>
+        {mode === 'date' && (
+          <div>
+            <label className={labelClass}>Pick the date</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={field.default_value && field.default_value !== 'today' ? field.default_value : ''}
+              onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // signature, file: no extra settings.
+  return null;
 }
 
 function OptionsEditor({
@@ -618,7 +784,8 @@ function ResultMappingEditor({
     <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
       <p className="text-sm font-medium text-amber-900">Pass / fail result</p>
       <p className="mt-0.5 text-xs text-amber-700">
-        Choose a staff-only dropdown field and mark which options count as a pass or a fail.
+        We added a staff-only Pass / Fail field below. Rename it or its options if you like, or pick a different
+        staff-only dropdown here, then mark which answers count as a pass or a fail.
       </p>
       <select
         className={`${inputClass} mt-2`}

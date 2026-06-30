@@ -105,16 +105,36 @@ export function ComplianceFormRenderer({
 
       {fields.map((field) => {
         const error = errors[field.id]?.message as string | undefined;
+        const helpId = field.help_text ? `${field.id}-help` : null;
+        const errorId = error ? `${field.id}-error` : null;
+        const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
+        const ariaProps = {
+          'aria-required': field.required ? true : undefined,
+          'aria-invalid': error ? true : undefined,
+          'aria-describedby': describedBy,
+        } as const;
         return (
           <div key={field.id}>
-            <label htmlFor={field.id} className="mb-1 block text-sm font-medium text-slate-700">
+            <label
+              id={`${field.id}-label`}
+              htmlFor={field.id}
+              className="mb-1 block text-sm font-medium text-slate-700"
+            >
               {field.label}
-              {field.required && <span className="ml-0.5 text-rose-500">*</span>}
+              {field.required && (
+                <span className="ml-0.5 text-rose-500" aria-hidden>
+                  *
+                </span>
+              )}
               {mode === 'staff' && field.staff_only && (
                 <span className="ml-2 text-xs font-normal text-slate-400">(staff only)</span>
               )}
             </label>
-            {field.help_text && <p className="mb-1 text-xs text-slate-500">{field.help_text}</p>}
+            {field.help_text && (
+              <p id={helpId ?? undefined} className="mb-1 text-xs text-slate-500">
+                {field.help_text}
+              </p>
+            )}
 
             <Controller
               name={field.id}
@@ -131,6 +151,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'textarea':
@@ -143,6 +164,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'select':
@@ -154,6 +176,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       >
                         <option value="">Select…</option>
                         {field.options.map((o) => (
@@ -166,7 +189,12 @@ export function ComplianceFormRenderer({
                   case 'multiselect': {
                     const selected = Array.isArray(rhf.value) ? (rhf.value as string[]) : [];
                     return (
-                      <div className="space-y-1.5">
+                      <div
+                        role="group"
+                        aria-labelledby={`${field.id}-label`}
+                        aria-describedby={describedBy}
+                        className="space-y-1.5"
+                      >
                         {field.options.map((o) => (
                           <label key={o.value} className="flex items-center gap-2 text-sm text-slate-700">
                             <input
@@ -196,6 +224,7 @@ export function ComplianceFormRenderer({
                         value={(rhf.value as string) ?? ''}
                         onChange={rhf.onChange}
                         onBlur={rhf.onBlur}
+                        {...ariaProps}
                       />
                     );
                   case 'signature':
@@ -220,7 +249,11 @@ export function ComplianceFormRenderer({
                 }
               }}
             />
-            {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
+            {error && (
+              <p id={errorId ?? undefined} role="alert" className="mt-1 text-sm text-rose-600">
+                {error}
+              </p>
+            )}
           </div>
         );
       })}

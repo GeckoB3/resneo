@@ -25,15 +25,17 @@ import {
   type ComplianceConfig,
 } from '@/lib/compliance/config';
 
-type SubTab = 'types' | 'requirements' | 'general';
+type SubTab = 'general' | 'types' | 'requirements';
+// Ordered as the natural setup flow: turn it on, build the forms, then attach them to
+// services. Loads on General settings (where the feature is enabled) by default.
 const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string }> = [
+  { id: 'general', label: 'General settings' },
   { id: 'types', label: 'Templates & types' },
   { id: 'requirements', label: 'Service requirements' },
-  { id: 'general', label: 'General settings' },
 ];
 
 export function ComplianceSettingsSection({ isAdmin }: { isAdmin: boolean }) {
-  const [sub, setSub] = useState<SubTab>('types');
+  const [sub, setSub] = useState<SubTab>('general');
 
   return (
     <div className="space-y-4">
@@ -395,15 +397,21 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
-            <input
-              type="checkbox"
-              disabled={!isAdmin}
-              checked={isEnabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            Enable compliance records for this venue
-          </label>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={isEnabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              Enable compliance records for this venue
+            </label>
+            <p className="mt-1.5 text-xs text-slate-600">
+              Turns on patch tests, consent forms and intake questionnaires across your dashboard and online
+              booking. While this is off, none of the compliance tools appear to your team or your clients.
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -452,6 +460,10 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
                 value={config.reminder_cadence_days}
                 onChange={(e) => set('reminder_cadence_days', Number(e.target.value))}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                How many days before a record expires we remind the client to renew it. Set 0 to turn expiry
+                reminders off.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Form-link expiry (days)</label>
@@ -464,6 +476,9 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
                 value={config.form_link_expiry_days}
                 onChange={(e) => set('form_link_expiry_days', Number(e.target.value))}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                How long a form link stays valid after you send it. A type can override this.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Default lock period (hours)</label>

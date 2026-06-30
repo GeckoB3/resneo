@@ -20,7 +20,7 @@ export default async function ComplianceDashboardPage() {
       <PageHeader
         eyebrow="Compliance"
         title="Compliance"
-        subtitle="Your morning sweep: what’s missing, expiring, or awaiting a client."
+        subtitle="Your daily sweep: what’s missing, expiring, or awaiting a client."
       />
       <ComplianceDashboardView />
     </PageFrame>

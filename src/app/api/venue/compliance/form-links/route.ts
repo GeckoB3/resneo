@@ -42,7 +42,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    // A delivery channel needs a destination on file.
+    // Resolve a deliverable channel: prefer the requested one, fall back to whatever the
+    // guest actually has on file, and if neither, still create the link so staff can copy
+    // it (the caller gets dispatched:false + public_url) rather than hitting a dead end.
     const { data: guest } = await staff.db
       .from('guests')
       .select('id, email, phone')
@@ -51,12 +53,13 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (!guest) return NextResponse.json({ error: 'Guest not found.' }, { status: 404 });
     const g = guest as { email: string | null; phone: string | null };
-    if (parsed.data.send_via === 'email' && !g.email?.trim()) {
-      return NextResponse.json({ error: 'Add an email address to this guest to send a form link.' }, { status: 400 });
-    }
-    if (parsed.data.send_via === 'sms' && !g.phone?.trim()) {
-      return NextResponse.json({ error: 'Add a phone number to this guest to send a form link.' }, { status: 400 });
-    }
+    const hasEmail = Boolean(g.email?.trim());
+    const hasPhone = Boolean(g.phone?.trim());
+
+    // Start from the requested channel, or the venue's default when none was specified.
+    let channel: 'email' | 'sms' | 'manual_copy' = parsed.data.send_via ?? gate.ctx.config.default_form_link_channel;
+    if (channel === 'email' && !hasEmail) channel = hasPhone ? 'sms' : 'manual_copy';
+    else if (channel === 'sms' && !hasPhone) channel = hasEmail ? 'email' : 'manual_copy';
 
     const issued = await issueOrReuseFormLink(staff.db, {
       venueId: staff.venue_id,
@@ -69,22 +72,25 @@ export async function POST(request: NextRequest) {
     if (!issued.ok) return NextResponse.json({ error: issued.error }, { status: issued.status });
 
     let dispatched = false;
-    if (parsed.data.send_via !== 'manual_copy') {
+    let sentChannel: 'email' | 'sms' | null = null;
+    if (channel !== 'manual_copy') {
       const result = await dispatchComplianceFormLink(staff.db, {
         venueId: staff.venue_id,
         guestId: parsed.data.guest_id,
         linkId: issued.value.link.id as string,
         code: issued.value.link.code as string,
-        sentVia: parsed.data.send_via,
+        sentVia: channel,
         kind: 'request',
       });
       if (result.ok) {
         dispatched = true;
+        // The channel the message actually went out on (dispatch may fall back sms→email).
+        sentChannel = result.channel ?? channel;
         await markFormLinkSent(staff.db, {
           venueId: staff.venue_id,
           staffId: staff.id,
           linkId: issued.value.link.id as string,
-          sentVia: parsed.data.send_via,
+          sentVia: sentChannel,
           guestId: parsed.data.guest_id,
           complianceTypeId: parsed.data.compliance_type_id,
         });
@@ -97,6 +103,10 @@ export async function POST(request: NextRequest) {
         public_url: issued.value.publicUrl,
         reused: issued.value.reused,
         dispatched,
+        sent_via: sentChannel,
+        // Distinguish "nothing to send to" from "tried to send but it failed" so staff
+        // see accurate copy: manual_copy means no email/phone on file; otherwise dispatch erred.
+        no_destination: channel === 'manual_copy',
       },
       { status: issued.value.reused ? 200 : 201 },
     );

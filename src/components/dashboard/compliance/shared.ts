@@ -87,6 +87,15 @@ export const RESULT_TYPE_LABELS: Record<string, string> = {
   file_uploaded: 'File upload',
 };
 
+/** Friendly label for a record's derived `result` value. */
+export const RESULT_LABELS: Record<string, string> = {
+  pass: 'Pass',
+  fail: 'Fail',
+  inconclusive: 'Inconclusive',
+  completed: 'Completed',
+  signed: 'Signed',
+};
+
 /** Human label for a validity period (days): null = lifetime, 0 = per visit. */
 export function validityLabel(days: number | null | undefined): string {
   if (days == null) return 'No expiry';

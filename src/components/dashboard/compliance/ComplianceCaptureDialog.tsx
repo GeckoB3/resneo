@@ -44,6 +44,7 @@ export function ComplianceCaptureDialog({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string> | undefined>(undefined);
   const [channel, setChannel] = useState<CaptureChannel>(initialChannel);
 
   // Re-sync the channel whenever the dialog is (re)opened for a new target.
@@ -57,6 +58,7 @@ export function ComplianceCaptureDialog({
   async function handleSubmit(responses: Record<string, unknown>) {
     setSubmitting(true);
     setError(null);
+    setFieldErrors(undefined);
     try {
       const res = await fetch('/api/venue/compliance/records', {
         method: 'POST',
@@ -71,6 +73,9 @@ export function ComplianceCaptureDialog({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (body.field_errors && typeof body.field_errors === 'object') {
+          setFieldErrors(body.field_errors as Record<string, string>);
+        }
         setError(body.error ?? 'Could not save the record.');
         return;
       }
@@ -135,6 +140,7 @@ export function ComplianceCaptureDialog({
             submitting={submitting}
             submitLabel={selfComplete ? 'Submit & save' : 'Save record'}
             onSubmit={handleSubmit}
+            serverErrors={fieldErrors}
             // audit H3: enable in-venue file capture. The staff session is authenticated, so the
             // venue upload route works in both staff and hand-to-client (tablet) modes.
             fileUploadUrl="/api/venue/compliance/records/upload"

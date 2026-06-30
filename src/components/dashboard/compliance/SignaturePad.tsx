@@ -11,7 +11,7 @@ export function SignaturePad({
   value,
   onChange,
   disabled,
-  height = 160,
+  height = 200,
 }: {
   value: string | null;
   onChange: (dataUrl: string | null) => void;
@@ -22,23 +22,55 @@ export function SignaturePad({
   const drawing = useRef(false);
   const last = useRef<{ x: number; y: number } | null>(null);
   const [hasInk, setHasInk] = useState(Boolean(value));
+  // Read the latest value during a re-measure without re-running the effect on every stroke.
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
-  // Size the canvas backing store to its rendered size for crisp lines.
+  // Size the canvas backing store to its rendered size for crisp lines, and RE-measure
+  // whenever that size changes (orientation change, opening inside an animating dialog).
+  // Sizing only once on mount left the backing store mismatched after any later resize,
+  // so strokes landed offset on mobile. On each re-measure we redraw the saved signature.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ratio = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-    canvas.height = Math.max(1, Math.floor(height * ratio));
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.scale(ratio, ratio);
+
+    function setup() {
+      const c = canvasRef.current;
+      if (!c) return;
+      const ratio = window.devicePixelRatio || 1;
+      const rect = c.getBoundingClientRect();
+      c.width = Math.max(1, Math.floor(rect.width * ratio));
+      c.height = Math.max(1, Math.floor(height * ratio));
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = '#0f172a';
+      // Resizing the backing store clears it; redraw any existing signature to fit.
+      const saved = valueRef.current;
+      if (saved) {
+        const img = new Image();
+        img.onload = () => {
+          const cc = canvasRef.current?.getContext('2d');
+          if (cc) cc.drawImage(img, 0, 0, rect.width, height);
+        };
+        img.src = saved;
+      }
     }
+
+    setup();
+    if (typeof ResizeObserver === 'undefined') return;
+    // Re-measuring clears the canvas; skip it mid-stroke so a resize (e.g. a mobile URL bar
+    // collapsing) doesn't wipe the line the user is currently drawing (review #4).
+    const observer = new ResizeObserver(() => {
+      if (!drawing.current) setup();
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
   }, [height]);
 
   function pointFromEvent(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {

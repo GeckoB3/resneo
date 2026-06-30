@@ -2,13 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
+import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
+import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
 import {
   CATEGORY_LABELS,
   RESULT_TYPE_LABELS,
@@ -17,21 +19,30 @@ import {
   type ComplianceTypeSummary,
 } from '@/components/dashboard/compliance/shared';
 import {
-  COMPLIANCE_DEFAULT_CAPTURE_METHODS,
   COMPLIANCE_FORM_LINK_CHANNELS,
   DEFAULT_COMPLIANCE_CONFIG,
   type ComplianceConfig,
 } from '@/lib/compliance/config';
 
-type SubTab = 'types' | 'requirements' | 'general';
+type SubTab = 'general' | 'types' | 'requirements';
+// Ordered as the natural setup flow: turn it on, build the forms, then attach them to
+// services. Loads on General settings (where the feature is enabled) by default.
 const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string }> = [
+  { id: 'general', label: 'General settings' },
   { id: 'types', label: 'Templates & types' },
   { id: 'requirements', label: 'Service requirements' },
-  { id: 'general', label: 'General settings' },
 ];
 
+function isSubTab(v: string | null): v is SubTab {
+  return v === 'general' || v === 'types' || v === 'requirements';
+}
+
 export function ComplianceSettingsSection({ isAdmin }: { isAdmin: boolean }) {
-  const [sub, setSub] = useState<SubTab>('types');
+  // Honour a ?sub= deep link (e.g. "Create one in Settings → Compliance" links to types),
+  // otherwise default to General settings where the feature is enabled.
+  const searchParams = useSearchParams();
+  const subParam = searchParams.get('sub');
+  const [sub, setSub] = useState<SubTab>(isSubTab(subParam) ? subParam : 'general');
 
   return (
     <div className="space-y-4">
@@ -65,6 +76,22 @@ function TypesPanel({ isAdmin }: { isAdmin: boolean }) {
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
         setError(b.error ?? 'Could not update type.');
+        return;
+      }
+      await mutate();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function duplicate(t: ComplianceTypeSummary) {
+    setBusyId(t.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/types/${t.id}/duplicate`, { method: 'POST' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not duplicate this type.');
         return;
       }
       await mutate();
@@ -142,6 +169,14 @@ function TypesPanel({ isAdmin }: { isAdmin: boolean }) {
                     </Link>
                     <button
                       type="button"
+                      onClick={() => duplicate(t)}
+                      disabled={busyId === t.id}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => archiveToggle(t)}
                       disabled={busyId === t.id}
                       className="text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
@@ -168,6 +203,7 @@ interface LibraryTemplateSummary {
   validity_period_days: number | null;
   description?: string;
   field_count: number;
+  form_schema: ComplianceFormSchema;
 }
 
 function LibraryDialog({
@@ -184,6 +220,7 @@ function LibraryDialog({
     complianceJsonFetcher,
   );
   const [cloningSlug, setCloningSlug] = useState<string | null>(null);
+  const [previewSlug, setPreviewSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const templates = data?.templates ?? [];
 
@@ -211,24 +248,40 @@ function LibraryDialog({
         )}
         <ul className="divide-y divide-slate-100">
           {templates.map((t) => (
-            <li key={t.slug} className="flex items-start justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-800">{t.name}</p>
-                {t.description && <p className="mt-0.5 text-xs text-slate-500">{t.description}</p>}
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                  <Pill variant="neutral" size="sm">{CATEGORY_LABELS[t.category] ?? t.category}</Pill>
-                  <span>· {validityLabel(t.validity_period_days)}</span>
-                  <span>· {t.field_count} field(s)</span>
+            <li key={t.slug} className="py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800">{t.name}</p>
+                  {t.description && <p className="mt-0.5 text-xs text-slate-500">{t.description}</p>}
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                    <Pill variant="neutral" size="sm">{CATEGORY_LABELS[t.category] ?? t.category}</Pill>
+                    <span>· {validityLabel(t.validity_period_days)}</span>
+                    <span>· {t.field_count} field(s)</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSlug((s) => (s === t.slug ? null : t.slug))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    {previewSlug === t.slug ? 'Hide' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => clone(t.slug)}
+                    disabled={cloningSlug === t.slug}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {cloningSlug === t.slug ? 'Adding…' : 'Add'}
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => clone(t.slug)}
-                disabled={cloningSlug === t.slug}
-                className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {cloningSlug === t.slug ? 'Adding…' : 'Add'}
-              </button>
+              {previewSlug === t.slug && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <ComplianceFormRenderer schema={t.form_schema} mode="public" preview />
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -246,10 +299,15 @@ interface ServiceRow {
 }
 
 function RequirementsPanel() {
+  const { data: flags } = useSWR<{ raw: { compliance_records_enabled?: boolean } }>(
+    '/api/venue/feature-flags',
+    complianceJsonFetcher,
+  );
   const { data, isLoading } = useSWR<{ services: ServiceRow[] }>(
     '/api/venue/appointment-services',
     complianceJsonFetcher,
   );
+  const complianceEnabled = flags?.raw?.compliance_records_enabled ?? false;
   const services = (data?.services ?? []).filter((s) => s.is_active !== false);
 
   return (
@@ -257,10 +315,15 @@ function RequirementsPanel() {
       <SectionCard.Header
         eyebrow="Compliance"
         title="Service requirements"
-        description="Connect compliance types to the services that need them. You can also do this from the service editor."
+        description="Choose which compliance types each service requires, such as a patch test or a signed consent form. When a service needs a type, its bookings warn or block until the client has a valid record on file. You can set the same requirements while editing a service."
       />
       <SectionCard.Body>
-        {isLoading ? (
+        {flags && !complianceEnabled ? (
+          <p className="text-sm text-slate-500">
+            Turn on <span className="font-medium">Enable compliance records</span> in the General settings tab to
+            connect services to compliance types.
+          </p>
+        ) : isLoading ? (
           <p className="text-sm text-slate-500">Loading services…</p>
         ) : services.length === 0 ? (
           <p className="text-sm text-slate-500">No services to configure yet.</p>
@@ -270,7 +333,7 @@ function RequirementsPanel() {
               <details key={s.id} className="rounded-lg border border-slate-200">
                 <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-800">{s.name}</summary>
                 <div className="border-t border-slate-100 p-3">
-                  <ComplianceRequirementsEditor appointmentServiceId={s.id} complianceEnabled />
+                  <ComplianceRequirementsEditor appointmentServiceId={s.id} complianceEnabled={complianceEnabled} />
                 </div>
               </details>
             ))}
@@ -351,32 +414,23 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
-            <input
-              type="checkbox"
-              disabled={!isAdmin}
-              checked={isEnabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            Enable compliance records for this venue
-          </label>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={isEnabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              Enable compliance records for this venue
+            </label>
+            <p className="mt-1.5 text-xs text-slate-600">
+              Turns on patch tests, consent forms and intake questionnaires across your dashboard and online
+              booking. While this is off, none of the compliance tools appear to your team or your clients.
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Default capture method</label>
-              <select
-                disabled={!isAdmin}
-                className={fieldClass}
-                value={config.default_capture_method}
-                onChange={(e) => set('default_capture_method', e.target.value as ComplianceConfig['default_capture_method'])}
-              >
-                {COMPLIANCE_DEFAULT_CAPTURE_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {m === 'staff_in_venue' ? 'Staff in venue' : m === 'client_online' ? 'Client online' : 'Both'}
-                  </option>
-                ))}
-              </select>
-            </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Default form-link channel</label>
               <select
@@ -408,6 +462,10 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
                 value={config.reminder_cadence_days}
                 onChange={(e) => set('reminder_cadence_days', Number(e.target.value))}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                How many days before a record expires we remind the client to renew it. Set 0 to turn expiry
+                reminders off.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Form-link expiry (days)</label>
@@ -420,26 +478,11 @@ function GeneralPanel({ isAdmin }: { isAdmin: boolean }) {
                 value={config.form_link_expiry_days}
                 onChange={(e) => set('form_link_expiry_days', Number(e.target.value))}
               />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Default lock period (hours)</label>
-              <input
-                type="number"
-                min={0}
-                max={720}
-                disabled={!isAdmin}
-                className={fieldClass}
-                value={config.lock_period_hours}
-                onChange={(e) => set('lock_period_hours', Number(e.target.value))}
-              />
+              <p className="mt-1 text-xs text-slate-500">
+                How long a form link stays valid after you send it.
+              </p>
             </div>
           </div>
-
-          <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            Whether a form shows during online booking, is emailed with the booking confirmation, or is left for
-            your team to collect is now set for each service in the{' '}
-            <span className="font-medium">Service requirements</span> tab.
-          </p>
 
           {isAdmin && (
             <div>

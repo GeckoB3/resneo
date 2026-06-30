@@ -15,6 +15,7 @@ import { groupTodaysCheckIns } from '@/lib/compliance/check-in';
 import type { ComplianceRequirementState } from '@/lib/compliance/constants';
 
 interface DashboardData {
+  today: string;
   expiring_soon: Array<{
     id: string;
     guest_id: string;
@@ -58,6 +59,10 @@ export function ComplianceDashboardView() {
     '/api/venue/compliance/dashboard',
     complianceJsonFetcher,
   );
+  // The dashboard route caches per venue for 5 min; after an action, pull a cache-busting
+  // refresh so the actioned item drops off the sweep immediately (not up to 5 min later).
+  const refresh = () =>
+    mutate(() => complianceJsonFetcher('/api/venue/compliance/dashboard?refresh=1'), { revalidate: false });
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureTarget | null>(null);
@@ -71,11 +76,31 @@ export function ComplianceDashboardView() {
       const res = await fetch('/api/venue/compliance/form-links', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guest_id: guestId, compliance_type_id: typeId, booking_id: bookingId ?? null, send_via: 'email' }),
+        body: JSON.stringify({ guest_id: guestId, compliance_type_id: typeId, booking_id: bookingId ?? null }),
       });
       const body = await res.json().catch(() => ({}));
-      setMessage(res.ok ? (body.dispatched ? 'Form link sent.' : 'Form link created.') : body.error ?? 'Could not send link.');
-      if (res.ok) void mutate();
+      if (!res.ok) {
+        setMessage(body.error ?? 'Could not send link.');
+        return;
+      }
+      if (body.dispatched) {
+        setMessage(`Form link sent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`);
+      } else if (body.public_url) {
+        // Copy the link so staff can share it manually, with copy that matches why it
+        // wasn't sent: no destination on file vs a send that failed.
+        const reason = body.no_destination
+          ? 'This guest has no email or phone on file.'
+          : 'We couldn’t send it just now.';
+        try {
+          await navigator.clipboard.writeText(body.public_url as string);
+          setMessage(`${reason} Link copied, paste it to share with them.`);
+        } catch {
+          setMessage(`${reason} Copy this link to share: ${body.public_url}`);
+        }
+      } else {
+        setMessage('Form link created.');
+      }
+      void refresh();
     } finally {
       setSendingKey(null);
     }
@@ -94,16 +119,48 @@ export function ComplianceDashboardView() {
   const missing = data?.missing_for_bookings ?? [];
   const awaiting = data?.awaiting_submission ?? [];
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Use the server's venue-local "today" so the today/upcoming split matches the day
+  // boundary the API queried against (a browser-UTC date would drift by a day near
+  // midnight and across BST). The fallback is only a guard for an unexpected null.
+  const todayStr = data?.today ?? new Date().toISOString().slice(0, 10);
   const checkIns = groupTodaysCheckIns(missing, todayStr);
   // Today's bookings live in the dedicated check-in panel; keep the forward list to >today.
   const upcomingMissing = missing.filter((m) => m.booking_date !== todayStr);
+
+  const allClear =
+    checkIns.length === 0 && upcomingMissing.length === 0 && expiring.length === 0 && awaiting.length === 0;
 
   return (
     <div className="space-y-5">
       {message && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">{message}</div>
       )}
+
+      <SectionCard elevated>
+        <SectionCard.Body>
+          {allClear ? (
+            <p className="text-sm text-slate-600">
+              <span className="font-medium text-slate-800">You’re all caught up.</span> No outstanding forms,
+              nothing expiring, and no client submissions to wait on right now.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-600">
+              <span>
+                <span className="font-semibold text-slate-900">{checkIns.length}</span> for today
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{upcomingMissing.length}</span> upcoming
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{expiring.length}</span> expiring soon
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{awaiting.length}</span> awaiting clients
+              </span>
+            </div>
+          )}
+        </SectionCard.Body>
+      </SectionCard>
 
       <SectionCard elevated>
         <SectionCard.Header
@@ -260,7 +317,7 @@ export function ComplianceDashboardView() {
         <SectionCard.Header
           eyebrow="Compliance"
           title="Awaiting client submission"
-          description="Form links sent that haven’t been completed yet."
+          description="Form links awaiting completion by the client."
         />
         <SectionCard.Body>
           {awaiting.length === 0 ? (
@@ -274,8 +331,8 @@ export function ComplianceDashboardView() {
                       {a.guest_name} · {a.compliance_type_name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {a.sent_at ? `Sent ${formatComplianceDate(a.sent_at)}` : 'Not yet sent'} · expires{' '}
-                      {formatComplianceDate(a.expires_at)}
+                      {a.sent_at ? `Sent ${formatComplianceDate(a.sent_at)} · ` : ''}
+                      Expires {formatComplianceDate(a.expires_at)}
                     </p>
                   </div>
                   <Pill variant="compliance-pending" size="sm" dot>Pending</Pill>
@@ -286,13 +343,17 @@ export function ComplianceDashboardView() {
         </SectionCard.Body>
       </SectionCard>
 
-      <p className="text-center text-xs text-slate-400">
-        Set up types and requirements in{' '}
-        <Link href="/dashboard/settings?tab=compliance" className="text-brand-600 underline">
-          Settings → Compliance
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-5 text-center">
+        <p className="max-w-md text-sm text-slate-600">
+          Create or update your compliance types and choose which forms each service needs.
+        </p>
+        <Link
+          href="/dashboard/settings?tab=compliance"
+          className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand-600/25 transition-colors hover:bg-brand-700"
+        >
+          Set up types and requirements
         </Link>
-        .
-      </p>
+      </div>
 
       {capture && (
         <ComplianceCaptureDialog
@@ -307,7 +368,7 @@ export function ComplianceDashboardView() {
           initialChannel="client_walkin"
           onCaptured={() => {
             setMessage('Record captured.');
-            void mutate();
+            void refresh();
           }}
         />
       )}

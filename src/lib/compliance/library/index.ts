@@ -35,7 +35,7 @@ export function getTemplateBySlug(slug: string): LibraryTemplate | null {
   return TEMPLATES.find((t) => t.slug === slug) ?? null;
 }
 
-/** Lightweight summary for the "Add from library" picker (no full schema). */
+/** Summary for the "Add from library" picker, including the schema so it can be previewed. */
 export interface LibraryTemplateSummary {
   slug: string;
   name: string;
@@ -45,6 +45,7 @@ export interface LibraryTemplateSummary {
   capture_methods: LibraryTemplate['capture_methods'];
   description?: string;
   field_count: number;
+  form_schema: LibraryTemplate['form_schema'];
 }
 
 export function templateSummaries(): LibraryTemplateSummary[] {
@@ -57,5 +58,6 @@ export function templateSummaries(): LibraryTemplateSummary[] {
     capture_methods: t.capture_methods,
     description: t.description,
     field_count: t.form_schema.fields.length,
+    form_schema: t.form_schema,
   }));
 }

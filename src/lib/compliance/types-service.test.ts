@@ -3,7 +3,9 @@ import { FakeSupabase } from '@/lib/compliance/test-utils/fake-supabase';
 import {
   createComplianceType,
   createComplianceTypeVersion,
+  duplicateComplianceType,
   listComplianceTypesWithCounts,
+  restoreComplianceTypeVersion,
 } from '@/lib/compliance/types-service';
 import { ppdPatchTestTemplate } from '@/lib/compliance/library/templates/ppd-patch-test';
 
@@ -104,6 +106,131 @@ describe('createComplianceTypeVersion', () => {
       typeId: 'type-1',
       formSchema: { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] },
     });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(404);
+  });
+
+  it('does not publish a duplicate when the schema is unchanged (idempotent retry / metadata-only save)', async () => {
+    const schema = { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+    const fake = new FakeSupabase({
+      compliance_types: [{ id: 'type-1', venue_id: VENUE, result_type: 'completed', current_version_id: 'v1' }],
+      // Stored as the parsed shape the service writes (defaults filled in), so the comparison
+      // matches a re-submit of the same logical schema.
+      compliance_type_versions: [
+        {
+          id: 'v1',
+          compliance_type_id: 'type-1',
+          venue_id: VENUE,
+          version_number: 1,
+          form_schema: {
+            schema_version: '1.0',
+            title: 'T',
+            fields: [{ id: 'a', type: 'text', label: 'A', required: false, staff_only: false }],
+          },
+        },
+      ],
+    });
+    const res = await createComplianceTypeVersion(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      typeId: 'type-1',
+      formSchema: schema,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.versionNumber).toBe(1); // returned the existing version
+    // No second version row was inserted.
+    expect((fake.tables.compliance_type_versions ?? []).filter((v) => v.compliance_type_id === 'type-1')).toHaveLength(1);
+  });
+});
+
+describe('restoreComplianceTypeVersion', () => {
+  const schemaV1 = { schema_version: '1.0', title: 'T', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+  const schemaV2 = { schema_version: '1.0', title: 'T', fields: [{ id: 'b', type: 'text', label: 'B' }] };
+
+  function seedWithTwoVersions() {
+    return new FakeSupabase({
+      compliance_types: [{ id: 'type-1', venue_id: VENUE, result_type: 'completed', current_version_id: 'v2' }],
+      compliance_type_versions: [
+        { id: 'v1', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 1, form_schema: schemaV1 },
+        { id: 'v2', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 2, form_schema: schemaV2 },
+      ],
+    });
+  }
+
+  it('republishes a prior version as a new monotonic version with a changelog', async () => {
+    const fake = seedWithTwoVersions();
+    const res = await restoreComplianceTypeVersion(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      typeId: 'type-1',
+      versionId: 'v1',
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.versionNumber).toBe(3);
+    const versions = fake.tables.compliance_type_versions ?? [];
+    const created = versions.find((v) => v.version_number === 3);
+    expect(created?.changelog).toBe('Restored from v1');
+    // The type now points at the restored version.
+    expect((fake.tables.compliance_types ?? [])[0]!.current_version_id).toBe(res.ok ? res.value.versionId : null);
+  });
+
+  it('404s for a version that is not on this type/venue', async () => {
+    const fake = seedWithTwoVersions();
+    const res = await restoreComplianceTypeVersion(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      typeId: 'type-1',
+      versionId: 'does-not-exist',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(404);
+  });
+});
+
+describe('duplicateComplianceType', () => {
+  const simpleSchema = { schema_version: '1.0', title: 'PPD', fields: [{ id: 'a', type: 'text', label: 'A' }] };
+
+  it('creates an independent "(copy)" type with its own first version', async () => {
+    const fake = new FakeSupabase({
+      compliance_types: [
+        {
+          id: 'type-1',
+          venue_id: VENUE,
+          name: 'PPD',
+          slug: 'ppd',
+          category: 'test',
+          result_type: 'completed',
+          validity_period_days: 180,
+          capture_methods: ['staff_in_venue'],
+          current_version_id: 'v1',
+          is_active: true,
+        },
+      ],
+      compliance_type_versions: [
+        { id: 'v1', compliance_type_id: 'type-1', venue_id: VENUE, version_number: 1, form_schema: simpleSchema },
+      ],
+    });
+
+    const res = await duplicateComplianceType(fake.asClient(), { venueId: VENUE, staffId: STAFF, typeId: 'type-1' });
+    expect(res.ok).toBe(true);
+
+    const types = fake.tables.compliance_types ?? [];
+    expect(types).toHaveLength(2);
+    const copy = types.find((t) => t.id !== 'type-1');
+    expect(copy?.name).toBe('PPD (copy)');
+    expect(copy?.slug).not.toBe('ppd');
+    // Copy has its own first version linked.
+    const copyVersions = (fake.tables.compliance_type_versions ?? []).filter(
+      (v) => v.compliance_type_id === copy?.id,
+    );
+    expect(copyVersions).toHaveLength(1);
+    expect(copyVersions[0]!.version_number).toBe(1);
+    expect(copy?.current_version_id).toBe(copyVersions[0]!.id);
+  });
+
+  it('404s when the source type does not exist', async () => {
+    const fake = new FakeSupabase({});
+    const res = await duplicateComplianceType(fake.asClient(), { venueId: VENUE, staffId: STAFF, typeId: 'nope' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(404);
   });

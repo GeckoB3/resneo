@@ -253,6 +253,55 @@ export async function revokeFormLink(
 }
 
 /**
+ * Retire any still-pending links for a (guest, type) when a record has just been
+ * captured in venue, so they stop nagging in "awaiting client submission" and can't be
+ * opened later to create a duplicate record. Marks them consumed against the new record.
+ * Best-effort: never throws (a logging/update hiccup must not fail the capture).
+ */
+export async function consumePendingLinksForCapture(
+  admin: SupabaseClient,
+  params: { venueId: string; staffId: string | null; guestId: string; complianceTypeId: string; recordId: string },
+): Promise<void> {
+  try {
+    const { data: links } = await admin
+      .from('compliance_form_links')
+      .select('id')
+      .eq('venue_id', params.venueId)
+      .eq('guest_id', params.guestId)
+      .eq('compliance_type_id', params.complianceTypeId)
+      .eq('status', 'pending');
+    const ids = ((links ?? []) as Array<{ id: string }>).map((l) => l.id);
+    if (ids.length === 0) return;
+
+    // Only audit the links this call actually consumed: a concurrent capture/submit may
+    // have flipped some out of 'pending' between the select and here, so re-read the
+    // updated rows rather than trusting the pre-update id list.
+    const { data: updated } = await admin
+      .from('compliance_form_links')
+      .update({ status: 'consumed', consumed_record_id: params.recordId, consumed_at: new Date().toISOString() })
+      .in('id', ids)
+      .eq('status', 'pending')
+      .select('id');
+    const consumedIds = ((updated ?? []) as Array<{ id: string }>).map((l) => l.id);
+
+    for (const id of consumedIds) {
+      await writeComplianceAuditEvent(admin, {
+        venueId: params.venueId,
+        eventType: 'link.consumed',
+        actorType: 'staff',
+        actorStaffId: params.staffId,
+        guestId: params.guestId,
+        complianceFormLinkId: id,
+        complianceTypeId: params.complianceTypeId,
+        metadata: { via: 'in_venue_capture', record_id: params.recordId },
+      });
+    }
+  } catch (e) {
+    console.error('[consumePendingLinksForCapture] failed:', e instanceof Error ? e.message : e);
+  }
+}
+
+/**
  * Outstanding (pending, unexpired) form links for a booking, as {name, url} — for
  * the guest-facing confirmation/manage surfaces (Phase 1, G2). Defensive: returns
  * [] on any error (e.g. feature/table absent) so it never breaks the manage page.

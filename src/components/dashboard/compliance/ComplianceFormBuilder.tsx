@@ -22,7 +22,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
-import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
+import { complianceJsonFetcher, formatComplianceDate } from '@/components/dashboard/compliance/shared';
 import {
   COMPLIANCE_FIELD_TYPES,
   COMPLIANCE_RESULT_TYPES,
@@ -47,6 +47,16 @@ const FIELD_TYPE_LABELS: Record<ComplianceFieldType, string> = {
   date: 'Date',
   signature: 'Signature',
   file: 'File upload',
+};
+
+const FIELD_TYPE_ICONS: Record<ComplianceFieldType, string> = {
+  text: '📝',
+  textarea: '📄',
+  select: '🔽',
+  multiselect: '☑️',
+  date: '📅',
+  signature: '✍️',
+  file: '📎',
 };
 
 const CATEGORY_LABELS: Record<ComplianceCategory, string> = {
@@ -106,9 +116,9 @@ const DEFAULT_META: BuilderMeta = {
 
 export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; typeId?: string }) {
   const router = useRouter();
-  const { data: loaded, isLoading } = useSWR<{
+  const { data: loaded, isLoading, mutate: mutateType } = useSWR<{
     type: BuilderMeta & { id: string };
-    version: { form_schema: ComplianceFormSchema } | null;
+    version: { version_number: number; form_schema: ComplianceFormSchema } | null;
   }>(mode === 'edit' && typeId ? `/api/venue/compliance/types/${typeId}` : null, complianceJsonFetcher);
 
   const [meta, setMeta] = useState<BuilderMeta | null>(mode === 'new' ? DEFAULT_META : null);
@@ -119,6 +129,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [changelog, setChangelog] = useState('');
   const [hydrated, setHydrated] = useState(mode === 'new');
 
   // Hydrate edit state once the type loads.
@@ -185,6 +196,34 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
     });
   }
 
+  // Switching to pass/fail auto-creates a ready-to-use staff-only Pass/Fail field and
+  // wires the result mapping, so a valid pass/fail form exists without the staff member
+  // hunting for the mapping box first (the field and its options stay fully editable).
+  function handleResultTypeChange(next: ComplianceResultType) {
+    setMeta((m) => (m ? { ...m, result_type: next } : m));
+    if (next !== 'pass_fail') return;
+    const list = fields ?? [];
+    const existing = list.find((f) => f.type === 'select' && f.staff_only);
+    if (existing) {
+      if (!resultMapping) setResultMapping({ field: existing.id, pass_values: [], fail_values: [] });
+      return;
+    }
+    const id = newFieldId();
+    const resultField = {
+      id,
+      type: 'select',
+      label: 'Result (staff decision)',
+      required: true,
+      staff_only: true,
+      options: [
+        { value: 'pass', label: 'Pass' },
+        { value: 'fail', label: 'Fail' },
+      ],
+    } as ComplianceField;
+    setFields([...list, resultField]);
+    setResultMapping({ field: id, pass_values: ['pass'], fail_values: ['fail'] });
+  }
+
   async function save() {
     if (!meta || !fields || !schema) return;
     setErrors([]);
@@ -225,6 +264,8 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
           return;
         }
       } else if (typeId) {
+        // Single request (audit U7): update settings and publish the new version together,
+        // so a failure can no longer leave settings saved but the form unsaved.
         const patchRes = await fetch(`/api/venue/compliance/types/${typeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -235,20 +276,12 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             capture_methods: meta.capture_methods,
             form_link_expiry_days: meta.form_link_expiry_days,
             online_unmet_message: meta.online_unmet_message,
+            form_schema: schema,
+            changelog: changelog.trim() || undefined,
           }),
         });
         if (!patchRes.ok) {
           const b = await patchRes.json().catch(() => ({}));
-          setErrors([b.error ?? 'Could not update type details.']);
-          return;
-        }
-        const verRes = await fetch(`/api/venue/compliance/types/${typeId}/versions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ form_schema: schema }),
-        });
-        if (!verRes.ok) {
-          const b = await verRes.json().catch(() => ({}));
           setErrors([b.error ?? 'Could not save the form.']);
           return;
         }
@@ -296,7 +329,7 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                 className={inputClass}
                 value={meta.result_type}
                 disabled={mode === 'edit'}
-                onChange={(e) => setMeta({ ...meta, result_type: e.target.value as ComplianceResultType })}
+                onChange={(e) => handleResultTypeChange(e.target.value as ComplianceResultType)}
               >
                 {COMPLIANCE_RESULT_TYPES.map((r) => (
                   <option key={r} value={r}>
@@ -304,8 +337,12 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                   </option>
                 ))}
               </select>
-              {mode === 'edit' && (
+              {mode === 'edit' ? (
                 <p className="mt-1 text-xs text-slate-400">Result type can’t change after creation.</p>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">
+                  Choose carefully: this can’t be changed once the form is created.
+                </p>
               )}
             </div>
             <ValidityEditor meta={meta} setMeta={setMeta} />
@@ -394,9 +431,10 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
                     key={t}
                     type="button"
                     onClick={() => addField(t)}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    + {FIELD_TYPE_LABELS[t]}
+                    <span aria-hidden className="text-base leading-none">{FIELD_TYPE_ICONS[t]}</span>
+                    {FIELD_TYPE_LABELS[t]}
                   </button>
                 ))}
               </div>
@@ -408,7 +446,13 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
             <SectionCard.Header title="Form fields" description="Drag to reorder. Click a field to edit its settings." />
             <SectionCard.Body>
               {fields.length === 0 ? (
-                <p className="text-sm text-slate-500">No fields yet. Add one from the left.</p>
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <p className="text-sm font-medium text-slate-700">No questions yet</p>
+                  <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
+                    Add your first field from the list on the left. Each field becomes a question on the form your
+                    client or team fills in. Drag fields to reorder them.
+                  </p>
+                </div>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                   <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
@@ -438,6 +482,32 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
         </div>
       )}
 
+      {mode === 'edit' && (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">What changed (optional)</label>
+          <input
+            className={inputClass}
+            value={changelog}
+            onChange={(e) => setChangelog(e.target.value)}
+            placeholder="e.g. Added a question about medication"
+          />
+          <p className="mt-1 text-xs text-slate-500">Saved with this version so you can see what changed later.</p>
+        </div>
+      )}
+
+      {mode === 'edit' && typeId && (
+        <VersionHistory
+          typeId={typeId}
+          currentVersionNumber={loaded?.version?.version_number ?? null}
+          onRestored={async () => {
+            // Pull the restored (now current) version, then re-hydrate the editor from it.
+            await mutateType();
+            setChangelog('');
+            setHydrated(false);
+          }}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           type="button"
@@ -456,6 +526,113 @@ export function ComplianceFormBuilder({ mode, typeId }: { mode: 'new' | 'edit'; 
         </button>
       </div>
     </div>
+  );
+}
+
+interface VersionRow {
+  id: string;
+  version_number: number;
+  changelog: string | null;
+  created_at: string;
+}
+
+/**
+ * Read-only version history with one-click restore (audit U4). "Restore" publishes a
+ * new version copying the chosen one, so version numbers stay monotonic and existing
+ * records keep the version they were captured against.
+ */
+function VersionHistory({
+  typeId,
+  currentVersionNumber,
+  onRestored,
+}: {
+  typeId: string;
+  currentVersionNumber: number | null;
+  onRestored: () => void | Promise<void>;
+}) {
+  const { data, mutate, isLoading } = useSWR<{ versions: VersionRow[] }>(
+    `/api/venue/compliance/types/${typeId}/versions`,
+    complianceJsonFetcher,
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const versions = data?.versions ?? [];
+
+  async function restore(versionId: string) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Restore this version? It becomes a new current version and replaces any unsaved edits here.')
+    ) {
+      return;
+    }
+    setBusyId(versionId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/compliance/types/${typeId}/versions/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version_id: versionId }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError(b.error ?? 'Could not restore this version.');
+        return;
+      }
+      await mutate();
+      await onRestored();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Nothing worth showing until there's more than the first version.
+  if (!isLoading && versions.length <= 1) return null;
+
+  return (
+    <SectionCard>
+      <SectionCard.Header
+        title="Version history"
+        description="Each save publishes a new version. Existing records keep the version they were captured against."
+      />
+      <SectionCard.Body>
+        {error && (
+          <div className="mb-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">{error}</div>
+        )}
+        {isLoading ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {versions.map((v) => {
+              const isCurrent = v.version_number === currentVersionNumber;
+              return (
+                <li key={v.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800">
+                      v{v.version_number}
+                      {isCurrent && <span className="ml-2 text-xs font-normal text-emerald-600">(current)</span>}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatComplianceDate(v.created_at)}
+                      {v.changelog ? ` · ${v.changelog}` : ''}
+                    </p>
+                  </div>
+                  {!isCurrent && (
+                    <button
+                      type="button"
+                      disabled={busyId === v.id}
+                      onClick={() => restore(v.id)}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {busyId === v.id ? 'Restoring…' : 'Restore'}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 
@@ -522,7 +699,8 @@ function FieldCard({
         </button>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              <span aria-hidden className="text-xs leading-none">{FIELD_TYPE_ICONS[field.type]}</span>
               {FIELD_TYPE_LABELS[field.type]}
             </span>
             <button type="button" onClick={onRemove} className="ml-auto text-xs font-medium text-rose-600">
@@ -534,6 +712,12 @@ function FieldCard({
             value={field.label}
             onChange={(e) => onChange({ label: e.target.value })}
             placeholder="Question label"
+          />
+          <input
+            className={inputClass}
+            value={field.help_text ?? ''}
+            onChange={(e) => onChange({ help_text: e.target.value || undefined })}
+            placeholder="Help text shown under the question (optional)"
           />
           <div className="flex flex-wrap gap-4 text-xs text-slate-600">
             <label className="flex items-center gap-1.5">
@@ -551,10 +735,142 @@ function FieldCard({
               onChange={(options) => onChange({ options } as Partial<ComplianceField>)}
             />
           )}
+          <FieldExtras field={field} onChange={onChange} />
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Type-specific field settings the builder previously couldn't reach: character
+ * limits and default values (text/textarea/select/multiselect/date). The schema
+ * and renderer already support these; this surfaces them in the editor.
+ */
+function FieldExtras({
+  field,
+  onChange,
+}: {
+  field: ComplianceField;
+  onChange: (patch: Partial<ComplianceField>) => void;
+}) {
+  const labelClass = 'mb-1 block text-xs font-medium text-slate-500';
+
+  if (field.type === 'text' || field.type === 'textarea') {
+    return (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Character limit (optional)</label>
+          <input
+            type="number"
+            min={1}
+            max={10000}
+            className={inputClass}
+            value={field.max_length ?? ''}
+            onChange={(e) =>
+              onChange({
+                max_length: e.target.value ? Math.max(1, Number(e.target.value)) : undefined,
+              } as Partial<ComplianceField>)
+            }
+          />
+        </div>
+        <div>
+          <label className={labelClass}>Default value (optional)</label>
+          <input
+            className={inputClass}
+            value={field.default_value ?? ''}
+            onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === 'select') {
+    return (
+      <div>
+        <label className={labelClass}>Default selection (optional)</label>
+        <select
+          className={inputClass}
+          value={field.default_value ?? ''}
+          onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+        >
+          <option value="">No default</option>
+          {field.options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (field.type === 'multiselect') {
+    const selected = Array.isArray(field.default_value) ? field.default_value : [];
+    return (
+      <div>
+        <label className={labelClass}>Default selections (optional)</label>
+        <div className="flex flex-wrap gap-3">
+          {field.options.map((o) => (
+            <label key={o.value} className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={selected.includes(o.value)}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [...selected, o.value]
+                    : selected.filter((v) => v !== o.value);
+                  onChange({ default_value: next.length ? next : undefined } as Partial<ComplianceField>);
+                }}
+              />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (field.type === 'date') {
+    const mode = field.default_value === 'today' ? 'today' : field.default_value ? 'date' : 'none';
+    return (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Default date (optional)</label>
+          <select
+            className={inputClass}
+            value={mode}
+            onChange={(e) => {
+              const v = e.target.value;
+              onChange({
+                default_value:
+                  v === 'today' ? 'today' : v === 'date' ? new Date().toISOString().slice(0, 10) : undefined,
+              } as Partial<ComplianceField>);
+            }}
+          >
+            <option value="none">No default</option>
+            <option value="today">Today (the date completed)</option>
+            <option value="date">A specific date</option>
+          </select>
+        </div>
+        {mode === 'date' && (
+          <div>
+            <label className={labelClass}>Pick the date</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={field.default_value && field.default_value !== 'today' ? field.default_value : ''}
+              onChange={(e) => onChange({ default_value: e.target.value || undefined } as Partial<ComplianceField>)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // signature, file: no extra settings.
+  return null;
 }
 
 function OptionsEditor({
@@ -574,7 +890,13 @@ function OptionsEditor({
             value={o.label}
             onChange={(e) => {
               const label = e.target.value;
-              const value = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `option_${i + 1}`;
+              const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `option_${i + 1}`;
+              // Guard against two labels slugifying to the same value (audit U8): a silent
+              // value clash would corrupt select validation and pass/fail result mapping.
+              const taken = new Set(options.filter((_, j) => j !== i).map((x) => x.value));
+              let value = base;
+              let n = 2;
+              while (taken.has(value)) value = `${base}_${n++}`;
               onChange(options.map((x, j) => (j === i ? { value, label } : x)));
             }}
           />
@@ -591,7 +913,14 @@ function OptionsEditor({
       ))}
       <button
         type="button"
-        onClick={() => onChange([...options, { value: `option_${options.length + 1}`, label: `Option ${options.length + 1}` }])}
+        onClick={() => {
+          // Pick the next free option_N so a freshly-added option can't collide with an
+          // existing value (review #5) before its label is edited.
+          const taken = new Set(options.map((x) => x.value));
+          let n = options.length + 1;
+          while (taken.has(`option_${n}`)) n += 1;
+          onChange([...options, { value: `option_${n}`, label: `Option ${n}` }]);
+        }}
         className="text-xs font-medium text-brand-600"
       >
         + Add option
@@ -618,7 +947,8 @@ function ResultMappingEditor({
     <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
       <p className="text-sm font-medium text-amber-900">Pass / fail result</p>
       <p className="mt-0.5 text-xs text-amber-700">
-        Choose a staff-only dropdown field and mark which options count as a pass or a fail.
+        We added a staff-only Pass / Fail field below. Rename it or its options if you like, or pick a different
+        staff-only dropdown here, then mark which answers count as a pass or a fail.
       </p>
       <select
         className={`${inputClass} mt-2`}

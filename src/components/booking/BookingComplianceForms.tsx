@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
+import {
+  clearFormDraft,
+  clearFormDraftsByPrefix,
+  loadFormDraft,
+  saveFormDraft,
+} from '@/lib/compliance/form-draft';
 
 /**
  * Inline compliance forms for the public booking flow (spec §9.3, Phase 2c). Fetches the
@@ -34,6 +40,38 @@ export interface BookingComplianceState {
 
 const isMandatory = (enforcement: string) => enforcement === 'block_online' || enforcement === 'block_all';
 
+/**
+ * A UUID. Falls back to an RFC4122-v4 string where `crypto.randomUUID` is unavailable
+ * (insecure origins / older browsers): the pre-booking upload endpoint and booking-create
+ * both require UUID-format ids, so a non-UUID draft id would 400 file uploads (review #2).
+ */
+function makeDraftUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+
+/**
+ * Clear a venue's persisted booking-compliance drafts. Call this AFTER a booking
+ * succeeds (the parent reaches the confirmation/payment step). It is deliberately not
+ * done while submitting: this component unmounts the instant submission starts, and
+ * clearing only on success means a failed submit + reload still resumes the guest's
+ * answers (and keeps already-uploaded files under the same draft prefix).
+ */
+export function clearBookingComplianceDrafts(venueId: string): void {
+  clearFormDraftsByPrefix(`booking-inline:${venueId}:`);
+  clearFormDraft(`booking-responses:${venueId}`);
+  clearFormDraft(`booking-draftid:${venueId}`);
+}
+
 interface Props {
   venueId: string;
   /** Catalog service id(s) for the booking (one per chosen service / multi-service segment). */
@@ -41,19 +79,52 @@ interface Props {
   /** Disable the forms while the parent is submitting the booking. */
   submittingBooking?: boolean;
   onChange: (state: BookingComplianceState) => void;
+  /** Drop the standalone card chrome so the host can group this inside one section. */
+  embedded?: boolean;
+  /** Reports whether any inline form is currently shown (for the host's shared wrapper). */
+  onActiveChange?: (active: boolean) => void;
   className?: string;
 }
 
-export default function BookingComplianceForms({ venueId, serviceIds, submittingBooking, onChange, className }: Props) {
+export default function BookingComplianceForms({
+  venueId,
+  serviceIds,
+  submittingBooking,
+  onChange,
+  embedded,
+  onActiveChange,
+  className,
+}: Props) {
   const [forms, setForms] = useState<InlineForm[] | null>(null);
   const [responsesByType, setResponsesByType] = useState<Record<string, Record<string, unknown>>>({});
   const [editingType, setEditingType] = useState<string | null>(null);
-  // One stable draft id per booking session, used as the file-upload prefix.
-  const [draftId] = useState(() =>
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
-  );
+  // One stable draft id per booking session, used as the file-upload prefix. Persisted
+  // (with the saved responses) so a reload mid-booking resumes instead of restarting.
+  const [draftId, setDraftId] = useState('');
+  const [restored, setRestored] = useState(false);
+
+  const draftIdKey = `booking-draftid:${venueId}`;
+  const responsesKey = `booking-responses:${venueId}`;
+
+  // Restore any saved draft once on mount (effect, not a render-time initializer, so the
+  // server and client first render agree). Creates + persists a stable id if none exists.
+  useEffect(() => {
+    const savedId = loadFormDraft(draftIdKey) as { id?: string } | null;
+    const id = savedId?.id ?? makeDraftUuid();
+    setDraftId(id);
+    if (!savedId?.id) saveFormDraft(draftIdKey, { id });
+    const savedResponses = loadFormDraft(responsesKey) as Record<string, Record<string, unknown>> | null;
+    if (savedResponses && typeof savedResponses === 'object') setResponsesByType(savedResponses);
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venueId]);
+
+  // Persist completed inline responses so they survive a reload (after the restore above).
+  useEffect(() => {
+    if (!restored) return;
+    saveFormDraft(responsesKey, responsesByType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [responsesByType, restored]);
 
   const serviceKey = useMemo(() => [...new Set(serviceIds.filter(Boolean))].sort().join(','), [serviceIds]);
   const uniqueServiceIds = useMemo(() => serviceKey.split(',').filter(Boolean), [serviceKey]);
@@ -97,10 +168,16 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
   // Report collected state up whenever the forms or captured responses change.
   useEffect(() => {
     const formList = forms ?? [];
-    const submissions = Object.entries(responsesByType).map(([compliance_type_id, responses]) => ({
-      compliance_type_id,
-      responses,
-    }));
+    // Only submit responses for forms required by the CURRENT service set. A persisted draft
+    // from a previously-abandoned booking (different services, same venue/device) is kept for
+    // resume but must not be captured against this booking (review #3).
+    const currentTypeIds = new Set(formList.map((f) => f.compliance_type_id));
+    const submissions = Object.entries(responsesByType)
+      .filter(([compliance_type_id]) => currentTypeIds.has(compliance_type_id))
+      .map(([compliance_type_id, responses]) => ({
+        compliance_type_id,
+        responses,
+      }));
     const mandatoryComplete = formList
       .filter((f) => isMandatory(f.enforcement))
       .every((f) => responsesByType[f.compliance_type_id] !== undefined);
@@ -109,19 +186,38 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, forms, draftId]);
 
-  if (!forms || forms.length === 0) return null;
+  // Report whether any inline form is shown, so the host can render a shared wrapper.
+  useEffect(() => {
+    onActiveChange?.(Boolean(forms && forms.length > 0 && draftId));
+  }, [forms, draftId, onActiveChange]);
+
+  if (!forms || forms.length === 0 || !draftId) return null;
 
   const fileUploadUrl = `/api/public/compliance/booking-upload?venue_id=${encodeURIComponent(venueId)}&draft_id=${encodeURIComponent(draftId)}`;
 
+  const instructions = (
+    <p className={embedded ? 'text-xs text-slate-500' : 'mt-0.5 text-xs text-slate-500'}>
+      Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before you
+      can book.
+    </p>
+  );
+
   return (
-    <div className={`mb-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 ${className ?? ''}`}>
-      <div>
-        <h4 className="text-sm font-semibold text-slate-900">Forms for this booking</h4>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before
-          you can book.
-        </p>
-      </div>
+    <div
+      className={
+        embedded
+          ? `space-y-4 ${className ?? ''}`
+          : `mb-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 ${className ?? ''}`
+      }
+    >
+      {embedded ? (
+        instructions
+      ) : (
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900">Forms for this booking</h4>
+          {instructions}
+        </div>
+      )}
       {forms.map((f) => {
         const done = responsesByType[f.compliance_type_id] !== undefined;
         const editing = editingType === f.compliance_type_id;
@@ -166,6 +262,7 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
               submitLabel={done ? 'Save changes' : 'Save form'}
               submitting={Boolean(submittingBooking)}
               prefill={responsesByType[f.compliance_type_id]}
+              draftKey={`booking-inline:${venueId}:${draftId}:${f.compliance_type_id}`}
               onSubmit={(responses) => {
                 setResponsesByType((prev) => ({ ...prev, [f.compliance_type_id]: responses }));
                 setEditingType(null);

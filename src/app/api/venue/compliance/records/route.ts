@@ -8,6 +8,7 @@ import {
   listComplianceRecords,
   loadStaffCaptureContext,
 } from '@/lib/compliance/records-service';
+import { consumePendingLinksForCapture } from '@/lib/compliance/form-links-service';
 
 /** GET /api/venue/compliance/records — list records (filters: guest_id, compliance_type_id, booking_id, status, from, to). */
 export async function GET(request: NextRequest) {
@@ -98,6 +99,20 @@ export async function POST(request: NextRequest) {
         { status: result.status },
       );
     }
+
+    // The requirement is now satisfied in venue, so retire any pending form links for this
+    // (guest, type) — stops the "awaiting client submission" nag and a duplicate via the link.
+    const newRecordId = (result.record as { id?: string }).id;
+    if (newRecordId) {
+      await consumePendingLinksForCapture(staff.db, {
+        venueId: staff.venue_id,
+        staffId: staff.id,
+        guestId: parsed.data.guest_id,
+        complianceTypeId: parsed.data.compliance_type_id,
+        recordId: newRecordId,
+      });
+    }
+
     return NextResponse.json({ record: result.record }, { status: 201 });
   } catch (err) {
     console.error('POST /api/venue/compliance/records failed:', err);

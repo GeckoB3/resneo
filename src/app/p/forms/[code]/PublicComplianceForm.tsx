@@ -33,11 +33,14 @@ export function PublicComplianceForm({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setFormError(json.error ?? 'We could not submit your form. Please try again.');
-        return;
+        // Throw so the renderer keeps the saved draft for a retry (it only clears on success).
+        throw new Error('submit failed');
       }
       setDone(true);
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === 'submit failed') throw err;
       setFormError('Something went wrong. Please check your connection and try again.');
+      throw err;
     } finally {
       setSubmitting(false);
     }
@@ -67,6 +70,7 @@ export function PublicComplianceForm({
         submitLabel="Submit form"
         onSubmit={handleSubmit}
         fileUploadUrl={`/api/public/compliance/forms/${encodeURIComponent(code)}/file`}
+        draftKey={`public:${code}`}
       />
     </div>
   );

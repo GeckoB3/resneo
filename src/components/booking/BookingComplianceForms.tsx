@@ -1,8 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
+import {
+  clearFormDraft,
+  clearFormDraftsByPrefix,
+  loadFormDraft,
+  saveFormDraft,
+} from '@/lib/compliance/form-draft';
 
 /**
  * Inline compliance forms for the public booking flow (spec §9.3, Phase 2c). Fetches the
@@ -48,12 +54,50 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
   const [forms, setForms] = useState<InlineForm[] | null>(null);
   const [responsesByType, setResponsesByType] = useState<Record<string, Record<string, unknown>>>({});
   const [editingType, setEditingType] = useState<string | null>(null);
-  // One stable draft id per booking session, used as the file-upload prefix.
-  const [draftId] = useState(() =>
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
-  );
+  // One stable draft id per booking session, used as the file-upload prefix. Persisted
+  // (with the saved responses) so a reload mid-booking resumes instead of restarting.
+  const [draftId, setDraftId] = useState('');
+  const [restored, setRestored] = useState(false);
+
+  const draftIdKey = `booking-draftid:${venueId}`;
+  const responsesKey = `booking-responses:${venueId}`;
+
+  // Restore any saved draft once on mount (effect, not a render-time initializer, so the
+  // server and client first render agree). Creates + persists a stable id if none exists.
+  useEffect(() => {
+    const savedId = loadFormDraft(draftIdKey) as { id?: string } | null;
+    const id =
+      savedId?.id ??
+      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    setDraftId(id);
+    if (!savedId?.id) saveFormDraft(draftIdKey, { id });
+    const savedResponses = loadFormDraft(responsesKey) as Record<string, Record<string, unknown>> | null;
+    if (savedResponses && typeof savedResponses === 'object') setResponsesByType(savedResponses);
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venueId]);
+
+  // Persist completed inline responses so they survive a reload (after the restore above).
+  useEffect(() => {
+    if (!restored) return;
+    saveFormDraft(responsesKey, responsesByType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [responsesByType, restored]);
+
+  // Clear persisted drafts once the booking is being submitted. A success navigates away;
+  // a failed submit keeps the in-memory state so the guest can retry without re-entering.
+  const clearedRef = useRef(false);
+  useEffect(() => {
+    if (submittingBooking && !clearedRef.current) {
+      clearedRef.current = true;
+      clearFormDraftsByPrefix(`booking-inline:${venueId}:`);
+      clearFormDraft(responsesKey);
+      clearFormDraft(draftIdKey);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submittingBooking, venueId]);
 
   const serviceKey = useMemo(() => [...new Set(serviceIds.filter(Boolean))].sort().join(','), [serviceIds]);
   const uniqueServiceIds = useMemo(() => serviceKey.split(',').filter(Boolean), [serviceKey]);
@@ -109,7 +153,7 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, forms, draftId]);
 
-  if (!forms || forms.length === 0) return null;
+  if (!forms || forms.length === 0 || !draftId) return null;
 
   const fileUploadUrl = `/api/public/compliance/booking-upload?venue_id=${encodeURIComponent(venueId)}&draft_id=${encodeURIComponent(draftId)}`;
 
@@ -166,6 +210,7 @@ export default function BookingComplianceForms({ venueId, serviceIds, submitting
               submitLabel={done ? 'Save changes' : 'Save form'}
               submitting={Boolean(submittingBooking)}
               prefill={responsesByType[f.compliance_type_id]}
+              draftKey={`booking-inline:${venueId}:${draftId}:${f.compliance_type_id}`}
               onSubmit={(responses) => {
                 setResponsesByType((prev) => ({ ...prev, [f.compliance_type_id]: responses }));
                 setEditingType(null);

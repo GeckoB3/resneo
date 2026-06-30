@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { marked } from 'marked';
@@ -11,6 +11,7 @@ import {
   type FileResponse,
   type SignatureResponse,
 } from '@/lib/compliance/form-schema';
+import { clearFormDraft, loadFormDraft, saveFormDraft } from '@/lib/compliance/form-draft';
 import { SignaturePad } from '@/components/dashboard/compliance/SignaturePad';
 
 const inputClass =
@@ -35,6 +36,12 @@ export interface ComplianceFormRendererProps {
   preview?: boolean;
   /** Endpoint for `file` field uploads (public submissions). */
   fileUploadUrl?: string;
+  /**
+   * When set, in-progress input is autosaved to localStorage under this key and
+   * restored on mount, so a reload resumes (improvement plan §10, U10). The draft is
+   * cleared on a successful submit. Omit for staff/preview contexts (shared devices).
+   */
+  draftKey?: string;
 }
 
 export function ComplianceFormRenderer({
@@ -46,6 +53,7 @@ export function ComplianceFormRenderer({
   submitLabel = 'Submit',
   preview = false,
   fileUploadUrl,
+  draftKey,
 }: ComplianceFormRendererProps) {
   const fields = useMemo(
     () => schema.fields.filter((f) => mode === 'staff' || !f.staff_only),
@@ -81,15 +89,48 @@ export function ComplianceFormRenderer({
   const {
     control,
     handleSubmit,
+    reset,
+    watch,
     formState: { errors },
   } = useForm<Record<string, unknown>>({ resolver, defaultValues, mode: 'onSubmit' });
+
+  // Restore a saved draft once per key (after mount, so server and client first render
+  // match). Merges over the computed defaults so newly-added fields keep their defaults.
+  const restoredKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (preview || !draftKey || restoredKeyRef.current === draftKey) return;
+    restoredKeyRef.current = draftKey;
+    const draft = loadFormDraft(draftKey);
+    if (draft) reset({ ...defaultValues, ...draft });
+  }, [draftKey, preview, defaultValues, reset]);
+
+  // Autosave on change (debounced) so a reload mid-form resumes.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (preview || !draftKey) return;
+    const sub = watch((values) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => saveFormDraft(draftKey, values as Record<string, unknown>), 300);
+    });
+    return () => {
+      sub.unsubscribe();
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [draftKey, preview, watch]);
 
   const disabled = preview || submitting;
   const introHtml = schema.intro_markdown ? renderIntroMarkdown(schema.intro_markdown) : null;
 
   const submit = onSubmit
     ? handleSubmit(async (values) => {
-        await onSubmit(values);
+        try {
+          await onSubmit(values);
+          // Only a clean submit clears the draft; a throw (e.g. a failed network call
+          // the parent re-raised) keeps it so the guest can retry without re-entering.
+          if (draftKey) clearFormDraft(draftKey);
+        } catch {
+          // Parent surfaced the error; leave the draft in place.
+        }
       })
     : (e: React.FormEvent) => e.preventDefault();
 

@@ -478,15 +478,9 @@ pass/fail "needs decision"; void; form-link issue/dedup/revoke; the merged
 restore/resume; signature-pad mobile resize; storage-path security guards;
 per-tenant isolation on every new path.
 
-**Reported, not changed (recommended follow-ups, by judgment):**
+**Follow-ups since picked up and implemented (§10.8):** the dashboard send-link
+channel fallback and per-field server errors. Still open:
 
-- **Dashboard "Send link" is email-only.** A guest with a phone but no email
-  can't be sent a link from the dashboard (the per-guest panel can do SMS/copy).
-  Worth an email/SMS choice or a copy-link fallback on the dashboard rows.
-- **Server `field_errors` aren't shown per-field** on the public form / inline
-  booking — only as a top banner. The renderer already has the `aria` wiring;
-  plumbing server field errors into it would localise them. (Client-side
-  validation catches most, so this is an edge.)
 - **No client-side file size/type guard** before upload, so an oversized photo is
   rejected only after a round trip on mobile.
 - **"Complete now" on the dashboard opens hand-to-client mode** by default; the
@@ -494,6 +488,32 @@ per-tenant isolation on every new path.
 - Minor jargon ("lead time", "capture method") could carry a one-line hint;
   multiselect groups can't take `aria-required`/`aria-invalid` (invalid ARIA), so
   required/invalid is conveyed via the label asterisk + `aria-describedby` error.
+
+### 10.8 Follow-ups implemented (June 2026)
+
+Two of the §10.7 reported items, picked up. No migration; typecheck + lint +
+lint:modals clean; 1676 tests green.
+
+- **Dashboard "Send link" now just works for any guest.** The form-links route
+  resolves a deliverable channel itself: it uses the requested channel if the
+  guest has that destination, otherwise falls back to the other channel they do
+  have, and if neither is on file it still creates the link and returns
+  `dispatched:false` + `public_url`. The route now returns `sent_via` (the channel
+  actually used). The dashboard reports how it was sent and, when nothing could be
+  delivered, copies the link to the clipboard so a phone/email-less guest is never
+  a dead end; the per-guest panel messaging was aligned. No per-row channel toggle
+  was added (it would clutter the sweep). (`form-links/route.ts`,
+  `ComplianceDashboardView.tsx`, `ComplianceSection.tsx`.)
+- **Server field errors now show under the offending field.**
+  `ComplianceFormRenderer` gained a `serverErrors` prop that maps a server
+  rejection's `field_errors` onto the matching fields via react-hook-form
+  `setError`, reusing the existing inline-error + `aria-invalid`/`aria-describedby`
+  wiring. Wired into the public link form and the staff capture dialog (both
+  receive `field_errors` directly). The inline-booking-create path still surfaces
+  only the top-level message (its errors arrive at the whole-flow response and
+  routing them to the right sub-form is a larger change) — left as a follow-up.
+  (`ComplianceFormRenderer.tsx`, `PublicComplianceForm.tsx`,
+  `ComplianceCaptureDialog.tsx`.)
 
 ## Sources
 

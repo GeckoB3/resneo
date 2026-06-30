@@ -42,6 +42,8 @@ export interface ComplianceFormRendererProps {
    * cleared on a successful submit. Omit for staff/preview contexts (shared devices).
    */
   draftKey?: string;
+  /** Field-id → message, from a server-side validation rejection; shown under the field. */
+  serverErrors?: Record<string, string>;
 }
 
 export function ComplianceFormRenderer({
@@ -54,6 +56,7 @@ export function ComplianceFormRenderer({
   preview = false,
   fileUploadUrl,
   draftKey,
+  serverErrors,
 }: ComplianceFormRendererProps) {
   const fields = useMemo(
     () => schema.fields.filter((f) => mode === 'staff' || !f.staff_only),
@@ -91,8 +94,18 @@ export function ComplianceFormRenderer({
     handleSubmit,
     reset,
     watch,
+    setError,
     formState: { errors },
   } = useForm<Record<string, unknown>>({ resolver, defaultValues, mode: 'onSubmit' });
+
+  // Surface server-side field rejections under the matching field (reusing the inline
+  // error + aria wiring), so a guest sees *which* answer to fix, not just a top banner.
+  useEffect(() => {
+    if (!serverErrors) return;
+    for (const [name, message] of Object.entries(serverErrors)) {
+      if (message) setError(name, { type: 'server', message });
+    }
+  }, [serverErrors, setError]);
 
   // Restore a saved draft once per key (after mount, so server and client first render
   // match). Merges over the computed defaults so newly-added fields keep their defaults.

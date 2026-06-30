@@ -20,10 +20,12 @@ export function PublicComplianceForm({
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [serverFieldErrors, setServerFieldErrors] = useState<Record<string, string> | undefined>(undefined);
 
   async function handleSubmit(responses: Record<string, unknown>) {
     setSubmitting(true);
     setFormError(null);
+    setServerFieldErrors(undefined);
     try {
       const res = await fetch(`/api/public/compliance/forms/${encodeURIComponent(code)}/submit`, {
         method: 'POST',
@@ -37,6 +39,9 @@ export function PublicComplianceForm({
         if (json.reason === 'consumed' || json.reason === 'already_consumed') {
           setDone(true);
           return;
+        }
+        if (json.field_errors && typeof json.field_errors === 'object') {
+          setServerFieldErrors(json.field_errors as Record<string, string>);
         }
         setFormError(json.error ?? 'We could not submit your form. Please try again.');
         // Throw so the renderer keeps the saved draft for a retry (it only clears on success).
@@ -77,6 +82,7 @@ export function PublicComplianceForm({
         onSubmit={handleSubmit}
         fileUploadUrl={`/api/public/compliance/forms/${encodeURIComponent(code)}/file`}
         draftKey={`public:${code}`}
+        serverErrors={serverFieldErrors}
       />
     </div>
   );

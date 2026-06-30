@@ -78,8 +78,24 @@ export function ComplianceDashboardView() {
         body: JSON.stringify({ guest_id: guestId, compliance_type_id: typeId, booking_id: bookingId ?? null, send_via: 'email' }),
       });
       const body = await res.json().catch(() => ({}));
-      setMessage(res.ok ? (body.dispatched ? 'Form link sent.' : 'Form link created.') : body.error ?? 'Could not send link.');
-      if (res.ok) void refresh();
+      if (!res.ok) {
+        setMessage(body.error ?? 'Could not send link.');
+        return;
+      }
+      if (body.dispatched) {
+        setMessage(`Form link sent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`);
+      } else if (body.public_url) {
+        // No email or phone on file: copy the link so staff can share it manually.
+        try {
+          await navigator.clipboard.writeText(body.public_url as string);
+          setMessage('This guest has no email or phone on file. Link copied, paste it to share with them.');
+        } catch {
+          setMessage(`No email or phone on file. Copy this link to share: ${body.public_url}`);
+        }
+      } else {
+        setMessage('Form link created.');
+      }
+      void refresh();
     } finally {
       setSendingKey(null);
     }

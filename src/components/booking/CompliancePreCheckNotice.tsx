@@ -23,6 +23,8 @@ interface PreCheckRequirement {
   enforcement: string;
   lock_period_hours: number | null;
   online_unmet_message?: string | null;
+  /** Whether the client can complete this themselves online (vs in-venue only). */
+  client_online?: boolean;
 }
 
 type PreCheckState = 'SATISFIED' | 'MISSING' | 'EXPIRED' | 'LOCK_PASSED';
@@ -180,23 +182,45 @@ export default function CompliancePreCheckNotice({ venueId, serviceIds, email, s
           detail: 'Needs to be completed ahead of your visit, and there may not be enough time to do this online. Please contact the venue.',
         };
       }
-      // MISSING / EXPIRED / not-yet-resolved: this blocks an online booking.
+      if (state === 'EXPIRED') {
+        return {
+          name: req.compliance_type_name,
+          tone: 'block',
+          detail: 'Your previous record has expired. Please contact the venue to renew it before you book online.',
+        };
+      }
+      if (state === 'MISSING') {
+        // Actionable default (U12) plus a nudge for the returning client who used a
+        // different email/phone last time (U13) and so reads as having nothing on file.
+        return {
+          name: req.compliance_type_name,
+          tone: 'block',
+          detail:
+            'This needs to be on file before you can book online. Please contact the venue to arrange it. If you’ve done this with us before, you may have used a different email or phone number, so it’s worth checking with them.',
+        };
+      }
+      // Not yet resolved (no email entered yet): keep it short until we know more.
       return {
         name: req.compliance_type_name,
         tone: 'block',
-        detail:
-          state === 'EXPIRED'
-            ? 'Your previous record has expired and must be renewed before booking online.'
-            : 'Must be completed before this can be booked online.',
+        detail: 'This needs to be on file before you can book online. Please contact the venue to arrange it.',
       };
     }
-    // warn_client (non-blocking): booking proceeds, form follows.
+    // warn_client (non-blocking): the booking proceeds and the form follows.
+    if (req.client_online === false) {
+      // The client cannot complete this online (e.g. an in-venue patch test); don't promise a link.
+      return {
+        name: req.compliance_type_name,
+        tone: 'warn',
+        detail: 'Your team will complete this with you at your appointment.',
+      };
+    }
     return {
       name: req.compliance_type_name,
       tone: 'warn',
       detail:
         state === 'EXPIRED'
-          ? 'Your previous record has expired. We’ll email a secure link to renew it.'
+          ? 'Your previous record has expired. We’ll email you a secure link to renew it.'
           : 'We’ll email you a secure link to complete this before your visit.',
     };
   });

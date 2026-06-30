@@ -214,6 +214,127 @@ describe('enrichBookingEmailForComms', () => {
   });
 });
 
+// ── Per-practitioner price override (regression) ──────────────────────────────
+describe('enrichBookingEmailForComms appointment pricing', () => {
+  const bookingId = 'b-appt-1';
+  const base: BookingEmailData = {
+    id: bookingId,
+    guest_name: 'Norah',
+    guest_email: 'norah@example.com',
+    booking_date: '2026-04-10',
+    booking_time: '10:00',
+    party_size: 1,
+  };
+
+  /** Chainable mock that answers by table (bookings differs anchor vs secondary). */
+  function makeApptClient(data: {
+    anchor: Record<string, unknown>;
+    practitioner: { name: string } | null;
+    service: { name: string; price_pence: number | null } | null;
+    link: { custom_price_pence: number | null } | null;
+    variant?: { name: string; price_pence: number | null } | null;
+  }): SupabaseClient {
+    let bookingsCalls = 0;
+    const rowFor = (table: string): unknown => {
+      switch (table) {
+        case 'bookings':
+          bookingsCalls += 1;
+          return bookingsCalls === 1
+            ? data.anchor
+            : {
+                experience_event_id: null,
+                class_instance_id: null,
+                resource_id: null,
+                booking_end_time: null,
+                booking_time: '10:00:00',
+                party_size: 1,
+              };
+        case 'practitioners':
+          return data.practitioner;
+        case 'appointment_services':
+          return data.service;
+        case 'practitioner_services':
+          return data.link;
+        case 'service_variants':
+          return data.variant ?? null;
+        default:
+          return null;
+      }
+    };
+    const builder = (table: string): Record<string, unknown> => {
+      const b: Record<string, unknown> = {};
+      b.eq = () => b;
+      b.order = () => Promise.resolve({ data: [], error: null });
+      b.maybeSingle = async () => ({ data: rowFor(table), error: null });
+      return b;
+    };
+    return {
+      from: (table: string) => ({ select: () => builder(table) }),
+    } as unknown as SupabaseClient;
+  }
+
+  const legacyAnchor = {
+    booking_model: 'appointment',
+    practitioner_id: 'pr-1',
+    appointment_service_id: 'svc-1',
+    calendar_id: null,
+    service_item_id: null,
+    service_variant_id: null,
+    group_booking_id: null,
+    guest_id: 'g-1',
+    person_label: null,
+    location_type: null,
+  };
+
+  it('uses the per-practitioner custom price over the base service price', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: legacyAnchor,
+        practitioner: { name: 'Norah' },
+        service: { name: 'Haircut', price_pence: 2800 },
+        link: { custom_price_pence: 2600 },
+      }),
+      bookingId,
+      base,
+    );
+    expect(out.appointment_service_name).toBe('Haircut');
+    expect(out.appointment_price_display).toBe('£26.00');
+    expect(out.booking_total_price_pence).toBe(2600);
+  });
+
+  it('falls back to the base service price when there is no override', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: legacyAnchor,
+        practitioner: { name: 'Norah' },
+        service: { name: 'Haircut', price_pence: 2800 },
+        link: null,
+      }),
+      bookingId,
+      base,
+    );
+    expect(out.appointment_price_display).toBe('£28.00');
+    expect(out.booking_total_price_pence).toBe(2800);
+  });
+
+  it('lets a chosen variant price win over the practitioner override', async () => {
+    const out = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: { ...legacyAnchor, service_variant_id: 'var-1' },
+        practitioner: { name: 'Norah' },
+        service: { name: 'Haircut', price_pence: 2800 },
+        link: { custom_price_pence: 2600 },
+        variant: { name: 'Long hair', price_pence: 3200 },
+      }),
+      bookingId,
+      base,
+    );
+    expect(out.appointment_service_name).toBe('Haircut - Long hair');
+    expect(out.appointment_price_display).toBe('£32.00');
+    expect(out.booking_total_price_pence).toBe(3200);
+  });
+});
+
 // ── Add-ons enrichment ────────────────────────────────────────────────────────
 describe('enrichBookingEmailForComms with add-ons', () => {
   const bookingId = 'b-addons-1';

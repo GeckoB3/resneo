@@ -1,6 +1,6 @@
 # Resneo Compliance — Competitive Review & Improvement Plan
 
-**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3.
+**Status:** Phases 1–3 implemented ✅ · Phase 4 implemented ✅ (G6+G7) · **§9 addendum (June 2026 end-to-end audit + in-booking form collection): Phase 0 (enforcement bypasses) implemented ✅; Phase 1 (helper text + em-dash cleanup) implemented ✅; Phase 2 (in-booking form collection) ✅ + Phase 3 (records trustworthy) ✅ + Phase 4 (operability + needs-staff-decision prompt) ✅ + Phase 5 (hygiene) ✅ implemented. The §9 plan (Phases 0 to 5) is complete; remaining items are the deferred Low items noted in §9.5 and browser/E2E verification on a seeded venue.** G8 ("true inline completion during booking") is promoted from "deferred" to a specified design in §9.3. · **§10 addendum (June 2026 usability review): the §9 functional work all shipped and is correct; a follow-up review of staff form-building and guest form-completion found a layer of UX/builder gaps that are not yet addressed. These are open — see §10.**
 **Date:** June 2026 (Phase 1 shipped; §9 addendum added June 2026)
 **Scope:** How Vagaro, Phorest, Booksy and Fresha integrate compliance/intake/consent forms into booking, vs. Resneo's current implementation, and a prioritised plan to close the gaps. The §9 addendum extends this with a full code audit and the in-booking form-collection design.
 
@@ -339,3 +339,74 @@ Guardrails from §7 still hold: never fail a booking because of compliance comms
 - Booksy — [Introduces Custom Forms](https://biz.booksy.com/en-us/blog/booksy-introduces-custom-forms), [Introduces Consent Forms](https://biz.booksy.com/en-gb/blog/booksy-introduces-consent-forms)
 - Fresha — [Client forms overview](https://www.fresha.com/help-center/knowledge-base/clients/607-client-forms-overview), [Complete forms](https://www.fresha.com/help-center/knowledge-base/clients/183-complete-forms), [How clients complete consultation forms](https://support.fresha.com/hc/en-us/articles/360017574719-How-do-clients-complete-consultation-forms-), [Appointment reminders](https://www.fresha.com/help-center/knowledge-base/calendar/167-send-appointment-reminders)
 - Jane (health, comparison) — [Intake Form FAQ](https://jane.app/guide/intake-form-faq), [Consent forms](https://jane.app/guide/consent-forms)
+
+---
+
+## 10. Addendum (June 2026): staff-builder and guest-completion usability review
+
+This addendum was added after the §9 plan (Phases 0 to 5) shipped. §9 made the
+feature *functionally* complete and correct: enforcement is watertight, records
+are trustworthy, in-booking collection works, and the data/governance model is
+strong. This pass looked at a different layer — **how quick and easy the feature
+is to use** for (a) a salon staff member building and managing forms, and (b) a
+client completing a form or booking. Everything below is a usability, builder, or
+polish gap, not an architectural defect. Findings were verified against the code;
+file references are `path:line` at the time of review.
+
+> **Scope note.** None of these block the feature shipping or compromise data
+> integrity. They are the difference between "works" and "fast and pleasant." A
+> few overlap with §9 Low/deferred items (cross-referenced); the rest are new.
+
+### 10.1 Staff: building and managing forms
+
+| ID | Finding | Location | Impact |
+|---|---|---|---|
+| **U1** | **The custom form builder cannot set help text, character limits, or default values.** Each field card exposes only label, Required, Staff-only, and (for select/multiselect) options. The schema and renderer fully support `help_text`, `max_length`, and `default_value` (incl. date `'today'`), and the renderer *displays* help text — but there is no input for any of them, so a hand-built form can never carry guidance or a prefilled date. Only library templates (authored in TypeScript) can. | `ComplianceFormBuilder.tsx:494-558` (FieldCard); supported at `form-schema.ts:46-92`; rendered at `ComplianceFormRenderer.tsx:117` | **High.** Intake forms lean on help text; this is the most-felt builder gap. |
+| **U2** | **Pass/fail setup is back-to-front** — and pass/fail is the most common salon form (patch tests). Staff must first add a *staff-only select* field, then scroll to the amber box below the field list to nominate it as the result field and tag pass/fail values. Nothing guides the order; the rules (must be select + staff_only + required, values present, no overlap) surface only as save-time errors, inviting repeated fix cycles. | `ComplianceFormBuilder.tsx:603-682` (ResultMappingEditor); rules at `form-schema.ts:168-198` | **High.** Friction on the single most-used form type. |
+| **U3** | **Result type locks silently after creation.** The dropdown is disabled in edit mode with only a small grey note and no warning at creation time. A wrong choice means archiving and rebuilding the whole form. | `ComplianceFormBuilder.tsx:294-309` | Medium. |
+| **U4** | **No version history, changelog, or rollback in the UI.** Versions are stored immutably and `GET .../types/[id]/versions` exists, but no component consumes it, the builder never collects the `changelog` it already supports (the save POSTs `form_schema` only), and there is no view/restore of a prior version. A bad edit can only be superseded, not reverted. | builder save `ComplianceFormBuilder.tsx:245-254`; endpoint `types/[id]/versions/route.ts`; no UI caller | Medium. |
+| **U5** | **No "Duplicate type" and no bulk actions.** Making a variant means rebuilding by hand; archiving many types is one click each. | `ComplianceSettingsSection.tsx` TypesPanel | Low/Medium. |
+| **U6** | **The feature is spread across three surfaces.** Daily work lives at `/dashboard/compliance` (the "morning sweep"); all setup (types, requirements, general) lives under `/dashboard/settings?tab=compliance`, and the builder is reachable only from there (`/dashboard/compliance-types` just redirects). Easy to get lost. | `dashboard/compliance/page.tsx`; `compliance-types/page.tsx` (redirect); `ComplianceSettingsSection.tsx` | Low. |
+| **U7** | **Editing a form fires two sequential saves that can half-apply.** Edit PATCHes the type meta, then POSTs a new version separately; if the first succeeds and the second fails, state is partially saved behind an error. | `ComplianceFormBuilder.tsx:227-255` | Low (robustness). |
+| **U8** | **Dropdown option values auto-derive from labels on every keystroke with no collision guard,** so two labels that slugify identically (e.g. "Yes" / "Yes!") silently share a value and can corrupt select validation or result mapping. | `ComplianceFormBuilder.tsx:574-579` | Low (edge case). |
+| **U9** | **Library templates can't be previewed before cloning** (only a field count is shown); slug collisions are silently suffixed. | `ComplianceSettingsSection.tsx` LibraryDialog | Low. |
+
+### 10.2 Guests: completing forms and booking
+
+| ID | Finding | Location | Impact |
+|---|---|---|---|
+| **U10** | **No save-progress / resume anywhere.** Inline booking forms live in React state; the public link form keeps nothing locally. A refresh, dropped mobile connection, or tab close loses all entry (and strands any in-progress upload). Worst on long forms on a phone. | `BookingComplianceForms.tsx`; `PublicComplianceForm.tsx` | **High.** |
+| **U11** | **Signature pad mobile bug.** The canvas backing store is sized once on mount from `getBoundingClientRect()` and never re-measured; if the width changes after mount (orientation change, or rendering inside an animating dialog) the live pointer mapping no longer matches the scaled backing store, so strokes land offset/distorted. Fixed 160px height is also cramped on phones. | `SignaturePad.tsx:27-47,91` | **High** (touch is the primary signing surface). |
+| **U12** | **"Cannot book online" can dead-end the guest.** When a service needs an in-venue-only type (e.g. patch test) with `block_online`, the per-type `online_unmet_message` (shipped in §9.3) explains next steps — but it is optional. Unset, the guest sees a generic "Must be completed before this can be booked online" with no action. | `CompliancePreCheckNotice.tsx:171-191`; message is an optional builder field | Medium. Extends §9.3. |
+| **U13** | **Returning clients with a different email read as MISSING.** Pre-check resolves "already on file" by venue+email; a regular who books under a second email is told the requirement is unmet and may be blocked online. Escape hatch is the "contact the venue" copy. | `pre-check` POST; `public-forms-service.ts` `publicPreCheckForGuest` | Medium. |
+| **U14** | **Two stacked "what you need" panels** in the details step (the pre-check notice and the inline forms block) risk reading as duplication, even though `suppressTypeIds` dedups type ids between them. | `AppointmentBookingFlow.tsx:3988-4013` | Low/Medium. |
+| **U15** | **No self-service correction after submit.** A consumed public link shows "Already submitted, contact the venue" — a typo means a phone call. | `p/forms/[code]/page.tsx` consumed copy | Low. |
+| **U16** | **Expired links fail silently** — expiry happens on access/cron with no "your link expired" message, so guests may keep retrying a dead link. (Related to the §9.5 Low item on the expiry-reminder template, but distinct: this is the *link*, not the record.) | `public-forms-service.ts:112-122` | Low. |
+| **U17** | **Form renderer accessibility gaps** — no `aria-invalid`, `aria-describedby` (help text not linked), or `aria-required`; validation errors are not programmatically tied to their fields. Reinforces the §9.5 deferred "a11y label-association sweep." | `ComplianceFormRenderer.tsx` | Low/Medium. |
+
+### 10.3 Verification notes (claims checked and rejected)
+
+During this review three plausible-sounding concerns were checked and found to be
+non-issues, recorded here so they are not re-raised:
+
+- The public pre-check POST **is** rate-limited (30/IP/min). `pre-check/route.ts:42`.
+- Group bookings **do** enforce compliance per attendee (the "not wired" idea was a stale reading of §6/§9 history, not the code). `create-group/route.ts:504-528`.
+- Single-use link consumption **is** atomic with rollback on capture failure — no race. `public-forms-service.ts:214-258`.
+
+### 10.4 Suggested implementation order
+
+Sequenced by value-per-effort, front-loading the two changes a salon and a client
+feel most, and grouping by the surface each touches so work batches cleanly. All
+of it stays behind `compliance_records_enabled`, Appointments-tier, off by default.
+
+- **Step 1 — Builder field options (U1) + pass/fail flow (U2).** *~2–3 days. Highest staff ROI.* Add help-text, max-length and default-value inputs to `FieldCard` (the schema/renderer already accept them), and rework the pass/fail panel so picking result type = pass/fail auto-inserts (or inline-prompts for) the staff Pass/Fail select with per-option toggles, instead of the after-the-fact mapping box. These share one file (`ComplianceFormBuilder.tsx`) so they batch.
+- **Step 2 — Signature pad mobile fix (U11) + guest accessibility (U17).** *~1–2 days. Highest guest ROI.* Re-measure the canvas on resize (ResizeObserver) and raise mobile height; add `aria-invalid`/`aria-describedby`/`aria-required` in the same renderer pass. One component each, no data changes.
+- **Step 3 — Draft persistence (U10).** *~2 days.* localStorage draft for inline + public forms (resume on reload), keyed by link code / booking draft id; clear on submit. Removes the worst guest friction after the signature pad.
+- **Step 4 — Blocked-online guidance (U12) + returning-client lookup (U13).** *~1–2 days.* Default `online_unmet_message` to actionable copy (or require it when a type is `block_online` and not client-completable); soften the email-only "already on file" check (e.g. also match on phone, or surface a "booked before with another email? contact us" path).
+- **Step 5 — Staff management niceties (U4, U5, U3, U7).** *~3 days.* Add a read-only version list + changelog field + restore (U4), a Duplicate action (U5), a clear create-time warning that result type is permanent (U3), and fold the edit save into a single transactional request (U7).
+- **Step 6 — Lower-priority polish.** *as capacity allows.* Two-panel consolidation (U14), self-service resubmit / "fix a mistake" path (U15), expired-link notice (U16), option-value collision guard (U8), library preview (U9), navigation consolidation (U6).
+
+Steps 1 and 2 are the recommended next sprint: between them they cover the
+biggest staff and guest pain points, touch isolated files, and need no migration.
+Steps 4 and 5 are the only ones that touch the data model or shared message copy;
+everything else is front-end-only.

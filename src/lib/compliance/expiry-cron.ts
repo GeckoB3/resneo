@@ -66,7 +66,8 @@ async function defaultSendReminder(
       venueId: target.venueId,
       staffId: null,
       linkId: issued.value.link.id as string,
-      sentVia,
+      // Record the channel actually used (dispatch may fall back sms→email).
+      sentVia: result.channel ?? sentVia,
       guestId: target.guestId,
       complianceTypeId: target.complianceTypeId,
     });

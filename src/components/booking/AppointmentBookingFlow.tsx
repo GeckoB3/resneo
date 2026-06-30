@@ -5,11 +5,8 @@ import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
-import CompliancePreCheckNotice from './CompliancePreCheckNotice';
-import BookingComplianceForms, {
-  clearBookingComplianceDrafts,
-  type BookingComplianceState,
-} from './BookingComplianceForms';
+import BookingComplianceBlock from './BookingComplianceBlock';
+import { clearBookingComplianceDrafts, type BookingComplianceState } from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
@@ -588,10 +585,6 @@ export function AppointmentBookingFlow({
   // submissions + whether every mandatory form is done (gates Confirm) + the type ids
   // (so the pre-check notice suppresses the forms it is already rendering).
   const [bookingCompliance, setBookingCompliance] = useState<BookingComplianceState | null>(null);
-  // Whether each compliance sub-panel currently has content, so the shared "Before you book"
-  // card (and its heading) only appears when there is actually something to show.
-  const [precheckActive, setPrecheckActive] = useState(false);
-  const [inlineComplianceActive, setInlineComplianceActive] = useState(false);
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -632,7 +625,10 @@ export function AppointmentBookingFlow({
   // reaches confirmation/payment). Doing it here, not on submit start, means a failed submit
   // still resumes on reload, while a completed booking doesn't leave stale answers behind.
   useEffect(() => {
-    if (isPublicGuest && (step === 'confirmation' || step === 'payment')) {
+    if (
+      isPublicGuest &&
+      (step === 'confirmation' || step === 'payment' || step === 'group_confirmation' || step === 'group_payment')
+    ) {
       clearBookingComplianceDrafts(venue.id);
     }
   }, [step, isPublicGuest, venue.id]);
@@ -2373,6 +2369,18 @@ export function AppointmentBookingFlow({
         return;
       }
     }
+    // Gate on mandatory inline compliance forms (the server re-checks; this is a friendly guard).
+    if (isPublicGuest && bookingCompliance && !bookingCompliance.mandatoryComplete) {
+      setError('Please complete the required form(s) above before booking.');
+      return;
+    }
+    const complianceCreateFields =
+      isPublicGuest && bookingCompliance && bookingCompliance.submissions.length > 0
+        ? {
+            compliance_submissions: bookingCompliance.submissions,
+            compliance_draft_id: bookingCompliance.draftId,
+          }
+        : {};
     setSubmitting(true);
     try {
       const res = await fetch(bookingCreateGroupUrl(), {
@@ -2399,6 +2407,7 @@ export function AppointmentBookingFlow({
             booking_time: p.time,
           })),
           marketing_consent: details.marketing_consent,
+          ...complianceCreateFields,
         }),
       });
       const data = await res.json();
@@ -2426,7 +2435,7 @@ export function AppointmentBookingFlow({
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isPublicGuest, accountGate, publicCreateErrorMessage]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isPublicGuest, accountGate, publicCreateErrorMessage, bookingCompliance]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -4002,47 +4011,19 @@ export function AppointmentBookingFlow({
           ) : (
             <>
               {isPublicGuest && (
-                <div
-                  className={
-                    precheckActive || inlineComplianceActive
-                      ? 'mb-4 rounded-xl border border-slate-200 bg-white p-4'
-                      : ''
+                <BookingComplianceBlock
+                  venueId={venue.id}
+                  serviceIds={
+                    multiServiceSegments && multiServiceSegments.length > 0
+                      ? multiServiceSegments.map((s) => s.serviceId)
+                      : selectedServiceId
+                        ? [selectedServiceId]
+                        : []
                   }
-                >
-                  {(precheckActive || inlineComplianceActive) && (
-                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Before you book</h4>
-                  )}
-                  <div className="space-y-3">
-                    <CompliancePreCheckNotice
-                      venueId={venue.id}
-                      serviceIds={
-                        multiServiceSegments && multiServiceSegments.length > 0
-                          ? multiServiceSegments.map((s) => s.serviceId)
-                          : selectedServiceId
-                            ? [selectedServiceId]
-                            : []
-                      }
-                      email={precheckEmail}
-                      suppressTypeIds={bookingCompliance?.inlineTypeIds ?? []}
-                      embedded
-                      onActiveChange={setPrecheckActive}
-                    />
-                    <BookingComplianceForms
-                      venueId={venue.id}
-                      serviceIds={
-                        multiServiceSegments && multiServiceSegments.length > 0
-                          ? multiServiceSegments.map((s) => s.serviceId)
-                          : selectedServiceId
-                            ? [selectedServiceId]
-                            : []
-                      }
-                      submittingBooking={submitting}
-                      onChange={setBookingCompliance}
-                      embedded
-                      onActiveChange={setInlineComplianceActive}
-                    />
-                  </div>
-                </div>
+                  email={precheckEmail}
+                  submittingBooking={submitting}
+                  onChange={setBookingCompliance}
+                />
               )}
             <DetailsStep
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
@@ -4751,29 +4732,41 @@ export function AppointmentBookingFlow({
           {submitting ? (
             <BookingSubmittingPanel variant="appointment" />
           ) : (
-            <DetailsStep
-              slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
-              date={groupPeople[0]?.date ?? date}
-              partySize={groupPeople.length}
-              onSubmit={handleGroupDetailsSubmit}
-              onBack={() => setStep('group_review')}
-              variant="appointment"
-              appointmentDepositPence={totalGroupDepositPence}
-              appointmentChargeLabel={
-                groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
-                  ? 'full_payment'
-                  : 'deposit'
-              }
-              currencySymbol={sym}
-              refundNoticeHours={refundNoticeHours}
-              multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
-              phoneDefaultCountry={phoneDefaultCountry}
-              audience={detailsAudience}
-              collectClientAddress={collectClientAddressGroup}
-              initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
-              emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
-              {...publicDetailsFieldProps}
-            />
+            <>
+              {isPublicGuest && (
+                <BookingComplianceBlock
+                  venueId={venue.id}
+                  serviceIds={groupPeople.map((p) => p.serviceId)}
+                  email={precheckEmail}
+                  submittingBooking={submitting}
+                  onChange={setBookingCompliance}
+                />
+              )}
+              <DetailsStep
+                slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
+                date={groupPeople[0]?.date ?? date}
+                partySize={groupPeople.length}
+                onSubmit={handleGroupDetailsSubmit}
+                onBack={() => setStep('group_review')}
+                variant="appointment"
+                appointmentDepositPence={totalGroupDepositPence}
+                appointmentChargeLabel={
+                  groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
+                    ? 'full_payment'
+                    : 'deposit'
+                }
+                currencySymbol={sym}
+                refundNoticeHours={refundNoticeHours}
+                multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
+                phoneDefaultCountry={phoneDefaultCountry}
+                audience={detailsAudience}
+                collectClientAddress={collectClientAddressGroup}
+                initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
+                emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
+                onEmailChange={isPublicGuest ? setPrecheckEmail : undefined}
+                {...publicDetailsFieldProps}
+              />
+            </>
           )}
         </div>
       )}

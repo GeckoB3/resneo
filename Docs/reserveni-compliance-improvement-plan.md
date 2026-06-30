@@ -515,6 +515,52 @@ lint:modals clean; 1676 tests green.
   (`ComplianceFormRenderer.tsx`, `PublicComplianceForm.tsx`,
   `ComplianceCaptureDialog.tsx`.)
 
+### 10.9 Second end-to-end QA pass (June 2026)
+
+Another full staff + customer review (two independent passes plus direct
+tracing). The earlier fixes were verified solid; three further items were fixed.
+No migration; typecheck + lint + lint:modals clean; 1676 tests green.
+
+**Bugs fixed**
+
+1. **Group bookings had no compliance UI at all — a hard online dead-end.** The
+   "Before you book" card (pre-check + inline forms) rendered only in the
+   single/multi flow, while the `group_details` step had neither — yet
+   `create-group` enforces compliance and 409s a `block_online` requirement. So a
+   service bookable solo became un-bookable in a group with no online way to
+   satisfy it. Fixed by extracting the card into a self-contained
+   `BookingComplianceBlock` (which owns its own active-state, so no shared-flag
+   bugs) and rendering it in both the single and group details steps; the group
+   submit now gates on mandatory forms and threads `compliance_submissions` +
+   `compliance_draft_id` (the route already captured them before its gate). The
+   clear-on-success effect now also covers the group success steps.
+   (`BookingComplianceBlock.tsx`, `AppointmentBookingFlow.tsx`.)
+2. **Form links were mislabeled after an internal SMS→email fallback.**
+   `dispatchComplianceFormLink` silently re-sends by email when SMS fails but
+   returned `{ok:true}` with no channel, so the caller recorded `sent_via='sms'`
+   and the UI/audit said "sent by SMS" when it went by email. Dispatch now returns
+   the channel it actually used, and all four senders (manual send, resend,
+   auto-send reminders, expiry cron) persist/return that. (`dispatch.ts`,
+   `form-links/route.ts`, `.../resend/route.ts`, `auto-send.ts`, `expiry-cron.ts`.)
+3. **The venue "Default form-link channel" setting was ignored on manual sends.**
+   The Send-link buttons hard-coded `send_via:'email'`, so a venue set to SMS never
+   sent by SMS. The buttons now omit the channel and the route falls back to
+   `config.default_form_link_channel` (then to whatever destination the guest has).
+   (`zod-schemas.ts`, `form-links/route.ts`, `ComplianceDashboardView.tsx`,
+   `ComplianceSection.tsx`.)
+
+**Reviewed and confirmed solid:** the merged card's empty-state handling, the
+pre-check inline self-suppression, draft clear-on-success vs failed-submit resume,
+`consumePendingLinksForCapture` scoping, the `?refresh=1` dashboard revalidation,
+the `useSearchParams` sub-tab (no SSR/build concern), the canonicalJson save dedup,
+and the serverErrors plumbing on the public form + capture dialog.
+
+**Still open (low priority, by judgment):** inline-booking-create `field_errors`
+not shown per-field (the §10.8 follow-up — arrives at the flow level); the inline
+`mandatoryComplete` is vacuously true in the sub-second window before forms load
+(server re-checks, so no bypass — just a blunter error path); a client-side file
+size/type guard before upload.
+
 ## Sources
 
 - Vagaro — [Forms feature](https://www.vagaro.com/pro/forms), [Make Forms Mandatory](https://support.vagaro.com/hc/en-us/articles/24398220401819-Make-Forms-Mandatory-for-Your-Customers), [Dual‑signature forms](https://www.vagaro.com/learn/vagaros-dual-signature-forms-improve-intake-liability), [Notifications & reminders](https://support.vagaro.com/hc/en-us/articles/115000439594-Send-Notifications-and-Reminders-to-Your-Customers), [Check‑In Kiosks](https://support.vagaro.com/hc/en-us/articles/5024382031131-Manage-Your-Check-In-Kiosks), [Self check‑in](https://support.vagaro.com/hc/en-us/articles/115003955413-Self-Check-In-at-a-Business-for-Customers-of-a-Vagaro-Business)

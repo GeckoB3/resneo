@@ -56,7 +56,8 @@ export async function POST(request: NextRequest) {
     const hasEmail = Boolean(g.email?.trim());
     const hasPhone = Boolean(g.phone?.trim());
 
-    let channel: 'email' | 'sms' | 'manual_copy' = parsed.data.send_via;
+    // Start from the requested channel, or the venue's default when none was specified.
+    let channel: 'email' | 'sms' | 'manual_copy' = parsed.data.send_via ?? gate.ctx.config.default_form_link_channel;
     if (channel === 'email' && !hasEmail) channel = hasPhone ? 'sms' : 'manual_copy';
     else if (channel === 'sms' && !hasPhone) channel = hasEmail ? 'email' : 'manual_copy';
 
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
     if (!issued.ok) return NextResponse.json({ error: issued.error }, { status: issued.status });
 
     let dispatched = false;
+    let sentChannel: 'email' | 'sms' | null = null;
     if (channel !== 'manual_copy') {
       const result = await dispatchComplianceFormLink(staff.db, {
         venueId: staff.venue_id,
@@ -82,11 +84,13 @@ export async function POST(request: NextRequest) {
       });
       if (result.ok) {
         dispatched = true;
+        // The channel the message actually went out on (dispatch may fall back sms→email).
+        sentChannel = result.channel ?? channel;
         await markFormLinkSent(staff.db, {
           venueId: staff.venue_id,
           staffId: staff.id,
           linkId: issued.value.link.id as string,
-          sentVia: channel,
+          sentVia: sentChannel,
           guestId: parsed.data.guest_id,
           complianceTypeId: parsed.data.compliance_type_id,
         });
@@ -99,8 +103,7 @@ export async function POST(request: NextRequest) {
         public_url: issued.value.publicUrl,
         reused: issued.value.reused,
         dispatched,
-        // The channel actually used (after fallback), so the caller can tell the user.
-        sent_via: dispatched ? channel : null,
+        sent_via: sentChannel,
       },
       { status: issued.value.reused ? 200 : 201 },
     );

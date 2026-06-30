@@ -102,7 +102,6 @@ export function ComplianceSection({
           guest_id: guestId,
           compliance_type_id: typeId,
           booking_id: bookingId ?? null,
-          send_via: 'email',
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -137,7 +136,7 @@ export function ComplianceSection({
       }
       setActionMessage(
         body.dispatched
-          ? `Form link resent by ${sendVia === 'sms' ? 'SMS' : 'email'}.`
+          ? `Form link resent by ${body.sent_via === 'sms' ? 'SMS' : 'email'}.`
           : `We couldn’t send it (no ${sendVia === 'sms' ? 'mobile number' : 'email'} on file). Use Copy link instead.`,
       );
       refresh();

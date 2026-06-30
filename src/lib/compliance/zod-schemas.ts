@@ -124,6 +124,7 @@ export const complianceFormLinkCreateSchema = z.object({
   guest_id: z.string().uuid(),
   compliance_type_id: z.string().uuid(),
   booking_id: z.string().uuid().nullable().optional(),
-  send_via: z.enum(COMPLIANCE_LINK_SENT_VIA).default('email'),
+  // Optional: when omitted, the route uses the venue's default form-link channel.
+  send_via: z.enum(COMPLIANCE_LINK_SENT_VIA).optional(),
 });
 export type ComplianceFormLinkCreateInput = z.infer<typeof complianceFormLinkCreateSchema>;

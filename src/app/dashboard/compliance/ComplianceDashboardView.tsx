@@ -75,7 +75,7 @@ export function ComplianceDashboardView() {
       const res = await fetch('/api/venue/compliance/form-links', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guest_id: guestId, compliance_type_id: typeId, booking_id: bookingId ?? null, send_via: 'email' }),
+        body: JSON.stringify({ guest_id: guestId, compliance_type_id: typeId, booking_id: bookingId ?? null }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {

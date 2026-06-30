@@ -48,18 +48,23 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       sentVia,
       kind: 'request',
     });
-    if (result.ok) {
+    const sentChannel = result.ok ? (result.channel ?? sentVia) : null;
+    if (result.ok && sentChannel) {
       await markFormLinkSent(staff.db, {
         venueId: staff.venue_id,
         staffId: staff.id,
         linkId: id,
-        sentVia,
+        sentVia: sentChannel,
         guestId: l.guest_id,
         complianceTypeId: l.compliance_type_id,
       });
     }
 
-    return NextResponse.json({ public_url: complianceFormPublicUrl(l.code), dispatched: result.ok });
+    return NextResponse.json({
+      public_url: complianceFormPublicUrl(l.code),
+      dispatched: result.ok,
+      sent_via: sentChannel,
+    });
   } catch (err) {
     console.error('POST /api/venue/compliance/form-links/[id]/resend failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

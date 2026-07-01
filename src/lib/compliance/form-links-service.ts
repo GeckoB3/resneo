@@ -339,7 +339,7 @@ export async function listFormLinks(
   let query = admin
     .from('compliance_form_links')
     .select(
-      'id, code, guest_id, compliance_type_id, booking_id, status, sent_via, sent_at, expires_at, consumed_at, created_at, compliance_types!inner(name)',
+      'id, code, guest_id, compliance_type_id, booking_id, status, sent_via, sent_at, expires_at, consumed_at, created_at, reminder_count, last_reminded_at, compliance_types!inner(name)',
     )
     .eq('venue_id', venueId)
     .order('created_at', { ascending: false });

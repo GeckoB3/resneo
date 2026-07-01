@@ -434,7 +434,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message:
-            "Thanks. We've noted that you're coming. Your booking is confirmed on our side.",
+            "Thanks! Your appointment is already confirmed. We look forward to seeing you.",
           guest_attendance_confirmed_at: now,
         });
       }
@@ -472,7 +472,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: "Thanks. We've noted that you're coming. We look forward to seeing you.",
+        message: "Thanks! Your appointment is confirmed. We look forward to seeing you.",
       });
     }
 

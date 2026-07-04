@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Reserve NI — Database schema reference (curated map)
 -- =============================================================================
--- Last regenerated: 3 Dec 2026, from supabase/migrations/ (194 migrations).
+-- Last regenerated: 4 Jul 2026, from supabase/migrations/ (230 migrations).
 --
 -- THIS FILE IS NOT THE SOURCE OF TRUTH.
 -- The canonical schema is the ordered migration set in `supabase/migrations/`.
@@ -45,11 +45,16 @@
 -- Linked-accounts enums — see migration 20260919120000_linked_accounts.sql:
 --   link_status, link_action_level, link_calendar_visibility, link_termination_reason
 
+-- referral_status               ('pending','referee_signed_up','credited','failed','void')
+--                               Venue-to-venue referral lifecycle; see 20260527120200_referrals.sql
+-- sales_attribution_status      ('pending','active','churned')
+--                               Sales-agent signup attribution lifecycle; see 20261211130000_sales_programme.sql
+
 
 -- =============================================================================
 -- TABLE INVENTORY (public schema, grouped by domain)
 -- =============================================================================
--- ~95 tables. For each table's columns, FKs and RLS, open the creating migration.
+-- ~123 tables. For each table's columns, FKs and RLS, open the creating migration.
 
 -- --- Core venue & identity ---------------------------------------------------
 -- venues                         Core venue profile, booking_model, enabled_models,
@@ -82,7 +87,8 @@
 -- events                           IMMUTABLE append-only booking audit log
 -- webhook_events                   Stripe / external webhook idempotency log
 -- reconciliation_alerts            Payment / data reconciliation findings
--- runs                             Cron / batch job run records
+-- cron_runs                        Run history for scheduled cron jobs (success,
+--                                  duration, response detail); powers platform health page
 
 -- --- Appointments & unified scheduling (Model B) -----------------------------
 -- practitioners                    Bookable staff who take appointments
@@ -101,6 +107,12 @@
 -- availability_blocks              Availability block entries
 -- party_size_durations             Duration by party size
 -- processing time blocks           (columns on services/bookings — see 20260830* migration)
+
+-- --- Add-ons -----------------------------------------------------------------
+-- addon_groups                     Container for selection constraints on optional add-ons
+-- addons                           Selectable options within an addon_group (soft-delete via archived_at)
+-- service_addon_groups             Junction linking an addon_group to one or many services
+-- booking_addons                   Immutable snapshot of add-ons chosen at booking time
 
 -- --- Restaurant tables (Model A) ---------------------------------------------
 -- venue_tables                     Physical tables
@@ -166,8 +178,11 @@
 -- --- Linked accounts & collectives -------------------------------------------
 -- account_links                     Pairwise venue links
 -- account_link_audit_log            Link lifecycle audit
+-- account_link_notifications        Per-venue in-app notification feed for Linked Accounts
 -- venue_collectives                 Multi-venue collective groupings
 -- venue_collective_members          Collective membership
+-- collective_service_items          Combined booking page service items (Model B collectives)
+-- collective_service_providers      Which collective member/venue service fulfils an item
 
 -- --- Import tool -------------------------------------------------------------
 -- import_sessions                   Import wizard sessions
@@ -177,11 +192,32 @@
 -- import_validation_issues          Validation findings
 -- import_booking_rows               Parsed booking rows
 -- import_booking_references         Resolved booking FK references
+-- import_ai_mapping_cache           Cached AI header-to-field mappings (service-role only)
 -- external_record_refs              Mapping to source-platform record ids
 
 -- --- Platform support --------------------------------------------------------
 -- support_sessions                  Superuser sign-in-as venue context
 -- support_audit_events              Append-only support action log
+
+-- --- Platform admin ----------------------------------------------------------
+-- platform_invoices                 Subscription revenue ledger (Stripe invoice webhook)
+-- platform_audit_events             Append-only log of superuser platform actions
+-- platform_announcements            Dismissible dashboard banners set by superusers
+-- platform_announcement_dismissals  Per-venue dismissal of an announcement
+
+-- --- Referrals ---------------------------------------------------------------
+-- referral_codes                    Per-venue referral code (unique per venue)
+-- referrals                         Venue-to-venue referral records + credit state
+-- referral_audit                    Append-only referral status-change audit
+
+-- --- Sales programme ---------------------------------------------------------
+-- salespeople                       External Resneo sales agents
+-- sales_codes                       Signup codes issued to salespeople
+-- sales_attributions                Venue signups attributed to a salesperson/code
+-- sales_invoice_revenue             Per-venue monthly paid revenue for a signup
+-- sales_bonus_tiers                 Per-salesperson bonus thresholds
+-- sales_bonus_awards                Bonus awards earned per month
+-- sales_monthly_statements          Per-salesperson monthly commission statements
 
 -- --- Metrics -----------------------------------------------------------------
 -- venue_baseline_metrics_snapshots  Weekly per-venue baseline metric snapshots

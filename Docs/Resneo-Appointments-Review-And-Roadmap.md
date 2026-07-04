@@ -2,6 +2,7 @@
 
 **Version:** 1.0 (consolidated)
 **Date:** 21 May 2026
+**Last reviewed:** 4 July 2026 (factual-accuracy pass: compliance module, referrals, and feature-flag defaults corrected to match shipped code).
 **Supersedes:** `Resneo-Appointments-Functionality-Review-And-Plan-May-2026.md` (v1.0) and
 `Resneo-Appointments-Functionality-Review-And-Plan-May2026.md` (v3.0) — both removed.
 **Scope:** Appointment-style businesses using **appointments**, **classes**, **ticketed events**, and
@@ -42,10 +43,12 @@ Phorest**.
 
 **May 2026 inflection point.** Engineering has closed the **Tier 1 reception-desk gaps** that
 previously blocked sales demos. The following are **complete in the codebase** and ship behind
-per-venue feature flags (default off until pilot rollout):
+per-venue feature flags. Most default off until pilot rollout, but **guest self-reschedule defaults
+on** (it persists only an explicit `false`; omitted means on, per `FLAG_DEFAULT_ON` in
+`src/lib/feature-flags/resolve.ts`):
 
-- **Any-available practitioner** booking — flag `any_available_practitioner`
-- **Guest self-reschedule** — flag `guest_self_reschedule` (manage link + `/api/confirm` modify)
+- **Any-available practitioner** booking, flag `any_available_practitioner` (default off)
+- **Guest self-reschedule**, flag `guest_self_reschedule` (**default on**; manage link + `/api/confirm` modify)
 - **Appointment waitlist v2** — flag `waitlist_v2` (join, staff offer, auto-offer on cancel, expiry cron)
 - **Calendar blocks UI** — create/edit/delete on the practitioner calendar (not flagged)
 - **Unified booking detail** — one `BookingDetailSurface` across calendar, list, contacts, floor plan
@@ -138,7 +141,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Practitioner leave / days off | ● | Availability tabs, `practitioner-leave` |
 | **Calendar blocks UI** | ● | Create/edit/delete on practitioner calendar |
 | **Any-available practitioner** | ⚑ | `appointment-any-practitioner.ts`; flag `any_available_practitioner` |
-| **Guest self-reschedule** | ⚑ | `guest-appointment-modify-policy.ts`; flag `guest_self_reschedule` |
+| **Guest self-reschedule** | ⚑ | `guest-appointment-modify-policy.ts`; flag `guest_self_reschedule` (**defaults on**, unlike the other flags) |
 | **Appointment waitlist** | ⚑ | Join / offer / auto-offer on cancel / expiry cron; flag `waitlist_v2` |
 | Late-reschedule fee enforcement | ○ | Deferred to Phase 1b (needs saved cards) |
 | Native staff mobile app | ○ | Responsive web only |
@@ -200,8 +203,8 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Merge contacts | ● | Admin merge modal |
 | Household linking | ● | `ContactHouseholdSection` |
 | Guest loyalty ledger | ◐ | Manual admin point adjustments only — no automated earn/redeem |
-| Consultation forms builder | ○ | Phorest-class gap |
-| Patch test registry + expiry alerts | ○ | UK/Ireland beauty compliance gap |
+| Consultation forms builder | ● | Shipped: form-schema builder + template library (`new-client-intake.ts`, `massage-intake.ts`, consent forms) in `src/lib/compliance/`; tablet-friendly public form links; flag `compliance_records_enabled` |
+| Patch test registry + expiry alerts | ● | Shipped: compliance records + expiry cron (`src/app/api/cron/compliance-expiry`), booking-block enforcement; patch-test templates (`eyebrow-patch-test.ts`, `eyelash-patch-test.ts`, `ppd-patch-test.ts`) |
 | Before/after photo gallery | ○ | Phorest-class gap |
 | Pet / animal profiles | ○ | Groomer-specific gap (breed, coat, temperament, vaccination) |
 
@@ -338,8 +341,9 @@ Gaps grouped by tier. Ordered by revenue impact × frequency in sales conversati
 | Calendar blocks UI | Done | Practitioner calendar |
 | Unified booking detail | Done | `BookingDetailSurface` |
 
-**Remaining Tier 1 risk is rollout, not code** — flags default off; pilots must enable them, run the
-demo script, and measure §9 before claiming parity in GTM.
+**Remaining Tier 1 risk is rollout, not code.** Most flags default off (guest self-reschedule already
+defaults on), so pilots must enable the rest, run the demo script, and measure §9 before claiming
+parity in GTM.
 
 ### Tier 2 — Compliance & retention (current sales blockers)
 
@@ -430,8 +434,8 @@ chosen instead, drop P1b.4 and accept the competitive scoring in §4.
 
 ## 8. Roadmap
 
-Horizon: **May 2026 → mid-2027**. Phases overlap. Legend: **Done** · **Flagged** (shipped, default
-off) · **Planned** · **Open** (needs a decision).
+Horizon: **May 2026 → mid-2027**. Phases overlap. Legend: **Done** · **Shipped** (delivered since this
+plan was drafted) · **Flagged** (shipped, default off) · **Planned** · **Open** (needs a decision).
 
 ### Phase 0 — Foundation — **substantially done**
 
@@ -439,7 +443,7 @@ off) · **Planned** · **Open** (needs a decision).
 |----|------|--------|
 | P0.1 | Radix Dialog/Sheet + shared primitives on operational paths | Done (Wave E legacy modals ongoing) |
 | P0.2 | Unified `BookingDetailSurface` across all booking surfaces | Done |
-| P0.3 | Feature flags: `waitlist_v2`, `guest_self_reschedule`, `any_available_practitioner` | Done |
+| P0.3 | Feature flags: `waitlist_v2`, `guest_self_reschedule`, `any_available_practitioner`, `class_commerce_enabled`, `compliance_records_enabled` | Done |
 | P0.4 | Playwright smoke: book → pay → confirm → guest reschedule | Done (CI gated by `RUN_E2E_SMOKE`) |
 | P0.5 | Baseline metrics instrumentation + cron | Done (migration must be applied in prod) |
 
@@ -479,10 +483,15 @@ Retail catalogue / inventory / terminal hardware remain out of scope.
 
 ### Phase 2 — Compliance & retention (Weeks 16–30, Sep 2026–Jan 2027)
 
+**Update (4 July 2026):** P2.1 and P2.2 shipped ahead of this roadmap. Compliance is now a delivered
+module (`src/lib/compliance/`, records dashboard at `/dashboard/compliance`, expiry cron, booking-block
+enforcement, and a template library covering patch tests, intake, and consent), gated by
+`compliance_records_enabled`. The remaining Phase 2 items (P2.3–P2.5) are still planned.
+
 | ID | Work | Priority | Notes |
 |----|------|----------|-------|
-| P2.1 | **Patch test registry** — expiry date, booking-block hook, staff alert | P0 | Segment gate for colour/lash/brow; pull into Phase 1b if 1a held schedule |
-| P2.2 | **Consultation / intake form builder** | P1 | GDPR capture, link to service, tablet-friendly guest fill; serves beauticians + massage |
+| P2.1 | **Patch test registry** (expiry date, booking-block hook, staff alert) | **Shipped** | Delivered: compliance records + expiry cron (`src/app/api/cron/compliance-expiry`), booking-block enforcement; templates `eyebrow-patch-test.ts`, `eyelash-patch-test.ts`, `ppd-patch-test.ts` |
+| P2.2 | **Consultation / intake form builder** | **Shipped** | Delivered: form-schema builder + template library (intake, consent) in `src/lib/compliance/`; GDPR capture, tablet-friendly guest fill via public form links |
 | P2.3 | **Automated review requests** | P1 | Trigger on `Completed`; Google review link template |
 | P2.4 | **Salon loyalty programme** | P2 | Automated earn/redeem on visit/spend; builds on the existing ledger |
 | P2.5 | Before/after photo gallery on contact | P3 | Beauty + grooming visual records |
@@ -496,7 +505,7 @@ intake; colour-focused salons are sellable.
 |----|------|----------|-------|
 | P3.1 | **Reserve with Google** | P1 | Completion depends on Google approval timeline |
 | P3.2 | **WhatsApp notifications** | P1 | New channel in `lib/communications/`; abstraction ready |
-| P3.3 | **Referral / share booking link** | P2 | Venue-led growth substitute for a marketplace |
+| P3.3 | **Referral / share booking link** | **Shipped** | Delivered: referral engine (`src/lib/referrals/`), dashboard (`/dashboard/referrals`), and APIs (`src/app/api/referrals/*`); venue-led growth substitute for a marketplace |
 | P3.4 | **Meta booking links** (Instagram/Facebook) | P2 | Booksy strength for barbers/beauty |
 | P3.5 | **Two-way messaging inbox** | P3 | Thread per guest; opt-in SMS replies |
 

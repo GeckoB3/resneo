@@ -168,13 +168,13 @@ The tab body contains three sub-panels (driven by an inline `<TabBar>` within th
    - The per-service editor (§3.6) is the other entry point for the same data — both write to `service_compliance_requirements` via the same API
 
 3. **General settings** (`?tab=compliance&sub=general`) — persisted in `venues.feature_flags.compliance` JSONB sub-object (see §14.2 for schema):
-   - Default capture method for new types (`staff_in_venue` | `client_online` | `both`)
-   - Default channel for sending form links (`email` | `sms` | `both`)
-   - Reminder cadence (days before expiry to remind client — int)
-   - Lock period (hours before a booking the client must complete required forms)
+   - Default channel for sending form links (`email` | `sms`)
+   - Reminder cadence (days before expiry to remind client, int)
    - Behaviour when a client arrives and the form is incomplete (`warn_only` only in v1; `block_check_in` is deferred to v2 as it requires a check-in scan surface that does not yet exist in the dashboard)
 
-**Why the form builder lives at a separate top-level dashboard route, not inside settings:** the existing dashboard convention is that complex editors (Services, Floor Plan, Linked Calendar) have their own top-level route under `/dashboard/<name>` with `loading.tsx` and skeleton support, and settings only contains read/light-edit forms. Compliance follows the same pattern with `/dashboard/compliance-types` (list and edit) — see §7.
+   Note: `default_capture_method` and `lock_period_hours` still exist as keys in the zod parser ([`src/lib/compliance/config.ts`](src/lib/compliance/config.ts)) for backward-compatible parsing of previously-stored config, but they are deprecated: they are no longer surfaced in the settings UI and have no consumer. Do not present them as configurable general settings.
+
+**Why the form builder lives at a separate top-level dashboard route, not inside settings:** the existing dashboard convention is that complex editors (Services, Floor Plan, Linked Calendar) have their own top-level route under `/dashboard/<name>` with `loading.tsx` and skeleton support, and settings only contains read/light-edit forms. Compliance follows the same pattern: the builder (create and edit) lives at `/dashboard/compliance-types/new` and `/dashboard/compliance-types/[id]/edit` (see §7). The types **list** now lives in Settings → Compliance → Templates and types; the bare `/dashboard/compliance-types` index route (`src/app/dashboard/compliance-types/page.tsx`) `redirect()`s to `/dashboard/settings?tab=compliance` rather than rendering its own list.
 
 ### 3.4 Public form submission page
 
@@ -394,7 +394,7 @@ compliance_records
 ├── responses                   jsonb NOT NULL DEFAULT '{}'::jsonb                       -- keyed by field id; see §4.4.1
 ├── captured_by_staff_id        uuid REFERENCES staff(id) ON DELETE SET NULL              -- null if client self-submitted
 ├── captured_at                 timestamptz NOT NULL DEFAULT now()
-├── capture_channel             text NOT NULL CHECK (capture_channel IN ('staff_web','staff_mobile','client_email','client_sms','client_walkin','import'))
+├── capture_channel             text NOT NULL CHECK (capture_channel IN ('staff_web','staff_mobile','client_email','client_sms','client_walkin','client_booking','import'))
 ├── capture_ip                  inet                                                      -- client IP for online submissions
 ├── capture_user_agent          text
 ├── expires_at                  timestamptz                                               -- computed at capture time
@@ -414,6 +414,7 @@ The `capture_channel` values and their meanings:
 - `staff_mobile` — staff completes it in the React Native app (once compliance is exposed there)
 - `client_email` / `client_sms` — client self-submits via a link; the originating `compliance_form_links.sent_via` determines which
 - `client_walkin` — client completes the form themselves on a staff device at the venue (handed tablet / kiosk mode); distinct from `staff_web` because the client, not staff, entered the responses
+- `client_booking`: client completes the form inline while making an online booking (in-booking collection; see §4.8). Added in migration `20261229120000_compliance_in_booking_collection.sql`.
 - `import` — bulk import of historical records through the existing import tool (`/dashboard/import`)
 
 #### 4.4.1 The `responses` JSONB shape
@@ -552,6 +553,19 @@ No `updated_at` column. A BEFORE UPDATE/DELETE trigger raises an exception, mirr
 
 `record.viewed` is written by the GET endpoint serving individual records to staff, so reads of sensitive medical data are traceable. (Implementing this as a server-side hook rather than a database trigger because the trigger would need the calling staff `id` from a custom session variable; staff resolution already happens in `getVenueStaff` in the API route.)
 
+### 4.8 In-booking collection (`online_collection` and `online_unmet_message`)
+
+Added after the original data model in migration [`20261229120000_compliance_in_booking_collection.sql`](supabase/migrations/20261229120000_compliance_in_booking_collection.sql) to let a client-online requirement be collected **during the online booking flow** rather than only via a form link sent afterwards. Two columns:
+
+- **`service_compliance_requirements.online_collection`** `text NOT NULL DEFAULT 'confirmation_link'`, `CHECK (online_collection IN ('inline','confirmation_link','none'))`. Per-requirement placement of where the client-online form is offered during online booking:
+  - `inline`: rendered as a step inside the booking flow (client completes it before finishing the booking; the record is captured with `capture_channel = 'client_booking'`, see §4.4)
+  - `confirmation_link`: the link is carried in the booking confirmation email (the post-booking behaviour)
+  - `none`: not surfaced to the guest online (staff handle it)
+  - Indexed `(venue_id, online_collection)`. This column replaces the venue-wide `feature_flags.compliance.auto_send_on_booking` toggle: the migration backfills `on → confirmation_link`, `off → none`.
+- **`compliance_types.online_unmet_message`** `text` (nullable). A venue-set message shown when a booking is blocked by an unmet requirement the guest cannot self-complete online (e.g. a staff-only PPD patch test): for example "Please book a patch test first."
+
+The resolver loads `online_collection` per requirement (`ResolverRequirement.online_collection` in [`src/lib/compliance/resolve-requirements.ts`](src/lib/compliance/resolve-requirements.ts); the allowed values live in `COMPLIANCE_ONLINE_COLLECTION_MODES` in [`src/lib/compliance/constants.ts`](src/lib/compliance/constants.ts)), defaulting a missing value to `confirmation_link`.
+
 ---
 
 ## 5. Behaviour
@@ -580,10 +594,15 @@ When a booking is created (staff-side or online), the system runs the **Requirem
      status = 'completed'
      AND (expires_at IS NULL OR expires_at > booking_datetime)
      AND voided_at IS NULL
+     AND (type.result_type <> 'pass_fail' OR result = 'pass')
      AND (requirement.lock_period_hours IS NULL
           OR captured_at <= booking_datetime - make_interval(hours => requirement.lock_period_hours))
    -- The lock_period_hours guard ensures a patch test captured 12 hours before a booking does
    -- not satisfy a 48-hour requirement (see §4.5.1).
+   -- The pass_fail guard (audit H4) means a pass/fail type only satisfies a requirement on an
+   -- explicit result = 'pass'; a 'fail', 'inconclusive', or still-undecided (null, e.g. a
+   -- client-submitted patch test awaiting a staff decision) record does not count as satisfying.
+   -- Implemented in isRecordValidForBooking() in src/lib/compliance/resolve-requirements.ts.
 
 3. Compute the requirement's resolved state:
      - SATISFIED       — a valid record exists (passes step 2 filters)
@@ -767,9 +786,9 @@ src/lib/compliance/library/
 
 A visual editor for creating and editing `compliance_type_versions.form_schema`. Lives at a dedicated top-level dashboard route, not inside `/dashboard/settings`, to match how Services, Floor Plan, and Linked Calendar handle their complex editors:
 
-- `/dashboard/compliance-types` — list view (also reachable via the Settings → Compliance tab as a "Manage types" link)
-- `/dashboard/compliance-types/new` — create
-- `/dashboard/compliance-types/[id]/edit` — edit
+- `/dashboard/compliance-types/new`: create (renders `<ComplianceFormBuilder mode="new" />`)
+- `/dashboard/compliance-types/[id]/edit`: edit (renders `<ComplianceFormBuilder mode="edit" />`)
+- `/dashboard/compliance-types`: the bare index route no longer renders its own list; it `redirect()`s to `/dashboard/settings?tab=compliance`. The types list lives in Settings → Compliance → Templates and types (§3.3), which links out to the two builder routes above.
 
 ### 7.1 Layout
 

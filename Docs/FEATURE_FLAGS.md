@@ -32,7 +32,9 @@ When `any_available_practitioner` is on, venues can set `any_available_practitio
 | `mode` | `priority` (default) or `random` | How to choose a calendar when several are free at the same time |
 | `calendar_order` | UUID[] | Priority list (Settings → Beta features → calendar order UI) |
 
-All flags default to **off** until enabled per venue or via environment override.
+The flag schema also carries a nested `waitlist_config` sub-object (alongside `any_available_practitioner_config` and `compliance`) in the same JSONB, tied to `waitlist_v2` (see `src/lib/feature-flags/types.ts`).
+
+All flags default to **off** until enabled per venue or via environment override, **except `guest_self_reschedule`**, which defaults **on** unless a venue explicitly stores `false` (per `FLAG_DEFAULT_ON` in `src/lib/feature-flags/resolve.ts`). An environment override still wins over both.
 
 ## Resolution order
 

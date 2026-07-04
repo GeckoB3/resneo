@@ -6,6 +6,8 @@
 **Status:** Assessment only — no code changes were made.
 **Supersedes (partially):** `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md` (v1.0, 19 May 2026), which is now stale in several material respects (see §2).
 
+> **Status note (4 July 2026):** the remediation described in this document has since been **merged and is present in the current tree**. The fixes marked ✅ below are verified in code today, including the two capacity migrations (`supabase/migrations/20261225120000_cde_capacity_guards.sql`, `supabase/migrations/20261225120100_class_instances_unique_slot.sql`), the class‑scheduling closure/leave/break guard (`src/lib/calendar/class-schedule-availability-conflicts.ts`), and the shared public/staff event‑ticket validator (`src/lib/experience-events/validate-event-ticket-booking.ts`). The **only remaining threads** are the items still marked ⏳ deferred: the **S2 / S3** defense‑in‑depth hardening and the deferred feature list (full CDE calendar drag‑reschedule, multi‑resource booking, class waitlist, partial ticket refund, and event/credit‑class guest self‑move). Everything else in the plan is done.
+
 ---
 
 ## How this review was produced

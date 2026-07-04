@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-07-04).** This work has shipped. Kept for historical and architecture reference only; it does not describe pending work. Any "not yet built" / "proposed" / "no code written" status noted below is obsolete. See `Docs/archive/README.md`.
+
 # Resneo Referral Programme — Implementation Plan
 
 **Status:** Proposed (no code written yet)

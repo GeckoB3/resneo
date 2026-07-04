@@ -10,9 +10,11 @@ Quick reference for **admin** vs **calendar-scoped staff** vs **staff with no as
 | Experience events | `PATCH/DELETE /api/venue/experience-events/[id]` | Allowed | **403** — use collection routes above | **403** |
 | Experience events | `POST .../experience-events/[id]/cancel` | Allowed | **403** | **403** |
 | Class instances | `POST .../class-instances/[id]/cancel` | Allowed | **403** | **403** |
-| Classes | `POST .../classes/generate-instances` | Allowed | **403** | **403** |
 
 **Notes**
 
 - “Managed calendar” means the staff member’s assigned team calendars (`getStaffManagedCalendarIds` / `requireManagedCalendarAccess`).
 - Dashboard UI should hide admin-only actions (e.g. cancel-with-notifications) for non-admins; APIs remain the source of truth.
+- Class instances are now generated inside `POST /api/venue/classes`; the former standalone `POST /api/venue/classes/generate-instances` route was removed in the timetable rebuild.
+
+**Related:** for public-vs-staff booking routes and silent-auth signup behaviour, see [`ACCOUNT_PUBLIC_VS_STAFF_ROUTES.md`](ACCOUNT_PUBLIC_VS_STAFF_ROUTES.md).

@@ -131,12 +131,15 @@ export async function POST(request: NextRequest) {
     // unsaved hold's SetupIntent (spec §7.4).
     const usePaymentIntent = Boolean(booking.stripe_payment_intent_id) || Boolean(paymentIntentIdParam);
     if (!usePaymentIntent && !hold) {
+      // No stripe_payment_method_id filter: a partially processed webhook
+      // stamps the payment method BEFORE flipping the booking, and this path
+      // must still find the hold so the guest's confirm can finish the flip
+      // (the setup confirm is idempotent against a stamped method).
       const { data: holdData } = await supabase
         .from('booking_card_holds')
         .select(OPEN_HOLD_SELECT)
         .eq('booking_id', booking.id)
         .is('released_at', null)
-        .is('stripe_payment_method_id', null)
         .not('stripe_setup_intent_id', 'is', null)
         .maybeSingle();
       hold = (holdData as OpenHoldRow | null) ?? null;
@@ -229,6 +232,29 @@ export async function POST(request: NextRequest) {
     }
 
     if (!confirmResult.ok) {
+      if (confirmResult.reason === 'booking_cancelled') {
+        // The abandonment sweep cancelled the unit while this confirm was in
+        // flight (J2 race). Never report "confirmed" for a cancelled booking.
+        return NextResponse.json(
+          {
+            error:
+              'This booking was cancelled because it was not completed in time. Please make a new booking. If you were charged, the venue will arrange a refund.',
+            code: 'BOOKING_CANCELLED',
+          },
+          { status: 409 },
+        );
+      }
+      if (confirmResult.reason === 'hold_not_found') {
+        // The hold was waived or released while this tab was open: nothing to
+        // confirm any more, and nothing went wrong with the guest's card.
+        return NextResponse.json(
+          {
+            error: 'This booking no longer needs a card on file. You are all set.',
+            code: 'HOLD_RELEASED',
+          },
+          { status: 409 },
+        );
+      }
       console.error('[confirm-payment] booking confirm failed:', confirmResult.reason, {
         bookingId: booking.id,
       });

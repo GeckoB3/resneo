@@ -27,17 +27,20 @@ function bookingLabel(booking: BookingEmailData): string {
 export function renderCardHoldChargedEmail(
   booking: BookingEmailData,
   venue: VenueEmailData,
-  charge: { chargedPence: number },
+  charge: { chargedPence: number; chargedAt?: string | null },
 ): RenderedEmail {
   const date = formatDate(booking.booking_date);
   const time = formatTime(booking.booking_time);
   const amount = formatCardHoldFeePence(charge.chargedPence);
   const label = bookingLabel(booking);
   const appt = isAppointment(booking);
+  const chargedOn = charge.chargedAt ? formatDate(charge.chargedAt.slice(0, 10)) : null;
 
   const bodyCore =
     `You missed your ${label} at ${venue.name} on ${date} at ${time}. ` +
-    `As set out when you booked, a no-show fee of ${amount} has been charged to your saved card. ` +
+    `As set out when you booked, a no-show fee of ${amount} has been charged to your saved card` +
+    (chargedOn ? ` on ${chargedOn}` : "") +
+    `. ` +
     `If you think this is a mistake, please contact ${venue.name} directly.`;
 
   const mainContent =
@@ -72,6 +75,7 @@ export function renderCardHoldChargedEmail(
     textParts.push(`Service: ${booking.appointment_service_name}`);
   }
   textParts.push(`Amount charged: ${amount}`);
+  if (chargedOn) textParts.push(`Charged on: ${chargedOn}`);
   if (venue.address) textParts.push("", `Address: ${venue.address}`);
   textParts.push("", venue.name);
 

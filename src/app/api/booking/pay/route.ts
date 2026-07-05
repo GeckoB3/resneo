@@ -75,12 +75,15 @@ export async function GET(request: NextRequest) {
       stripe_payment_method_id: string | null;
       fee_pence: number;
       released_at: string | null;
+      terms_snapshot: { text?: string } | null;
     };
     let hold: HoldRow | null = null;
     if (booking.status !== 'Pending' || !booking.stripe_payment_intent_id) {
       const { data: holdRow } = await supabase
         .from('booking_card_holds')
-        .select('stripe_connected_account_id, stripe_setup_intent_id, stripe_payment_method_id, fee_pence, released_at')
+        .select(
+          'stripe_connected_account_id, stripe_setup_intent_id, stripe_payment_method_id, fee_pence, released_at, terms_snapshot',
+        )
         .eq('booking_id', booking.id)
         .maybeSingle();
       hold = (holdRow as HoldRow | null) ?? null;
@@ -166,11 +169,21 @@ export async function GET(request: NextRequest) {
         cardHoldFeePence = siblings.reduce((sum, row) => sum + (row.fee_pence ?? 0), 0);
       }
 
+      // The consent text the guest accepts must be the section 7.5 snapshot
+      // stored at create time (the dispute evidence), not a re-render from the
+      // live venue name and fee, which can drift after a rename or a sibling
+      // release.
+      const consentText =
+        typeof openUnsavedHold.terms_snapshot?.text === 'string'
+          ? openUnsavedHold.terms_snapshot.text
+          : null;
+
       return NextResponse.json({
         payment_mode: 'setup',
         client_secret: setupIntent.client_secret,
         stripe_account_id: openUnsavedHold.stripe_connected_account_id,
         card_hold_fee_pence: cardHoldFeePence,
+        card_hold_consent_text: consentText,
         deposit_amount_pence: null,
         ...bookingFields,
       });

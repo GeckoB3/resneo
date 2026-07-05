@@ -57,7 +57,12 @@ export function resolveCardHoldBookingEndIso(booking: CardHoldWindowBookingField
 
   if (booking.estimated_end_time) {
     const estimatedMs = new Date(booking.estimated_end_time).getTime();
-    if (Number.isFinite(estimatedMs)) return new Date(estimatedMs).toISOString();
+    if (Number.isFinite(estimatedMs)) {
+      // estimated_end_time is stamped on the booking's own date, so a value
+      // before the start is an overnight booking: roll to the next day, same
+      // as the booking_end_time branch above.
+      return new Date(estimatedMs < startMs ? estimatedMs + DAY_MS : estimatedMs).toISOString();
+    }
   }
 
   return new Date(startMs).toISOString();

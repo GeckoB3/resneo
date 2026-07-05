@@ -60,7 +60,10 @@ export function resolveStaffTableSlotCardHold(
     return null;
   }
   const covers = Number.isFinite(partySize) && partySize >= 1 ? Math.floor(partySize) : 1;
-  return { feePence: Math.round(perPersonGbp * 100) * covers };
+  // Round after multiplying, matching the server's fee derivation in the
+  // staff table branch, so a sub-penny per-person config shows the same total
+  // the hold row will store.
+  return { feePence: Math.round(perPersonGbp * covers * 100) };
 }
 
 /**

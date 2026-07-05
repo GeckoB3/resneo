@@ -910,8 +910,13 @@ export function ExpandedBookingContent({
         body: JSON.stringify({ action }),
       });
       if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        setInlineActionError(payload.error ?? 'Deposit action failed');
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        // Card-hold guard responses use { code, message }; legacy deposit
+        // responses use { error }. Read both so the specific copy surfaces.
+        setInlineActionError(payload.message ?? payload.error ?? 'Deposit action failed');
         setRowOverlay((prev) => pruneBookingRowOverlay(prev, booking));
         return;
       }

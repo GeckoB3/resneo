@@ -147,6 +147,13 @@ export async function orchestrateClassCartCheckout(
 
   const bookingIds: string[] = [];
   const paidBookingIds: string[] = [];
+  // Confirmation comms for Booked (covered/credits/free) lines are deferred
+  // until the whole cart is final: queueing them at insert time would email a
+  // confirmation for a booking a later line's failure then rolls back.
+  const deferredGuestNotifications: Array<() => void> = [];
+  const flushDeferredGuestNotifications = () => {
+    for (const queue of deferredGuestNotifications) queue();
+  };
   const stripeQuoteLines: ClassCartQuoteLine[] = [];
   /** Card-hold lines in the capture unit: booking row + its max chargeable no-show fee (§7.2). */
   const cardHoldLines: { bookingId: string; feePence: number }[] = [];
@@ -261,6 +268,7 @@ export async function orchestrateClassCartCheckout(
           source: 'online',
           groupBookingId: groupId,
           settleWithoutOnlineCard: true,
+          deferGuestNotifications: true,
         });
         if (!res.ok) {
           if (isCapacityError(res)) {
@@ -269,6 +277,7 @@ export async function orchestrateClassCartCheckout(
           }
           throw new Error(res.error);
         }
+        if (res.queueGuestNotifications) deferredGuestNotifications.push(res.queueGuestNotifications);
         // When the matched membership is an allowance plan, ledger the consumption.
         if (
           decision.kind === 'membership' &&
@@ -309,6 +318,7 @@ export async function orchestrateClassCartCheckout(
           source: 'online',
           groupBookingId: groupId,
           settleWithoutOnlineCard: true,
+          deferGuestNotifications: true,
         });
         if (!res.ok) {
           if (isCapacityError(res)) {
@@ -317,6 +327,7 @@ export async function orchestrateClassCartCheckout(
           }
           throw new Error(res.error);
         }
+        if (res.queueGuestNotifications) deferredGuestNotifications.push(res.queueGuestNotifications);
         const consumed = await consumeClassCreditsForBooking({
           admin,
           userId,
@@ -380,6 +391,7 @@ export async function orchestrateClassCartCheckout(
         partySize: line.party_size,
         source: 'online',
         groupBookingId: groupId,
+        deferGuestNotifications: true,
       });
       if (!res.ok) {
         if (isCapacityError(res)) {
@@ -388,6 +400,7 @@ export async function orchestrateClassCartCheckout(
         }
         throw new Error(res.error);
       }
+      if (res.queueGuestNotifications) deferredGuestNotifications.push(res.queueGuestNotifications);
       bookingIds.push(res.bookingId);
     }
   } catch (err) {
@@ -418,6 +431,7 @@ export async function orchestrateClassCartCheckout(
   const captureMode = resolveCaptureMode(captureLines);
 
   if (captureMode === 'none') {
+    flushDeferredGuestNotifications();
     return {
       ok: true,
       body: {
@@ -473,6 +487,9 @@ export async function orchestrateClassCartCheckout(
         },
       );
 
+      // Covered/free lines stay Booked whatever happens to the card save, so
+      // their confirmations go out now that rollback is no longer possible.
+      flushDeferredGuestNotifications();
       return {
         ok: true,
         body: {
@@ -586,6 +603,9 @@ export async function orchestrateClassCartCheckout(
       paidBookingIds,
     });
 
+    // Covered/free lines stay Booked whatever happens to the payment, so
+    // their confirmations go out now that rollback is no longer possible.
+    flushDeferredGuestNotifications();
     return {
       ok: true,
       body: {

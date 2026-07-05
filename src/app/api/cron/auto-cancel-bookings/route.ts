@@ -144,10 +144,15 @@ async function handlePost(request: NextRequest) {
       );
     }
 
+    // Only rows the UPDATE actually flipped get events/lifecycle/notifications:
+    // a guest can pay between the fetch above and this loop, and a 0-row match
+    // returns no error, so acting on the fetched list would cancel-notify (and
+    // in the hold sweeps below, release holds on) live bookings.
+    const depositCancelled: SweepBooking[] = [];
     for (const booking of depositCandidates) {
       const check = validateBookingStatusTransition('Pending', 'Cancelled');
       if (!check.ok) continue;
-      const { error: updateErr } = await supabase
+      const { data: cancelledRows, error: updateErr } = await supabase
         .from('bookings')
         .update({
           status: 'Cancelled',
@@ -155,11 +160,14 @@ async function handlePost(request: NextRequest) {
           cancelled_by_staff_id: null,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', booking.id);
+        .eq('id', booking.id)
+        .eq('status', 'Pending')
+        .select('id');
       if (updateErr) {
         console.error('auto-cancel update failed:', updateErr);
         return NextResponse.json({ error: 'Update failed' }, { status: 500 });
       }
+      if (!cancelledRows?.length) continue;
       await applyBookingLifecycleStatusEffects(supabase, {
         bookingId: booking.id,
         guestId: booking.guest_id,
@@ -167,9 +175,10 @@ async function handlePost(request: NextRequest) {
         nextStatus: 'Cancelled',
         actorId: null,
       });
+      depositCancelled.push(booking);
     }
 
-    const eventRows = depositCandidates.map((b) => ({
+    const eventRows = depositCancelled.map((b) => ({
       venue_id: b.venue_id,
       booking_id: b.id,
       event_type: 'auto_cancelled',
@@ -186,7 +195,7 @@ async function handlePost(request: NextRequest) {
       }
     }
 
-    for (const b of depositCandidates) {
+    for (const b of depositCancelled) {
       await sendAutoCancelNotifications(supabase, b, { cardHold: false });
     }
 
@@ -223,7 +232,7 @@ async function handlePost(request: NextRequest) {
       for (const booking of staffCandidates) {
         const check = validateBookingStatusTransition('Pending', 'Cancelled');
         if (!check.ok) continue;
-        const { error: updateErr } = await supabase
+        const { data: cancelledRows, error: updateErr } = await supabase
           .from('bookings')
           .update({
             status: 'Cancelled',
@@ -232,11 +241,15 @@ async function handlePost(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', booking.id)
-          .eq('status', 'Pending');
+          .eq('status', 'Pending')
+          .select('id');
         if (updateErr) {
           console.error('[auto-cancel] staff card-hold cancel failed:', updateErr, { bookingId: booking.id });
           continue;
         }
+        // 0 rows: the guest added their card (or staff confirmed) between the
+        // fetch and this UPDATE. The booking is live; do not release its hold.
+        if (!cancelledRows?.length) continue;
         await applyBookingLifecycleStatusEffects(supabase, {
           bookingId: booking.id,
           guestId: booking.guest_id,
@@ -339,7 +352,7 @@ async function handlePost(request: NextRequest) {
         const ids = group.map((r) => r.booking.id);
         const check = validateBookingStatusTransition('Pending', 'Cancelled');
         if (!check.ok) continue;
-        const { error: cancelErr } = await supabase
+        const { data: cancelledRows, error: cancelErr } = await supabase
           .from('bookings')
           .update({
             status: 'Cancelled',
@@ -349,14 +362,23 @@ async function handlePost(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .in('id', ids)
-          .eq('status', 'Pending');
+          .eq('status', 'Pending')
+          .select('id');
         if (cancelErr) {
           console.error('[auto-cancel] card-hold setup cancel failed', cancelErr, { siId });
           continue;
         }
+        // Scope everything below to rows the UPDATE actually flipped: the
+        // guest can confirm the SI between the retrieve above and this UPDATE
+        // (the confirm flips rows to Booked/'Card Held'), and a 0-row match is
+        // not an error. Acting on the full group would release live holds and
+        // fabricate auto_cancelled events for Booked bookings.
+        const cancelledIds = new Set((cancelledRows ?? []).map((r) => r.id as string));
+        if (cancelledIds.size === 0) continue;
+        const cancelledGroup = group.filter((r) => cancelledIds.has(r.booking.id));
 
         const { error: eventErr } = await supabase.from('events').insert(
-          group.map((r) => ({
+          cancelledGroup.map((r) => ({
             venue_id: r.booking.venue_id,
             booking_id: r.booking.id,
             event_type: 'auto_cancelled',
@@ -371,7 +393,7 @@ async function handlePost(request: NextRequest) {
           console.error('[auto-cancel] card-hold setup events insert failed:', eventErr);
         }
 
-        for (const r of group) {
+        for (const r of cancelledGroup) {
           await applyBookingLifecycleStatusEffects(supabase, {
             bookingId: r.booking.id,
             guestId: r.booking.guest_id,
@@ -383,12 +405,12 @@ async function handlePost(request: NextRequest) {
 
         // Releases the holds and deletes the booking-scoped customer (§12.1).
         try {
-          await releaseCardHoldsForBookings(supabase, ids, 'abandoned');
+          await releaseCardHoldsForBookings(supabase, [...cancelledIds], 'abandoned');
         } catch (releaseErr) {
           console.error('[auto-cancel] card-hold setup release failed:', releaseErr, { siId });
         }
 
-        onlineHoldCancelled += ids.length;
+        onlineHoldCancelled += cancelledIds.size;
       } catch (err) {
         console.error('[auto-cancel] card-hold si retrieve failed', err, { siId });
       }
@@ -482,7 +504,7 @@ async function handlePost(request: NextRequest) {
           if (!definitelyNotPaid) continue;
 
           const ids = group.map((b) => b.id);
-          const { error: cancelErr } = await supabase
+          const { data: cancelledRows, error: cancelErr } = await supabase
             .from('bookings')
             .update({
               status: 'Cancelled',
@@ -492,14 +514,21 @@ async function handlePost(request: NextRequest) {
               updated_at: new Date().toISOString(),
             })
             .in('id', ids)
-            .eq('status', 'Pending');
+            .eq('status', 'Pending')
+            .select('id');
           if (cancelErr) {
             console.error('[auto-cancel] pi sweep cancel failed', cancelErr, { piId });
             continue;
           }
+          // Same race guard as the setup sweep: the guest can complete payment
+          // between the PI retrieve and this UPDATE, so only the rows the
+          // UPDATE flipped get events/lifecycle/hold release.
+          const cancelledIds = new Set((cancelledRows ?? []).map((r) => r.id as string));
+          if (cancelledIds.size === 0) continue;
+          const cancelledGroup = group.filter((b) => cancelledIds.has(b.id));
 
           await supabase.from('events').insert(
-            group.map((b) => ({
+            cancelledGroup.map((b) => ({
               venue_id: b.venue_id,
               booking_id: b.id,
               event_type: 'auto_cancelled',
@@ -513,7 +542,7 @@ async function handlePost(request: NextRequest) {
             })),
           );
 
-          for (const b of group) {
+          for (const b of cancelledGroup) {
             await applyBookingLifecycleStatusEffects(supabase, {
               bookingId: b.id,
               guestId: b.guest_id,
@@ -526,12 +555,12 @@ async function handlePost(request: NextRequest) {
           // Card-hold units in the group get their holds released (and the
           // booking-scoped customer deleted); a no-op for plain class rows.
           try {
-            await releaseCardHoldsForBookings(supabase, ids, 'abandoned');
+            await releaseCardHoldsForBookings(supabase, [...cancelledIds], 'abandoned');
           } catch (releaseErr) {
             console.error('[auto-cancel] pi sweep hold release failed:', releaseErr, { piId });
           }
 
-          classCancelled += ids.length;
+          classCancelled += cancelledIds.size;
         } catch (err) {
           console.error('[auto-cancel] pi sweep retrieve failed', err, { piId });
         }
@@ -539,7 +568,7 @@ async function handlePost(request: NextRequest) {
     }
 
     return NextResponse.json({
-      cancelled: depositCandidates.length,
+      cancelled: depositCancelled.length,
       staff_hold_cancelled: staffHoldCancelled,
       online_hold_cancelled: onlineHoldCancelled,
       class_cancelled: classCancelled,

@@ -26,6 +26,13 @@ export interface InsertFreeClassSessionBookingParams {
   /** When true, skip confirmation email/SMS (e.g. recurring materialization batch). */
   skipGuestNotifications?: boolean;
   /**
+   * When true, do not queue the confirmation comms here; instead return a
+   * `queueGuestNotifications` closure for the caller to invoke once the whole
+   * unit is final. Cart checkouts use this so a rollback after this insert
+   * cannot leave a confirmation email in flight for a deleted booking.
+   */
+  deferGuestNotifications?: boolean;
+  /**
    * When true, allow creating a Booked class row even if the class type normally requires card prepayment
    * (caller has already verified credits, course entitlement, or membership).
    */
@@ -40,7 +47,10 @@ export interface InsertFreeClassSessionBookingParams {
  */
 export async function insertFreeClassSessionBooking(
   params: InsertFreeClassSessionBookingParams,
-): Promise<{ ok: true; bookingId: string } | { ok: false; status: number; error: string; code?: string }> {
+): Promise<
+  | { ok: true; bookingId: string; queueGuestNotifications?: () => void }
+  | { ok: false; status: number; error: string; code?: string }
+> {
   const {
     admin,
     venueId,
@@ -54,6 +64,7 @@ export async function insertFreeClassSessionBooking(
     source,
     groupBookingId,
     skipGuestNotifications = false,
+    deferGuestNotifications = false,
     settleWithoutOnlineCard = false,
     classRecurringReservationId = null,
   } = params;
@@ -211,7 +222,8 @@ export async function insertFreeClassSessionBooking(
     purpose: 'manage',
   });
 
-  if (!skipGuestNotifications && (guest.email || guest.phone)) {
+  const queueGuestNotifications = () => {
+    if (!(guest.email || guest.phone)) return;
     after(async () => {
       try {
         const { email, sms } = await sendBookingConfirmationNotifications(
@@ -249,7 +261,15 @@ export async function insertFreeClassSessionBooking(
         console.error('[insertFreeClassSessionBooking] notifications failed', err);
       }
     });
+  };
+
+  if (!skipGuestNotifications && !deferGuestNotifications) {
+    queueGuestNotifications();
   }
 
-  return { ok: true, bookingId };
+  return {
+    ok: true,
+    bookingId,
+    ...(deferGuestNotifications && !skipGuestNotifications ? { queueGuestNotifications } : {}),
+  };
 }

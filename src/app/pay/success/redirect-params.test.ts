@@ -13,9 +13,9 @@ describe('redirectStatusFromParams', () => {
     expect(redirectStatusFromParams('processing')).toBe('pending');
   });
 
-  it('treats a missing or unknown status as succeeded (direct visit)', () => {
-    expect(redirectStatusFromParams(null)).toBe('succeeded');
-    expect(redirectStatusFromParams('something_else')).toBe('succeeded');
+  it('treats a missing or unknown status as pending (direct visit or stripped params)', () => {
+    expect(redirectStatusFromParams(null)).toBe('pending');
+    expect(redirectStatusFromParams('something_else')).toBe('pending');
   });
 });
 

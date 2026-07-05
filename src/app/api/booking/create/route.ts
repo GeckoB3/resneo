@@ -1777,7 +1777,7 @@ async function handleNonTableBooking(
         effectiveModel === 'resource_booking')
     ) {
       return NextResponse.json(
-        { error: 'This slot is no longer available — it was just booked.' },
+        { error: 'This slot is no longer available: it was just booked.' },
         { status: 409 },
       );
     }
@@ -1913,6 +1913,7 @@ async function handleNonTableBooking(
     // venue's connected account, one hold row per booking row.
     const stripeAccountId = venue.stripe_connected_account_id as string;
     let cardHoldCustomerId: string | null = null;
+    let cardHoldSetupIntentId: string | null = null;
     try {
       const customer = await createCardHoldCustomer({
         leadBookingId: booking.id,
@@ -1928,6 +1929,7 @@ async function handleNonTableBooking(
         venueId: venue_id,
         stripeConnectedAccountId: stripeAccountId,
       });
+      cardHoldSetupIntentId = setupIntent.id;
       await insertCardHoldRows(
         supabase,
         [{ bookingId: booking.id, feePence: cardHoldFeePence }],
@@ -1943,6 +1945,17 @@ async function handleNonTableBooking(
     } catch (stripeErr) {
       console.error('Card hold setup failed:', stripeErr);
       await supabase.from('bookings').delete().eq('id', booking.id);
+      // Best-effort Stripe cleanup: cancel the SetupIntent (when created)
+      // before deleting the customer so neither lingers on the account.
+      if (cardHoldSetupIntentId) {
+        try {
+          await stripe.setupIntents.cancel(cardHoldSetupIntentId, {
+            stripeAccount: stripeAccountId,
+          });
+        } catch (cleanupErr) {
+          console.error('Card hold setup intent cleanup failed:', cleanupErr);
+        }
+      }
       if (cardHoldCustomerId) {
         try {
           await stripe.customers.del(cardHoldCustomerId, { stripeAccount: stripeAccountId });

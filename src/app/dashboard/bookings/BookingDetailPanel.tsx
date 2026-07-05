@@ -650,7 +650,9 @@ export function BookingDetailPanel({
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        setError(payload.error ?? 'Deposit action failed');
+        // Card-hold guard responses use { code, message }; legacy deposit
+        // responses use { error }. Read both so the specific copy surfaces.
+        setError(payload.message ?? payload.error ?? 'Deposit action failed');
         return;
       }
       setError(null);

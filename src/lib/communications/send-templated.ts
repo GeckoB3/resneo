@@ -369,7 +369,7 @@ export async function sendCardHoldChargedReceipt(params: {
   chargedPence: number;
   chargedAt: string;
 }): Promise<SendResult> {
-  const { bookingId, venueId, chargedPence } = params;
+  const { bookingId, venueId, chargedPence, chargedAt } = params;
   const admin = getSupabaseAdminClient();
 
   const { data: bookingRow } = await admin
@@ -459,7 +459,7 @@ export async function sendCardHoldChargedReceipt(params: {
     timezone: v.timezone ?? null,
   });
 
-  const rendered = renderCardHoldChargedEmail(booking, venueData, { chargedPence });
+  const rendered = renderCardHoldChargedEmail(booking, venueData, { chargedPence, chargedAt });
 
   return deliverEmailMessage(
     {

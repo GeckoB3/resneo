@@ -615,7 +615,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      await supabase
+      const { error: cancelUpdateErr } = await supabase
         .from("bookings")
         .update({
           status: "Cancelled",
@@ -626,6 +626,20 @@ export async function POST(request: NextRequest) {
           updated_at: now,
         })
         .eq("id", bookingId);
+      if (cancelUpdateErr) {
+        // The booking is still live: do not run lifecycle effects or release a
+        // card hold for a cancellation that did not happen.
+        console.error("[confirm cancel] booking update failed:", cancelUpdateErr, {
+          bookingId,
+        });
+        return NextResponse.json(
+          {
+            error:
+              "We could not cancel your booking right now. Please try again or contact the venue.",
+          },
+          { status: 500 },
+        );
+      }
 
       await applyBookingLifecycleStatusEffects(supabase, {
         bookingId,

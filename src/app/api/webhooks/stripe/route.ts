@@ -261,6 +261,21 @@ export async function POST(request: NextRequest) {
       });
 
       if (!confirmResult.ok) {
+        if (confirmResult.reason === 'booking_cancelled') {
+          // The abandonment sweep cancelled the unit before this event landed
+          // (J2 race). Retrying cannot resurrect it; flag for reconciliation
+          // (money may have been taken for a cancelled unit) and acknowledge.
+          console.error(
+            `[Stripe webhook] PI ${pi.id} succeeded but its booking unit is Cancelled; needs reconciliation`,
+            { bookingId },
+          );
+          await supabase.from('reconciliation_alerts').insert({
+            booking_id: bookingId,
+            expected_status: 'Booked',
+            actual_stripe_status: pi.status,
+          });
+          return NextResponse.json({ received: true });
+        }
         throw new Error(`confirmBookingsForSucceededPaymentIntent failed: ${confirmResult.reason}`);
       }
 
@@ -442,6 +457,15 @@ export async function POST(request: NextRequest) {
       if (!confirmResult.ok) {
         if (confirmResult.reason === 'hold_not_found') {
           console.warn(`[Stripe webhook] setup_intent.succeeded ${si.id}: no hold rows found, skipping`);
+          return NextResponse.json({ received: true });
+        }
+        if (confirmResult.reason === 'booking_cancelled') {
+          // The abandonment sweep cancelled the unit before this event landed
+          // (J2 race). No money moved (setup mode); retrying cannot resurrect
+          // the unit, so acknowledge and skip.
+          console.warn(
+            `[Stripe webhook] setup_intent.succeeded ${si.id}: booking unit already Cancelled, skipping`,
+          );
           return NextResponse.json({ received: true });
         }
         throw new Error(`confirmBookingsForSucceededSetupIntent failed: ${confirmResult.reason}`);

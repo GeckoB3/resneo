@@ -32,6 +32,7 @@ interface BookingInfo {
   party_size: number;
   deposit_amount_pence: number | null;
   card_hold_fee_pence: number | null;
+  card_hold_consent_text: string | null;
   guest_name: string;
   guest_email: string;
   refund_cutoff: string | null;
@@ -140,11 +141,24 @@ function RefundPolicy({ refundCutoff }: { refundCutoff: string | null }) {
   );
 }
 
-/** The exact consent line (spec 7.5), rendered verbatim above the save button. */
-function CardHoldConsent({ venueName, feePence }: { venueName: string; feePence: number }) {
+/**
+ * The exact consent line (spec 7.5), rendered verbatim above the save button.
+ * Prefers the stored terms snapshot text (the dispute evidence the accepted_at
+ * stamp attaches to); the re-render from live venue name and fee is only a
+ * fallback for holds created before the snapshot carried text.
+ */
+function CardHoldConsent({
+  venueName,
+  feePence,
+  consentText,
+}: {
+  venueName: string;
+  feePence: number;
+  consentText: string | null;
+}) {
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 leading-relaxed">
-      {renderCardHoldConsentText(venueName, feePence)}
+      {consentText ?? renderCardHoldConsentText(venueName, feePence)}
     </div>
   );
 }
@@ -313,6 +327,7 @@ function PayContent() {
           party_size: data.party_size ?? 0,
           deposit_amount_pence: data.deposit_amount_pence ?? null,
           card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+          card_hold_consent_text: data.card_hold_consent_text ?? null,
           guest_name: data.guest_name ?? '',
           guest_email: data.guest_email ?? '',
           refund_cutoff: data.refund_cutoff ?? null,
@@ -413,7 +428,11 @@ function PayContent() {
 
           <BookingDetailsCard info={bookingInfo} />
           {isSetup ? (
-            <CardHoldConsent venueName={bookingInfo.venue_name} feePence={bookingInfo.card_hold_fee_pence ?? 0} />
+            <CardHoldConsent
+              venueName={bookingInfo.venue_name}
+              feePence={bookingInfo.card_hold_fee_pence ?? 0}
+              consentText={bookingInfo.card_hold_consent_text}
+            />
           ) : (
             <RefundPolicy refundCutoff={bookingInfo.refund_cutoff} />
           )}

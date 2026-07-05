@@ -25,12 +25,20 @@ vi.mock('@/lib/linked-accounts/notifications', () => ({
   notifyCrossVenueBookingWrite: vi.fn(),
 }));
 
+vi.mock('@/lib/booking/card-hold-release', () => ({
+  releaseCardHoldsForBookings: vi.fn(async () => ({
+    releasedBookingIds: [],
+    deletedCustomerIds: [],
+  })),
+}));
+
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
-import { POST } from './route';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { PATCH, POST } from './route';
 
 const mockCreateClient = vi.mocked(createRouteHandlerClientFromHeaders);
 const mockGetVenueStaff = vi.mocked(getVenueStaff);
@@ -184,5 +192,94 @@ describe('POST /api/venue/linked-calendar/booking card-hold rejection (spec D6)'
     const res = await POST(postRequest());
     expect(res.status).toBe(200);
     expect(rpc).toHaveBeenCalled();
+  });
+});
+
+describe('PATCH /api/venue/linked-calendar/booking card-hold release on cancel (spec 9.3)', () => {
+  it('releases open card holds after a successful cross-venue PATCH cancel', async () => {
+    const BOOKING_ID = 'f0000000-0000-4000-8000-000000000099';
+    const rpc = vi.fn().mockResolvedValue({ data: { id: BOOKING_ID, status: 'Cancelled' }, error: null });
+    const client = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'bookings') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: BOOKING_ID,
+                venue_id: OWNER_VENUE_ID,
+                calendar_id: null,
+                practitioner_id: null,
+                booking_date: '2026-07-10',
+                booking_time: '10:00:00',
+                booking_end_time: null,
+              },
+              error: null,
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc,
+    };
+    mockGetAdmin.mockReturnValue(client as never);
+
+    const res = await PATCH(
+      new NextRequest('https://app.test/api/venue/linked-calendar/booking', {
+        method: 'PATCH',
+        body: JSON.stringify({ bookingId: BOOKING_ID, changes: { status: 'Cancelled' } }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith('linked_apply_booking_update', expect.anything());
+    // The cross-venue cancel goes through the SQL RPC and skips every other
+    // cancel hook, so this route must release the hold itself.
+    expect(releaseCardHoldsForBookings).toHaveBeenCalledTimes(1);
+    expect(releaseCardHoldsForBookings).toHaveBeenCalledWith(client, [BOOKING_ID], 'cancelled');
+  });
+
+  it('does not touch holds on a non-cancel PATCH (reschedule keeps the hold open)', async () => {
+    const BOOKING_ID = 'f0000000-0000-4000-8000-000000000099';
+    const rpc = vi.fn().mockResolvedValue({ data: { id: BOOKING_ID }, error: null });
+    const client = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'bookings') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: BOOKING_ID,
+                venue_id: OWNER_VENUE_ID,
+                calendar_id: null,
+                practitioner_id: null,
+                booking_date: '2026-07-10',
+                booking_time: '10:00:00',
+                booking_end_time: null,
+              },
+              error: null,
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc,
+    };
+    mockGetAdmin.mockReturnValue(client as never);
+
+    const res = await PATCH(
+      new NextRequest('https://app.test/api/venue/linked-calendar/booking', {
+        method: 'PATCH',
+        body: JSON.stringify({ bookingId: BOOKING_ID, changes: { booking_date: '2026-07-12' } }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith('linked_apply_booking_update', expect.anything());
+    expect(releaseCardHoldsForBookings).not.toHaveBeenCalled();
   });
 });

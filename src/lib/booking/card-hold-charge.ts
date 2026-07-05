@@ -170,6 +170,12 @@ export async function applyCardHoldChargedState(
     })
     .eq('id', input.holdId)
     .is('charged_at', null)
+    // A released hold must never be stamped: Stripe does not order events, so
+    // charge.refunded can land before payment_intent.succeeded (route crash
+    // between PI persist and stamp). Once the refund has released the hold and
+    // flipped the booking to 'Refunded', the late succeeded event must be a
+    // no-op (applied=false), not a resurrection to 'Charged' plus a receipt.
+    .is('released_at', null)
     .select('id');
   if (stampErr) {
     console.error('[card-hold-charge] charged stamp failed', stampErr, { holdId: input.holdId });

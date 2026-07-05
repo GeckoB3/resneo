@@ -600,6 +600,12 @@ export function ClassBookingFlow({
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
 
       if (data.status === 'payment_required') {
+        // The payment step only renders with a client secret; without this
+        // guard a null secret would strand the guest on a blank step with
+        // Pending rows already created.
+        if (!data.client_secret) {
+          throw new Error('Checkout failed. Please try again.');
+        }
         setCreateResult({
           booking_id: '',
           client_secret: data.client_secret,

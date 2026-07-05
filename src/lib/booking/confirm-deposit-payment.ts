@@ -93,6 +93,42 @@ async function insertCardHoldSavedEvents(
   }
 }
 
+/**
+ * A confirm that flipped 0 rows is usually a benign webhook/route replay (the
+ * unit is already Booked), but it can also mean the abandonment sweep
+ * Cancelled the unit between the guest's payment and this confirm. The two
+ * must not be conflated: reporting alreadyConfirmed for a Cancelled unit tells
+ * the guest "Booking confirmed" for a booking that no longer exists (review
+ * finding, J2). Classifies by re-reading current statuses: any Booked row is a
+ * genuine replay; otherwise any Cancelled row means the sweep won the race.
+ */
+async function classifyZeroRowConfirm(
+  admin: SupabaseClient,
+  bookingIds: string[],
+  venueId: string,
+  logContext: Record<string, unknown>,
+): Promise<'already_confirmed' | 'cancelled'> {
+  if (bookingIds.length === 0) return 'already_confirmed';
+  const { data, error } = await admin
+    .from('bookings')
+    .select('id, status')
+    .in('id', bookingIds)
+    .eq('venue_id', venueId);
+  if (error) {
+    console.error('[confirm-deposit-payment] zero-row status re-read failed:', error, logContext);
+    return 'already_confirmed';
+  }
+  return classifyZeroRowStatuses((data ?? []).map((r) => (r as { status: string | null }).status));
+}
+
+function classifyZeroRowStatuses(
+  statuses: Array<string | null>,
+): 'already_confirmed' | 'cancelled' {
+  if (statuses.some((s) => s === 'Booked')) return 'already_confirmed';
+  if (statuses.some((s) => s === 'Cancelled')) return 'cancelled';
+  return 'already_confirmed';
+}
+
 /** Overwrite guest_email on the confirmed rows when the confirm call carried one. */
 async function applyGuestEmail(
   admin: SupabaseClient,
@@ -166,23 +202,33 @@ export async function confirmBookingsForSucceededPaymentIntent(
 
   const { data: candidateRows, error: candidateErr } = await admin
     .from('bookings')
-    .select('id, deposit_status, deposit_amount_pence')
+    .select('id, status, deposit_status, deposit_amount_pence')
     .eq('stripe_payment_intent_id', paymentIntentId)
-    .eq('venue_id', venueId)
-    .eq('status', 'Pending');
+    .eq('venue_id', venueId);
 
   if (candidateErr) {
     console.error('[confirmBookingsForSucceededPaymentIntent] booking load failed:', candidateErr, logContext);
     return { ok: false, reason: 'booking_load_failed' };
   }
 
-  const candidates = (candidateRows ?? []) as Array<{
+  const allRows = (candidateRows ?? []) as Array<{
     id: string;
+    status: string | null;
     deposit_status: string | null;
     deposit_amount_pence: number | null;
   }>;
+  const candidates = allRows.filter((r) => r.status === 'Pending');
 
   if (candidates.length === 0) {
+    // No Pending rows: usually a benign replay (already Booked), but if the
+    // abandonment sweep Cancelled the unit after this payment succeeded, the
+    // caller must not tell the guest "confirmed" (review finding, J2).
+    if (
+      allRows.length > 0 &&
+      classifyZeroRowStatuses(allRows.map((r) => r.status)) === 'cancelled'
+    ) {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
     return { ok: true, confirmedIds: [], alreadyConfirmed: true };
   }
 
@@ -252,6 +298,10 @@ export async function confirmBookingsForSucceededPaymentIntent(
   }
 
   if (confirmedIds.length === 0) {
+    const outcome = await classifyZeroRowConfirm(admin, candidateIds, venueId, logContext);
+    if (outcome === 'cancelled') {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
     return { ok: true, confirmedIds: [], alreadyConfirmed: true };
   }
 
@@ -340,6 +390,15 @@ export async function confirmBookingsForSucceededSetupIntent(
   }
 
   if (!updatedRows?.length) {
+    const outcome = await classifyZeroRowConfirm(
+      admin,
+      holds.map((h) => h.booking_id),
+      venueId,
+      logContext,
+    );
+    if (outcome === 'cancelled') {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
     return { ok: true, confirmedIds: [], alreadyConfirmed: true };
   }
 

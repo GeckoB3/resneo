@@ -1080,7 +1080,10 @@ export function UnifiedBookingForm({
           email: email.trim() || undefined,
           dietary_notes: dietaryNotes.trim() || undefined,
           special_requests: notes.trim() || undefined,
-          require_deposit: requireDeposit,
+          // Card-hold slots never charge a deposit: zero the stale toggle state
+          // from a previously selected charge slot instead of relying on the
+          // server to neutralise it.
+          require_deposit: staffCardHold ? false : requireDeposit,
           // Card-hold slots (design doc 7.6): always send the toggle state explicitly
           // (the server defaults to true when omitted; ignored for charge slots).
           ...(staffCardHold ? { require_card_hold: requireCardHold } : {}),

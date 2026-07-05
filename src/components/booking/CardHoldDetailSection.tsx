@@ -121,7 +121,9 @@ export function CardHoldChargeDialog({
     }
   }
 
-  const minPence = Math.min(100, feePence);
+  // Spec floor is 1 pence, and the server's invalid_amount message quotes
+  // £0.01: the dialog must enforce the same bound, not a stricter one.
+  const minPence = Math.min(1, feePence);
   const amountPence = parsePoundsInputToPence(amountInput);
   const amountValid = amountPence != null && amountPence >= minPence && amountPence <= feePence;
 
@@ -246,6 +248,7 @@ export function CardHoldDetailSection({
   onChanged: () => void | Promise<void>;
 }) {
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
+  const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
   const hasActions =
     state.showResendLink || state.showWaive || state.showChargeAction || state.showRefundAction;
 
@@ -292,7 +295,7 @@ export function CardHoldDetailSection({
             <button
               type="button"
               disabled={actionDisabled}
-              onClick={() => onLegacyDepositAction('refund')}
+              onClick={() => setRefundConfirmOpen(true)}
               className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
             >
               {CARD_HOLD_REFUND_ACTION_LABEL}
@@ -309,6 +312,44 @@ export function CardHoldDetailSection({
           feePence={state.feePence}
           onCharged={onChanged}
         />
+      ) : null}
+      {state.showRefundAction ? (
+        // Refunding moves real money and cannot be undone (the hold is
+        // released), so it gets the same confirm affordance as the charge.
+        <Dialog
+          open={refundConfirmOpen}
+          onOpenChange={setRefundConfirmOpen}
+          title={CARD_HOLD_REFUND_ACTION_LABEL}
+          description={`This refunds the charged no-show fee to ${guestName}'s card. The card hold ends and the fee cannot be charged again.`}
+          size="sm"
+          showClose={false}
+          contentClassName="max-w-sm"
+          footer={
+            <div className="flex gap-2.5">
+              <Button
+                type="button"
+                variant="danger"
+                className="flex-1"
+                onClick={() => {
+                  setRefundConfirmOpen(false);
+                  onLegacyDepositAction('refund');
+                }}
+              >
+                {CARD_HOLD_REFUND_ACTION_LABEL}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setRefundConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          }
+        >
+          {null}
+        </Dialog>
       ) : null}
     </div>
   );

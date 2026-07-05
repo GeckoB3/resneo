@@ -113,6 +113,11 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       if (call.table === 'booking_card_holds' && call.op === 'select') {
         return { data: rowsMatching(holds, call), error: null };
       }
+      // Zero-row confirms re-read booking statuses to distinguish a benign
+      // replay from a sweep-cancelled unit (J2).
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: rowsMatching(bookings, call), error: null };
+      }
       if (call.table === 'booking_card_holds' && call.op === 'update') return { data: null, error: null };
       if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
       if (call.table === 'events' && call.op === 'insert') return { data: null, error: null };
@@ -360,6 +365,75 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
     expect(eventInsert?.payload).toEqual([
       { venue_id: 'venue-1', booking_id: 'b2', event_type: 'card_hold_saved', payload: { booking_id: 'b2', fee_pence: 2500 } },
     ]);
+  });
+
+  it("flips a 'Failed' money row back to Booked/'Paid' on retry success (regression)", async () => {
+    // payment_intent.payment_failed marked the row 'Failed'; the guest retried
+    // from the still-open payment element on the SAME PI and succeeded. The
+    // classification must treat 'Failed' like 'Pending' or the retry is lost.
+    const bookings = [pendingBooking('b1', { deposit_status: 'Failed', deposit_amount_pence: 2000 })];
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: bookings.map((b) => ({ ...b })), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'select') return { data: [], error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
+    expect(flip?.payload).toMatchObject({ status: 'Booked', deposit_status: 'Paid' });
+    expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Paid' });
+  });
+
+  it("flips a 'Failed' hold row to Booked/'Card Held' on retry success and stamps the PM (regression)", async () => {
+    // Same retry-after-failure path, payment_with_setup unit: the card-hold row
+    // (deposit_amount_pence NULL + open hold) must classify to 'Card Held',
+    // never 'Paid', and its hold row must still get the payment method.
+    const hold = {
+      id: 'h1',
+      booking_id: 'b1',
+      fee_pence: 2500,
+      stripe_payment_method_id: null,
+      terms_snapshot: { version: 1, text: 'consent', fee_pence: 2500, accepted_at: null },
+    };
+    const bookings = [pendingBooking('b1', { deposit_status: 'Failed', deposit_amount_pence: null })];
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: bookings.map((b) => ({ ...b })), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'select') return { data: [hold], error: null };
+      if (call.table === 'booking_card_holds' && call.op === 'update') return { data: null, error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      if (call.table === 'events' && call.op === 'insert') return { data: null, error: null };
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+      paymentMethodId: 'pm_1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
+    expect(flip?.payload).toMatchObject({ status: 'Booked', deposit_status: 'Card Held' });
+    expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Card Held' });
+
+    // Hold completion: payment method stamped, consent accepted_at set.
+    const holdUpdate = calls.find((c) => c.table === 'booking_card_holds' && c.op === 'update');
+    const holdPayload = holdUpdate?.payload as {
+      stripe_payment_method_id?: string;
+      terms_snapshot?: { accepted_at?: string | null };
+    };
+    expect(holdPayload.stripe_payment_method_id).toBe('pm_1');
+    expect(holdPayload.terms_snapshot?.accepted_at).toBeTruthy();
   });
 
   it("keeps 'Not Required' zero-deposit siblings out of the Paid flip (regression)", async () => {

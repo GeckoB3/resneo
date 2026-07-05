@@ -4103,7 +4103,7 @@ export function AppointmentBookingFlow({
               return (
                 <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   Full payment online ({sym}
-                  {(o.amountPence / 100).toFixed(2)}) — a payment link will be sent to the client.
+                  {(o.amountPence / 100).toFixed(2)}). A payment link will be sent to the client.
                 </p>
               );
             }

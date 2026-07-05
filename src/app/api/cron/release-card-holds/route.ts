@@ -4,6 +4,7 @@ import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { isCardHoldChargeWindowExpired, normalizeEmbeddedBooking } from '@/lib/booking/card-hold-cron';
+import { CARD_HOLD_CHARGE_WINDOW_DAYS } from '@/lib/booking/card-hold-terms';
 import type { CardHoldWindowBookingFields } from '@/lib/booking/card-hold-window';
 
 /**
@@ -40,7 +41,9 @@ async function handlePost(request: NextRequest) {
     // batch from being starved by older-but-not-yet-expired holds (for
     // example, holds on far-future bookings created long ago). The JS check
     // below stays the precise gate.
-    const prefilterCutoffYmd = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+    const prefilterCutoffYmd = new Date(
+      Date.now() - CARD_HOLD_CHARGE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    )
       .toISOString()
       .slice(0, 10);
     const { data: rows, error: fetchErr } = await supabase

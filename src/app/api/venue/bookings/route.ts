@@ -1631,11 +1631,19 @@ export async function POST(request: NextRequest) {
       amount_per_person_gbp?: number;
       type?: string;
     } | null;
-    const legacyGbp = legacyDepositConfig?.amount_per_person_gbp;
+    // Coerce defensively like the availability fetchers do: PostgREST can
+    // return numerics as strings, and a raw typeof check would resolve the
+    // slot as card_hold while this branch sees no amount at all.
+    const restrictionGbp =
+      tableRestriction?.deposit_amount_per_person_gbp == null
+        ? null
+        : Number(tableRestriction.deposit_amount_per_person_gbp);
+    const legacyGbpRaw = legacyDepositConfig?.amount_per_person_gbp;
+    const legacyGbp = legacyGbpRaw == null ? null : Number(legacyGbpRaw);
     const amountPerPersonGbp =
-      typeof tableRestriction?.deposit_amount_per_person_gbp === 'number'
-        ? tableRestriction.deposit_amount_per_person_gbp
-        : typeof legacyGbp === 'number'
+      restrictionGbp != null && Number.isFinite(restrictionGbp)
+        ? restrictionGbp
+        : legacyGbp != null && Number.isFinite(legacyGbp)
           ? legacyGbp
           : null;
 

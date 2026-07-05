@@ -52,6 +52,14 @@ vi.mock('@/lib/class-commerce/membership-allowance-coverage', () => ({
 vi.mock('@/lib/class-commerce/consume-membership-allowance', () => ({
   consumeMembershipAllowanceForBooking: vi.fn(),
 }));
+// Spy wrapper keeping the REAL decision logic: card-hold lines must bypass the
+// entitlement engine entirely (D8), which the spy makes assertable.
+vi.mock('@/lib/class-commerce/entitlement-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/class-commerce/entitlement-engine')>();
+  return { ...actual, decideClassLineEntitlement: vi.fn(actual.decideClassLineEntitlement) };
+});
+import { decideClassLineEntitlement } from '@/lib/class-commerce/entitlement-engine';
+import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 
 const quoteMock = quoteClassCart as unknown as Mock;
 const insertFreeMock = insertFreeClassSessionBooking as unknown as Mock;
@@ -59,6 +67,8 @@ const insertPendingMock = insertPendingPaidClassSessionBooking as unknown as Moc
 const persistTxnMock = persistClassCartCheckoutTransaction as unknown as Mock;
 const membershipCoversMock = membershipCoversClassType as unknown as Mock;
 const findOrCreateGuestMock = findOrCreateGuest as unknown as Mock;
+const decideEntitlementMock = decideClassLineEntitlement as unknown as Mock;
+const sumCreditsMock = sumAvailableClassCreditsForClassType as unknown as Mock;
 const piCreateMock = stripe.paymentIntents.create as unknown as Mock;
 const siCreateMock = stripe.setupIntents.create as unknown as Mock;
 const customerCreateMock = stripe.customers.create as unknown as Mock;
@@ -426,6 +436,73 @@ describe('orchestrateClassCartCheckout card-hold capture modes', () => {
       checkout_charge_kind: 'full_payment',
       card_hold_fee_pence: null,
     });
+  });
+
+  it('never runs the entitlement engine for a card-hold line, even when the payer opted into credits (D8)', async () => {
+    // A hold-only cart with pay_with_class_credits: the card-hold line must be
+    // inserted as a hold booking without ever consulting the entitlement
+    // engine or the credit balance (credits cannot pay a card-hold line).
+    mockQuote([qLine({ payment_requirement: 'card_hold', card_hold_fee_pence: 2500 })]);
+    const rec: Recorded = { holdRows: [], bookingUpdates: [], deletes: [] };
+
+    const result = await orchestrateClassCartCheckout(makeAdmin(rec), {
+      venueId: 'venue-1',
+      lines: [{ class_instance_id: 'inst-1', party_size: 1 }],
+      userId: 'user-1',
+      userEmail: 'Guest@Example.com',
+      displayName: 'Pat Guest',
+      payWithClassCredits: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(decideEntitlementMock).not.toHaveBeenCalled();
+    expect(sumCreditsMock).not.toHaveBeenCalled();
+    expect(insertPendingMock).toHaveBeenCalledTimes(1);
+    expect(insertPendingMock.mock.calls[0]![0]).toMatchObject({ cardHold: true });
+    expect(rec.holdRows).toHaveLength(1);
+    expect(result.body).toMatchObject({ status: 'payment_required', payment_mode: 'setup' });
+  });
+
+  it('runs the entitlement engine only for the money line in a mixed paid + hold cart with credits opted in', async () => {
+    mockQuote([
+      qLine({
+        class_instance_id: 'inst-1',
+        online_charge_pence: 1500,
+        payment_requirement: 'deposit',
+        requires_stripe_checkout: true,
+      }),
+      qLine({ class_instance_id: 'inst-2', payment_requirement: 'card_hold', card_hold_fee_pence: 2500 }),
+    ]);
+    const rec: Recorded = { holdRows: [], bookingUpdates: [], deletes: [] };
+
+    const result = await orchestrateClassCartCheckout(makeAdmin(rec), {
+      venueId: 'venue-1',
+      lines: [
+        { class_instance_id: 'inst-1', party_size: 1 },
+        { class_instance_id: 'inst-2', party_size: 1 },
+      ],
+      userId: 'user-1',
+      userEmail: 'Guest@Example.com',
+      displayName: 'Pat Guest',
+      payWithClassCredits: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Exactly one decision: the money line. The card-hold line bypasses it.
+    expect(decideEntitlementMock).toHaveBeenCalledTimes(1);
+    expect(decideEntitlementMock.mock.calls[0]![0]).toMatchObject({
+      paymentRequirement: 'deposit',
+      payWithClassCredits: true,
+    });
+    // Credit balance was only consulted for the money line.
+    expect(sumCreditsMock).toHaveBeenCalledTimes(1);
+    expect(sumCreditsMock.mock.calls[0]![1]).toMatchObject({ classTypeId: 'ct-1' });
+    // The hold line still lands as a hold booking in the payment_with_setup unit.
+    expect(rec.holdRows).toHaveLength(1);
+    expect(rec.holdRows[0]).toMatchObject({ booking_id: 'bk-hold-2', fee_pence: 2500 });
+    expect(result.body).toMatchObject({ status: 'payment_required', payment_mode: 'payment_with_setup' });
   });
 
   it('rolls back the group AND deletes the card-hold customer when hold persistence fails', async () => {

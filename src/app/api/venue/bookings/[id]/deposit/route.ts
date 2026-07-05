@@ -26,7 +26,10 @@ import type { BookingModel } from '@/types/booking-models';
 
 const schema = z.object({
   action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund', 'charge_no_show_fee']),
-  amount_pence: z.number().int().min(0).max(500000).optional(),
+  // No upper bound here: the charge engine clamps to [1 pence, the consented
+  // fee], and a schema cap would turn a large-but-consented fee into a generic
+  // 400 with no usable message in the charge dialog.
+  amount_pence: z.number().int().min(0).optional(),
 });
 
 /** Hold-row fields the deposit actions need (card_hold deposits §9.2). */
@@ -213,7 +216,14 @@ export async function POST(
     if (hold) {
       // §9.2e: refund the charged no-show fee against the hold's own PI on the
       // SNAPSHOTTED connected account (never the venue row, so refunds survive
-      // a venue account change). Admin-only (§15).
+      // a venue account change). Admin-only (§15); the admin check runs first,
+      // mirroring the charge action, so non-admins learn nothing about state.
+      if (!requireAdmin(staff)) {
+        return NextResponse.json(
+          { code: 'admin_only', message: 'Only admins can refund a no-show fee.' },
+          { status: 403 },
+        );
+      }
       if (booking.deposit_status !== 'Charged') {
         return NextResponse.json(
           {
@@ -221,12 +231,6 @@ export async function POST(
             code: 'invalid_state',
           },
           { status: 409 },
-        );
-      }
-      if (!requireAdmin(staff)) {
-        return NextResponse.json(
-          { code: 'admin_only', message: 'Only admins can refund a no-show fee.' },
-          { status: 403 },
         );
       }
       if (!hold.charge_payment_intent_id) {
@@ -257,6 +261,30 @@ export async function POST(
         venueId: scopeVenueId,
         chargedPence: hold.charged_pence,
       });
+
+      // Cross-venue writes are audited (§11), mirroring the charge action: a
+      // linked-venue admin refunding another venue's money must leave a trail.
+      if (!loaded.ctx.isOwnVenue && loaded.ctx.linkId) {
+        let actorUserId: string | null = null;
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          actorUserId = authData.user?.id ?? null;
+        } catch {
+          actorUserId = null;
+        }
+        await recordBookingWriteAudit({
+          admin,
+          linkId: loaded.ctx.linkId,
+          actingVenueId: staff.venue_id,
+          actingUserId: actorUserId,
+          owningVenueId: scopeVenueId,
+          actionType: 'edited_booking',
+          bookingId: id,
+          beforeState: booking as Record<string, unknown>,
+          afterState: { deposit_status: 'Refunded', refunded_pence: hold.charged_pence },
+        });
+      }
+
       return NextResponse.json({ success: true });
     }
     if (!booking.stripe_payment_intent_id) {

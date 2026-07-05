@@ -212,9 +212,12 @@ export async function confirmBookingsForSucceededPaymentIntent(
   const paidIds: string[] = [];
   const untouchedDepositIds: string[] = [];
   for (const row of candidates) {
-    if (row.deposit_status !== 'Pending') {
-      // Regression requirement: 'Not Required' zero-deposit siblings must stop
-      // flipping to 'Paid'; they only get their status confirmed.
+    // 'Pending' is the normal awaiting-payment state; 'Failed' is a prior
+    // payment_intent.payment_failed on the SAME PI that the guest then
+    // retried from the still-open payment element, so a success must flip
+    // it too (the pre-per-row behaviour, review regression finding).
+    // 'Not Required' zero-deposit siblings only get their status confirmed.
+    if (row.deposit_status !== 'Pending' && row.deposit_status !== 'Failed') {
       untouchedDepositIds.push(row.id);
     } else if (holdByBookingId.has(row.id) && row.deposit_amount_pence == null) {
       heldIds.push(row.id);

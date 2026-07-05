@@ -20,6 +20,7 @@ import {
   type AppointmentServicePaymentFields,
 } from '@/lib/appointments/appointment-service-payment';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -138,6 +139,18 @@ export async function PATCH(request: NextRequest) {
     if (rpcError) {
       console.error('linked_apply_booking_update RPC failed:', rpcError.message);
       return NextResponse.json({ error: 'Failed to update the booking.' }, { status: 500 });
+    }
+
+    // Card-hold §9.3 — this cross-venue cancel goes through the SQL RPC and
+    // none of the other cancel hooks, so release any open hold here. Best
+    // effort: the cancel already happened and the charge gate also requires
+    // status = 'No-Show'.
+    if (parsed.data.changes.status === 'Cancelled') {
+      try {
+        await releaseCardHoldsForBookings(admin, [parsed.data.bookingId], 'cancelled');
+      } catch (holdErr) {
+        console.error('linked-calendar booking cancel: card-hold release failed:', holdErr);
+      }
     }
 
     // §17.3 — email the owning venue per its preferences.

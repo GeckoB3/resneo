@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CARD_HOLD_CHARGE_ACTION_LABEL,
+  CARD_HOLD_CHARGE_DIALOG_TITLE,
   CARD_HOLD_PAYMENT_WITH_SETUP_CONFIRMATION_LINE,
+  CARD_HOLD_REFUND_ACTION_LABEL,
+  CARD_HOLD_RESEND_LINK_LABEL,
   CARD_HOLD_SETUP_CONFIRMATION_LINE,
   CARD_HOLD_SETUP_HEADING,
   CARD_HOLD_SETUP_SUBHEADING,
   CARD_HOLD_SETUP_SUBMIT_LABEL,
   cardHoldBookingNoticeLine,
   cardHoldCatalogNoticeLine,
+  cardHoldChargeConfirmLabel,
+  cardHoldChargeDialogBody,
+  cardHoldChargeFailurePlainReason,
   cardHoldConfirmationLine,
   cardHoldPaymentWithSetupBodyText,
   cardHoldSetupBodyText,
@@ -98,6 +105,36 @@ describe('isCardHoldPaymentMode', () => {
   });
 });
 
+describe('staff charge dialog copy (spec 9.2, exact)', () => {
+  it('uses the exact title and action labels', () => {
+    expect(CARD_HOLD_CHARGE_DIALOG_TITLE).toBe('Charge no-show fee');
+    expect(CARD_HOLD_CHARGE_ACTION_LABEL).toBe('Charge no-show fee');
+    expect(CARD_HOLD_REFUND_ACTION_LABEL).toBe('Refund no-show fee');
+    expect(CARD_HOLD_RESEND_LINK_LABEL).toBe('Resend link');
+  });
+
+  it('renders the exact dialog body with guest name and max fee', () => {
+    expect(cardHoldChargeDialogBody('Amina Khan', 2500)).toBe(
+      "Charge Amina Khan's saved card for missing this booking. The maximum you can charge is £25.00.",
+    );
+  });
+
+  it('renders the live confirm label from the entered amount', () => {
+    expect(cardHoldChargeConfirmLabel(2500)).toBe('Charge £25.00');
+    expect(cardHoldChargeConfirmLabel(150)).toBe('Charge £1.50');
+  });
+
+  it('maps failure codes to plain words with a generic fallback', () => {
+    expect(cardHoldChargeFailurePlainReason('card_declined')).toBe('the card was declined');
+    expect(cardHoldChargeFailurePlainReason('authentication_required')).toBe(
+      'the card issuer requires the client to authorise the payment',
+    );
+    expect(cardHoldChargeFailurePlainReason('some_unknown_code')).toBe(
+      'the payment did not go through',
+    );
+  });
+});
+
 describe('no em-dashes in any guest-facing card-hold copy', () => {
   it('contains no U+2014 characters', () => {
     const all = [
@@ -111,6 +148,15 @@ describe('no em-dashes in any guest-facing card-hold copy', () => {
       cardHoldCatalogNoticeLine(2500, { perPerson: true }),
       cardHoldBookingNoticeLine(2500),
       cardHoldBookingNoticeLine(0),
+      CARD_HOLD_CHARGE_DIALOG_TITLE,
+      CARD_HOLD_CHARGE_ACTION_LABEL,
+      CARD_HOLD_REFUND_ACTION_LABEL,
+      CARD_HOLD_RESEND_LINK_LABEL,
+      cardHoldChargeDialogBody('Guest', 2500),
+      cardHoldChargeConfirmLabel(2500),
+      cardHoldChargeFailurePlainReason('card_declined'),
+      cardHoldChargeFailurePlainReason('authentication_required'),
+      cardHoldChargeFailurePlainReason('other'),
     ].join('\n');
     expect(all).not.toContain('—');
   });

@@ -12,7 +12,16 @@ import {
   parseExtendedBookingRules,
 } from "@/lib/booking/venue-booking-rules";
 import { verifyConfirmToken } from "@/lib/confirm-token";
-import { createOrGetBookingShortLink } from "@/lib/booking-short-links";
+import {
+  createOrGetBookingShortLink,
+  createOrGetPaymentShortLink,
+} from "@/lib/booking-short-links";
+import {
+  deriveGuestCardHoldSummary,
+  type GuestCardHoldRowInput,
+  type GuestCardHoldSummary,
+} from "@/lib/booking/guest-card-hold-summary";
+import { releaseCardHoldsForBookings } from "@/lib/booking/card-hold-release";
 import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
   validateBookingStatusTransition,
@@ -251,6 +260,42 @@ export async function GET(request: NextRequest) {
     );
     const featureFlagsResolved = resolveAppointmentsFeatureFlags(venueFlags);
 
+    // Guest-safe card-hold summary (card_hold deposits §10.1): fee + derived
+    // state only, never Stripe ids or the terms snapshot. For an unsaved hold
+    // (`awaiting_card`, staff link flow pre-save) also include the payment
+    // link so the manage page can offer "Add card details".
+    let card_hold: (GuestCardHoldSummary & { payment_link?: string }) | null =
+      null;
+    {
+      const { data: holdRow } = await supabase
+        .from("booking_card_holds")
+        .select(
+          "fee_pence, released_at, charged_pence, charged_at, stripe_payment_method_id",
+        )
+        .eq("booking_id", booking.id)
+        .maybeSingle();
+      const summary = deriveGuestCardHoldSummary(
+        booking as { deposit_status?: string | null },
+        (holdRow as GuestCardHoldRowInput | null) ?? null,
+      );
+      if (summary) {
+        card_hold = summary;
+        if (summary.state === "awaiting_card") {
+          try {
+            card_hold = {
+              ...summary,
+              payment_link: await createOrGetPaymentShortLink(
+                booking.venue_id,
+                booking.id,
+              ),
+            };
+          } catch (linkErr) {
+            console.error("[confirm GET] payment short link failed:", linkErr);
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       booking_id: booking.id,
       venue_id: booking.venue_id,
@@ -262,6 +307,7 @@ export async function GET(request: NextRequest) {
       party_size: booking.party_size,
       deposit_paid: depositPaid,
       deposit_amount_pence: booking.deposit_amount_pence,
+      card_hold,
       status: booking.status,
       booking_model: inferredModel,
       is_appointment: isAppointment,
@@ -499,9 +545,30 @@ export async function POST(request: NextRequest) {
       );
 
       const previousStatus = booking.status as string;
+
+      // Card-hold deposits (§9.3/§10.1): note whether this booking carries an
+      // OPEN hold before we cancel, so we can release it afterwards and tell
+      // the guest their card will not be charged. Works for both saved holds
+      // ('Card Held') and unsaved staff-flow holds ('Pending', card never
+      // saved): in both cases the card is never charged after a cancel.
+      const { data: cancelHoldRow } = await supabase
+        .from("booking_card_holds")
+        .select("id, released_at")
+        .eq("booking_id", bookingId)
+        .maybeSingle();
+      const hadOpenCardHold = Boolean(
+        cancelHoldRow &&
+          !(cancelHoldRow as { released_at?: string | null }).released_at,
+      );
+
       const deadline = booking.cancellation_deadline
         ? new Date(booking.cancellation_deadline)
         : null;
+      // Refund + late-cancel copy below are keyed strictly on
+      // `deposit_status === 'Paid'`. Card holds never reach 'Paid'
+      // (Pending -> Card Held -> Charged/Refunded, §14), so neither the refund
+      // path nor the "non-refundable" late-cancel message can fire for a
+      // card-hold booking; a hold booking always cancels charge-free (§9.3).
       const canRefund =
         deadline &&
         new Date() <= deadline &&
@@ -567,6 +634,27 @@ export async function POST(request: NextRequest) {
         nextStatus: "Cancelled",
         actorId: null,
       });
+
+      // Card-hold deposits (§9.3): guest cancel releases the hold (stamps
+      // released_at + reason 'cancelled', emits card_hold_released, best-effort
+      // deletes the booking-scoped Stripe customer). The booking is already
+      // cancelled at this point, so a release failure must not fail the
+      // request; the daily release cron (§12.3) is the backstop.
+      let cardHoldReleased = false;
+      if (hadOpenCardHold) {
+        try {
+          const releaseResult = await releaseCardHoldsForBookings(
+            supabase,
+            [bookingId],
+            "cancelled",
+          );
+          cardHoldReleased = releaseResult.releasedBookingIds.includes(bookingId);
+        } catch (releaseErr) {
+          console.error("[confirm cancel] card-hold release failed:", releaseErr, {
+            bookingId,
+          });
+        }
+      }
 
       // Plan §4.1 — restore class credits / membership allowance when the
       // cancelled booking is a class_session paid via credits or membership.
@@ -743,14 +831,25 @@ export async function POST(request: NextRequest) {
         booking_model: cancelInferred,
       });
 
+      // Card-hold cancel copy (§10.1): true for saved holds (card detached) and
+      // for awaiting_card holds alike (card never saved, so it still "will not
+      // be charged"). Only claimed when the release actually happened.
+      const cardHoldMessage = cardHoldReleased
+        ? "Your booking is cancelled. Your card will not be charged and the card hold has been released."
+        : null;
+
       return NextResponse.json({
         success: true,
-        message: refundSucceeded
-          ? "Booking cancelled. Your deposit will be refunded."
-          : "Booking cancelled.",
+        message:
+          cardHoldMessage ??
+          (refundSucceeded
+            ? "Booking cancelled. Your deposit will be refunded."
+            : "Booking cancelled."),
         refund_message,
         refund_eligible: refundSucceeded,
         deposit_amount_str: depositAmountStr,
+        card_hold_released: cardHoldReleased,
+        card_hold_message: cardHoldMessage,
       });
     }
 
@@ -1080,6 +1179,10 @@ export async function POST(request: NextRequest) {
 
         const nowIso = new Date().toISOString();
         const prevUpdatedAt = booking.updated_at as string;
+        // Card-hold fee snapshots are never recomputed on modify; the guest
+        // consented to the original amount. The move stays within the same
+        // class type and updates the row in place, so any hold (and its
+        // fee_pence) carries over untouched (card_hold deposits §10.1).
         const { data: classUpdated, error: classUpdErr } = await supabase
           .from("bookings")
           .update({
@@ -1349,6 +1452,12 @@ export async function POST(request: NextRequest) {
 
         const nowIso = new Date().toISOString();
         const prevUpdatedAt = booking.updated_at as string;
+        // Card-hold fee snapshots are never recomputed on modify; the guest
+        // consented to the original amount. This update can move the booking to
+        // a different service/practitioner (a different entity may configure a
+        // different fee), but the hold row and its fee_pence are untouched
+        // (card_hold deposits §10.1): the row is updated in place, never
+        // deleted and reinserted, so the hold carries over unchanged.
         const { data: apptUpdated, error: apptUpdErr } = await supabase
           .from("bookings")
           .update({

@@ -138,3 +138,63 @@ describe('card_hold_payment_reminder SMS rendering', () => {
     expect(out!.body).not.toMatch(EM_DASH);
   });
 });
+
+describe('booking_confirmation with an open card hold (§10.2)', () => {
+  const heldBooking: BookingEmailData = {
+    ...appointmentBooking,
+    deposit_status: 'Card Held',
+  };
+  const HOLD_NOTICE =
+    'No payment has been taken. Your card is securely on file and Glow Studio may charge ' +
+    'a no-show fee of up to £25.00 if you do not attend. Cancel before your booking ' +
+    'starts to avoid any charge.';
+
+  it('appends the hold section to the confirmation email html and text', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      booking: heldBooking,
+      venue,
+      messageKey: 'booking_confirmation',
+    });
+    expect(out).not.toBeNull();
+    expect(out!.html).toContain(HOLD_NOTICE);
+    expect(out!.text).toContain(HOLD_NOTICE);
+    expect(out!.html).not.toMatch(EM_DASH);
+    expect(out!.text).not.toMatch(EM_DASH);
+  });
+
+  it('shows the dedicated payment status line instead of Free', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      booking: heldBooking,
+      venue,
+      messageKey: 'booking_confirmation',
+    });
+    expect(out!.text).toContain(
+      'No payment taken. Card held for a no-show fee of up to £25.00.',
+    );
+    expect(out!.text).not.toContain('Free');
+  });
+
+  it('adds the hold suffix to the confirmation SMS', () => {
+    const out = renderCommunicationSms({
+      lane: 'appointments_other',
+      booking: heldBooking,
+      venue,
+      messageKey: 'booking_confirmation',
+    });
+    expect(out!.body).toContain('Card held, no payment taken. No-show fee up to £25.00.');
+    expect(out!.body).not.toMatch(EM_DASH);
+  });
+
+  it('leaves confirmations without a hold untouched', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      booking: { ...appointmentBooking, card_hold_fee_pence: null },
+      venue,
+      messageKey: 'booking_confirmation',
+    });
+    expect(out!.html).not.toContain('securely on file');
+    expect(out!.text).not.toContain('securely on file');
+  });
+});

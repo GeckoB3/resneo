@@ -9,6 +9,11 @@ import {
   loadAccountBookingById,
 } from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import {
+  deriveGuestCardHoldSummary,
+  type GuestCardHoldRowInput,
+} from '@/lib/booking/guest-card-hold-summary';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 type PageProps = { params: Promise<{ bookingId: string }> };
@@ -46,6 +51,37 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   const cde = booking.cde_context;
   const friendlyStatus = friendlyAccountBookingStatus(booking.status);
   const isClassGroup = booking.booking_model === 'class_session' && !!booking.group_booking_id;
+
+  // Card-hold deposits (§10.1): the signed-in booking detail page is a
+  // consent-bearing surface, so it carries the same hold line as the manage
+  // page for the held/charged states. The fee comes from the hold row (one
+  // indexed admin read; only done when deposit_status says a hold exists).
+  const depositStatusLower = (booking.deposit_status ?? '').toLowerCase();
+  let cardHoldLine: string | null = null;
+  if (depositStatusLower === 'card held' || depositStatusLower === 'charged') {
+    const { data: holdRow } = await getSupabaseAdminClient()
+      .from('booking_card_holds')
+      .select('fee_pence, released_at, charged_pence, charged_at, stripe_payment_method_id')
+      .eq('booking_id', booking.id)
+      .maybeSingle();
+    const holdSummary = deriveGuestCardHoldSummary(
+      booking,
+      (holdRow as GuestCardHoldRowInput | null) ?? null,
+    );
+    const venueName = booking.venue?.name ?? 'The venue';
+    if (holdSummary?.state === 'held') {
+      cardHoldLine = `Your card is securely on file. ${venueName} may charge a no-show fee of up to ${formatCardHoldFeePence(holdSummary.fee_pence)} if you miss this booking. Cancel before it starts to avoid any charge.`;
+    } else if (holdSummary?.state === 'charged' && holdSummary.charged_pence != null) {
+      const chargedDate = holdSummary.charged_at
+        ? ` on ${new Date(holdSummary.charged_at).toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          })}`
+        : '';
+      cardHoldLine = `A no-show fee of ${formatCardHoldFeePence(holdSummary.charged_pence)} was charged for this booking${chargedDate}.`;
+    }
+  }
 
   const headerTitle = cde?.title ?? booking.venue?.name ?? 'Booking details';
   const headerSubtitleParts = [
@@ -166,6 +202,9 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
               {booking.deposit_status ?? 'Not required'}
               {money(booking.deposit_amount_pence) ? ` · ${money(booking.deposit_amount_pence)}` : ''}
             </dd>
+            {cardHoldLine ? (
+              <dd className="mt-1.5 text-sm leading-relaxed text-slate-600">{cardHoldLine}</dd>
+            ) : null}
           </div>
           {booking.venue?.address ? (
             <div className="sm:col-span-2">

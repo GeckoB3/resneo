@@ -78,6 +78,11 @@ import {
 import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
 import { validateClassModification } from '@/lib/booking/validate-class-modification';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import {
+  deleteCardHoldCustomersForBookings,
+  releaseCardHoldsForBookings,
+} from '@/lib/booking/card-hold-release';
+import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -157,7 +162,7 @@ export async function GET(
     const inferredForRefund = inferBookingRowModel(
       booking as Parameters<typeof inferBookingRowModel>[0],
     );
-    const [detailBundle, cde_context, practitioner_name, refund_notice_hours] = await Promise.all([
+    const [detailBundle, cde_context, practitioner_name, refund_notice_hours, holdRes] = await Promise.all([
       loadStaffBookingDetailBundle(scopeDb, id, scopeVenueId, { includeTimeline: true }),
       resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
       resolveBookingStaffName(
@@ -183,6 +188,13 @@ export async function GET(
         console.error('GET /api/venue/bookings/[id] refund notice resolve failed:', e);
         return 48;
       }),
+      // §9.1 — staff-facing card-hold summary. Hold rows are service-role only
+      // (RLS enabled, no policies), so always read via the admin client.
+      getSupabaseAdminClient()
+        .from('booking_card_holds')
+        .select('fee_pence, stripe_payment_method_id, charged_pence, charged_at, released_at, charge_failure_code')
+        .eq('booking_id', id)
+        .maybeSingle(),
     ]);
 
     if (!detailBundle) {
@@ -278,6 +290,36 @@ export async function GET(
 
     const addons = detailBundle.addons;
 
+    // §9.1 — `card_hold` payload for the staff detail surfaces; null when the
+    // booking has no hold row. `charge_window_ends_at` is derived, never stored.
+    if (holdRes.error) {
+      console.error('GET /api/venue/bookings/[id] card-hold load failed:', holdRes.error);
+    }
+    const holdRow = (holdRes.data ?? null) as {
+      fee_pence: number;
+      stripe_payment_method_id: string | null;
+      charged_pence: number | null;
+      charged_at: string | null;
+      released_at: string | null;
+      charge_failure_code: string | null;
+    } | null;
+    const card_hold = holdRow
+      ? {
+          fee_pence: holdRow.fee_pence,
+          saved: holdRow.stripe_payment_method_id != null,
+          charged_pence: holdRow.charged_pence ?? null,
+          charged_at: holdRow.charged_at ?? null,
+          released_at: holdRow.released_at ?? null,
+          charge_failure_code: holdRow.charge_failure_code ?? null,
+          charge_window_ends_at: cardHoldChargeWindowEndsAtForBooking({
+            booking_date: String(booking.booking_date),
+            booking_time: String(booking.booking_time),
+            booking_end_time: booking.booking_end_time ?? null,
+            estimated_end_time: booking.estimated_end_time ?? null,
+          }),
+        }
+      : null;
+
     return NextResponse.json({
       ...booking,
       area_name,
@@ -294,6 +336,7 @@ export async function GET(
       service_variant_price_pence,
       addons,
       refund_notice_hours,
+      card_hold,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -765,6 +808,18 @@ export async function PATCH(
             booking as Parameters<typeof inferBookingRowModel>[0],
           ),
         });
+
+        // §9.3 — cancels release card holds in every path; group cancels
+        // release per sibling row (idsToCancel carries every cancelled row and
+        // each has its own hold). Best-effort: the cancel itself already
+        // happened, and the charge gate also requires status = 'No-Show'.
+        try {
+          await releaseCardHoldsForBookings(admin, idsToCancel, 'cancelled');
+        } catch (holdErr) {
+          console.error('[PATCH booking cancel] card-hold release failed:', holdErr, {
+            bookingId: id,
+          });
+        }
 
         const cancelledBookingForWaitlist = {
           id,
@@ -2419,6 +2474,15 @@ export async function DELETE(
     if (recErr) {
       console.error('DELETE booking: reconciliation_alerts delete failed:', recErr);
       return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    // §9.3 — the row delete cascades away any hold row (with the customer id
+    // needed for cleanup), so best-effort delete the hold's Stripe customer
+    // first (snapshot account, shared-customer check). Never blocks the delete.
+    try {
+      await deleteCardHoldCustomersForBookings(admin, [id]);
+    } catch (holdErr) {
+      console.error('DELETE booking: card-hold customer cleanup failed:', holdErr);
     }
 
     const { error: delErr } = await admin.from('bookings').delete().eq('id', id).eq('venue_id', scopeVenueId);

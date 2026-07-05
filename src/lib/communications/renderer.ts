@@ -19,6 +19,7 @@ import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/ema
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import {
   bookingConfirmationSmsPriceSuffix,
+  cardHoldConfirmationNotice,
   confirmationStructuredPriceText,
   eventBookingConfirmationSmsPriceSuffix,
   formatMoneyOrNull,
@@ -346,6 +347,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       const structuredTextLines = structuredPrice
         ? ['Price and payment:', ...structuredPrice.split('\n')]
         : [];
+      // Card-hold deposits (§10.2): open hold -> append the card-on-file notice.
+      const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
       return {
         subject: appointment
           ? confirmationSubject(opts.booking, opts.venue.name)
@@ -375,6 +378,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
           ...structuredTextLines,
+          holdNotice ? '' : null,
+          holdNotice,
           ...complianceFormsTextLines(opts.booking.compliance_forms),
           opts.cancellationPolicy ? `Cancellation policy: ${opts.cancellationPolicy}` : null,
           opts.preAppointmentInstructions && appointment
@@ -840,6 +845,13 @@ export function renderCommunicationEmail(
 
   if (opts.messageKey === 'booking_confirmation') {
     const structuredPrice = confirmationStructuredPriceText(opts.booking);
+    // Card-hold deposits (§10.2): render the card-on-file notice in the details
+    // card, in the slot the deposit callout uses (mirrors how deposit receipt
+    // lines are appended to the confirmation).
+    const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
+    const holdNoticeHtml = holdNotice
+      ? `<div style="margin:16px 0 0;padding:14px 16px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:10px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`
+      : null;
 
     html = renderBookingConfirmationDocumentHtml({
       booking: opts.booking,
@@ -850,7 +862,7 @@ export function renderCommunicationEmail(
       manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
         preambleHtml: complianceFormsHtml(opts.booking.compliance_forms),
-        depositHtml: null,
+        depositHtml: holdNoticeHtml,
         customMessage: opts.emailCustomMessage ?? null,
         postCtaAccountHtml: config.postCtaHtml ?? null,
         cancellationPolicy: opts.cancellationPolicy ?? null,

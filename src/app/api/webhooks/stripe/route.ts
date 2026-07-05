@@ -8,6 +8,12 @@ import {
   confirmBookingsForSucceededSetupIntent,
   sendDepositPaidBookingComms,
 } from '@/lib/booking/confirm-deposit-payment';
+import {
+  applyCardHoldChargeRefund,
+  completeCardHoldChargeFromWebhook,
+  recordCardHoldChargeFailure,
+} from '@/lib/booking/card-hold-charge';
+import { sendCardHoldChargedReceipt } from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import {
   claimStripeWebhookEvent,
@@ -180,6 +186,34 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
+      // Card-hold no-show fee PI (spec §8.6.1): source-of-truth completion.
+      // MUST run before the generic booking confirm path: the fee PI carries
+      // metadata.booking_id and would otherwise be misread as a deposit payment.
+      if (meta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.CARD_HOLD_NO_SHOW_FEE) {
+        const completion = await completeCardHoldChargeFromWebhook(supabase, {
+          paymentIntentId: pi.id,
+          bookingId: meta.booking_id ?? null,
+          amountReceivedPence: pi.amount_received ?? pi.amount,
+        });
+        if (completion?.applied) {
+          // Receipt email after the response (idempotent: dedupe comm log).
+          const receiptParams = {
+            bookingId: completion.bookingId,
+            venueId: completion.venueId,
+            chargedPence: completion.chargedPence,
+            chargedAt: new Date(event.created * 1000).toISOString(),
+          };
+          after(async () => {
+            try {
+              await sendCardHoldChargedReceipt(receiptParams);
+            } catch (emailErr) {
+              console.error('[Stripe webhook] card-hold receipt email failed:', emailErr, receiptParams);
+            }
+          });
+        }
+        return NextResponse.json({ received: true });
+      }
+
       const bookingId = meta.booking_id;
       if (!bookingId) {
         console.warn(
@@ -266,6 +300,22 @@ export async function POST(request: NextRequest) {
       });
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
+
+      // Card-hold no-show fee PI (spec §8.6.3): record the failure fields on
+      // the hold only; NEVER touch booking status for a fee PI. The generic
+      // failure path below stays scoped to deposit-Pending rows.
+      const failedMeta = pi.metadata ?? {};
+      if (failedMeta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.CARD_HOLD_NO_SHOW_FEE) {
+        await recordCardHoldChargeFailure(supabase, {
+          paymentIntentId: pi.id,
+          bookingId: failedMeta.booking_id ?? null,
+          failureCode:
+            pi.last_payment_error?.code ?? pi.last_payment_error?.decline_code ?? 'payment_failed',
+          failureAtIso: new Date(event.created * 1000).toISOString(),
+        });
+        console.error('payment_intent.payment_failed (card-hold fee)', pi.id, pi.last_payment_error?.message);
+        return NextResponse.json({ received: true });
+      }
 
       // Plan §4.4 — look up by PaymentIntent, not by metadata.booking_id. Cart
       // checkouts attach the PI id to every paid booking in the group; we must
@@ -501,6 +551,32 @@ export async function POST(request: NextRequest) {
         }
       }
       if (paymentIntentId) {
+        // Card-hold fee PI (spec §8.6.6): the existing lookup by
+        // bookings.stripe_payment_intent_id misses fee PIs (they live on the
+        // hold row), so resolve the hold first. A refunded fee flips the
+        // booking to 'Refunded', releases the hold ('refunded'), and inserts
+        // the card_hold_charge_refunded event. Idempotent.
+        const { data: feeHoldData, error: feeHoldErr } = await supabase
+          .from('booking_card_holds')
+          .select('id, booking_id, venue_id, charged_pence')
+          .eq('charge_payment_intent_id', paymentIntentId)
+          .maybeSingle();
+        if (feeHoldErr) {
+          console.error('[Stripe webhook] fee-PI hold lookup failed:', feeHoldErr, { paymentIntentId });
+          throw feeHoldErr;
+        }
+        const feeHold = feeHoldData as
+          | { id: string; booking_id: string; venue_id: string; charged_pence: number | null }
+          | null;
+        if (feeHold) {
+          await applyCardHoldChargeRefund(supabase, {
+            bookingId: feeHold.booking_id,
+            venueId: feeHold.venue_id,
+            chargedPence: feeHold.charged_pence,
+          });
+          return NextResponse.json({ received: true });
+        }
+
         const { data: bookings, error: bookingsErr } = await supabase
           .from('bookings')
           .select('id, deposit_status, venue_id, guest_id, status')
@@ -511,7 +587,37 @@ export async function POST(request: NextRequest) {
           console.error('[Stripe webhook] Failed to load bookings for refunded payment intent:', bookingsErr);
         }
 
-        const refundable = (bookings ?? []).filter((b) => b.deposit_status !== 'Refunded') as Array<{
+        // Spec §8.6.6: constrain the generic flip. In a payment_with_setup
+        // unit the card-hold-only rows share the money PI, so refunding the
+        // money part must not stamp sibling 'Card Held' rows 'Refunded'
+        // (which would kill their holds without release). Rows with a hold
+        // row are handled exclusively by the fee-PI branch above.
+        const candidateRows = (bookings ?? []) as Array<{
+          id: string;
+          deposit_status: string | null;
+          venue_id: string;
+          guest_id: string | null;
+          status: string;
+        }>;
+        let heldBookingIds = new Set<string>();
+        if (candidateRows.length > 0) {
+          const { data: holdRows, error: holdRowsErr } = await supabase
+            .from('booking_card_holds')
+            .select('booking_id')
+            .in(
+              'booking_id',
+              candidateRows.map((b) => b.id),
+            );
+          if (holdRowsErr) {
+            console.error('[Stripe webhook] hold sibling lookup failed:', holdRowsErr, { paymentIntentId });
+            throw holdRowsErr;
+          }
+          heldBookingIds = new Set(((holdRows ?? []) as Array<{ booking_id: string }>).map((h) => h.booking_id));
+        }
+
+        const refundable = candidateRows.filter(
+          (b) => b.deposit_status !== 'Refunded' && !heldBookingIds.has(b.id),
+        ) as Array<{
           id: string;
           venue_id: string;
           guest_id: string | null;

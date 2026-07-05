@@ -1,6 +1,7 @@
 /**
- * Guest-facing card-hold copy for the online booking client
- * (docs: CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION §7.3).
+ * Card-hold copy for the online booking client (§7.3) and the staff booking
+ * detail surfaces (§9.1/§9.2)
+ * (docs: CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION).
  *
  * All strings that mention the fee build on `formatCardHoldFeePence` from
  * `card-hold-terms.ts` (the same module the server snapshot uses) so the
@@ -89,4 +90,114 @@ export function cardHoldConfirmationLine(
   if (mode === 'setup') return CARD_HOLD_SETUP_CONFIRMATION_LINE;
   if (mode === 'payment_with_setup') return CARD_HOLD_PAYMENT_WITH_SETUP_CONFIRMATION_LINE;
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Staff booking-detail surfaces (§9.1 pill table + §9.2 charge UI)    */
+/* ------------------------------------------------------------------ */
+
+/** Pill labels from the §9.1 state table (exact strings). */
+export const CARD_HOLD_PILL_REQUEST_SENT = 'Card request sent';
+export const CARD_HOLD_PILL_HELD = 'Card held';
+export const CARD_HOLD_PILL_ENDED = 'Card hold ended';
+export const CARD_HOLD_PILL_CHARGED = 'No-show fee charged';
+export const CARD_HOLD_PILL_REFUNDED = 'No-show fee refunded';
+
+/** Staff action labels (§9.1/§9.2). */
+export const CARD_HOLD_RESEND_LINK_LABEL = 'Resend link';
+export const CARD_HOLD_WAIVE_LABEL = 'Waive';
+export const CARD_HOLD_CHARGE_ACTION_LABEL = 'Charge no-show fee';
+export const CARD_HOLD_REFUND_ACTION_LABEL = 'Refund no-show fee';
+
+/** Short date used in staff hold detail lines, e.g. "3 Jul 2026". */
+export function formatCardHoldDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** `'Pending'` + open unsaved hold detail line (§9.1). */
+export function cardHoldAwaitingCardLine(feePence: number): string {
+  return `Waiting for the guest to add card details. No-show fee up to ${formatCardHoldFeePence(feePence)}.`;
+}
+
+/** `'Pending'` + released hold (booking cancelled before the card was saved) (§9.1). */
+export const CARD_HOLD_REQUEST_CANCELLED_LINE = 'The card request was cancelled with the booking.';
+
+/** `'Card Held'`, not released (§9.1). Fee-less fallback for payloads without the hold row. */
+export function cardHoldHeldLine(feePence: number | null): string {
+  if (feePence != null && feePence > 0) {
+    return `No-show fee up to ${formatCardHoldFeePence(feePence)}. No payment taken.`;
+  }
+  return 'Card securely on file. No payment taken.';
+}
+
+/** `'Card Held'`, released (§9.1). */
+export function cardHoldEndedLine(releasedAtIso: string | null): string {
+  if (releasedAtIso) {
+    return `The card hold was released on ${formatCardHoldDate(releasedAtIso)}.`;
+  }
+  return 'The card hold has ended.';
+}
+
+/** `'Charged'` (§9.1). Degrades gracefully when amount or date is unknown. */
+export function cardHoldChargedLine(
+  chargedPence: number | null,
+  chargedAtIso: string | null,
+): string {
+  if (chargedPence != null && chargedPence > 0) {
+    const amount = formatCardHoldFeePence(chargedPence);
+    return chargedAtIso
+      ? `${amount} charged on ${formatCardHoldDate(chargedAtIso)}.`
+      : `${amount} charged.`;
+  }
+  return 'A no-show fee was charged.';
+}
+
+/** `'Refunded'` after a charge (§9.1). */
+export function cardHoldRefundedLine(chargedPence: number | null): string {
+  if (chargedPence != null && chargedPence > 0) {
+    return `${formatCardHoldFeePence(chargedPence)} refunded.`;
+  }
+  return 'The no-show fee was refunded.';
+}
+
+/**
+ * Plain-words mapping of Stripe charge failure codes (§8.5/§9.1). Unknown codes
+ * degrade to a generic phrase rather than leaking raw codes to staff.
+ */
+export function cardHoldChargeFailurePlainReason(code: string): string {
+  switch (code) {
+    case 'card_declined':
+      return 'the card was declined';
+    case 'authentication_required':
+      return 'the card issuer requires the client to authorise the payment';
+    case 'expired_card':
+      return 'the card has expired';
+    case 'insufficient_funds':
+      return 'the card has insufficient funds';
+    default:
+      return 'the payment did not go through';
+  }
+}
+
+/** Appended detail line when the last charge attempt failed (§9.1). */
+export function cardHoldChargeFailureLine(code: string): string {
+  return `Last charge attempt failed: ${cardHoldChargeFailurePlainReason(code)}.`;
+}
+
+/** Charge dialog title (§9.2, exact string). */
+export const CARD_HOLD_CHARGE_DIALOG_TITLE = 'Charge no-show fee';
+
+/** Charge dialog body (§9.2, exact string). */
+export function cardHoldChargeDialogBody(guestName: string, feePence: number): string {
+  return (
+    `Charge ${guestName}'s saved card for missing this booking. ` +
+    `The maximum you can charge is ${formatCardHoldFeePence(feePence)}.`
+  );
+}
+
+/** Charge dialog confirm button, live-updating with the entered amount (§9.2). */
+export function cardHoldChargeConfirmLabel(amountPence: number): string {
+  return `Charge ${formatCardHoldFeePence(amountPence)}`;
 }

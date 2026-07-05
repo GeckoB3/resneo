@@ -30,6 +30,12 @@ import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChan
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
+import {
+  resolveCardHoldUiState,
+  type CardHoldSummary,
+  type CardHoldUiState,
+} from '@/components/booking/card-hold-ui-state';
+import { CardHoldStateLine } from '@/components/booking/CardHoldDetailSection';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -94,6 +100,8 @@ export interface BookingDetailRecord {
   staff_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
+  /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
+  card_hold?: CardHoldSummary | null;
   resource_payment_requirement?: ClassPaymentRequirement | null;
   party_size: number;
   source?: string | null;
@@ -220,7 +228,24 @@ function resourcePaymentModeLabel(m: ClassPaymentRequirement | null | undefined)
   if (m === 'none') return 'Pay at venue';
   if (m === 'deposit') return 'Deposit (online)';
   if (m === 'full_payment') return 'Full payment (online)';
+  if (m === 'card_hold') return 'Card hold (no payment taken)';
   return '—';
+}
+
+/**
+ * Hold state for this read-only sheet (§9.1 other-staff-surfaces bullet):
+ * state line only, never actions, so the resolver runs as non-admin. The
+ * charge action lives on the full booking detail surface. When the payload
+ * lacks the `card_hold` object (e.g. prefetch snapshots), the resolver falls
+ * back to a conservative enum-only state ('Card Held' / 'Charged'), so the fee
+ * line renders only when the hold row is available.
+ */
+function detailCardHoldState(detail: BookingDetailRecord): CardHoldUiState | null {
+  return resolveCardHoldUiState(
+    { status: detail.status, deposit_status: detail.deposit_status ?? '' },
+    detail.card_hold ?? null,
+    { isAdmin: false },
+  );
 }
 
 interface Props {
@@ -772,6 +797,18 @@ export function AppointmentDetailSheet({
                     </dd>
                   </div>
                 )}
+                {(() => {
+                  const hold = detailCardHoldState(detail);
+                  if (!hold || (!hold.pill && hold.lines.length === 0)) return null;
+                  return (
+                    <div>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Card hold</dt>
+                      <dd className="mt-0.5">
+                        <CardHoldStateLine state={hold} />
+                      </dd>
+                    </div>
+                  );
+                })()}
                 {detail.source ? (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Source</dt>
@@ -881,6 +918,18 @@ export function AppointmentDetailSheet({
                     </dd>
                   </div>
                 ) : null}
+                {(() => {
+                  const hold = detailCardHoldState(detail);
+                  if (!hold || (!hold.pill && hold.lines.length === 0)) return null;
+                  return (
+                    <div>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Card hold</dt>
+                      <dd className="mt-0.5">
+                        <CardHoldStateLine state={hold} />
+                      </dd>
+                    </div>
+                  );
+                })()}
                 {detail.source ? (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Source</dt>

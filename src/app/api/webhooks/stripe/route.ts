@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import {
   confirmBookingsForSucceededPaymentIntent,
+  confirmBookingsForSucceededSetupIntent,
   sendDepositPaidBookingComms,
 } from '@/lib/booking/confirm-deposit-payment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -120,7 +121,8 @@ async function restoreAndReleaseClassBookings(
 
 /**
  * Stripe webhook handler. Idempotent: process each event once (track by stripe_event_id).
- * Verifies signature. Handles: payment_intent.succeeded, payment_intent.payment_failed, charge.refunded.
+ * Verifies signature. Handles: payment_intent.succeeded, payment_intent.payment_failed,
+ * setup_intent.succeeded, setup_intent.setup_failed, charge.refunded.
  */
 export async function POST(request: NextRequest) {
   let event: Stripe.Event;
@@ -203,9 +205,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
+      // Thread the payment method through so payment_with_setup units get
+      // their hold rows completed (spec §7.4 payment branch).
+      const paymentMethodId =
+        typeof pi.payment_method === 'string' ? pi.payment_method : pi.payment_method?.id ?? null;
+
       const confirmResult = await confirmBookingsForSucceededPaymentIntent(supabase, {
         paymentIntentId: pi.id,
         venueId: booking.venue_id,
+        paymentMethodId,
       });
 
       if (!confirmResult.ok) {
@@ -333,6 +341,111 @@ export async function POST(request: NextRequest) {
         }
       }
       console.error('payment_intent.payment_failed', pi.id, pi.last_payment_error?.message);
+    } else if (event.type === 'setup_intent.succeeded') {
+      // Card-hold setup mode backup confirm (spec §8.6 item 4). The
+      // confirm-payment route is the primary path; this covers 3DS redirects
+      // and clients that never came back.
+      const si = event.data.object as Stripe.SetupIntent;
+      const meta = si.metadata ?? {};
+      if (meta.reserve_ni_purpose !== RESERVE_NI_PI_PURPOSE.CARD_HOLD_SETUP) {
+        console.log(`[Stripe webhook] setup_intent.succeeded ${si.id} is not a card-hold setup, skipping`);
+        return NextResponse.json({ received: true });
+      }
+
+      // Resolve the venue from the connected account the event arrived on,
+      // falling back to the SI metadata (covers a venue whose current account
+      // has changed since the hold snapshotted it).
+      let venueId: string | null = null;
+      if (connectedAccountId) {
+        const { data: venueRow } = await supabase
+          .from('venues')
+          .select('id')
+          .eq('stripe_connected_account_id', connectedAccountId)
+          .maybeSingle();
+        venueId = venueRow?.id ?? null;
+      }
+      if (!venueId) venueId = (meta.venue_id as string | undefined) ?? null;
+      if (!venueId) {
+        console.warn(`[Stripe webhook] setup_intent.succeeded ${si.id}: could not resolve venue, skipping`);
+        return NextResponse.json({ received: true });
+      }
+
+      const setupPaymentMethodId =
+        typeof si.payment_method === 'string' ? si.payment_method : si.payment_method?.id ?? null;
+
+      const confirmResult = await confirmBookingsForSucceededSetupIntent(supabase, {
+        setupIntentId: si.id,
+        paymentMethodId: setupPaymentMethodId,
+        venueId,
+      });
+
+      if (!confirmResult.ok) {
+        if (confirmResult.reason === 'hold_not_found') {
+          console.warn(`[Stripe webhook] setup_intent.succeeded ${si.id}: no hold rows found, skipping`);
+          return NextResponse.json({ received: true });
+        }
+        throw new Error(`confirmBookingsForSucceededSetupIntent failed: ${confirmResult.reason}`);
+      }
+
+      if (confirmResult.alreadyConfirmed) {
+        console.log(`[Stripe webhook] No pending bookings to mark Booked for SI ${si.id} - may already be processed`);
+        return NextResponse.json({ received: true });
+      }
+
+      const confirmedIds = confirmResult.confirmedIds;
+
+      const { data: leadBooking } = await supabase
+        .from('bookings')
+        .select('id, guest_id')
+        .eq('id', confirmedIds[0])
+        .maybeSingle();
+
+      const { data: venue, error: venueErr } = await supabase
+        .from('venues')
+        .select('name, address, email, reply_to_email')
+        .eq('id', venueId)
+        .single();
+      if (venueErr) {
+        console.error('[Stripe webhook] Venue load failed:', venueErr, { venueId });
+        throw venueErr;
+      }
+
+      let guest: { first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null } | null = null;
+      if (leadBooking?.guest_id) {
+        const { data: guestRow } = await supabase
+          .from('guests')
+          .select('first_name, last_name, email, phone')
+          .eq('id', leadBooking.guest_id)
+          .maybeSingle();
+        guest = guestRow ?? null;
+      }
+
+      const venueData = venueRowToEmailData({
+        name: venue?.name ?? 'Venue',
+        address: venue?.address ?? null,
+        email: venue?.email ?? null,
+        reply_to_email: venue?.reply_to_email ?? null,
+      });
+
+      const venueIdForAfter = venueId;
+      after(async () => {
+        const admin = getSupabaseAdminClient();
+        await sendDepositPaidBookingComms(admin, {
+          confirmedIds,
+          venueId: venueIdForAfter,
+          venueData,
+          guest,
+        });
+      });
+    } else if (event.type === 'setup_intent.setup_failed') {
+      // Informational only (spec §8.6 item 5): the client handles inline
+      // failure and the abandonment cron cleans up unsaved holds.
+      const si = event.data.object as Stripe.SetupIntent;
+      console.warn(
+        'setup_intent.setup_failed',
+        si.id,
+        si.last_setup_error?.message ?? 'no error detail',
+      );
     } else if (event.type === 'account.updated') {
       const account = event.data.object as Stripe.Account;
       if (account.id) {

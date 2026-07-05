@@ -31,15 +31,24 @@ export interface InsertPendingPaidClassSessionBookingParams {
    * discount applied at quote time). Must not exceed the natural charge.
    */
   overrideOnlineChargePence?: number;
+  /**
+   * Card-hold line (card-hold design doc §7.2): no money is due today, so the row is
+   * inserted Pending/Pending with `deposit_amount_pence: NULL`; the chargeable no-show
+   * fee lives on the `booking_card_holds` row, not here. The class type must be
+   * configured `card_hold`. Ignores `overrideOnlineChargePence`.
+   */
+  cardHold?: boolean;
 }
 
 /**
- * Creates a **Pending** class_session booking with `deposit_amount_pence` set for Stripe collection.
+ * Creates a **Pending** class_session booking awaiting its payment step:
+ * - default: `deposit_amount_pence` set for Stripe money collection;
+ * - `cardHold: true`: `deposit_amount_pence` NULL (card saved, nothing charged today).
  * No confirmation email — sent after `confirm-payment` / webhook.
  */
 export async function insertPendingPaidClassSessionBooking(
   params: InsertPendingPaidClassSessionBookingParams,
-): Promise<{ ok: true; bookingId: string; deposit_amount_pence: number } | { ok: false; status: number; error: string; code?: string }> {
+): Promise<{ ok: true; bookingId: string; deposit_amount_pence: number | null } | { ok: false; status: number; error: string; code?: string }> {
   const {
     admin,
     venueId,
@@ -51,6 +60,7 @@ export async function insertPendingPaidClassSessionBooking(
     source,
     groupBookingId,
     overrideOnlineChargePence,
+    cardHold = false,
   } = params;
 
   const { data: inst, error: instErr } = await admin
@@ -94,20 +104,29 @@ export async function insertPendingPaidClassSessionBooking(
   const payReq = ct.payment_requirement ?? 'none';
   const priceP = ct.price_pence ?? 0;
   const depPer = ct.deposit_amount_pence ?? 0;
-  const naturalDeposit = onlineChargePence(payReq, priceP, depPer, partySize);
-  if (naturalDeposit <= 0) {
-    return { ok: false, status: 400, error: 'This session does not require an online card payment' };
-  }
-  let depositPence = naturalDeposit;
-  if (
-    typeof overrideOnlineChargePence === 'number' &&
-    overrideOnlineChargePence >= 0 &&
-    overrideOnlineChargePence <= naturalDeposit
-  ) {
-    depositPence = overrideOnlineChargePence;
-  }
-  if (depositPence <= 0) {
-    return { ok: false, status: 400, error: 'This session does not require an online card payment' };
+
+  let depositPence: number | null;
+  if (cardHold) {
+    if (payReq !== 'card_hold') {
+      return { ok: false, status: 400, error: 'This session does not take a card hold' };
+    }
+    depositPence = null;
+  } else {
+    const naturalDeposit = onlineChargePence(payReq, priceP, depPer, partySize);
+    if (naturalDeposit <= 0) {
+      return { ok: false, status: 400, error: 'This session does not require an online card payment' };
+    }
+    depositPence = naturalDeposit;
+    if (
+      typeof overrideOnlineChargePence === 'number' &&
+      overrideOnlineChargePence >= 0 &&
+      overrideOnlineChargePence <= naturalDeposit
+    ) {
+      depositPence = overrideOnlineChargePence;
+    }
+    if (depositPence <= 0) {
+      return { ok: false, status: 400, error: 'This session does not require an online card payment' };
+    }
   }
 
   const bookingDate = row.instance_date;

@@ -20,6 +20,12 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
+import {
+  cardHoldCatalogNoticeLine,
+  cardHoldConfirmationLine,
+  isCardHoldPaymentMode,
+  type CardHoldPaymentMode,
+} from './card-hold-copy';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { formatBookablePricePence, formatFromBookablePricePence } from '@/lib/booking/format-price-display';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
@@ -665,6 +671,9 @@ export function AppointmentBookingFlow({
     deposit_amount_pence: number;
     cancellation_notice_hours: number;
     payment_url?: string;
+    /** Card capture mode from the create response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
     /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
     compliance_warnings?: Array<{ compliance_type_name: string }>;
   } | null>(null);
@@ -709,6 +718,9 @@ export function AppointmentBookingFlow({
     requires_deposit: boolean;
     total_deposit_pence: number;
     cancellation_notice_hours: number;
+    /** Card capture mode from the create response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
   } | null>(null);
 
   /**
@@ -2074,6 +2086,8 @@ export function AppointmentBookingFlow({
             deposit_amount_pence: typeof data.total_deposit_pence === 'number' ? data.total_deposit_pence : 0,
             cancellation_notice_hours:
               typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
+            payment_mode: data.payment_mode,
+            card_hold_fee_pence: data.card_hold_fee_pence ?? null,
           });
           const needsStripe = Boolean(data.requires_deposit && data.client_secret);
           setStep(needsStripe ? 'payment' : 'confirmation');
@@ -2193,6 +2207,8 @@ export function AppointmentBookingFlow({
           deposit_amount_pence: typeof data.deposit_amount_pence === 'number' ? data.deposit_amount_pence : 0,
           cancellation_notice_hours:
             typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
+          payment_mode: data.payment_mode,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         });
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
@@ -2432,6 +2448,8 @@ export function AppointmentBookingFlow({
         requires_deposit: data.requires_deposit ?? false,
         total_deposit_pence: data.total_deposit_pence ?? 0,
         cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
+        payment_mode: data.payment_mode,
+        card_hold_fee_pence: data.card_hold_fee_pence ?? null,
       });
       const needsStripe = Boolean(data.requires_deposit && data.client_secret);
       setStep(needsStripe ? 'group_payment' : 'group_confirmation');
@@ -2498,6 +2516,60 @@ export function AppointmentBookingFlow({
     0,
   );
   const totalGroupDepositPence = groupPeople.reduce((sum, p) => sum + (p.depositPence ?? 0), 0);
+
+  // Card holds (design doc 7.3): hold fees are not money due at booking, so they are split
+  // out of the deposit sums and the legacy deposit / refund-policy copy is suppressed for
+  // the hold portion.
+  const groupCardHoldFeePence = groupPeople.reduce(
+    (sum, p) => sum + (p.onlineChargeLabel === 'card_hold' ? p.depositPence ?? 0 : 0),
+    0,
+  );
+  const groupPaidDepositPence = totalGroupDepositPence - groupCardHoldFeePence;
+  const groupChargeLabel: 'deposit' | 'full_payment' | 'card_hold' =
+    groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'card_hold')
+      ? 'card_hold'
+      : groupPeople.length > 0 &&
+          groupPeople
+            .filter((p) => p.onlineChargeLabel !== 'card_hold')
+            .every((p) => p.onlineChargeLabel === 'full_payment')
+        ? 'full_payment'
+        : 'deposit';
+
+  const isMultiServiceBooking = Boolean(multiServiceSegments && multiServiceSegments.length > 1);
+  const singleOnlineCharge = effectiveOfferForBooking
+    ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
+    : null;
+  const multiCardHoldFeePence = (multiServiceSegments ?? []).reduce(
+    (sum, s) => sum + (s.onlineChargeLabel === 'card_hold' ? s.depositPence ?? 0 : 0),
+    0,
+  );
+  const multiPaidDepositPence = (multiServiceSegments ?? []).reduce(
+    (sum, s) => sum + (s.onlineChargeLabel !== 'card_hold' ? s.depositPence ?? 0 : 0),
+    0,
+  );
+  const singleDetailsChargeLabel: 'deposit' | 'full_payment' | 'card_hold' = isMultiServiceBooking
+    ? (multiServiceSegments ?? []).every((s) => s.onlineChargeLabel === 'card_hold')
+      ? 'card_hold'
+      : (multiServiceSegments ?? [])
+            .filter((s) => s.onlineChargeLabel !== 'card_hold')
+            .every((s) => s.onlineChargeLabel === 'full_payment')
+        ? 'full_payment'
+        : 'deposit'
+    : singleOnlineCharge?.chargeLabel === 'card_hold'
+      ? 'card_hold'
+      : singleOnlineCharge?.chargeLabel === 'full_payment'
+        ? 'full_payment'
+        : 'deposit';
+  const singleDetailsDepositPence = isMultiServiceBooking
+    ? multiPaidDepositPence
+    : singleDetailsChargeLabel === 'card_hold'
+      ? 0
+      : singleOnlineCharge?.amountPence ?? 0;
+  const singleDetailsCardHoldFeePence = isMultiServiceBooking
+    ? multiCardHoldFeePence
+    : singleDetailsChargeLabel === 'card_hold'
+      ? singleOnlineCharge?.amountPence ?? 0
+      : 0;
 
   const paymentCancellationBlurb = `Full deposit refund if you cancel ≥${refundNoticeHours}h before each appointment.`;
 
@@ -3702,6 +3774,7 @@ export function AppointmentBookingFlow({
               durationMinutes: s.durationMinutes,
               pricePence: s.pricePence,
               depositPence: s.depositPence,
+              chargeKind: s.onlineChargeLabel,
               extras: addonSelectionDetails(catalogStaff, s.serviceId, s.addonIds ?? [], s.practitionerId).lines.map((l) => ({
                 name: l.name,
                 pricePence: l.pricePence,
@@ -3952,6 +4025,15 @@ export function AppointmentBookingFlow({
                     ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
                     : null;
                   if (!o || o.amountPence <= 0) return null;
+                  if (o.chargeLabel === 'card_hold') {
+                    // Card hold (design doc 7.3): no money due at booking; show the hold notice
+                    // where the deposit hint renders today.
+                    return (
+                      <p className="mt-1.5 border-t border-slate-100 pt-1.5 text-xs text-slate-600">
+                        {cardHoldCatalogNoticeLine(o.amountPence)}
+                      </p>
+                    );
+                  }
                   return (
                     <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                       <span className="font-medium text-slate-700">
@@ -3969,6 +4051,9 @@ export function AppointmentBookingFlow({
               ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
               : null;
             if (!o || o.amountPence <= 0) return null;
+            // Card-hold services never show the deposit toggle (the staff card-hold toggle
+            // is a separate control; the two are never shown together, design doc 7.6).
+            if (o.chargeLabel === 'card_hold') return null;
             if (o.chargeLabel === 'full_payment') {
               return (
                 <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -4040,25 +4125,9 @@ export function AppointmentBookingFlow({
                 setStep('multi_service');
               }}
               variant="appointment"
-              appointmentDepositPence={
-                isStaffWalkInAppointment
-                  ? null
-                  : multiServiceSegments && multiServiceSegments.length > 1
-                  ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
-                  : effectiveOfferForBooking
-                    ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)?.amountPence ?? 0
-                    : 0
-              }
-              appointmentChargeLabel={
-                multiServiceSegments && multiServiceSegments.length > 1
-                  ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
-                    ? 'full_payment'
-                    : 'deposit'
-                  : onlineChargeFromCatalogOffer(effectiveOfferForBooking ?? { price_pence: null, deposit_pence: null })
-                        ?.chargeLabel === 'full_payment'
-                    ? 'full_payment'
-                    : 'deposit'
-              }
+              appointmentDepositPence={isStaffWalkInAppointment ? null : singleDetailsDepositPence}
+              appointmentChargeLabel={isStaffWalkInAppointment ? 'deposit' : singleDetailsChargeLabel}
+              appointmentCardHoldFeePence={isStaffWalkInAppointment ? null : singleDetailsCardHoldFeePence}
               currencySymbol={sym}
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
@@ -4111,18 +4180,15 @@ export function AppointmentBookingFlow({
           partySize={1}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={singleAppointmentPaymentPolicy}
-          summaryMode="total"
-          chargeKind={
-            multiServiceSegments && multiServiceSegments.length > 1
-              ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
-                ? 'full_payment'
-                : 'deposit'
-              : onlineChargeFromCatalogOffer(effectiveOfferForBooking ?? { price_pence: null, deposit_pence: null })
-                    ?.chargeLabel === 'full_payment'
-                ? 'full_payment'
-                : 'deposit'
+          // Hold modes: the consent line covers the cancellation rule (design doc 7.3).
+          cancellationPolicy={
+            isCardHoldPaymentMode(createResult.payment_mode) ? undefined : singleAppointmentPaymentPolicy
           }
+          summaryMode="total"
+          chargeKind={singleDetailsChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'}
+          mode={createResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={createResult.card_hold_fee_pence}
+          venueName={venue.name}
         />
       )}
 
@@ -4165,13 +4231,20 @@ export function AppointmentBookingFlow({
           {!isEdit && isStaff && createResult?.payment_url ? (
             <p className="mt-3 text-xs text-brand-800">A deposit payment link was sent to the guest.</p>
           ) : null}
-          {!isEdit && (createResult?.deposit_amount_pence ?? 0) > 0 ? (
+          {!isEdit && cardHoldConfirmationLine(createResult?.payment_mode) ? (
+            <p className="mt-3 text-sm font-medium text-brand-800">
+              {cardHoldConfirmationLine(createResult?.payment_mode)}
+            </p>
+          ) : null}
+          {!isEdit &&
+          (createResult?.deposit_amount_pence ?? 0) > 0 &&
+          createResult?.payment_mode !== 'setup' ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
               {singleConfirmationDepositCopy ??
                 `Full refund if you cancel ≥${createResult?.cancellation_notice_hours ?? refundNoticeHours}h before start (see venue terms).`}
             </p>
-          ) : !isEdit && isPublicGuest ? (
+          ) : !isEdit && isPublicGuest && !isCardHoldPaymentMode(createResult?.payment_mode) ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
@@ -4256,12 +4329,17 @@ export function AppointmentBookingFlow({
                   </div>
                 </div>
               )}
-              {totalGroupDepositPence > 0 && (
+              {groupPaidDepositPence > 0 && (
                 <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-2.5 text-sm">
                   <div className="flex justify-between">
                     <span className="font-medium text-amber-900">Total deposit due</span>
-                    <span className="font-semibold text-amber-900">{formatPrice(totalGroupDepositPence)}</span>
+                    <span className="font-semibold text-amber-900">{formatPrice(groupPaidDepositPence)}</span>
                   </div>
+                </div>
+              )}
+              {groupCardHoldFeePence > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-600">
+                  {cardHoldCatalogNoticeLine(groupCardHoldFeePence)}
                 </div>
               )}
             </div>
@@ -4726,11 +4804,16 @@ export function AppointmentBookingFlow({
                   <span className="font-semibold text-brand-600">{formatPrice(totalGroupPrice)}</span>
                 </div>
               )}
-              {totalGroupDepositPence > 0 && (
+              {groupPaidDepositPence > 0 && (
                 <div className="flex justify-between border-t border-amber-100 pt-2">
                   <span className="font-medium text-amber-900">Total deposit</span>
-                  <span className="font-semibold text-amber-800">{formatPrice(totalGroupDepositPence)}</span>
+                  <span className="font-semibold text-amber-800">{formatPrice(groupPaidDepositPence)}</span>
                 </div>
+              )}
+              {groupCardHoldFeePence > 0 && (
+                <p className="border-t border-slate-100 pt-2 text-xs text-slate-600">
+                  {cardHoldCatalogNoticeLine(groupCardHoldFeePence)}
+                </p>
               )}
             </div>
           </div>
@@ -4754,12 +4837,9 @@ export function AppointmentBookingFlow({
                 onSubmit={handleGroupDetailsSubmit}
                 onBack={() => setStep('group_review')}
                 variant="appointment"
-                appointmentDepositPence={totalGroupDepositPence}
-                appointmentChargeLabel={
-                  groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
-                    ? 'full_payment'
-                    : 'deposit'
-                }
+                appointmentDepositPence={groupChargeLabel === 'card_hold' ? null : groupPaidDepositPence}
+                appointmentChargeLabel={groupChargeLabel}
+                appointmentCardHoldFeePence={groupCardHoldFeePence > 0 ? groupCardHoldFeePence : null}
                 currencySymbol={sym}
                 refundNoticeHours={refundNoticeHours}
                 multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
@@ -4785,13 +4865,15 @@ export function AppointmentBookingFlow({
           partySize={groupPeople.length}
           onComplete={handleGroupPaymentComplete}
           onBack={() => setStep('group_details')}
-          cancellationPolicy={groupAppointmentPaymentPolicy}
-          summaryMode="total"
-          chargeKind={
-            groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
-              ? 'full_payment'
-              : 'deposit'
+          // Hold modes: the consent line covers the cancellation rule (design doc 7.3).
+          cancellationPolicy={
+            isCardHoldPaymentMode(groupCreateResult.payment_mode) ? undefined : groupAppointmentPaymentPolicy
           }
+          summaryMode="total"
+          chargeKind={groupChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'}
+          mode={groupCreateResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={groupCreateResult.card_hold_fee_pence}
+          venueName={venue.name}
         />
       )}
 
@@ -4815,13 +4897,19 @@ export function AppointmentBookingFlow({
               A confirmation will be sent to {guestDetails.email || guestDetails.phone}.
             </p>
           ) : null}
-          {(groupCreateResult?.total_deposit_pence ?? 0) > 0 ? (
+          {cardHoldConfirmationLine(groupCreateResult?.payment_mode) ? (
+            <p className="mt-3 text-sm font-medium text-brand-800">
+              {cardHoldConfirmationLine(groupCreateResult?.payment_mode)}
+            </p>
+          ) : null}
+          {(groupCreateResult?.total_deposit_pence ?? 0) > 0 &&
+          groupCreateResult?.payment_mode !== 'setup' ? (
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-brand-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
               {groupConfirmationDepositCopy ??
                 `Full refund per appointment if you cancel ≥${groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours}h before each start (see venue terms).`}
             </p>
-          ) : isPublicGuest ? (
+          ) : isPublicGuest && !isCardHoldPaymentMode(groupCreateResult?.payment_mode) ? (
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change these appointments at any time before they start (subject to the venue&apos;s terms).
             </p>

@@ -89,6 +89,11 @@ export interface AvailableSlot {
   estimated_duration?: number;
   deposit_required?: boolean;
   deposit_amount?: number | null;
+  /**
+   * Table rules protection kind for this slot: classic upfront deposit vs a card hold
+   * (save the card now, charge only on no-show). Absent means 'deposit'.
+   */
+  deposit_type?: 'deposit' | 'card_hold';
   /** When deposits apply for this dining service, require them for online/widget checkout. */
   online_requires_deposit?: boolean;
   /** Hours before start for deposit refund (from dining `booking_restrictions`). */

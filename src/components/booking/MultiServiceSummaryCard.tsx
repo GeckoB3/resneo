@@ -1,5 +1,7 @@
 'use client';
 
+import { cardHoldCatalogNoticeLine } from './card-hold-copy';
+
 export interface MultiServiceLine {
   /** Group bookings: attendee label shown above the service line. */
   personLabel?: string;
@@ -51,10 +53,22 @@ export function MultiServiceSummaryCard({
     0,
   );
   const totalPrice = lines.reduce((sum, l) => sum + (l.pricePence ?? 0), 0) + totalExtras;
-  const totalDeposit = lines.reduce((sum, l) => sum + (l.depositPence ?? 0), 0);
+  // Card-hold lines are not money due at booking (design doc 7.3): their fee is split out of
+  // the deposit total and shown as the no-show hold notice instead.
+  const totalCardHoldFee = lines.reduce(
+    (sum, l) => sum + (l.chargeKind === 'card_hold' ? l.depositPence ?? 0 : 0),
+    0,
+  );
+  const totalDeposit = lines.reduce(
+    (sum, l) => sum + (l.chargeKind === 'card_hold' ? 0 : l.depositPence ?? 0),
+    0,
+  );
   const hasPrice = lines.some((l) => l.pricePence != null);
   const allFull =
-    totalDeposit > 0 && lines.every((l) => l.depositPence <= 0 || l.chargeKind === 'full_payment');
+    totalDeposit > 0 &&
+    lines.every(
+      (l) => l.depositPence <= 0 || l.chargeKind === 'full_payment' || l.chargeKind === 'card_hold',
+    );
   const depositLineLabel = totalDeposit > 0 ? (allFull ? 'Full payment due' : 'Deposit due') : '';
 
   return (
@@ -157,6 +171,9 @@ export function MultiServiceSummaryCard({
               {(totalDeposit / 100).toFixed(2)}
             </span>
           </div>
+        )}
+        {totalCardHoldFee > 0 && (
+          <p className="text-xs text-slate-600">{cardHoldCatalogNoticeLine(totalCardHoldFee)}</p>
         )}
       </div>
     </div>

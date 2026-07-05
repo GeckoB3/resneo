@@ -20,6 +20,13 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import {
+  cardHoldBookingNoticeLine,
+  cardHoldCatalogNoticeLine,
+  cardHoldConfirmationLine,
+  isCardHoldPaymentMode,
+  type CardHoldPaymentMode,
+} from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
@@ -97,6 +104,15 @@ function paymentSummaryLines(
   const price = slot.price_pence ?? 0;
   const dep = slot.deposit_amount_pence ?? 0;
   const req = slot.payment_requirement;
+
+  // Card hold: nothing is charged today; the card is stored for a possible no-show fee.
+  // Checked before the free shortcut so a free card-hold class still shows the notice.
+  if (req === 'card_hold' && dep > 0 && !suppressOnlinePayment) {
+    const lines =
+      price > 0 ? [`${sym}${(price / 100).toFixed(2)} per person - pay at venue.`] : [];
+    lines.push(cardHoldBookingNoticeLine(dep * spots));
+    return { lines, chargePence: 0 };
+  }
 
   if (price <= 0) {
     return { lines: ['Free - no payment required'], chargePence: 0 };
@@ -246,6 +262,9 @@ export function ClassBookingFlow({
     cart_primary_booking_id?: string;
     cart_booking_count?: number;
     cart_charge_kind?: 'deposit' | 'full_payment';
+    /** Card capture mode from the create / checkout response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -467,6 +486,8 @@ export function ClassBookingFlow({
           client_secret: data.client_secret,
           stripe_account_id: data.stripe_account_id,
           requires_deposit: data.requires_deposit ?? false,
+          payment_mode: data.payment_mode,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         });
         const needsStripe = Boolean(data.requires_deposit && data.client_secret);
         setStep(needsStripe ? 'payment' : 'confirmation');
@@ -559,6 +580,8 @@ export function ClassBookingFlow({
           cart_primary_booking_id: data.primary_booking_id,
           cart_booking_count: Array.isArray(data.booking_ids) ? data.booking_ids.length : selectedSlots.length,
           cart_charge_kind: data.checkout_charge_kind === 'full_payment' ? 'full_payment' : 'deposit',
+          payment_mode: data.payment_mode,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         });
         setSelectedClass(selectedSlots[0] ?? null);
         setStep('payment');
@@ -665,6 +688,11 @@ export function ClassBookingFlow({
                         </div>
                         {cls.description ? (
                           <p className="mt-1 line-clamp-2 text-xs text-slate-600">{cls.description}</p>
+                        ) : null}
+                        {cls.payment_requirement === 'card_hold' && (cls.deposit_amount_pence ?? 0) > 0 ? (
+                          <p className="mt-1 text-xs text-slate-600">
+                            {cardHoldCatalogNoticeLine(cls.deposit_amount_pence ?? 0, { perPerson: true })}
+                          </p>
                         ) : null}
                       </div>
                     </div>
@@ -1011,7 +1039,18 @@ export function ClassBookingFlow({
               requiresDeposit={false}
               variant="class"
               appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
-              appointmentChargeLabel={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+              appointmentChargeLabel={
+                selectedClass.payment_requirement === 'full_payment'
+                  ? 'full_payment'
+                  : !isStaffWalkIn && !payWithClassCredits && selectedClass.payment_requirement === 'card_hold'
+                    ? 'card_hold'
+                    : 'deposit'
+              }
+              appointmentCardHoldFeePence={
+                !isStaffWalkIn && !payWithClassCredits && selectedClass.payment_requirement === 'card_hold'
+                  ? (selectedClass.deposit_amount_pence ?? 0) * spots
+                  : null
+              }
               payAtVenueBalancePence={
                 (isStaffWalkIn || selectedClass.payment_requirement === 'none') && (selectedClass.price_pence ?? 0) > 0
                   ? (selectedClass.price_pence ?? 0) * spots
@@ -1037,12 +1076,18 @@ export function ClassBookingFlow({
           partySize={spots}
           onComplete={handlePaymentComplete}
           onBack={() => setStep(createResult.cart_primary_booking_id ? 'pick-date' : 'details')}
-          cancellationPolicy={classPaymentRefundPolicy}
+          // Hold modes: the consent line covers the cancellation rule (design doc 7.3).
+          cancellationPolicy={
+            isCardHoldPaymentMode(createResult.payment_mode) ? undefined : classPaymentRefundPolicy
+          }
           summaryMode="total"
           chargeKind={
             createResult.cart_charge_kind ??
             (selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit')
           }
+          mode={createResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={createResult.card_hold_fee_pence}
+          venueName={venue.name}
         />
       )}
 
@@ -1069,6 +1114,11 @@ export function ClassBookingFlow({
               {spots} spot{spots !== 1 ? 's' : ''}
             </p>
           )}
+          {cardHoldConfirmationLine(createResult?.payment_mode) ? (
+            <p className="mt-3 text-sm font-medium text-green-800">
+              {cardHoldConfirmationLine(createResult?.payment_mode)}
+            </p>
+          ) : null}
           {isStaff && createResult?.payment_url ? (
             <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
           ) : (

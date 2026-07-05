@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { buildIcsContent } from '@/lib/ics';
 import type { GuestDetails, VenuePublic } from './types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { cardHoldConfirmationLine, isCardHoldPaymentMode, type CardHoldPaymentMode } from './card-hold-copy';
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -21,9 +22,11 @@ interface ConfirmationStepProps {
   guest: GuestDetails;
   bookingId: string | undefined;
   requiresDeposit?: boolean;
+  /** Card capture mode from the create response; hold modes swap the deposit policy copy. */
+  paymentMode?: CardHoldPaymentMode;
 }
 
-export function ConfirmationStep({ venue, date, slot, partySize, guest, requiresDeposit }: ConfirmationStepProps) {
+export function ConfirmationStep({ venue, date, slot, partySize, guest, requiresDeposit, paymentMode }: ConfirmationStepProps) {
   const dateStr = formatDateLong(date);
   const [showCheck, setShowCheck] = useState(false);
 
@@ -91,12 +94,20 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
         Add to Calendar
       </button>
 
-      {/* Cancellation policy - only relevant when a deposit was taken */}
-      {requiresDeposit && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <p className="font-medium">Cancellation Policy</p>
-          <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund if cancelled within 48 hours or for no-shows.</p>
+      {/* Card hold (design doc 7.3): no deposit was taken, so the deposit policy copy is
+          replaced with the card-saved note. */}
+      {isCardHoldPaymentMode(paymentMode) ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <p className="font-medium">{cardHoldConfirmationLine(paymentMode)}</p>
         </div>
+      ) : (
+        /* Cancellation policy - only relevant when a deposit was taken */
+        requiresDeposit && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <p className="font-medium">Cancellation Policy</p>
+            <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund if cancelled within 48 hours or for no-shows.</p>
+          </div>
+        )
       )}
     </div>
   );

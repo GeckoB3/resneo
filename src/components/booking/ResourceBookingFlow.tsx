@@ -22,6 +22,12 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import {
+  cardHoldCatalogNoticeLine,
+  cardHoldConfirmationLine,
+  isCardHoldPaymentMode,
+  type CardHoldPaymentMode,
+} from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
@@ -264,6 +270,9 @@ export function ResourceBookingFlow({
     amount_pence_charged?: number;
     payment_url?: string;
     staffMessage?: string;
+    /** Card capture mode from the create response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -566,6 +575,14 @@ export function ResourceBookingFlow({
 
   const resourcePriceSummary = useMemo(() => {
     const sym = currencySymbolFromCode(venue.currency);
+    // Card hold: nothing is charged today; the card is stored for a possible no-show fee.
+    if (!isStaffWalkIn && payReq === 'card_hold' && (priceBasis?.deposit_amount_pence ?? 0) > 0) {
+      return {
+        primary:
+          totalPricePence > 0 ? `${sym}${(totalPricePence / 100).toFixed(2)} (pay at venue)` : 'Free',
+        secondary: cardHoldCatalogNoticeLine(priceBasis?.deposit_amount_pence ?? 0),
+      };
+    }
     if (totalPricePence <= 0) {
       return { primary: 'Free', secondary: null as string | null };
     }
@@ -588,7 +605,7 @@ export function ResourceBookingFlow({
       primary: `${sym}${(totalPricePence / 100).toFixed(2)} (pay at venue)`,
       secondary: null,
     };
-  }, [totalPricePence, payReq, onlineChargePence, venue.currency, isStaffWalkIn]);
+  }, [totalPricePence, payReq, onlineChargePence, venue.currency, isStaffWalkIn, priceBasis?.deposit_amount_pence]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -670,6 +687,8 @@ export function ResourceBookingFlow({
           stripe_account_id: data.stripe_account_id,
           requires_deposit: data.requires_deposit ?? false,
           amount_pence_charged: charged,
+          payment_mode: data.payment_mode,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         });
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
@@ -1126,7 +1145,16 @@ export function ResourceBookingFlow({
               requiresDeposit={false}
               variant="appointment"
               appointmentDepositPence={isStaffWalkIn ? null : onlineChargePence > 0 ? onlineChargePence : null}
-              appointmentChargeLabel={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
+              appointmentChargeLabel={
+                payReq === 'full_payment'
+                  ? 'full_payment'
+                  : !isStaffWalkIn && payReq === 'card_hold'
+                    ? 'card_hold'
+                    : 'deposit'
+              }
+              appointmentCardHoldFeePence={
+                !isStaffWalkIn && payReq === 'card_hold' ? priceBasis?.deposit_amount_pence ?? null : null
+              }
               payAtVenueBalancePence={(isStaffWalkIn || payReq === 'none') && totalPricePence > 0 ? totalPricePence : null}
               payAtVenuePaymentRequirement={isStaffWalkIn || payReq === 'none' ? 'none' : undefined}
               currencySymbol={currencySymbolFromCode(venue.currency)}
@@ -1150,8 +1178,14 @@ export function ResourceBookingFlow({
           partySize={1}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={resourcePaymentRefundPolicy}
+          // Hold modes: the consent line covers the cancellation rule (design doc 7.3).
+          cancellationPolicy={
+            isCardHoldPaymentMode(createResult.payment_mode) ? undefined : resourcePaymentRefundPolicy
+          }
           chargeKind={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
+          mode={createResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={createResult.card_hold_fee_pence}
+          venueName={venue.name}
         />
       )}
 
@@ -1173,6 +1207,11 @@ export function ResourceBookingFlow({
             <br />
             {date} · {selectedTime} – {selectedTime ? computeEndTime(selectedTime, duration) : ''}
           </p>
+          {cardHoldConfirmationLine(createResult?.payment_mode) ? (
+            <p className="mt-3 text-sm font-medium text-green-800">
+              {cardHoldConfirmationLine(createResult?.payment_mode)}
+            </p>
+          ) : null}
           {bookingReference ? (
             <p className="mt-3 text-sm text-green-800">
               <span className="text-green-700">Booking reference</span>{' '}

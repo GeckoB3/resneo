@@ -7,6 +7,7 @@ import { classOfferingsUrl, bookingConfirmPaymentUrl } from '@/lib/booking/booki
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import { PaymentStep } from './PaymentStep';
+import { type CardHoldPaymentMode } from './card-hold-copy';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 interface CartLine {
@@ -28,7 +29,11 @@ interface PaymentSessionState {
   stripe_account_id: string;
   primary_booking_id: string;
   total_amount_pence: number;
-  checkout_charge_kind: 'deposit' | 'full_payment';
+  /** Absent in setup mode (card hold: nothing is charged today). */
+  checkout_charge_kind?: 'deposit' | 'full_payment';
+  /** Card capture mode from the checkout response ('setup' = card hold, no payment today). */
+  payment_mode?: CardHoldPaymentMode;
+  card_hold_fee_pence?: number | null;
   group_booking_id: string;
   total_party_size: number;
 }
@@ -196,7 +201,9 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
           stripe_account_id: data.stripe_account_id as string,
           primary_booking_id: data.primary_booking_id as string,
           total_amount_pence: data.total_amount_pence as number,
-          checkout_charge_kind: (data.checkout_charge_kind as 'deposit' | 'full_payment') ?? 'deposit',
+          checkout_charge_kind: data.checkout_charge_kind as 'deposit' | 'full_payment' | undefined,
+          payment_mode: (data.payment_mode as CardHoldPaymentMode | undefined) ?? 'payment',
+          card_hold_fee_pence: (data.card_hold_fee_pence as number | null | undefined) ?? null,
           group_booking_id: data.group_booking_id as string,
           total_party_size: totalParty,
         });
@@ -270,7 +277,10 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             }}
             cancellationPolicy={undefined}
             summaryMode="total"
-            chargeKind={paymentSession.checkout_charge_kind}
+            chargeKind={paymentSession.checkout_charge_kind ?? 'deposit'}
+            mode={paymentSession.payment_mode ?? 'payment'}
+            cardHoldFeePence={paymentSession.card_hold_fee_pence}
+            venueName={venue.name}
           />
         </div>
       ) : (

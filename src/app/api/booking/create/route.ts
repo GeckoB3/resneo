@@ -96,6 +96,14 @@ import {
   validateBookingAgainstWaitlistOffer,
   type ActiveWaitlistOfferRow,
 } from '@/lib/booking/validate-waitlist-offer-access';
+import {
+  resolveCaptureMode,
+  createCardHoldCustomer,
+  createCardHoldSetupIntent,
+  insertCardHoldRows,
+} from '@/lib/booking/card-hold-capture';
+import { buildCardHoldTermsSnapshot } from '@/lib/booking/card-hold-terms';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -254,7 +262,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, logo_url, cover_photo_url, website_url, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, logo_url, cover_photo_url, website_url, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags',
       )
       .eq('id', venue_id)
       .single();
@@ -290,6 +298,13 @@ export async function POST(request: NextRequest) {
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
 
+    // Card-hold flag resolved once per request (design doc §6.1/§7.1): gates the
+    // creation of new holds in every model branch below.
+    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
+      'card_hold_deposits',
+      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
+    );
+
     // Dispatch to model-specific create handlers (B, C, D, E)
     if (venueMode.bookingModel !== 'table_reservation') {
       const inferredSecondary = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
@@ -303,6 +318,7 @@ export async function POST(request: NextRequest) {
         phoneE164,
         effectiveModel,
         guestLinkOptions,
+        cardHoldEnabled,
       );
     }
 
@@ -317,6 +333,7 @@ export async function POST(request: NextRequest) {
         phoneE164,
         secondaryModel,
         guestLinkOptions,
+        cardHoldEnabled,
       );
     }
     if (hasNonTableBookingPayload(parsed.data)) {
@@ -412,13 +429,32 @@ export async function POST(request: NextRequest) {
     const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
     const onlineDepositApplies = isOnlineSource && slot.deposit_required;
 
+    /** No-show fee (pence) when this slot's protection is a card hold (spec 7.1). */
+    let cardHoldFeePence: number | null = null;
+
     if (onlineDepositApplies) {
-      requiresDeposit = true;
-      const totalGbp = slot.deposit_amount ?? 0;
-      depositAmountPence = Math.round(totalGbp * 100);
+      if (slot.deposit_type === 'card_hold') {
+        // Card hold: no money is charged at booking; the card is saved for a
+        // possible no-show fee. The engine only sets deposit_required for
+        // card_hold when the venue flag is on and the fee is positive (spec 6.3);
+        // this guard mirrors that flag-off / zero-fee safety.
+        const feePence = Math.round((slot.deposit_amount ?? 0) * 100);
+        if (cardHoldEnabled && feePence > 0) {
+          cardHoldFeePence = feePence;
+        } else {
+          console.warn(
+            '[booking/create] card_hold table slot degraded to no protection (flag off or fee <= 0)',
+            { venue_id, service_id: slot.service_id },
+          );
+        }
+      } else {
+        requiresDeposit = true;
+        const totalGbp = slot.deposit_amount ?? 0;
+        depositAmountPence = Math.round(totalGbp * 100);
+      }
     }
 
-    if (requiresDeposit && !venue.stripe_connected_account_id) {
+    if ((requiresDeposit || cardHoldFeePence != null) && !venue.stripe_connected_account_id) {
       return NextResponse.json(
         { error: 'Venue has not set up payments; deposits are required for this booking type.' },
         { status: 400 }
@@ -460,7 +496,9 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time: timeForDb,
       party_size,
-      status: requiresDeposit ? 'Pending' : 'Booked',
+      // Card-hold bookings await the card save exactly as deposits await payment
+      // (spec 7.1): status Pending / deposit_status Pending, deposit_amount_pence NULL.
+      status: requiresDeposit || cardHoldFeePence != null ? 'Pending' : 'Booked',
       source,
       dietary_notes: dietary_notes || null,
       occasion: occasion || null,
@@ -469,7 +507,7 @@ export async function POST(request: NextRequest) {
       guest_last_name: guestLast,
       guest_phone: phoneE164,
       deposit_amount_pence: depositAmountPence,
-      deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
+      deposit_status: requiresDeposit || cardHoldFeePence != null ? 'Pending' : 'Not Required',
       cancellation_deadline,
       cancellation_policy_snapshot: cancellationPolicySnapshot,
       service_id: resolvedServiceId,
@@ -523,6 +561,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Capture mode for this single-row unit (spec 7.0): 'payment' and 'none'
+    // behave exactly as before; 'setup' saves the card with no charge.
+    const captureMode = resolveCaptureMode([
+      {
+        bookingId: booking.id,
+        chargePence: requiresDeposit && depositAmountPence != null ? depositAmountPence : 0,
+        cardHoldFeePence,
+      },
+    ]);
+
     let client_secret: string | null = null;
 
     if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
@@ -550,9 +598,54 @@ export async function POST(request: NextRequest) {
         await supabase.from('bookings').delete().eq('id', booking.id);
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
+    } else if (captureMode === 'setup' && cardHoldFeePence != null && venue.stripe_connected_account_id) {
+      // Card hold, setup mode (spec 7.0/7.1): dedicated Customer + SetupIntent on the
+      // venue's connected account, one hold row per booking row.
+      let cardHoldCustomerId: string | null = null;
+      try {
+        const customer = await createCardHoldCustomer({
+          leadBookingId: booking.id,
+          venueId: venue_id,
+          stripeConnectedAccountId: venue.stripe_connected_account_id,
+          email: guest.email ?? (email || null),
+          name: formatGuestDisplayName(guest.first_name, guest.last_name),
+        });
+        cardHoldCustomerId = customer.id;
+        const setupIntent = await createCardHoldSetupIntent({
+          customerId: customer.id,
+          leadBookingId: booking.id,
+          venueId: venue_id,
+          stripeConnectedAccountId: venue.stripe_connected_account_id,
+        });
+        await insertCardHoldRows(
+          supabase,
+          [{ bookingId: booking.id, feePence: cardHoldFeePence }],
+          {
+            venueId: venue_id,
+            stripeConnectedAccountId: venue.stripe_connected_account_id,
+            stripeCustomerId: customer.id,
+            stripeSetupIntentId: setupIntent.id,
+            termsSnapshot: buildCardHoldTermsSnapshot(venue.name as string, cardHoldFeePence),
+          },
+        );
+        client_secret = setupIntent.client_secret;
+      } catch (stripeErr) {
+        console.error('Card hold setup failed:', stripeErr);
+        await supabase.from('bookings').delete().eq('id', booking.id);
+        if (cardHoldCustomerId) {
+          try {
+            await stripe.customers.del(cardHoldCustomerId, {
+              stripeAccount: venue.stripe_connected_account_id,
+            });
+          } catch (cleanupErr) {
+            console.error('Card hold customer cleanup failed:', cleanupErr);
+          }
+        }
+        return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+      }
     }
 
-    if (!requiresDeposit) {
+    if (!requiresDeposit && cardHoldFeePence == null) {
       const manageToken = generateConfirmToken();
       await supabase
         .from('bookings')
@@ -617,9 +710,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         booking_id: booking.id,
-        requires_deposit: requiresDeposit,
+        // requires_deposit is true whenever a payment step must render (spec §18):
+        // setup mode carries the SetupIntent secret in the existing client_secret field.
+        requires_deposit: requiresDeposit || captureMode === 'setup',
+        payment_mode: captureMode === 'setup' ? ('setup' as const) : ('payment' as const),
+        card_hold_fee_pence: cardHoldFeePence,
         client_secret: client_secret ?? undefined,
-        stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
+        stripe_account_id:
+          requiresDeposit || captureMode === 'setup' ? venue.stripe_connected_account_id : undefined,
         status: booking.status,
         ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
       },
@@ -652,6 +750,8 @@ async function handleNonTableBooking(
   phoneE164: string,
   effectiveModel: BookingModel,
   guestLinkOptions: { silentAuthSignup: boolean },
+  /** Resolved `card_hold_deposits` venue flag; gates creation of new holds (spec 6.1). */
+  cardHoldEnabled: boolean,
 ) {
   const {
     venue_id,
@@ -742,6 +842,12 @@ async function handleNonTableBooking(
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
   let requiresDeposit = false;
+  /**
+   * No-show fee (pence) when the effective payment requirement is 'card_hold'
+   * (spec 7.1). Non-null means no money is charged at booking: the card is saved
+   * and this row gets a `booking_card_holds` row.
+   */
+  let cardHoldFeePence: number | null = null;
   // Server-priced, server-labelled event ticket lines (M1/C2). Populated in the
   // event_ticket branch by validateEventTicketBooking; the booking_ticket_lines
   // insert below uses these in preference to the client-supplied ticket_lines.
@@ -852,8 +958,20 @@ async function handleNonTableBooking(
         deposit_pence: depositPence ?? 0,
       });
       if (online != null && online.amountPence > 0) {
-        requiresDeposit = true;
-        depositAmountPence = online.amountPence * needSeats;
+        if (online.chargeLabel === 'card_hold') {
+          // Card hold (spec 7.1): fixed service fee, no money due at booking.
+          if (cardHoldEnabled) {
+            cardHoldFeePence = online.amountPence;
+          } else {
+            console.warn(
+              '[booking/create] card_hold service item booked while card_hold_deposits flag is off; treating as no charge',
+              { venue_id, service_item_id: sess.service_item_id },
+            );
+          }
+        } else {
+          requiresDeposit = true;
+          depositAmountPence = online.amountPence * needSeats;
+        }
       }
     }
 
@@ -1068,8 +1186,21 @@ async function handleNonTableBooking(
         addons_total_price_pence: chosenAddonTotals.total_price_pence,
       });
       if (online != null && online.amountPence > 0) {
-        requiresDeposit = true;
-        depositAmountPence = online.amountPence;
+        if (online.chargeLabel === 'card_hold') {
+          // Card hold (spec 7.1): fixed fee (variant-adjusted deposit_pence, add-ons
+          // excluded), no money due at booking. Flag off resolves as 'none' (spec 6.3).
+          if (cardHoldEnabled) {
+            cardHoldFeePence = online.amountPence;
+          } else {
+            console.warn(
+              '[booking/create] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
+              { venue_id, appointment_service_id },
+            );
+          }
+        } else {
+          requiresDeposit = true;
+          depositAmountPence = online.amountPence;
+        }
       }
     }
     if (mergedSvc && svc) {
@@ -1121,6 +1252,17 @@ async function handleNonTableBooking(
     depositAmountPence = eventValidation.value.requiresDeposit
       ? eventValidation.value.depositAmountPence
       : null;
+    if (eventValidation.value.cardHoldFeePence != null) {
+      // Card hold (spec 7.1): server-derived per-person fee x tickets, no money due.
+      if (cardHoldEnabled) {
+        cardHoldFeePence = eventValidation.value.cardHoldFeePence;
+      } else {
+        console.warn(
+          '[booking/create] card_hold event booked while card_hold_deposits flag is off; treating as no charge',
+          { venue_id, experience_event_id },
+        );
+      }
+    }
     const ticketTotalDisplay =
       ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
     const eventTicketPriceLines = validatedEventTicketLines.map((tl) => ({
@@ -1165,6 +1307,26 @@ async function handleNonTableBooking(
     } else if (classPayReq === 'deposit' && depPer > 0) {
       requiresDeposit = true;
       depositAmountPence = depPer * party_size;
+    }
+    // Card hold (spec 7.1): the engine degrades a card_hold class type to 'none'
+    // (no upfront charge), so read the raw class type to know a hold applies.
+    // Flag-off and zero-fee configs resolve as 'none' with a warning (spec 6.3).
+    const rawClassType = input.classTypes.find((ct) => ct.id === cls.class_type_id);
+    if (rawClassType?.payment_requirement === 'card_hold') {
+      const holdPerPerson = rawClassType.deposit_amount_pence ?? 0;
+      if (!cardHoldEnabled) {
+        console.warn(
+          '[booking/create] card_hold class booked while card_hold_deposits flag is off; treating as no charge',
+          { venue_id, class_instance_id },
+        );
+      } else if (holdPerPerson > 0) {
+        cardHoldFeePence = holdPerPerson * party_size;
+      } else {
+        console.warn(
+          '[booking/create] card_hold class has no positive per-person fee; treating as no charge',
+          { venue_id, class_instance_id },
+        );
+      }
     }
     const classPriceDisplay =
       cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
@@ -1229,6 +1391,16 @@ async function handleNonTableBooking(
     if (classCoveredByEntitlement) {
       requiresDeposit = false;
       depositAmountPence = null;
+    }
+
+    // A card-hold class charges no money, so there is nothing for credits to cover
+    // (spec 7.1 step 5). It also never enters the entitlement short-circuit above
+    // (its online charge is 0), so nothing is consumed for it (D8).
+    if (pay_with_class_credits && cardHoldFeePence != null) {
+      return NextResponse.json(
+        { error: 'There is nothing to pay with credits for this class.' },
+        { status: 400 },
+      );
     }
 
     if (pay_with_class_credits && !classCoveredByEntitlement) {
@@ -1339,6 +1511,19 @@ async function handleNonTableBooking(
     } else if (payReq === 'deposit' && depConfigured > 0) {
       requiresDeposit = true;
       depositAmountPence = depConfigured;
+    } else if (payReq === 'card_hold') {
+      // Card hold (spec 7.1): flat no-show fee, no money due at booking. The
+      // `bookings.resource_payment_requirement` snapshot records 'card_hold';
+      // flag-off and zero-fee configs resolve as 'none' with a warning (spec 6.3).
+      if (cardHoldEnabled && depConfigured > 0) {
+        cardHoldFeePence = depConfigured;
+      } else {
+        resourcePaymentRequirement = 'none';
+        console.warn(
+          '[booking/create] card_hold resource degraded to no charge (flag off or fee <= 0)',
+          { venue_id, resource_id },
+        );
+      }
     }
     const resourceLabels = await getResourceBookingEmailLabels(supabase, resource_id);
     const resourcePriceDisplay =
@@ -1356,7 +1541,7 @@ async function handleNonTableBooking(
     };
   }
 
-  if (requiresDeposit && !(venue.stripe_connected_account_id as string | null)) {
+  if ((requiresDeposit || cardHoldFeePence != null) && !(venue.stripe_connected_account_id as string | null)) {
     return NextResponse.json(
       { error: 'Venue has not set up payments; payment is required for this booking.' },
       { status: 400 }
@@ -1471,7 +1656,9 @@ async function handleNonTableBooking(
     party_size,
     /** Align with effectiveModel; default `table_reservation` would violate bookings_area_required_for_table_reservation when area_id is unset. */
     booking_model: effectiveModel,
-    status: requiresDeposit ? 'Pending' : 'Booked',
+    // Card-hold bookings await the card save exactly as deposits await payment
+    // (spec 7.1): status Pending / deposit_status Pending, deposit_amount_pence NULL.
+    status: requiresDeposit || cardHoldFeePence != null ? 'Pending' : 'Booked',
     source,
     dietary_notes: dietary_notes || null,
     occasion: occasion || null,
@@ -1480,7 +1667,7 @@ async function handleNonTableBooking(
     guest_last_name: guestLast,
     guest_phone: phoneE164,
     deposit_amount_pence: depositAmountPence,
-    deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
+    deposit_status: requiresDeposit || cardHoldFeePence != null ? 'Pending' : 'Not Required',
     cancellation_deadline,
     cancellation_policy_snapshot: cancellationPolicySnapshot,
     estimated_end_time: estimatedEndTime,
@@ -1682,6 +1869,16 @@ async function handleNonTableBooking(
     }
   }
 
+  // Capture mode for this single-row unit (spec 7.0): 'payment' and 'none'
+  // behave exactly as before; 'setup' saves the card with no charge.
+  const captureMode = resolveCaptureMode([
+    {
+      bookingId: booking.id,
+      chargePence: requiresDeposit && depositAmountPence != null ? depositAmountPence : 0,
+      cardHoldFeePence,
+    },
+  ]);
+
   // Stripe payment intent
   let client_secret: string | null = null;
 
@@ -1707,10 +1904,58 @@ async function handleNonTableBooking(
       await supabase.from('bookings').delete().eq('id', booking.id);
       return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
     }
+  } else if (
+    captureMode === 'setup' &&
+    cardHoldFeePence != null &&
+    (venue.stripe_connected_account_id as string)
+  ) {
+    // Card hold, setup mode (spec 7.0/7.1): dedicated Customer + SetupIntent on the
+    // venue's connected account, one hold row per booking row.
+    const stripeAccountId = venue.stripe_connected_account_id as string;
+    let cardHoldCustomerId: string | null = null;
+    try {
+      const customer = await createCardHoldCustomer({
+        leadBookingId: booking.id,
+        venueId: venue_id,
+        stripeConnectedAccountId: stripeAccountId,
+        email: guest.email ?? (email || null),
+        name: formatGuestDisplayName(guest.first_name, guest.last_name),
+      });
+      cardHoldCustomerId = customer.id;
+      const setupIntent = await createCardHoldSetupIntent({
+        customerId: customer.id,
+        leadBookingId: booking.id,
+        venueId: venue_id,
+        stripeConnectedAccountId: stripeAccountId,
+      });
+      await insertCardHoldRows(
+        supabase,
+        [{ bookingId: booking.id, feePence: cardHoldFeePence }],
+        {
+          venueId: venue_id,
+          stripeConnectedAccountId: stripeAccountId,
+          stripeCustomerId: customer.id,
+          stripeSetupIntentId: setupIntent.id,
+          termsSnapshot: buildCardHoldTermsSnapshot(venue.name as string, cardHoldFeePence),
+        },
+      );
+      client_secret = setupIntent.client_secret;
+    } catch (stripeErr) {
+      console.error('Card hold setup failed:', stripeErr);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      if (cardHoldCustomerId) {
+        try {
+          await stripe.customers.del(cardHoldCustomerId, { stripeAccount: stripeAccountId });
+        } catch (cleanupErr) {
+          console.error('Card hold customer cleanup failed:', cleanupErr);
+        }
+      }
+      return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+    }
   }
 
-  // Send confirmation for non-deposit bookings
-  if (!requiresDeposit) {
+  // Send confirmation for bookings with no payment step (money or card save)
+  if (!requiresDeposit && cardHoldFeePence == null) {
     const manageToken = generateConfirmToken();
     await supabase
       .from('bookings')
@@ -1775,10 +2020,17 @@ async function handleNonTableBooking(
   return NextResponse.json(
     {
       booking_id: booking.id,
-      requires_deposit: requiresDeposit,
+      // requires_deposit is true whenever a payment step must render (spec §18):
+      // setup mode carries the SetupIntent secret in the existing client_secret field.
+      requires_deposit: requiresDeposit || captureMode === 'setup',
+      payment_mode: captureMode === 'setup' ? ('setup' as const) : ('payment' as const),
+      card_hold_fee_pence: cardHoldFeePence,
       deposit_amount_pence: depositAmountPence ?? 0,
       client_secret: client_secret ?? undefined,
-      stripe_account_id: requiresDeposit ? (venue.stripe_connected_account_id as string) : undefined,
+      stripe_account_id:
+        requiresDeposit || captureMode === 'setup'
+          ? (venue.stripe_connected_account_id as string)
+          : undefined,
       status: booking.status,
       cancellation_notice_hours: refundWindowHours,
     },

@@ -18,6 +18,13 @@ import {
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import {
+  cardHoldBookingNoticeLine,
+  cardHoldCatalogNoticeLine,
+  cardHoldConfirmationLine,
+  isCardHoldPaymentMode,
+  type CardHoldPaymentMode,
+} from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
 
 interface EventOfferingSummary {
@@ -28,7 +35,7 @@ interface EventOfferingSummary {
   dates: string[];
   occurrence_count: number;
   from_price_pence: number | null;
-  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  payment_requirement: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_amount_pence: number | null;
 }
 
@@ -53,7 +60,7 @@ interface EventInstance {
   image_url: string | null;
   total_capacity: number;
   remaining_capacity: number;
-  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  payment_requirement: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_amount_pence: number | null;
   /** Hours before start for refund of online deposit / prepayment. */
   cancellation_notice_hours?: number;
@@ -92,6 +99,15 @@ function eventPaymentSummaryLines(
   const sym = symForCurrency(currency);
   const req = occurrence.payment_requirement ?? 'none';
   const depPerPerson = occurrence.deposit_amount_pence ?? 0;
+
+  // Card hold: nothing is charged today; the card is stored for a possible no-show fee.
+  // Checked before the free shortcut so a free card-hold event still shows the notice.
+  if (req === 'card_hold' && depPerPerson > 0 && !suppressOnlinePayment) {
+    const lines =
+      totalPricePence > 0 ? [`Total: ${sym}${(totalPricePence / 100).toFixed(2)} - pay at venue.`] : [];
+    lines.push(cardHoldBookingNoticeLine(depPerPerson * totalTickets));
+    return { lines, chargePence: 0 };
+  }
 
   if (totalPricePence <= 0) {
     return { lines: ['Free - no payment required'], chargePence: 0 };
@@ -234,6 +250,9 @@ export function EventBookingFlow({
     requires_deposit: boolean;
     payment_url?: string;
     staffMessage?: string;
+    /** Card capture mode from the create response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
   } | null>(null);
   const [loading, setLoading] = useState(() => Boolean(preselectedExperienceEventId));
   const [offeringsReady, setOfferingsReady] = useState(() => !preselectedExperienceEventId);
@@ -464,6 +483,8 @@ export function EventBookingFlow({
           client_secret: data.client_secret,
           stripe_account_id: data.stripe_account_id,
           requires_deposit: data.requires_deposit ?? false,
+          payment_mode: data.payment_mode,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         });
         const needsStripe = Boolean(data.requires_deposit && data.client_secret);
         setStep(needsStripe ? 'payment' : 'confirmation');
@@ -549,6 +570,11 @@ export function EventBookingFlow({
                           <p className="mt-1 line-clamp-2 text-xs text-slate-600">{ev.description}</p>
                         ) : null}
                         <div className="mt-2 text-sm font-medium text-slate-700">{priceLabel}</div>
+                        {ev.payment_requirement === 'card_hold' && (ev.deposit_amount_pence ?? 0) > 0 ? (
+                          <div className="mt-1 text-xs text-slate-600">
+                            {cardHoldCatalogNoticeLine(ev.deposit_amount_pence ?? 0, { perPerson: true })}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </button>
@@ -736,7 +762,18 @@ export function EventBookingFlow({
               requiresDeposit={false}
               variant="class"
               appointmentDepositPence={isStaffWalkIn ? null : chargePence > 0 ? chargePence : null}
-              appointmentChargeLabel={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+              appointmentChargeLabel={
+                selectedOccurrence.payment_requirement === 'full_payment'
+                  ? 'full_payment'
+                  : !isStaffWalkIn && selectedOccurrence.payment_requirement === 'card_hold'
+                    ? 'card_hold'
+                    : 'deposit'
+              }
+              appointmentCardHoldFeePence={
+                !isStaffWalkIn && selectedOccurrence.payment_requirement === 'card_hold'
+                  ? (selectedOccurrence.deposit_amount_pence ?? 0) * totalTickets
+                  : null
+              }
               payAtVenueBalancePence={
                 (isStaffWalkIn || selectedOccurrence.payment_requirement === 'none') && totalPricePence > 0 ? totalPricePence : null
               }
@@ -762,9 +799,15 @@ export function EventBookingFlow({
           partySize={totalTickets}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={eventPaymentRefundPolicy}
+          // Hold modes: the consent line covers the cancellation rule (design doc 7.3).
+          cancellationPolicy={
+            isCardHoldPaymentMode(createResult.payment_mode) ? undefined : eventPaymentRefundPolicy
+          }
           summaryMode="total"
           chargeKind={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+          mode={createResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={createResult.card_hold_fee_pence}
+          venueName={venue.name}
         />
       )}
 
@@ -783,6 +826,11 @@ export function EventBookingFlow({
             <br />
             {totalTickets} ticket{totalTickets !== 1 ? 's' : ''}
           </p>
+          {cardHoldConfirmationLine(createResult?.payment_mode) ? (
+            <p className="mt-3 text-sm font-medium text-green-800">
+              {cardHoldConfirmationLine(createResult?.payment_mode)}
+            </p>
+          ) : null}
           {isStaff && createResult?.payment_url ? (
             <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
           ) : (

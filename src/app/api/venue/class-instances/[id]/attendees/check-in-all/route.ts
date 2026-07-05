@@ -38,7 +38,7 @@ export async function POST(
       return NextResponse.json({ error: 'Failed to load roster' }, { status: 500 });
     }
     const eligible = ((rows ?? []) as Array<{ id: string; status: string; checked_in_at: string | null }>)
-      .filter((r) => r.status !== 'Cancelled' && r.status !== 'No Show' && !r.checked_in_at);
+      .filter((r) => r.status !== 'Cancelled' && r.status !== 'No-Show' && !r.checked_in_at);
 
     let changed = 0;
     for (const r of eligible) {

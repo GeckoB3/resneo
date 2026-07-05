@@ -7,6 +7,12 @@ export const RESERVE_NI_PI_PURPOSE = {
   CLASS_CART_CHECKOUT: 'class_cart_checkout',
   /** Paid course enrollment checkout on the venue connected account. */
   CLASS_COURSE_ENROLLMENT: 'class_course_enrollment',
+  /** Booking-scoped card-hold Customer metadata (D2). */
+  CARD_HOLD_CUSTOMER: 'card_hold',
+  /** Card-hold SetupIntent metadata. */
+  CARD_HOLD_SETUP: 'card_hold_setup',
+  /** Off-session no-show fee charge PI metadata. */
+  CARD_HOLD_NO_SHOW_FEE: 'card_hold_no_show_fee',
 } as const;
 
 export const RESERVE_NI_SUBSCRIPTION_PURPOSE = {

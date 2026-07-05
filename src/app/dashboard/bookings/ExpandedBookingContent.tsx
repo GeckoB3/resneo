@@ -1110,13 +1110,17 @@ export function ExpandedBookingContent({
     <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
       <span className="font-medium text-slate-500">Deposit</span>
       <span
-        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-800'}`}
+        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' || effectiveBooking.deposit_status === 'Charged' ? 'text-amber-700' : effectiveBooking.deposit_status === 'Card Held' ? 'text-sky-700' : 'text-slate-800'}`}
       >
         {effectiveBooking.deposit_status === 'Not Required'
           ? 'None'
           : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
             ? `${depositAmtStr} paid`
-            : effectiveBooking.deposit_status}
+            : effectiveBooking.deposit_status === 'Card Held'
+              ? 'Card held'
+              : effectiveBooking.deposit_status === 'Charged'
+                ? 'Fee charged'
+                : effectiveBooking.deposit_status}
       </span>
     </span>
     ),

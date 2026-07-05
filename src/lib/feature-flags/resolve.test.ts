@@ -35,6 +35,11 @@ describe('resolveAppointmentsFeatureFlag', () => {
     expect(resolveAppointmentsFeatureFlag('waitlist_v2', { waitlist_v2: true })).toBe(true);
   });
 
+  it('defaults card_hold_deposits to false when unset (not in FLAG_DEFAULT_ON)', () => {
+    expect(resolveAppointmentsFeatureFlag('card_hold_deposits', {})).toBe(false);
+    expect(resolveAppointmentsFeatureFlag('card_hold_deposits', { card_hold_deposits: true })).toBe(true);
+  });
+
   it('defaults guest_self_reschedule to true when unset', () => {
     expect(resolveAppointmentsFeatureFlag('guest_self_reschedule', {})).toBe(true);
     expect(resolveAppointmentsFeatureFlag('guest_self_reschedule', { guest_self_reschedule: false })).toBe(
@@ -121,6 +126,7 @@ describe('resolveAppointmentsFeatureFlags', () => {
       waitlist_v2: false,
       guest_self_reschedule: true,
       any_available_practitioner: false,
+      card_hold_deposits: false,
     });
   });
 });

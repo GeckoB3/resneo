@@ -13,6 +13,7 @@ export const APPOINTMENTS_FEATURE_FLAG_KEYS = [
   'any_available_practitioner',
   'class_commerce_enabled',
   'compliance_records_enabled',
+  'card_hold_deposits',
 ] as const;
 
 export type AppointmentsFeatureFlagKey = (typeof APPOINTMENTS_FEATURE_FLAG_KEYS)[number];
@@ -28,6 +29,7 @@ export const venueFeatureFlagsSchema = z
     class_commerce_enabled: z.boolean().optional(),
     compliance_records_enabled: z.boolean().optional(),
     compliance: complianceConfigSchema.optional(),
+    card_hold_deposits: z.boolean().optional(),
   })
   .strip();
 

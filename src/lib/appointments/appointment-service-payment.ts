@@ -15,6 +15,14 @@ export function resolveAppointmentPaymentRequirement(
 ): ClassPaymentRequirement {
   const raw = svc.payment_requirement;
   if (raw === 'deposit' || raw === 'full_payment' || raw === 'none') return raw;
+  // Card-hold guard rail (design doc §6.4): until the card-hold booking flows ship, a
+  // 'card_hold' service must degrade to 'none' (no upfront charge). Without this branch it
+  // would fall into the legacy deposit_pence inference below and charge a deposit the guest
+  // was never shown.
+  if (raw === 'card_hold') {
+    console.warn('[appointment-service-payment] card_hold not yet supported; treating as none');
+    return 'none';
+  }
   if (svc.deposit_pence != null && svc.deposit_pence > 0) return 'deposit';
   return 'none';
 }

@@ -110,6 +110,8 @@ export function validateEventTicketBooking(params: {
   const depPerPerson = slot.deposit_amount_pence ?? 0;
   let requiresDeposit = false;
   let depositAmountPence = 0;
+  // 'card_hold' intentionally falls through both branches below (no upfront charge, same as
+  // 'none') until the card-hold booking flows ship (design doc §6.4 guard rail).
   if (payReq === 'full_payment' && ticketTotalPence > 0) {
     requiresDeposit = true;
     depositAmountPence = ticketTotalPence;

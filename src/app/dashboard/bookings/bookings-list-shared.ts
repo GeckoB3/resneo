@@ -47,6 +47,8 @@ export function depositPillVariant(status: string): PillVariant {
   if (s === 'paid' || s === 'captured') return 'success';
   if (s === 'pending' || s === 'requires_action') return 'warning';
   if (s === 'refunded' || s === 'cancelled' || s === 'failed') return 'danger';
+  if (s === 'card held') return 'info';
+  if (s === 'charged') return 'warning';
   return 'neutral';
 }
 

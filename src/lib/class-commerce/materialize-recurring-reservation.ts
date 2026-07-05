@@ -181,6 +181,9 @@ export async function materializeRecurringReservation(
   const payReq = ct.payment_requirement ?? 'none';
   const priceP = ct.price_pence ?? 0;
   const depPer = ct.deposit_amount_pence ?? 0;
+  // 'card_hold' is deliberately not in `requiresPaid` yet: until the card-hold flows ship it is
+  // treated like 'none' (no upfront charge), so auto-booking proceeds. A later phase makes this
+  // cron skip card-hold classes instead (design doc §12.4).
   const requiresPaid =
     (payReq === 'full_payment' && priceP > 0) || (payReq === 'deposit' && depPer > 0 && priceP > 0);
   if (requiresPaid) {

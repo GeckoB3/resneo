@@ -123,12 +123,12 @@ export async function applyAttendanceMutation(
     }
   } else {
     // no_show
-    if (booking.status === 'No Show') {
+    if (booking.status === 'No-Show') {
       // already
     } else {
       const { error: upErr } = await admin
         .from('bookings')
-        .update({ status: 'No Show', updated_at: nowIso })
+        .update({ status: 'No-Show', updated_at: nowIso })
         .eq('id', bookingId);
       if (upErr) {
         console.error('[applyAttendanceMutation] no-show update', upErr);

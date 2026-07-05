@@ -42,6 +42,12 @@ const FLAG_META: {
     description:
       'Turn on prepaid class commerce: credit packs, fixed-session courses, and recurring membership plans. Adds a "Class products" area to your Classes dashboard and exposes them in guest accounts.',
   },
+  {
+    key: 'card_hold_deposits',
+    title: 'Card hold deposits',
+    description:
+      'Card on file with a chargeable no-show fee. No payment taken at booking.',
+  },
 ];
 
 export function FeatureFlagsSection({

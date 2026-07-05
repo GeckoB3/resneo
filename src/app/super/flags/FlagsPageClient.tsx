@@ -26,6 +26,10 @@ const FLAG_LABELS: Record<string, { label: string; description: string }> = {
   },
   class_commerce_enabled: { label: 'Class commerce', description: 'Paid classes, passes and memberships' },
   compliance_records_enabled: { label: 'Compliance records', description: 'Practitioner compliance tracking' },
+  card_hold_deposits: {
+    label: 'Card hold deposits',
+    description: 'Card on file with a chargeable no-show fee. No payment taken at booking.',
+  },
 };
 
 function flagMeta(key: string): { label: string; description: string } {

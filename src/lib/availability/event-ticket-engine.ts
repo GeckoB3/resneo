@@ -50,7 +50,7 @@ export interface EventAvailabilitySlot {
   image_url: string | null;
   total_capacity: number;
   remaining_capacity: number;
-  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  payment_requirement: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_amount_pence: number | null;
   /** Hours before start for deposit / prepayment refund (from `experience_events`). */
   cancellation_notice_hours: number;
@@ -145,7 +145,8 @@ export function computeEventAvailability(
       image_url: event.image_url,
       total_capacity: event.capacity,
       remaining_capacity: remaining,
-      payment_requirement: (event.payment_requirement as 'none' | 'deposit' | 'full_payment') ?? 'none',
+      payment_requirement:
+        (event.payment_requirement as 'none' | 'deposit' | 'full_payment' | 'card_hold') ?? 'none',
       deposit_amount_pence: (event.deposit_amount_pence as number | null) ?? null,
       cancellation_notice_hours: refundHours,
       ticket_types: ticketResults,
@@ -255,7 +256,7 @@ export interface EventOfferingSummary {
   occurrence_count: number;
   /** Minimum ticket price across occurrences (for "from £x" labels). */
   from_price_pence: number | null;
-  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  payment_requirement: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_amount_pence: number | null;
 }
 

@@ -228,7 +228,7 @@ function AttendanceActions({
   }
 
   const alreadyCheckedIn = Boolean(checkedInAt);
-  const alreadyNoShow = status === 'No Show';
+  const alreadyNoShow = status === 'No-Show';
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -669,7 +669,7 @@ export function ClassInstanceDetailSheet({
                 </button>
               ) : null}
               {canManageAttendance &&
-              attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No Show' && !a.checked_in_at) ? (
+              attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No-Show' && !a.checked_in_at) ? (
                 <CheckInAllButton instanceId={instanceId ?? ''} onMutated={() => void load()} />
               ) : null}
               {isAdmin && instance && !instance.is_cancelled ? (

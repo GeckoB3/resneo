@@ -202,7 +202,7 @@ describe('edge cases', () => {
 
   it('no-show and cancelled bookings should not receive post-visit thank you', () => {
     const completedStatuses = ['Completed'];
-    const excludedStatuses = ['No Show', 'Cancelled'];
+    const excludedStatuses = ['No-Show', 'Cancelled'];
 
     for (const status of excludedStatuses) {
       expect(completedStatuses.includes(status)).toBe(false);

@@ -84,6 +84,14 @@ export interface ClassAvailabilitySlot {
 export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequirement {
   const raw = ct.payment_requirement;
   if (raw === 'deposit' || raw === 'full_payment' || raw === 'none') return raw;
+  // Card-hold guard rail (design doc §6.4): until the card-hold booking flows ship, a
+  // 'card_hold' class must degrade to 'none' (no upfront charge). Without this branch it
+  // would fall into the legacy requires_online_payment inference below and charge the full
+  // price the guest was never asked to pay.
+  if (raw === 'card_hold') {
+    console.warn('[class-session-engine] card_hold not yet supported; treating as none');
+    return 'none';
+  }
   if (ct.requires_online_payment === false) return 'none';
   if (ct.requires_online_payment === true) {
     if (ct.price_pence != null && ct.price_pence > 0) return 'full_payment';

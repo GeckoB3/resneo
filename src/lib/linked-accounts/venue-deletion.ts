@@ -1,6 +1,7 @@
 /** Terminate linked-account relationships and notify partner venues before hard-delete (§6.6). */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { deleteCardHoldCustomersForVenue } from '@/lib/booking/card-hold-release';
 import { notifyLinkPartnerVenueDeleted } from './notifications';
 
 export interface VenueDeletionLinkPartner {
@@ -44,6 +45,15 @@ export async function hardDeleteVenueWithLinkedAccountNotifications(
   admin: SupabaseClient,
   venueId: string,
 ): Promise<{ partners: VenueDeletionLinkPartner[] }> {
+  // Best-effort Stripe customer cleanup BEFORE the rows go (§9.3): the RPC
+  // cascades booking_card_holds away, taking the snapshotted customer ids with
+  // it. A cleanup failure never blocks the delete.
+  try {
+    await deleteCardHoldCustomersForVenue(admin, venueId);
+  } catch (err) {
+    console.error('[venue-deletion] card-hold customer cleanup failed (non-blocking)', err);
+  }
+
   const { data, error } = await admin.rpc('admin_hard_delete_venue', {
     p_venue_id: venueId,
   });

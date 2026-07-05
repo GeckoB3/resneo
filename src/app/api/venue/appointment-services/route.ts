@@ -1172,6 +1172,20 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: customCoherent.message }, { status: 400 });
       }
 
+      // Variants-only patch on a STORED card_hold service: the £1 variant-fee floor
+      // still applies (§6.2). No flag gate here (§6.1): servicing existing card-hold
+      // config is allowed even when the flag has since been turned off.
+      if (
+        variantsProvided &&
+        parsed.data.payment_requirement === undefined &&
+        (serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold'
+      ) {
+        const storedHoldVariantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+        if (storedHoldVariantFeeError) {
+          return NextResponse.json({ error: storedHoldVariantFeeError }, { status: 400 });
+        }
+      }
+
       let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
       let requestedManagedCalendarIds = practitioner_ids;
       let updatePayload: Record<string, unknown> = { ...parsed.data };
@@ -1435,6 +1449,20 @@ export async function PATCH(request: NextRequest) {
     });
     if (!legacyCustomCoherent.ok) {
       return NextResponse.json({ error: legacyCustomCoherent.message }, { status: 400 });
+    }
+
+    // Variants-only patch on a STORED card_hold service: the £1 variant-fee floor
+    // still applies (§6.2). No flag gate here (§6.1): servicing existing card-hold
+    // config is allowed even when the flag has since been turned off.
+    if (
+      variantsProvided &&
+      parsed.data.payment_requirement === undefined &&
+      (serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold'
+    ) {
+      const storedHoldVariantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+      if (storedHoldVariantFeeError) {
+        return NextResponse.json({ error: storedHoldVariantFeeError }, { status: 400 });
+      }
     }
 
     let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;

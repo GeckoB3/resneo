@@ -209,7 +209,6 @@ async function reconcileCardHolds(
     .select(
       'booking_id, stripe_setup_intent_id, stripe_connected_account_id, charge_payment_intent_id, booking:bookings!inner(id, deposit_status, stripe_payment_intent_id)',
     )
-    .not('charge_payment_intent_id', 'is', null)
     .eq('booking.deposit_status', 'Charged')
     .or(`created_at.gte.${cutoff},updated_at.gte.${cutoff}`)
     .limit(200);
@@ -219,8 +218,14 @@ async function reconcileCardHolds(
   } else {
     for (const hold of normalizeHoldReconRows(chargedRows ?? [])) {
       checked++;
+      // A 'Charged' booking whose hold has no charge PI id is itself the
+      // anomaly: alert without a Stripe call (there is nothing to retrieve).
+      if (!hold.charge_payment_intent_id) {
+        await insertAlert(hold.booking_id, 'Charged', 'missing_charge_pi');
+        continue;
+      }
       try {
-        const pi = await stripe.paymentIntents.retrieve(hold.charge_payment_intent_id!, {
+        const pi = await stripe.paymentIntents.retrieve(hold.charge_payment_intent_id, {
           stripeAccount: hold.stripe_connected_account_id,
         });
         if (pi.status !== 'succeeded') {

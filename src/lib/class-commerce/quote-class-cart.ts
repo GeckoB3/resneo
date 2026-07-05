@@ -187,9 +187,9 @@ export async function quoteClassCart(
     const discounted = applyDiscount(originalCharge, pct);
 
     // Card-hold lines charge no money today (`online_charge_pence` stays 0); the fee
-    // is the amount the venue may charge later on a no-show (§7.2). The engine's
-    // availability output degrades `card_hold` to 'none' (guard rail), so the raw
-    // class-type configuration decides here, gated on the venue flag resolved above.
+    // is the amount the venue may charge later on a no-show (§7.2). The raw
+    // class-type configuration decides here, gated on the venue flag resolved above,
+    // so this quote emits its own §6.3 warnings independent of the engine passthrough.
     const ct = ctName as { payment_requirement?: string | null; deposit_amount_pence?: number | null };
     const hold = resolveClassCartLineCardHoldFee({
       classTypePaymentRequirement: ct.payment_requirement,

@@ -37,3 +37,13 @@ export function bookingIdFromParams(params: PayRedirectParamsLike): string | nul
   const bookingId = params.get('booking_id')?.trim();
   return bookingId ? bookingId : null;
 }
+
+/**
+ * Stripe's own `setup_intent` redirect param, if any. Fallback identifier for the
+ * best-effort confirm call when the return_url carried no booking_id: the confirm
+ * route accepts `setup_intent_id` and resolves the hold's bookings from it.
+ */
+export function setupIntentIdFromParams(params: PayRedirectParamsLike): string | null {
+  const setupIntentId = params.get('setup_intent')?.trim();
+  return setupIntentId ? setupIntentId : null;
+}

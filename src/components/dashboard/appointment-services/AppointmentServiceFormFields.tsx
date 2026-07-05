@@ -427,7 +427,7 @@ export function AppointmentServiceFormFields({
                       placeholder={
                         form.payment_requirement === 'deposit' || form.payment_requirement === 'card_hold'
                           ? 'Uses service default'
-                          : '—'
+                          : '-'
                       }
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                     />

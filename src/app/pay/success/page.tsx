@@ -8,6 +8,7 @@ import {
   bookingIdFromParams,
   redirectModeFromParams,
   redirectStatusFromParams,
+  setupIntentIdFromParams,
 } from './redirect-params';
 
 function SuccessContent() {
@@ -15,22 +16,31 @@ function SuccessContent() {
   const status = redirectStatusFromParams(searchParams.get('redirect_status'));
   const mode = redirectModeFromParams(searchParams);
   const bookingId = bookingIdFromParams(searchParams);
+  const setupIntentId = setupIntentIdFromParams(searchParams);
   const confirmSent = useRef(false);
 
   // A 3DS-challenged card save redirects here without the /pay page's inline
   // confirm call ever running, so fire it best-effort on mount. The webhook
-  // remains the guaranteed path; errors are swallowed silently.
+  // remains the guaranteed path; errors are swallowed silently. When the
+  // return_url carried no booking_id, fall back to Stripe's own setup_intent
+  // param: the confirm route resolves the hold's bookings from it.
   useEffect(() => {
-    if (mode !== 'setup' || status !== 'succeeded' || !bookingId || confirmSent.current) return;
+    if (mode !== 'setup' || status !== 'succeeded' || confirmSent.current) return;
+    const body = bookingId
+      ? { booking_id: bookingId }
+      : setupIntentId
+        ? { setup_intent_id: setupIntentId }
+        : null;
+    if (!body) return;
     confirmSent.current = true;
     fetch('/api/booking/confirm-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ booking_id: bookingId }),
+      body: JSON.stringify(body),
     }).catch(() => {
       // Non-critical - webhook will handle if this fails.
     });
-  }, [mode, status, bookingId]);
+  }, [mode, status, bookingId, setupIntentId]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4">

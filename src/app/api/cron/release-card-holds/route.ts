@@ -49,6 +49,9 @@ async function handlePost(request: NextRequest) {
         'booking_id, booking:bookings!inner(id, booking_date, booking_time, booking_end_time, estimated_end_time)',
       )
       .is('released_at', null)
+      // A charged hold's lifecycle ends via refund (release_reason 'refunded'),
+      // never via this sweep: its release_reason must never read 'expired'.
+      .is('charged_at', null)
       .lte('booking.booking_date', prefilterCutoffYmd)
       .order('created_at', { ascending: true })
       .limit(200);

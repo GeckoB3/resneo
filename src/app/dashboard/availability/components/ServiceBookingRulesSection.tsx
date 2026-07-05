@@ -100,6 +100,11 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
         showToast('Enter a deposit amount per person greater than £0 when deposits are required.');
         return;
       }
+      // Card-hold floor, mirrored server-side: the no-show fee must be at least £1.
+      if (d.deposit_type === 'card_hold' && amt < 1) {
+        showToast('Enter a no-show fee of at least £1 per person when the card hold option is selected.');
+        return;
+      }
     }
 
     const existing = restrictionRef.current;
@@ -261,6 +266,11 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
                 <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
                 <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setDraft({ ...draft, deposit_required_from_party_size: v })} className={FIELD_CLASS} />
               </div>
+              {!cardHoldDepositsEnabled && draft.deposit_type === 'card_hold' && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  Card hold is disabled for this venue; this service currently takes no deposit.
+                </p>
+              )}
               {cardHoldDepositsEnabled && (
                 <div className="max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Deposit type</label>
@@ -296,7 +306,7 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
                 </label>
                 <NumericInput
                   allowFloat
-                  min={0.01}
+                  min={draft.deposit_type === 'card_hold' ? 1 : 0.01}
                   max={100}
                   value={draft.deposit_amount_per_person_gbp ?? 5}
                   onChange={(v) => setDraft({ ...draft, deposit_amount_per_person_gbp: v > 0 ? v : null })}

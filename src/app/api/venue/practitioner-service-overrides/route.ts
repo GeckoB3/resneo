@@ -270,6 +270,20 @@ export async function PATCH(request: NextRequest) {
 
     const service = svc as AppointmentService;
 
+    // On a card_hold service the deposit override becomes the effective no-show fee
+    // via the merge, so it carries the same £1 floor as the base fee (§6.2). Null
+    // clears the override (falls back to the service fee) and stays allowed.
+    if (
+      service.payment_requirement === 'card_hold' &&
+      rawPatch.custom_deposit_pence != null &&
+      rawPatch.custom_deposit_pence < 100
+    ) {
+      return NextResponse.json(
+        { error: 'Set a no-show fee of at least £1, or leave it blank to use the service fee.' },
+        { status: 400 },
+      );
+    }
+
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(rawPatch)) {
       if (value === undefined) continue;

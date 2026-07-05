@@ -168,10 +168,20 @@ export async function POST(
         );
       }
       await releaseCardHoldsForBookings(admin, [id], 'admin');
-      await admin
+      // The hold release above already happened; if the booking flip fails the
+      // reminder cron could re-target a Pending booking with a dead hold, so
+      // surface the failure. Re-running waive is safe: release is idempotent.
+      const { error: waiveErr } = await admin
         .from('bookings')
         .update({ deposit_status: 'Waived', updated_at: new Date().toISOString() })
         .eq('id', id);
+      if (waiveErr) {
+        console.error('[deposit route] waive booking update failed:', waiveErr, { bookingId: id });
+        return NextResponse.json(
+          { error: 'The card request could not be waived. Please try again.' },
+          { status: 500 },
+        );
+      }
       return NextResponse.json({ success: true });
     }
     await admin.from('bookings').update({ deposit_status: 'Waived', updated_at: new Date().toISOString() }).eq('id', id);
@@ -225,10 +235,23 @@ export async function POST(
           { status: 409 },
         );
       }
-      await stripe.refunds.create(
-        { payment_intent: hold.charge_payment_intent_id },
-        { stripeAccount: hold.stripe_connected_account_id },
-      );
+      try {
+        await stripe.refunds.create(
+          { payment_intent: hold.charge_payment_intent_id },
+          { stripeAccount: hold.stripe_connected_account_id },
+        );
+      } catch (refundErr) {
+        // Already fully refunded in Stripe (for example via the dashboard):
+        // proceed so our state converges with Stripe's. Anything else fails.
+        const code = (refundErr as { code?: string } | null)?.code;
+        if (code !== 'charge_already_refunded') {
+          console.error('[deposit route] hold fee refund failed:', refundErr, { bookingId: id });
+          return NextResponse.json(
+            { error: 'The refund could not be completed. Please try again.' },
+            { status: 502 },
+          );
+        }
+      }
       await applyCardHoldChargeRefund(admin, {
         bookingId: id,
         venueId: scopeVenueId,

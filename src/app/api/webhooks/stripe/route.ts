@@ -534,9 +534,14 @@ export async function POST(request: NextRequest) {
       }
     } else if (event.type === 'charge.refunded' || event.type === 'charge.refund.updated') {
       let paymentIntentId: string | null = null;
+      // True only when the charge is FULLY refunded (amount_refunded covers the
+      // full amount). Card-hold fee refunds gate on this: a partial refund must
+      // not release the hold or flip the booking off 'Charged'.
+      let chargeFullyRefunded = false;
       if (event.type === 'charge.refunded') {
         const charge = event.data.object as Stripe.Charge;
         paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
+        chargeFullyRefunded = (charge.amount_refunded ?? 0) >= charge.amount;
         // Net subscription-invoice refunds out of any salesperson's revenue share. This lives
         // here because `charge.refunded` is delivered to this endpoint; it no-ops for connected
         // deposit charges (no invoice) and for non-sales invoices.
@@ -555,6 +560,7 @@ export async function POST(request: NextRequest) {
               ? await stripe.charges.retrieve(chargeId, { stripeAccount: accountId })
               : await stripe.charges.retrieve(chargeId);
             paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
+            chargeFullyRefunded = (charge.amount_refunded ?? 0) >= charge.amount;
           } catch (chargeErr) {
             console.error('[Stripe webhook] Failed to retrieve charge for refund:', chargeErr);
           }
@@ -579,6 +585,16 @@ export async function POST(request: NextRequest) {
           | { id: string; booking_id: string; venue_id: string; charged_pence: number | null }
           | null;
         if (feeHold) {
+          // Only a FULL refund ends the fee's lifecycle. A partial refund keeps
+          // the booking 'Charged' and the hold alive; the operator finishes the
+          // refund in Stripe (or via the deposit route) to complete it.
+          if (!chargeFullyRefunded) {
+            console.warn('[Stripe webhook] partial refund on card-hold fee PI; leaving state Charged', {
+              paymentIntentId,
+              bookingId: feeHold.booking_id,
+            });
+            return NextResponse.json({ received: true });
+          }
           await applyCardHoldChargeRefund(supabase, {
             bookingId: feeHold.booking_id,
             venueId: feeHold.venue_id,

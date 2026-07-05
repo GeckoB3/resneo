@@ -3,6 +3,7 @@ import {
   bookingIdFromParams,
   redirectModeFromParams,
   redirectStatusFromParams,
+  setupIntentIdFromParams,
 } from './redirect-params';
 
 describe('redirectStatusFromParams', () => {
@@ -52,5 +53,20 @@ describe('bookingIdFromParams', () => {
   it('returns null when absent or blank', () => {
     expect(bookingIdFromParams(new URLSearchParams())).toBeNull();
     expect(bookingIdFromParams(new URLSearchParams({ booking_id: '  ' }))).toBeNull();
+  });
+});
+
+describe('setupIntentIdFromParams', () => {
+  it('returns Stripe\'s setup_intent redirect param', () => {
+    const params = new URLSearchParams({ setup_intent: 'seti_123', redirect_status: 'succeeded' });
+    expect(setupIntentIdFromParams(params)).toBe('seti_123');
+  });
+
+  it('returns null when absent or blank (client secret alone is not an id)', () => {
+    expect(setupIntentIdFromParams(new URLSearchParams())).toBeNull();
+    expect(setupIntentIdFromParams(new URLSearchParams({ setup_intent: '  ' }))).toBeNull();
+    expect(
+      setupIntentIdFromParams(new URLSearchParams({ setup_intent_client_secret: 'seti_1_secret_x' })),
+    ).toBeNull();
   });
 });

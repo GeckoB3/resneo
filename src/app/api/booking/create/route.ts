@@ -1308,9 +1308,9 @@ async function handleNonTableBooking(
       requiresDeposit = true;
       depositAmountPence = depPer * party_size;
     }
-    // Card hold (spec 7.1): the engine degrades a card_hold class type to 'none'
-    // (no upfront charge), so read the raw class type to know a hold applies.
-    // Flag-off and zero-fee configs resolve as 'none' with a warning (spec 6.3).
+    // Card hold (spec 7.1): the engine passes card_hold through only when the venue
+    // flag is on and a positive fee is configured; read the raw class type so this
+    // route's own warnings still fire for flag-off / zero-fee configs (spec 6.3).
     const rawClassType = input.classTypes.find((ct) => ct.id === cls.class_type_id);
     if (rawClassType?.payment_requirement === 'card_hold') {
       const holdPerPerson = rawClassType.deposit_amount_pence ?? 0;

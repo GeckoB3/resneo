@@ -14,6 +14,7 @@ import {
   type GuestCardHoldRowInput,
 } from '@/lib/booking/guest-card-hold-summary';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 type PageProps = { params: Promise<{ bookingId: string }> };
@@ -54,11 +55,19 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
 
   // Card-hold deposits (§10.1): the signed-in booking detail page is a
   // consent-bearing surface, so it carries the same hold line as the manage
-  // page for the held/charged states. The fee comes from the hold row (one
-  // indexed admin read; only done when deposit_status says a hold exists).
+  // page for the awaiting-card/held/charged states. The fee comes from the
+  // hold row (one indexed admin read; only done when deposit_status says a
+  // hold may exist: 'Pending' is included for staff phone/walk-in bookings
+  // still awaiting card details, at the cost of one indexed read for pending
+  // bookings without a hold).
   const depositStatusLower = (booking.deposit_status ?? '').toLowerCase();
   let cardHoldLine: string | null = null;
-  if (depositStatusLower === 'card held' || depositStatusLower === 'charged') {
+  let cardHoldPaymentLink: string | null = null;
+  if (
+    depositStatusLower === 'card held' ||
+    depositStatusLower === 'charged' ||
+    depositStatusLower === 'pending'
+  ) {
     const { data: holdRow } = await getSupabaseAdminClient()
       .from('booking_card_holds')
       .select('fee_pence, released_at, charged_pence, charged_at, stripe_payment_method_id')
@@ -69,7 +78,14 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
       (holdRow as GuestCardHoldRowInput | null) ?? null,
     );
     const venueName = booking.venue?.name ?? 'The venue';
-    if (holdSummary?.state === 'held') {
+    if (holdSummary?.state === 'awaiting_card') {
+      cardHoldLine = 'Add your card details to secure this booking. No payment is taken.';
+      try {
+        cardHoldPaymentLink = await createOrGetPaymentShortLink(booking.venue_id, booking.id);
+      } catch (linkErr) {
+        console.error('[account booking detail] payment short link failed:', linkErr);
+      }
+    } else if (holdSummary?.state === 'held') {
       cardHoldLine = `Your card is securely on file. ${venueName} may charge a no-show fee of up to ${formatCardHoldFeePence(holdSummary.fee_pence)} if you miss this booking. Cancel before it starts to avoid any charge.`;
     } else if (holdSummary?.state === 'charged' && holdSummary.charged_pence != null) {
       const chargedDate = holdSummary.charged_at
@@ -204,6 +220,16 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
             </dd>
             {cardHoldLine ? (
               <dd className="mt-1.5 text-sm leading-relaxed text-slate-600">{cardHoldLine}</dd>
+            ) : null}
+            {cardHoldPaymentLink ? (
+              <dd className="mt-1.5">
+                <a
+                  href={cardHoldPaymentLink}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 transition-colors hover:text-brand-800"
+                >
+                  Add card details
+                </a>
+              </dd>
             ) : null}
           </div>
           {booking.venue?.address ? (

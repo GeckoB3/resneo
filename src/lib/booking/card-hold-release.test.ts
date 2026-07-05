@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { stripe } from '@/lib/stripe';
 import {
   deleteCardHoldCustomersForBookings,
+  deleteCardHoldCustomersForVenue,
   releaseCardHoldsForBookings,
 } from './card-hold-release';
 
@@ -332,6 +333,76 @@ describe('deleteCardHoldCustomersForBookings', () => {
       deletedCustomerIds: [],
     });
     expect(await deleteCardHoldCustomersForBookings(admin, ['b1'])).toEqual({
+      deletedCustomerIds: [],
+    });
+    expect(customerDelMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteCardHoldCustomersForVenue', () => {
+  it('deletes every customer of the venue, released holds included, with no sibling check', async () => {
+    const state: State = {
+      holds: [
+        hold({ id: 'h1', booking_id: 'b1' }), // open
+        hold({
+          id: 'h2',
+          booking_id: 'b2',
+          stripe_customer_id: 'cus_2',
+          released_at: '2026-06-01T00:00:00.000Z',
+          release_reason: 'cancelled',
+        }), // released: still cleaned up (venue delete is the last chance)
+        hold({ id: 'h3', booking_id: 'b3', stripe_customer_id: 'cus_1' }), // shares cus_1: dedupe
+      ],
+      events: [],
+    };
+    const admin = makeAdmin(state);
+
+    const result = await deleteCardHoldCustomersForVenue(admin, 'venue-1');
+
+    expect(customerDelMock).toHaveBeenCalledTimes(2);
+    expect(customerDelMock).toHaveBeenCalledWith('cus_1', { stripeAccount: 'acct_1' });
+    expect(customerDelMock).toHaveBeenCalledWith('cus_2', { stripeAccount: 'acct_1' });
+    expect(result.deletedCustomerIds.sort()).toEqual(['cus_1', 'cus_2']);
+    // Pure cleanup: no release stamping, no events.
+    expect(state.events).toHaveLength(0);
+    expect(state.holds[0]!.released_at).toBeNull();
+  });
+
+  it('only touches the given venue\'s holds', async () => {
+    const state: State = {
+      holds: [
+        hold({ id: 'h1', booking_id: 'b1', venue_id: 'venue-other', stripe_customer_id: 'cus_other' }),
+      ],
+      events: [],
+    };
+    const admin = makeAdmin(state);
+
+    const result = await deleteCardHoldCustomersForVenue(admin, 'venue-1');
+
+    expect(customerDelMock).not.toHaveBeenCalled();
+    expect(result.deletedCustomerIds).toEqual([]);
+  });
+
+  it('swallows Stripe failures and a failed load (best-effort, never blocks the venue delete)', async () => {
+    customerDelMock.mockRejectedValueOnce(new Error('stripe down'));
+    const state: State = { holds: [hold({})], events: [] };
+
+    const failed = await deleteCardHoldCustomersForVenue(makeAdmin(state), 'venue-1');
+    expect(failed.deletedCustomerIds).toEqual([]);
+
+    const loadFail = await deleteCardHoldCustomersForVenue(
+      makeAdmin(state, { failSelect: true }),
+      'venue-1',
+    );
+    expect(loadFail.deletedCustomerIds).toEqual([]);
+  });
+
+  it('no-ops on an empty venue id and on holds without a customer id', async () => {
+    const state: State = { holds: [hold({ stripe_customer_id: null })], events: [] };
+    const admin = makeAdmin(state);
+
+    expect(await deleteCardHoldCustomersForVenue(admin, '')).toEqual({ deletedCustomerIds: [] });
+    expect(await deleteCardHoldCustomersForVenue(admin, 'venue-1')).toEqual({
       deletedCustomerIds: [],
     });
     expect(customerDelMock).not.toHaveBeenCalled();

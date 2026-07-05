@@ -196,3 +196,54 @@ export async function deleteCardHoldCustomersForBookings(
 
   return result;
 }
+
+/**
+ * Best-effort Stripe customer cleanup ahead of a venue hard delete (§9.3).
+ *
+ * Mirrors {@link deleteCardHoldCustomersForBookings} but selects every hold of
+ * the venue (released included: the venue delete is the last chance to clean up
+ * a customer whose release-time deletion failed). No sibling check is needed:
+ * the whole venue is going, so no surviving hold can still need any of these
+ * cards. Deletion uses each hold's snapshotted connected account; every failure
+ * is logged and swallowed so the delete never blocks.
+ */
+export async function deleteCardHoldCustomersForVenue(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<DeleteCardHoldCustomersResult> {
+  const result: DeleteCardHoldCustomersResult = { deletedCustomerIds: [] };
+  if (!venueId) return result;
+
+  const { data: holds, error: selErr } = await admin
+    .from('booking_card_holds')
+    .select('booking_id, stripe_connected_account_id, stripe_customer_id')
+    .eq('venue_id', venueId)
+    .not('stripe_customer_id', 'is', null);
+
+  if (selErr) {
+    // Best-effort only: never block the hard delete on a cleanup query.
+    console.error('[card-hold-release] failed to load venue holds for customer cleanup', selErr);
+    return result;
+  }
+  const rows = (holds ?? []) as Array<
+    Pick<ReleasableHoldRow, 'booking_id' | 'stripe_connected_account_id' | 'stripe_customer_id'>
+  >;
+  const customerIds = [...new Set(rows.map((h) => h.stripe_customer_id).filter(Boolean))] as string[];
+
+  for (const customerId of customerIds) {
+    const account = rows.find((h) => h.stripe_customer_id === customerId)
+      ?.stripe_connected_account_id;
+    if (!account) continue;
+    try {
+      await stripe.customers.del(customerId, { stripeAccount: account });
+      result.deletedCustomerIds.push(customerId);
+    } catch (err) {
+      console.error('[card-hold-release] customer deletion failed (cleanup miss, not fatal)', {
+        customerId,
+        err,
+      });
+    }
+  }
+
+  return result;
+}

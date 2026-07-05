@@ -53,6 +53,11 @@ export const depositConfigSchema = z.object({
   min_party_size_for_deposit: z.number().int().min(1).max(50).optional(),
   /** Only require deposits for Friday, Saturday, Sunday bookings. */
   weekend_only: z.boolean().default(false),
+}).refine((d) => d.type !== 'card_hold' || d.amount_per_person_gbp >= 1, {
+  // Card-hold floor (§6): a sub-£1 no-show fee makes the saved card pointless.
+  // Stored legacy rows are unaffected: only the PATCH route parses this schema.
+  message: 'The no-show fee must be at least £1 per person when the card hold option is selected.',
+  path: ['amount_per_person_gbp'],
 });
 
 /** Fixed intervals availability model. */

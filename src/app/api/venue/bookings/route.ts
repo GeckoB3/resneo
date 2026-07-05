@@ -1663,7 +1663,12 @@ export async function POST(request: NextRequest) {
     const requiresDeposit = !staffWalkIn && Boolean(require_deposit) && !tableEntityIsCardHold;
     const tableHoldRequired = tableEntityIsCardHold && (require_card_hold ?? true);
 
-    if (requiresDeposit && (amountPerPersonGbp == null || amountPerPersonGbp <= 0)) {
+    // A card_hold service's configured amount is a NO-SHOW FEE, never a chargeable
+    // deposit: with the flag off it must not convert into one (spec 6.3), so the
+    // deposit path sees no amount configured at all.
+    const depositChargeAmountGbp = tableDepositType === 'card_hold' ? null : amountPerPersonGbp;
+
+    if (requiresDeposit && (depositChargeAmountGbp == null || depositChargeAmountGbp <= 0)) {
       return NextResponse.json(
         {
           error:
@@ -1683,8 +1688,8 @@ export async function POST(request: NextRequest) {
     }
 
     const depositAmountPence =
-      requiresDeposit && amountPerPersonGbp != null
-        ? Math.round(amountPerPersonGbp * party_size * 100)
+      requiresDeposit && depositChargeAmountGbp != null
+        ? Math.round(depositChargeAmountGbp * party_size * 100)
         : null;
     const tableCardHoldFeePence =
       tableHoldRequired && amountPerPersonGbp != null

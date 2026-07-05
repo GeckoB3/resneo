@@ -452,6 +452,43 @@ describe('chargeCardHoldNoShowFee failures (§8.5)', () => {
     expect(state.booking?.deposit_status).toBe('Card Held');
   });
 
+  it('sync decline never clears a DIFFERENT persisted PI (concurrent winner survives)', async () => {
+    // While our create is in flight (post-claim), a concurrent winner persists
+    // its PI. Our synchronous decline must not wipe it: only an id equal to the
+    // failed attempt's own dead PI may be cleared.
+    const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
+    mockPiCreate.mockImplementationOnce((() => {
+      (state.hold as Row).charge_payment_intent_id = 'pi_winner';
+      return Promise.reject({
+        type: 'StripeCardError',
+        code: 'card_declined',
+        decline_code: 'insufficient_funds',
+        payment_intent: { id: 'pi_dead' },
+      });
+    }) as never);
+
+    const result = await chargeCardHoldNoShowFee(admin, chargeParams);
+    expect(result).toMatchObject({ ok: false, code: 'card_declined' });
+    expect(state.hold?.charge_payment_intent_id).toBe('pi_winner');
+    expect(state.hold?.charge_failure_code).toBe('card_declined');
+  });
+
+  it("sync decline clears the persisted id when it IS the failed attempt's own dead PI", async () => {
+    const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
+    mockPiCreate.mockImplementationOnce((() => {
+      (state.hold as Row).charge_payment_intent_id = 'pi_dead';
+      return Promise.reject({
+        type: 'StripeCardError',
+        code: 'card_declined',
+        payment_intent: { id: 'pi_dead' },
+      });
+    }) as never);
+
+    const result = await chargeCardHoldNoShowFee(admin, chargeParams);
+    expect(result).toMatchObject({ ok: false, code: 'card_declined' });
+    expect(state.hold?.charge_payment_intent_id).toBeNull(); // claim reopened
+  });
+
   it('returns charge_failed for non-card Stripe errors without touching state', async () => {
     const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
     mockPiCreate.mockRejectedValueOnce(new Error('stripe unreachable'));
@@ -521,6 +558,52 @@ describe('applyCardHoldChargedState / completeCardHoldChargeFromWebhook (§8.6.1
     expect(state.booking?.deposit_status).toBe('Card Held');
   });
 
+  it('replay (applied=false) does NOT resurrect a Refunded booking back to Charged', async () => {
+    // A late payment_intent.succeeded replay arrives after the fee was refunded:
+    // the hold is already stamped, so the flip converges only from 'Card Held'.
+    const { admin, state } = makeDb({
+      hold: holdRow({
+        charge_payment_intent_id: 'pi_fee',
+        charged_at: '2026-07-05T10:00:00.000Z',
+        charged_pence: 2500,
+      }),
+      booking: bookingRow({ deposit_status: 'Refunded' }),
+    });
+    const result = await applyCardHoldChargedState(admin, {
+      holdId: 'h1',
+      bookingId: 'b1',
+      venueId: 'v1',
+      paymentIntentId: 'pi_fee',
+      amountReceivedPence: 2500,
+    });
+    expect(result.applied).toBe(false);
+    expect(state.booking?.deposit_status).toBe('Refunded');
+    expect(state.events).toHaveLength(0);
+  });
+
+  it('replay (applied=false) still converges a Card Held booking to Charged (crash-heal)', async () => {
+    // Crash between the stamp and the booking flip: the retry finds the hold
+    // stamped (applied=false) but must still heal the booking.
+    const { admin, state } = makeDb({
+      hold: holdRow({
+        charge_payment_intent_id: 'pi_fee',
+        charged_at: '2026-07-05T10:00:00.000Z',
+        charged_pence: 2500,
+      }),
+      booking: bookingRow({ deposit_status: 'Card Held' }),
+    });
+    const result = await applyCardHoldChargedState(admin, {
+      holdId: 'h1',
+      bookingId: 'b1',
+      venueId: 'v1',
+      paymentIntentId: 'pi_fee',
+      amountReceivedPence: 2500,
+    });
+    expect(result.applied).toBe(false);
+    expect(state.booking?.deposit_status).toBe('Charged');
+    expect(state.events).toHaveLength(0); // heal-only: no duplicate event
+  });
+
   it('reports applied=false on a webhook replay after the route already applied the state', async () => {
     const { admin, state } = makeDb({
       hold: holdRow({
@@ -554,6 +637,41 @@ describe('recordCardHoldChargeFailure (§8.6.3)', () => {
       charge_failure_at: '2026-07-05T10:00:00.000Z',
     });
     expect(state.booking?.deposit_status).toBe('Card Held');
+  });
+
+  it('reopens the claim when the persisted PI is the one that failed asynchronously', async () => {
+    const { admin, state } = makeDb({
+      hold: holdRow({ charge_payment_intent_id: 'pi_fail' }),
+      booking: bookingRow(),
+    });
+    await recordCardHoldChargeFailure(admin, {
+      paymentIntentId: 'pi_fail',
+      bookingId: 'b1',
+      failureCode: 'card_declined',
+      failureAtIso: '2026-07-05T10:00:00.000Z',
+    });
+    expect(state.hold).toMatchObject({
+      charge_failure_code: 'card_declined',
+      charge_payment_intent_id: null, // claim reopened for a retry
+    });
+    expect(state.booking?.deposit_status).toBe('Card Held');
+  });
+
+  it("leaves the persisted PI alone when it differs from the failed PI (a newer attempt owns it)", async () => {
+    const { admin, state } = makeDb({
+      hold: holdRow({ charge_payment_intent_id: 'pi_other' }),
+      booking: bookingRow(),
+    });
+    await recordCardHoldChargeFailure(admin, {
+      paymentIntentId: 'pi_fail',
+      bookingId: 'b1',
+      failureCode: 'card_declined',
+      failureAtIso: '2026-07-05T10:00:00.000Z',
+    });
+    expect(state.hold).toMatchObject({
+      charge_failure_code: 'card_declined',
+      charge_payment_intent_id: 'pi_other',
+    });
   });
 
   it('never overwrites a charged hold or an equally-new failure', async () => {

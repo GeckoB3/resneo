@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -800,11 +801,20 @@ export function AppointmentDetailSheet({
                 {(() => {
                   const hold = detailCardHoldState(detail);
                   if (!hold || (!hold.pill && hold.lines.length === 0)) return null;
+                  const holdBookingId = detail.id ?? bookingId;
                   return (
                     <div>
                       <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Card hold</dt>
                       <dd className="mt-0.5">
                         <CardHoldStateLine state={hold} />
+                        {holdBookingId ? (
+                          <Link
+                            href={`/dashboard/bookings?openBooking=${encodeURIComponent(holdBookingId)}`}
+                            className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline"
+                          >
+                            Open in bookings list
+                          </Link>
+                        ) : null}
                       </dd>
                     </div>
                   );
@@ -921,11 +931,20 @@ export function AppointmentDetailSheet({
                 {(() => {
                   const hold = detailCardHoldState(detail);
                   if (!hold || (!hold.pill && hold.lines.length === 0)) return null;
+                  const holdBookingId = detail.id ?? bookingId;
                   return (
                     <div>
                       <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Card hold</dt>
                       <dd className="mt-0.5">
                         <CardHoldStateLine state={hold} />
+                        {holdBookingId ? (
+                          <Link
+                            href={`/dashboard/bookings?openBooking=${encodeURIComponent(holdBookingId)}`}
+                            className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline"
+                          >
+                            Open in bookings list
+                          </Link>
+                        ) : null}
                       </dd>
                     </div>
                   );

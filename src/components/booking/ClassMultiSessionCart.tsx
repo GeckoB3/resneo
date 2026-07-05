@@ -8,6 +8,7 @@ import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import { PaymentStep } from './PaymentStep';
 import { type CardHoldPaymentMode } from './card-hold-copy';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 interface CartLine {
@@ -45,6 +46,8 @@ interface QuoteLine {
   booking_time: string;
   party_size: number;
   online_charge_pence: number;
+  /** No-show fee the venue may charge later (card hold; nothing charged today). */
+  card_hold_fee_pence?: number | null;
   ok: boolean;
   error?: string;
 }
@@ -52,6 +55,8 @@ interface QuoteLine {
 interface CartQuote {
   lines: QuoteLine[];
   total_online_charge_pence: number;
+  /** Sum of the card-hold lines' no-show fees; null when no line holds a card. */
+  card_hold_fee_pence?: number | null;
   all_ok: boolean;
 }
 
@@ -164,11 +169,16 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
     } catch {
       /* webhook fallback */
     }
+    const savedCardOnly = paymentSession.payment_mode === 'setup';
     setPaymentSession(null);
     setCart([]);
     setQuote(null);
     setError(null);
-    alert('Payment successful — your class bookings are confirmed.');
+    alert(
+      savedCardOnly
+        ? 'Card saved. No payment has been taken.'
+        : 'Payment successful. Your class bookings are confirmed.',
+    );
   }, [paymentSession]);
 
   async function runCheckout() {
@@ -378,6 +388,12 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                       {line.class_name} · {line.booking_date} {line.booking_time} · {line.party_size} spot
                       {line.party_size !== 1 ? 's' : ''}
                       {!line.ok && line.error ? <span className="text-red-700"> · {line.error}</span> : null}
+                      {line.ok && line.card_hold_fee_pence != null ? (
+                        <span className="block text-xs text-slate-500">
+                          No-show fee up to {formatCardHoldFeePence(line.card_hold_fee_pence)}. Nothing is charged
+                          today.
+                        </span>
+                      ) : null}
                     </span>
                     <span className="font-semibold">£{(line.online_charge_pence / 100).toFixed(2)}</span>
                   </li>
@@ -387,6 +403,12 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                 <span>Due now</span>
                 <span>£{((quoteSummary?.total_online_charge_pence ?? 0) / 100).toFixed(2)}</span>
               </div>
+              {quoteSummary?.card_hold_fee_pence != null ? (
+                <div className="mt-1.5 flex justify-between text-xs text-slate-600">
+                  <span>No-show fee up to</span>
+                  <span>{formatCardHoldFeePence(quoteSummary.card_hold_fee_pence)}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </>

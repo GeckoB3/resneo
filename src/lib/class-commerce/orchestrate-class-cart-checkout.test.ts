@@ -263,6 +263,54 @@ describe('orchestrateClassCartCheckout card-hold capture modes', () => {
     expect(result.body).not.toHaveProperty('checkout_charge_kind');
   });
 
+  it('two card-hold lines with different fees get their own hold rows and fee_pence', async () => {
+    mockQuote([
+      qLine({ class_instance_id: 'inst-1', payment_requirement: 'card_hold', card_hold_fee_pence: 1500 }),
+      qLine({
+        class_instance_id: 'inst-2',
+        class_type_id: 'ct-2',
+        party_size: 2,
+        payment_requirement: 'card_hold',
+        card_hold_fee_pence: 4000,
+      }),
+    ]);
+    const rec: Recorded = { holdRows: [], bookingUpdates: [], deletes: [] };
+
+    const result = await checkout(makeAdmin(rec), 2);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(insertPendingMock).toHaveBeenCalledTimes(2);
+    // One shared customer + SetupIntent across the unit, one hold row per line.
+    expect(customerCreateMock).toHaveBeenCalledTimes(1);
+    expect(siCreateMock).toHaveBeenCalledTimes(1);
+    expect(rec.holdRows).toHaveLength(2);
+
+    const byBooking = new Map(rec.holdRows.map((r) => [r.booking_id, r]));
+    expect(byBooking.get('bk-hold-1')).toMatchObject({
+      stripe_customer_id: 'cus_1',
+      stripe_setup_intent_id: 'seti_1',
+      fee_pence: 1500,
+    });
+    expect(byBooking.get('bk-hold-2')).toMatchObject({
+      stripe_customer_id: 'cus_1',
+      stripe_setup_intent_id: 'seti_1',
+      fee_pence: 4000,
+    });
+    // The terms snapshot is SHARED and carries the cart-total consent the guest
+    // actually saw ("charge up to £55"), while fee_pence stays per line.
+    expect((byBooking.get('bk-hold-1')!.terms_snapshot as { fee_pence: number }).fee_pence).toBe(5500);
+    expect((byBooking.get('bk-hold-2')!.terms_snapshot as { fee_pence: number }).fee_pence).toBe(5500);
+
+    // The response summarises the cart total.
+    expect(result.body).toMatchObject({
+      status: 'payment_required',
+      payment_mode: 'setup',
+      total_amount_pence: 0,
+      card_hold_fee_pence: 5500,
+    });
+  });
+
   it('covered + hold cart books the covered line immediately and returns setup mode', async () => {
     membershipCoversMock.mockResolvedValue({ ok: true, mode: 'unlimited', membershipId: 'm1' });
     mockQuote([

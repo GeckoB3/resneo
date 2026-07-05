@@ -23,6 +23,7 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 export interface AppointmentCatalogVariant {
   id: string;
@@ -64,6 +65,37 @@ export interface AppointmentCatalogPractitioner {
      */
     location_type?: import('@/types/booking-models').ServiceLocationType;
   }>;
+}
+
+/**
+ * Card-hold passthrough for the guest catalog (spec 6.3), mirroring the table/class
+ * engines: 'card_hold' reaches the guest only when the venue flag is on AND a positive
+ * fee is configured (service-level deposit_pence, or any active variant's own fee).
+ * Otherwise it degrades to 'none' with a deduped warning, matching what the create
+ * route will actually do; leaving it raw would show flag-off venues' guests
+ * "No-show fee applies" copy for a booking that ends up with no protection.
+ */
+function resolveCatalogPaymentRequirement(params: {
+  service: Pick<AppointmentService, 'id' | 'payment_requirement' | 'deposit_pence'>;
+  variants: AppointmentCatalogVariant[];
+  cardHoldDepositsEnabled: boolean;
+  warnedServiceIds: Set<string>;
+}): ClassPaymentRequirement | undefined {
+  const { service, variants, cardHoldDepositsEnabled, warnedServiceIds } = params;
+  if (service.payment_requirement !== 'card_hold') return service.payment_requirement;
+  const feeConfigured =
+    (service.deposit_pence ?? 0) > 0 || variants.some((v) => (v.deposit_pence ?? 0) > 0);
+  if (cardHoldDepositsEnabled && feeConfigured) return 'card_hold';
+  if (!warnedServiceIds.has(service.id)) {
+    warnedServiceIds.add(service.id);
+    console.warn(
+      cardHoldDepositsEnabled
+        ? '[appointment-catalog] card_hold service has no positive fee; treating as none'
+        : '[appointment-catalog] card_hold service configured but card_hold_deposits flag is off; treating as none',
+      { service_id: service.id },
+    );
+  }
+  return 'none';
 }
 
 export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
@@ -112,6 +144,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
 async function fetchUnifiedAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
+  cardHoldDepositsEnabled: boolean,
   options?: { practitionerSlug?: string; includeHiddenAddons?: boolean },
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const calQuery = supabase
@@ -186,6 +219,7 @@ async function fetchUnifiedAppointmentCatalog(
   ]);
 
   const practitioners: Practitioner[] = calendars.map((row) => unifiedCalendarRowToPractitioner(row));
+  const cardHoldWarnedServiceIds = new Set<string>();
   const result: AppointmentCatalogPractitioner[] = [];
 
   for (const practitioner of practitioners) {
@@ -196,21 +230,29 @@ async function fetchUnifiedAppointmentCatalog(
     result.push({
       id: practitioner.id,
       name: practitioner.name,
-      services: offeredServices.map((svc) => ({
-        id: svc.id,
-        name: svc.name,
-        description: svc.description ?? null,
-        duration_minutes: svc.duration_minutes,
-        buffer_minutes: svc.buffer_minutes ?? 0,
-        price_pence: svc.price_pence,
-        deposit_pence: svc.deposit_pence,
-        payment_requirement: svc.payment_requirement,
-        cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
-        variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
-        addon_groups: addonGroupMap.get(svc.id) ?? [],
-        processing_time_blocks: svc.processing_time_blocks ?? [],
-        location_type: parseServiceLocationType(svc.location_type),
-      })),
+      services: offeredServices.map((svc) => {
+        const variants = (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog);
+        return {
+          id: svc.id,
+          name: svc.name,
+          description: svc.description ?? null,
+          duration_minutes: svc.duration_minutes,
+          buffer_minutes: svc.buffer_minutes ?? 0,
+          price_pence: svc.price_pence,
+          deposit_pence: svc.deposit_pence,
+          payment_requirement: resolveCatalogPaymentRequirement({
+            service: svc,
+            variants,
+            cardHoldDepositsEnabled,
+            warnedServiceIds: cardHoldWarnedServiceIds,
+          }),
+          cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
+          variants,
+          addon_groups: addonGroupMap.get(svc.id) ?? [],
+          processing_time_blocks: svc.processing_time_blocks ?? [],
+          location_type: parseServiceLocationType(svc.location_type),
+        };
+      }),
     });
   }
 
@@ -224,7 +266,7 @@ export async function fetchAppointmentCatalog(
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const { data: venueRow } = await supabase
     .from('venues')
-    .select('booking_model, enabled_models')
+    .select('booking_model, enabled_models, feature_flags')
     .eq('id', venueId)
     .maybeSingle();
   const primary = ((venueRow as { booking_model?: string } | null)?.booking_model as BookingModel) ?? 'table_reservation';
@@ -232,8 +274,12 @@ export async function fetchAppointmentCatalog(
     (venueRow as { enabled_models?: unknown } | null)?.enabled_models,
     primary,
   );
+  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
+    'card_hold_deposits',
+    parseVenueFeatureFlags((venueRow as { feature_flags?: unknown } | null)?.feature_flags),
+  );
   if (venueUsesUnifiedAppointmentData(primary, enabled)) {
-    return fetchUnifiedAppointmentCatalog(supabase, venueId, options);
+    return fetchUnifiedAppointmentCatalog(supabase, venueId, cardHoldDepositsEnabled, options);
   }
 
   const [practitionersRes, allServicesRes, psRes] = await Promise.all([
@@ -280,6 +326,7 @@ export async function fetchAppointmentCatalog(
     }),
   ]);
 
+  const cardHoldWarnedServiceIds = new Set<string>();
   const result: AppointmentCatalogPractitioner[] = [];
 
   for (const practitioner of practitioners) {
@@ -290,21 +337,29 @@ export async function fetchAppointmentCatalog(
     result.push({
       id: practitioner.id,
       name: practitioner.name,
-      services: offeredServices.map((svc) => ({
-        id: svc.id,
-        name: svc.name,
-        description: svc.description ?? null,
-        duration_minutes: svc.duration_minutes,
-        buffer_minutes: svc.buffer_minutes ?? 0,
-        price_pence: svc.price_pence,
-        deposit_pence: svc.deposit_pence,
-        payment_requirement: svc.payment_requirement,
-        cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
-        variants: (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog),
-        addon_groups: addonGroupMap.get(svc.id) ?? [],
-        processing_time_blocks: svc.processing_time_blocks ?? [],
-        location_type: parseServiceLocationType(svc.location_type),
-      })),
+      services: offeredServices.map((svc) => {
+        const variants = (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog);
+        return {
+          id: svc.id,
+          name: svc.name,
+          description: svc.description ?? null,
+          duration_minutes: svc.duration_minutes,
+          buffer_minutes: svc.buffer_minutes ?? 0,
+          price_pence: svc.price_pence,
+          deposit_pence: svc.deposit_pence,
+          payment_requirement: resolveCatalogPaymentRequirement({
+            service: svc,
+            variants,
+            cardHoldDepositsEnabled,
+            warnedServiceIds: cardHoldWarnedServiceIds,
+          }),
+          cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
+          variants,
+          addon_groups: addonGroupMap.get(svc.id) ?? [],
+          processing_time_blocks: svc.processing_time_blocks ?? [],
+          location_type: parseServiceLocationType(svc.location_type),
+        };
+      }),
     });
   }
 

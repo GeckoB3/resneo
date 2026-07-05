@@ -68,6 +68,12 @@ export interface BookingEmailData {
    * Set by the card-request senders / cron payloads; rendered via formatCardHoldFeePence.
    */
   card_hold_fee_pence?: number | null;
+  /**
+   * Auto-cancel comms (card_hold deposits §12.1): true when the booking was
+   * cancelled because card details were not added in time, so the template must
+   * not claim an unpaid deposit.
+   */
+  card_hold?: boolean;
   refund_cutoff?: string | null;
   manage_booking_link?: string | null;
   /** Signed-in account portal link for "manage all bookings" / unified booking history. */

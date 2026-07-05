@@ -181,12 +181,14 @@ export async function materializeRecurringReservation(
   const payReq = ct.payment_requirement ?? 'none';
   const priceP = ct.price_pence ?? 0;
   const depPer = ct.deposit_amount_pence ?? 0;
-  // 'card_hold' is deliberately not in `requiresPaid` yet: until the card-hold flows ship it is
-  // treated like 'none' (no upfront charge), so auto-booking proceeds. A later phase makes this
-  // cron skip card-hold classes instead (design doc §12.4).
-  const requiresPaid =
-    (payReq === 'full_payment' && priceP > 0) || (payReq === 'deposit' && depPer > 0 && priceP > 0);
-  if (requiresPaid) {
+  // Skip anything needing an online card interaction (design doc §12.4): paid classes
+  // (no guest present to pay) and card-hold classes (no guest present to save a card;
+  // booking without the hold would violate the design's hard requirements, §1.3).
+  const requiresCard =
+    (payReq === 'full_payment' && priceP > 0) ||
+    (payReq === 'deposit' && depPer > 0 && priceP > 0) ||
+    payReq === 'card_hold';
+  if (requiresCard) {
     const today = todayYmd();
     const fromDateEarly =
       row.next_materialize_on && row.next_materialize_on >= today ? row.next_materialize_on : today;
@@ -194,7 +196,7 @@ export async function materializeRecurringReservation(
       status: 'skipped',
       booking_ids: [],
       next_materialize_on: addDaysYmd(fromDateEarly, 7),
-      message: 'Auto-booking is only supported for classes with no online card charge',
+      message: 'Auto-booking is only supported for classes with no online card requirement',
     };
   }
 

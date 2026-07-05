@@ -259,6 +259,8 @@ async function buildGuestBookingContext(
         Number.isFinite(payload.card_hold_fee_pence)
           ? payload.card_hold_fee_pence
           : null,
+      // Auto-cancel copy variant (§12.1): card details, not a deposit, were missing.
+      card_hold: payload.card_hold === true,
       deposit_status:
         (typeof payload.deposit_status === 'string' ? payload.deposit_status : null) ??
         bookingData?.deposit_status ??

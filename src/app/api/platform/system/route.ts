@@ -11,6 +11,7 @@ const KNOWN_CRON_JOBS: Array<{ name: string; schedule: string }> = [
   { name: 'expire-waitlist-offers', schedule: 'Every 5 min' },
   { name: 'dietary-digest', schedule: 'Daily 07:00' },
   { name: 'reconciliation', schedule: 'Daily 06:00' },
+  { name: 'release-card-holds', schedule: 'Daily 05:30' },
   { name: 'materialize-event-sessions', schedule: 'Daily 03:00' },
   { name: 'class-recurring-materialize', schedule: 'Daily 04:15' },
   { name: 'account-hard-delete', schedule: 'Daily 05:00' },

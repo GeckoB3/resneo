@@ -11,7 +11,7 @@
  * booking detail surface).
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
@@ -110,12 +110,16 @@ export function CardHoldChargeDialog({
     onCharged,
   );
 
-  useEffect(() => {
+  // Reset the form each time the dialog opens. Adjust-state-during-render
+  // instead of an effect, so no cascading render.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setAmountInput(penceToPoundsInput(feePence));
       setChargeError(null);
     }
-  }, [open, feePence, setChargeError]);
+  }
 
   const minPence = Math.min(100, feePence);
   const amountPence = parsePoundsInputToPence(amountInput);

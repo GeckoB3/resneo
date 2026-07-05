@@ -139,6 +139,87 @@ describe('card_hold_payment_reminder SMS rendering', () => {
   });
 });
 
+describe('auto_cancel_notification card-hold variant (§12.1)', () => {
+  const cardHoldBooking: BookingEmailData = { ...appointmentBooking, card_hold: true };
+  const cardHoldTableBooking: BookingEmailData = { ...tableBooking, card_hold: true };
+
+  it('says card details were not added in time, never the deposit copy (email)', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      booking: cardHoldBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(out).not.toBeNull();
+    expect(out!.html).toContain(
+      "We're sorry to let you know that your appointment has been cancelled because card details were not added in time:",
+    );
+    expect(out!.text).toContain('because card details were not added in time');
+    expect(out!.html).not.toContain('deposit');
+    expect(out!.text).not.toContain('deposit');
+    expect(out!.subject).not.toMatch(EM_DASH);
+    expect(out!.html).not.toMatch(EM_DASH);
+    expect(out!.text).not.toMatch(EM_DASH);
+  });
+
+  it('uses the booking wording on the table lane', () => {
+    const out = renderCommunicationEmail({
+      lane: 'table',
+      booking: cardHoldTableBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(out!.html).toContain(
+      "We're sorry to let you know that your booking has been cancelled because card details were not added in time:",
+    );
+    expect(out!.html).not.toContain('deposit');
+  });
+
+  it('keeps the deposit copy when the flag is absent', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      booking: appointmentBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(out!.html).toContain("because the deposit wasn't paid in time");
+    expect(out!.html).not.toContain('card details were not added');
+  });
+
+  it('renders the card-hold SMS variant on both lanes', () => {
+    const appt = renderCommunicationSms({
+      lane: 'appointments_other',
+      booking: cardHoldBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(appt!.body).toContain('card details were not added in time.');
+    expect(appt!.body).not.toContain('deposit');
+    expect(appt!.body).not.toMatch(EM_DASH);
+
+    const table = renderCommunicationSms({
+      lane: 'table',
+      booking: cardHoldTableBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(table!.body).toContain('card details were not added.');
+    expect(table!.body).not.toContain('deposit');
+    expect(table!.body).not.toMatch(EM_DASH);
+  });
+
+  it('keeps the deposit SMS copy when the flag is absent', () => {
+    const out = renderCommunicationSms({
+      lane: 'appointments_other',
+      booking: appointmentBooking,
+      venue,
+      messageKey: 'auto_cancel_notification',
+    });
+    expect(out!.body).toContain('deposit was not paid in time.');
+    expect(out!.body).not.toContain('card details');
+  });
+});
+
 describe('booking_confirmation with an open card hold (§10.2)', () => {
   const heldBooking: BookingEmailData = {
     ...appointmentBooking,

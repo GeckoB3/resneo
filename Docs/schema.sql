@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Reserve NI — Database schema reference (curated map)
 -- =============================================================================
--- Last regenerated: 4 Jul 2026, from supabase/migrations/ (230 migrations).
+-- Last regenerated: 5 Jul 2026, from supabase/migrations/ (234 migrations).
 --
 -- THIS FILE IS NOT THE SOURCE OF TRUTH.
 -- The canonical schema is the ordered migration set in `supabase/migrations/`.
@@ -28,14 +28,22 @@
 -- staff_role                    ('admin','staff')
 -- booking_status                ('Pending','Booked','Confirmed','Cancelled','No-Show','Completed','Seated')
 -- booking_source                ('online','phone','walk-in','booking_page','import','widget')
--- deposit_status                ('Not Required','Pending','Paid','Refunded','Forfeited','Failed','Waived')
+-- deposit_status                ('Not Required','Pending','Paid','Refunded','Forfeited','Failed','Waived',
+--                                'Card Held','Charged')
+--                               'Card Held' / 'Charged' are the card-hold states
+--                               (20270101120000_card_hold_enums.sql).
 -- booking_model                 ('table_reservation','practitioner_appointment','unified_scheduling',
 --                                'event_ticket','class_session','resource_booking')
 --                               NB: 6 enum values; conceptually 5 booking models —
 --                               Model B has both 'practitioner_appointment' and 'unified_scheduling'.
 --                               See Docs/Resneo_Booking_Models_Reference.md (canonical).
 -- waitlist_status               ('waiting','offered','confirmed','expired','cancelled')
--- class_payment_requirement     ('none','deposit','full_payment')
+-- class_payment_requirement     ('none','deposit','full_payment','card_hold')
+--                               'card_hold' = store a card at booking, charge a
+--                               no-show fee later (20270101120000_card_hold_enums.sql);
+--                               shared by appointment_services, service_items,
+--                               class_types, unified_calendars and
+--                               bookings.resource_payment_requirement.
 -- block_type                    calendar/availability block kinds (incl. 'amended_hours')
 
 -- Class-commerce enums — see migrations 20260701/20260702* and 20260729*:
@@ -89,6 +97,19 @@
 -- reconciliation_alerts            Payment / data reconciliation findings
 -- cron_runs                        Run history for scheduled cron jobs (success,
 --                                  duration, response detail); powers platform health page
+
+-- --- Deposits and card holds -------------------------------------------------
+-- Deposit state itself lives on bookings (deposit_status, deposit_amount_pence,
+-- deposit_payment_intent_id); card holds add a companion ledger table:
+-- booking_card_holds               Card-hold ledger, one row per booking row
+--                                  (unique on booking_id): Stripe refs
+--                                  (connected account, customer, setup intent,
+--                                  payment method), fee_pence snapshot +
+--                                  consent terms_snapshot, charge outcome
+--                                  (charge PI, charged_pence/at/by, failure,
+--                                  attempt count), release (released_at,
+--                                  release_reason). Service-role only;
+--                                  see 20270101120100_booking_card_holds.sql.
 
 -- --- Appointments & unified scheduling (Model B) -----------------------------
 -- practitioners                    Bookable staff who take appointments
@@ -161,7 +182,9 @@
 -- waitlist_slot_opportunities      Appointment-waitlist slot offers
 
 -- --- Booking rules & restrictions --------------------------------------------
--- booking_restrictions             Venue booking restriction rules
+-- booking_restrictions             Venue booking restriction rules; deposit_type
+--                                  ('charge'|'card_hold') picks how a table-rule
+--                                  deposit is taken (20270101120200*)
 -- booking_restriction_exceptions   Exceptions to restriction rules
 
 -- --- Communications ----------------------------------------------------------

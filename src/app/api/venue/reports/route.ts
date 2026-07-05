@@ -70,6 +70,10 @@ function buildBookingModelBreakdown(rows: BookingBreakdownInput[]): ReportByBook
     if (r.status === 'Cancelled') cur.cancelled_count += 1;
     if (r.status === 'Completed') cur.completed_count += 1;
     if (r.checked_in_at) cur.checked_in_count += 1;
+    // Card-hold no-show fee revenue (deposit_status 'Charged') is deliberately
+    // NOT included here in v1: it is reported at venue level via the three
+    // card-hold keys on report4_deposit (report_deposit_summary RPC), not
+    // per booking model. See Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md §13.
     if (r.deposit_status === 'Paid' && typeof r.deposit_amount_pence === 'number') {
       cur.deposit_pence_collected += r.deposit_amount_pence;
     }

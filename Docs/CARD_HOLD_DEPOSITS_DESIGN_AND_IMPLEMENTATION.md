@@ -1,8 +1,7 @@
 # Card Hold Deposits: Design and Implementation Document
 
-**Status: Proposed, not yet implemented (4 July 2026). No code written. Implementation-ready.**
+**Status: Implemented (5 July 2026). This document was the implementation spec; the feature shipped on branch docs-review behind the `card_hold_deposits` flag (default off). Retained as the design reference.**
 Adversarially reviewed against the codebase on 4 July 2026 in two rounds (six independent verification passes: Stripe mechanics, booking/staff flows, lifecycle/comms, amended-claims verification, implementability walkthrough, fresh-eyes code sweep); all confirmed findings are folded into this text.
-When implementation ships, update this header (and move the doc to `Docs/archive/` per `Docs/archive/README.md` once it is purely historical). Do not leave a stale "not built" header on a shipped feature.
 
 **Covers booking models:** appointments (`practitioner_appointment`, `unified_scheduling`), classes (`class_session`, including the class cart), events (`event_ticket`), resources (`resource_booking`), and **table reservations** (`table_reservation`).
 **Covers booking channels:** the public online flows AND **staff-created bookings (phone and walk-in / in person)** via a "secure by card" link sent to the guest by email or SMS, with a per-booking staff toggle to waive the requirement.

@@ -215,7 +215,8 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Stripe Connect onboarding | ● | Settings → Payments |
 | Deposits + cancellation refunds | ● | Policy snapshot on booking |
 | Deposit reminders (cron) | ● | `deposit-reminder-2h` |
-| Saved cards (guest) | ◐ | SetupIntent endpoint exists; off-session use not wired |
+| Card hold deposits (no-show fee) | ● | Shipped (5 July 2026): card saved at booking, £0 taken; explicit admin **Charge no-show fee** action after a no-show; auto-release 14 days after the booking or on cancel; all five booking models incl. the staff phone/walk-in card-request link; flag `card_hold_deposits` (default off); spec `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` |
+| Saved cards (guest) | ◐ | SetupIntent endpoint exists; card-hold no-show fees charge off-session, general balance charging not wired |
 | **Checkout at appointment** (balance, tips, receipt) | ○ | See §7 — open strategic question |
 | Appointment packages (prepaid bundles) | ◐ | Class packs exist; not general appointment packages |
 | Gift cards / vouchers | ○ | Not built |

@@ -41,7 +41,9 @@ export interface TemplateVariables {
   manage_booking_link?: string;
   short_manage_link?: string;
   message?: string;
-  [key: string]: string | number | undefined;
+  /** Auto-cancel comms (§12.1): true when a card hold, not a deposit, timed out. */
+  card_hold?: boolean;
+  [key: string]: string | number | boolean | undefined;
 }
 
 export interface CompiledTemplate {

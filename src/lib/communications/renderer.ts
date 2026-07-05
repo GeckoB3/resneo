@@ -287,9 +287,17 @@ export function renderCommunicationSms(
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
       case 'auto_cancel_notification': {
+        // Card-hold variant (§12.1): the guest never owed a deposit, they never
+        // added card details.
+        const reason = opts.booking.card_hold
+          ? 'card details were not added in time'
+          : 'deposit was not paid in time';
+        const reasonShort = opts.booking.card_hold
+          ? 'card details were not added'
+          : 'deposit was not paid';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; deposit was not paid in time.`
-          : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; deposit was not paid.`;
+          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; ${reason}.`
+          : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; ${reasonShort}.`;
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
       case 'custom_message': {
@@ -662,7 +670,15 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
-    case 'auto_cancel_notification':
+    case 'auto_cancel_notification': {
+      // Card-hold variant (§12.1): "the deposit wasn't paid in time" is false
+      // for a card hold, where only card details were requested.
+      const cancelReason = opts.booking.card_hold
+        ? 'because card details were not added in time'
+        : "because the deposit wasn't paid in time";
+      const cancelledLine = appointment
+        ? `We're sorry to let you know that your appointment has been cancelled ${cancelReason}:`
+        : `We're sorry to let you know that your booking has been cancelled ${cancelReason}:`;
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been cancelled`
@@ -670,11 +686,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         heading: 'Booking cancelled',
         mainContent: [
           htmlParagraph(`Hi ${guestName},`),
-          htmlParagraph(
-            appointment
-              ? "We're sorry to let you know that your appointment has been cancelled because the deposit wasn't paid in time:"
-              : "We're sorry to let you know that your booking has been cancelled because the deposit wasn't paid in time:",
-          ),
+          htmlParagraph(cancelledLine),
           htmlParagraph(
             appointment
               ? "The slot has been released. If you'd still like to book, you're welcome to choose a new time."
@@ -684,9 +696,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         textLines: [
           `Hi ${guestName},`,
           '',
-          appointment
-            ? "We're sorry to let you know that your appointment has been cancelled because the deposit wasn't paid in time:"
-            : "We're sorry to let you know that your booking has been cancelled because the deposit wasn't paid in time:",
+          cancelledLine,
           appointment ? `Service: ${withStaffLabel}` : null,
           `Date: ${date}`,
           `Time: ${time}`,
@@ -695,6 +705,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
+    }
     case 'custom_message':
       return {
         subject: `A message from ${opts.venue.name}`,

@@ -1,23 +1,36 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-
-type Status = 'succeeded' | 'failed' | 'pending';
-
-function redirectStatusFromParams(redirectStatus: string | null): Status {
-  if (redirectStatus === 'succeeded') return 'succeeded';
-  if (redirectStatus === 'failed') return 'failed';
-  if (redirectStatus === 'processing') return 'pending';
-  // No Stripe redirect params - could be a direct visit or non-redirect payment completion.
-  return 'succeeded';
-}
+import {
+  bookingIdFromParams,
+  redirectModeFromParams,
+  redirectStatusFromParams,
+} from './redirect-params';
 
 function SuccessContent() {
   const searchParams = useSearchParams();
   const status = redirectStatusFromParams(searchParams.get('redirect_status'));
+  const mode = redirectModeFromParams(searchParams);
+  const bookingId = bookingIdFromParams(searchParams);
+  const confirmSent = useRef(false);
+
+  // A 3DS-challenged card save redirects here without the /pay page's inline
+  // confirm call ever running, so fire it best-effort on mount. The webhook
+  // remains the guaranteed path; errors are swallowed silently.
+  useEffect(() => {
+    if (mode !== 'setup' || status !== 'succeeded' || !bookingId || confirmSent.current) return;
+    confirmSent.current = true;
+    fetch('/api/booking/confirm-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ booking_id: bookingId }),
+    }).catch(() => {
+      // Non-critical - webhook will handle if this fails.
+    });
+  }, [mode, status, bookingId]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4">
@@ -36,10 +49,21 @@ function SuccessContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
               </svg>
             </div>
-            <h1 className="text-xl font-bold text-slate-900">Deposit paid</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              Your deposit has been received. You&rsquo;ll get a confirmation by email or text shortly.
-            </p>
+            {mode === 'setup' ? (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Card saved</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  No payment has been taken. You&rsquo;ll get a confirmation by email or text shortly.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Deposit paid</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your deposit has been received. You&rsquo;ll get a confirmation by email or text shortly.
+                </p>
+              </>
+            )}
             <p className="mt-4 text-xs text-slate-400">
               Didn&rsquo;t receive a confirmation? Check your spam folder or contact the venue directly.
             </p>

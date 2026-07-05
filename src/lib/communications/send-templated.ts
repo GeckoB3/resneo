@@ -179,6 +179,50 @@ export async function sendDepositRequestSms(
   });
 }
 
+/**
+ * Card-hold bookings (card_hold deposits §10.3): ask the guest to add card
+ * details to secure the booking. Mirrors sendDepositRequestNotifications:
+ * email is always attempted subject to the venue's communication policy for
+ * the message key; SMS is sent when the guest has a phone number, subject to
+ * the same policy. `opts.reminder` switches to the `card_hold_payment_reminder`
+ * key (reminder cron / re-sends); `feePence` is the consented no-show maximum.
+ */
+export async function sendCardHoldRequestNotifications(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+  paymentLink: string,
+  feePence: number,
+  opts?: { reminder?: boolean },
+): Promise<{ email: SendResult; sms: SendResult }> {
+  const messageKey = opts?.reminder
+    ? ('card_hold_payment_reminder' as const)
+    : ('card_hold_request' as const);
+  const holdBooking: BookingEmailData = { ...booking, card_hold_fee_pence: feePence };
+  const email = await sendPolicyMessage({
+    venueId,
+    booking: holdBooking,
+    venue,
+    messageKey,
+    channel: 'email',
+    mode: 'dedupe',
+    paymentLink,
+  });
+  let sms: SendResult = { sent: false, reason: 'no_phone' };
+  if (booking.guest_phone) {
+    sms = await sendPolicyMessage({
+      venueId,
+      booking: holdBooking,
+      venue,
+      messageKey,
+      channel: 'sms',
+      mode: 'dedupe',
+      paymentLink,
+    });
+  }
+  return { email, sms };
+}
+
 export async function sendDepositConfirmationEmail(
   booking: BookingEmailData,
   venue: VenueEmailData,

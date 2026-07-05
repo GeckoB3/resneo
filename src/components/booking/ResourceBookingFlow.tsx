@@ -29,6 +29,11 @@ import {
   type CardHoldPaymentMode,
 } from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffEntityCardHold,
+  STAFF_CARD_HOLD_LINK_SENT_LINE,
+} from '@/components/booking/staff-card-hold';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import type {
@@ -226,6 +231,10 @@ export function ResourceBookingFlow({
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
+  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
+  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
+  /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
   const [step, setStep] = useState<Step>('pick_resource');
   const advanceToGuestDetails = useCallback(async () => {
@@ -273,6 +282,8 @@ export function ResourceBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
+    card_hold_requested?: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -561,6 +572,19 @@ export function ResourceBookingFlow({
     return 0;
   }, [priceBasis, duration, isStaffWalkIn]);
 
+  /** Card-hold resources in the staff flow (design doc 7.6; walk-ins included, D6). Fee is per booking. */
+  const staffCardHold = useMemo(
+    () =>
+      isStaff && priceBasis
+        ? resolveStaffEntityCardHold({
+            paymentRequirement: priceBasis.payment_requirement,
+            feePerUnitPence: priceBasis.deposit_amount_pence,
+            cardHoldFlagEnabled: cardHoldDepositsEnabled,
+          })
+        : null,
+    [isStaff, priceBasis, cardHoldDepositsEnabled],
+  );
+
   const resourceRefundNoticeHours = useMemo(() => {
     const basis = selectedResource ?? selectedMeta;
     const h = basis?.cancellation_notice_hours;
@@ -638,6 +662,9 @@ export function ResourceBookingFlow({
               dietary_notes: details.dietary_notes || undefined,
               resource_id: resourceId,
               source: staffBookingSource,
+              // Card-hold resources (design doc 7.6): send the toggle state explicitly
+              // (server defaults to true when omitted; ignored otherwise).
+              ...(staffCardHold ? { require_card_hold: staffRequireCardHold } : {}),
               ...(details.returning_guest ? { returning_guest: true } : {}),
             }),
           });
@@ -648,6 +675,7 @@ export function ResourceBookingFlow({
             payment_url: data.payment_url,
             staffMessage: typeof data.message === 'string' ? data.message : undefined,
             requires_deposit: Boolean(data.payment_url),
+            card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
             amount_pence_charged: onlineChargePence,
           });
           setStep('confirmation');
@@ -709,6 +737,8 @@ export function ResourceBookingFlow({
       isPublicGuest,
       accountGate,
       staffBookingSource,
+      staffCardHold,
+      staffRequireCardHold,
     ],
   );
 
@@ -1130,6 +1160,15 @@ export function ResourceBookingFlow({
           {submitting ? (
             <BookingSubmittingPanel variant="resource" />
           ) : (
+            <>
+              {staffCardHold ? (
+                <StaffCardHoldToggle
+                  checked={staffRequireCardHold}
+                  onChange={setStaffRequireCardHold}
+                  feePence={staffCardHold.feePence}
+                  className="mb-4"
+                />
+              ) : null}
             <DetailsStep
               slot={{
                 key: selectedTime,
@@ -1166,6 +1205,7 @@ export function ResourceBookingFlow({
               }
               emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
             />
+            </>
           )}
         </div>
       )}
@@ -1199,7 +1239,10 @@ export function ResourceBookingFlow({
           <h2 className="text-xl font-bold text-green-900">{terms.booking} confirmed</h2>
           {isStaff && createResult?.payment_url ? (
             <p className="mt-3 text-sm leading-relaxed text-green-800">
-              Deposit link sent to the guest.{createResult.staffMessage ? ` ${createResult.staffMessage}` : ''}
+              {createResult.card_hold_requested
+                ? STAFF_CARD_HOLD_LINK_SENT_LINE
+                : 'Deposit link sent to the guest.'}
+              {createResult.staffMessage ? ` ${createResult.staffMessage}` : ''}
             </p>
           ) : null}
           <p className="mt-2 text-sm leading-relaxed text-green-700">

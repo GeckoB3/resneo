@@ -7,6 +7,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import type { Stripe } from '@stripe/stripe-js';
 import Image from 'next/image';
 import { isDepositRefundAvailableAt } from '@/lib/booking/cancellation-deadline';
+import { renderCardHoldConsentText, formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 
 const stripeCache = new Map<string, Promise<Stripe | null>>();
 
@@ -19,14 +20,18 @@ function getStripeForAccount(stripeAccountId?: string): Promise<Stripe | null> {
   return stripeCache.get(cacheKey)!;
 }
 
+type PayMode = 'payment' | 'setup';
+
 interface BookingInfo {
   booking_id: string;
+  payment_mode: PayMode;
   venue_name: string;
   venue_address: string | null;
   booking_date: string;
   booking_time: string;
   party_size: number;
   deposit_amount_pence: number | null;
+  card_hold_fee_pence: number | null;
   guest_name: string;
   guest_email: string;
   refund_cutoff: string | null;
@@ -65,6 +70,7 @@ function formatRefundCutoff(iso: string): string {
 
 function BookingDetailsCard({ info }: { info: BookingInfo }) {
   const deposit = info.deposit_amount_pence ? (info.deposit_amount_pence / 100).toFixed(2) : null;
+  const isSetup = info.payment_mode === 'setup';
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2.5">
       <h3 className="text-sm font-semibold text-slate-800">{info.venue_name}</h3>
@@ -88,10 +94,17 @@ function BookingDetailsCard({ info }: { info: BookingInfo }) {
           </div>
         )}
       </div>
-      {deposit && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-          <span className="font-semibold">Deposit required: &pound;{deposit}</span>
+      {isSetup ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+          <span className="font-semibold">No payment is taken today.</span>{' '}
+          No-show fee of up to {formatCardHoldFeePence(info.card_hold_fee_pence ?? 0)} if you do not attend.
         </div>
+      ) : (
+        deposit && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+            <span className="font-semibold">Deposit required: &pound;{deposit}</span>
+          </div>
+        )
       )}
     </div>
   );
@@ -127,13 +140,24 @@ function RefundPolicy({ refundCutoff }: { refundCutoff: string | null }) {
   );
 }
 
+/** The exact consent line (spec 7.5), rendered verbatim above the save button. */
+function CardHoldConsent({ venueName, feePence }: { venueName: string; feePence: number }) {
+  return (
+    <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 leading-relaxed">
+      {renderCardHoldConsentText(venueName, feePence)}
+    </div>
+  );
+}
+
 function PayForm({
+  mode,
   clientSecret,
   bookingId,
   email,
   onEmailChange,
   onSuccess,
 }: {
+  mode: PayMode;
   clientSecret: string;
   bookingId: string;
   email: string;
@@ -146,6 +170,8 @@ function PayForm({
   const [error, setError] = useState<string | null>(null);
   const [emailTouched, setEmailTouched] = useState(false);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const isSetup = mode === 'setup';
+  const confirmFallbackError = isSetup ? 'Card could not be saved' : 'Payment failed';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,17 +191,31 @@ function PayForm({
         return;
       }
 
-      const { error: confirmError } = await stripe.confirmPayment({
-        elements,
-        clientSecret,
-        confirmParams: {
-          return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success`,
-          receipt_email: email.trim(),
-        },
-        redirect: 'if_required',
-      });
+      // booking_id rides along in the return_url so /pay/success can run the
+      // best-effort confirm after a 3DS redirect (Stripe appends its own params).
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const returnUrl = `${origin}/pay/success?booking_id=${encodeURIComponent(bookingId)}`;
+
+      const { error: confirmError } = isSetup
+        ? await stripe.confirmSetup({
+            elements,
+            clientSecret,
+            confirmParams: {
+              return_url: returnUrl,
+            },
+            redirect: 'if_required',
+          })
+        : await stripe.confirmPayment({
+            elements,
+            clientSecret,
+            confirmParams: {
+              return_url: returnUrl,
+              receipt_email: email.trim(),
+            },
+            redirect: 'if_required',
+          });
       if (confirmError) {
-        setError(confirmError.message ?? 'Payment failed');
+        setError(confirmError.message ?? confirmFallbackError);
         setLoading(false);
         return;
       }
@@ -191,7 +231,7 @@ function PayForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Payment failed');
+      setError(err instanceof Error ? err.message : confirmFallbackError);
     } finally {
       setLoading(false);
     }
@@ -220,7 +260,9 @@ function PayForm({
         {emailTouched && !emailValid && (
           <p className="mt-1 text-xs text-red-500">Please enter a valid email so we can send your confirmation</p>
         )}
-        <p className="mt-1 text-xs text-slate-400">We&rsquo;ll send your deposit confirmation to this address</p>
+        <p className="mt-1 text-xs text-slate-400">
+          We&rsquo;ll send your {isSetup ? 'booking' : 'deposit'} confirmation to this address
+        </p>
       </div>
 
       <PaymentElement options={{ layout: 'tabs' }} />
@@ -233,7 +275,7 @@ function PayForm({
         disabled={!stripe || loading}
         className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
       >
-        {loading ? 'Processing\u2026' : 'Pay deposit'}
+        {loading ? 'Processing…' : isSetup ? 'Save card' : 'Pay deposit'}
       </button>
     </form>
   );
@@ -263,12 +305,14 @@ function PayContent() {
         setStripeAccountId(data.stripe_account_id);
         setBookingInfo({
           booking_id: data.booking_id,
+          payment_mode: data.payment_mode === 'setup' ? 'setup' : 'payment',
           venue_name: data.venue_name ?? '',
           venue_address: data.venue_address ?? null,
           booking_date: data.booking_date ?? '',
           booking_time: data.booking_time ?? '',
           party_size: data.party_size ?? 0,
           deposit_amount_pence: data.deposit_amount_pence ?? null,
+          card_hold_fee_pence: data.card_hold_fee_pence ?? null,
           guest_name: data.guest_name ?? '',
           guest_email: data.guest_email ?? '',
           refund_cutoff: data.refund_cutoff ?? null,
@@ -302,6 +346,7 @@ function PayContent() {
   }
 
   if (status === 'success') {
+    const isSetup = bookingInfo?.payment_mode === 'setup';
     const deposit = bookingInfo?.deposit_amount_pence ? (bookingInfo.deposit_amount_pence / 100).toFixed(2) : null;
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
@@ -313,10 +358,17 @@ function PayContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
               </svg>
             </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">Deposit paid</h2>
-              {deposit && <p className="mt-1 text-sm text-slate-500">&pound;{deposit} received</p>}
-            </div>
+            {isSetup ? (
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Card saved</h2>
+                <p className="mt-1 text-sm text-slate-500">Your booking is confirmed. No payment has been taken.</p>
+              </div>
+            ) : (
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Deposit paid</h2>
+                {deposit && <p className="mt-1 text-sm text-slate-500">&pound;{deposit} received</p>}
+              </div>
+            )}
             {email && (
               <p className="text-sm text-slate-600">
                 A confirmation email has been sent to <strong className="text-slate-800">{email}</strong>
@@ -341,20 +393,30 @@ function PayContent() {
     );
   }
 
+  const isSetup = bookingInfo.payment_mode === 'setup';
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-md space-y-5">
         <Image src="/Logo.png" alt="ResNeo" width={120} height={36} className="h-8 w-auto" />
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
           <div>
-            <h1 className="text-lg font-semibold text-slate-900">Pay your deposit</h1>
+            <h1 className="text-lg font-semibold text-slate-900">
+              {isSetup ? 'Secure your booking' : 'Pay your deposit'}
+            </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Hi {bookingInfo.guest_name || 'there'}, please pay your deposit to confirm your booking.
+              {isSetup
+                ? `Hi ${bookingInfo.guest_name || 'there'}, save your card to confirm your booking.`
+                : `Hi ${bookingInfo.guest_name || 'there'}, please pay your deposit to confirm your booking.`}
             </p>
           </div>
 
           <BookingDetailsCard info={bookingInfo} />
-          <RefundPolicy refundCutoff={bookingInfo.refund_cutoff} />
+          {isSetup ? (
+            <CardHoldConsent venueName={bookingInfo.venue_name} feePence={bookingInfo.card_hold_fee_pence ?? 0} />
+          ) : (
+            <RefundPolicy refundCutoff={bookingInfo.refund_cutoff} />
+          )}
 
           <Elements
             stripe={stripePromise}
@@ -364,6 +426,7 @@ function PayContent() {
             }}
           >
             <PayForm
+              mode={bookingInfo.payment_mode}
               clientSecret={clientSecret}
               bookingId={bookingInfo.booking_id}
               email={email}

@@ -26,6 +26,11 @@ import {
   type CardHoldPaymentMode,
 } from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffEntityCardHold,
+  STAFF_CARD_HOLD_LINK_SENT_LINE,
+} from '@/components/booking/staff-card-hold';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -204,6 +209,10 @@ export function EventBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
+  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
+  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
+  /** Card-hold events only (design doc 7.6): default ON, staff may waive per booking. */
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
   const [step, setStep] = useState<Step>(() =>
     preselectedExperienceEventId ? 'summary' : 'pick-event',
@@ -253,6 +262,8 @@ export function EventBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
+    card_hold_requested?: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(() => Boolean(preselectedExperienceEventId));
   const [offeringsReady, setOfferingsReady] = useState(() => !preselectedExperienceEventId);
@@ -384,6 +395,20 @@ export function EventBookingFlow({
     return eventPaymentSummaryLines(selectedOccurrence, totalTickets, totalPricePence, currency, isStaffWalkIn);
   }, [selectedOccurrence, totalTickets, totalPricePence, currency, isStaffWalkIn]);
 
+  /** Card-hold events in the staff flow (design doc 7.6; walk-ins included, D6). */
+  const staffCardHold = useMemo(
+    () =>
+      isStaff && selectedOccurrence
+        ? resolveStaffEntityCardHold({
+            paymentRequirement: selectedOccurrence.payment_requirement,
+            feePerUnitPence: selectedOccurrence.deposit_amount_pence,
+            cardHoldFlagEnabled: cardHoldDepositsEnabled,
+            units: totalTickets,
+          })
+        : null,
+    [isStaff, selectedOccurrence, totalTickets, cardHoldDepositsEnabled],
+  );
+
   const chargePence = paymentSummary?.chargePence ?? 0;
 
   const eventRefundNoticeHours = useMemo(() => {
@@ -435,6 +460,9 @@ export function EventBookingFlow({
               ticket_lines,
               dietary_notes: details.dietary_notes,
               source: staffBookingSource,
+              // Card-hold events (design doc 7.6): send the toggle state explicitly
+              // (server defaults to true when omitted; ignored otherwise).
+              ...(staffCardHold ? { require_card_hold: staffRequireCardHold } : {}),
               ...(details.returning_guest ? { returning_guest: true } : {}),
               ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
@@ -445,6 +473,7 @@ export function EventBookingFlow({
             booking_id: data.booking_id,
             requires_deposit: Boolean(data.payment_url),
             payment_url: data.payment_url,
+            card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
             staffMessage: typeof data.message === 'string' ? data.message : undefined,
           });
           setStep('confirmation');
@@ -504,6 +533,8 @@ export function EventBookingFlow({
       accountGate,
       staffBookingSource,
       linkedOwnerVenueId,
+      staffCardHold,
+      staffRequireCardHold,
     ],
   );
 
@@ -747,6 +778,15 @@ export function EventBookingFlow({
           {submitting ? (
             <BookingSubmittingPanel variant="event" />
           ) : (
+            <>
+              {staffCardHold ? (
+                <StaffCardHoldToggle
+                  checked={staffRequireCardHold}
+                  onChange={setStaffRequireCardHold}
+                  feePence={staffCardHold.feePence}
+                  className="mb-4"
+                />
+              ) : null}
             <DetailsStep
               slot={{
                 key: selectedOccurrence.event_id,
@@ -787,6 +827,7 @@ export function EventBookingFlow({
               initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
               emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
             />
+            </>
           )}
         </div>
       )}
@@ -832,7 +873,11 @@ export function EventBookingFlow({
             </p>
           ) : null}
           {isStaff && createResult?.payment_url ? (
-            <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
+            <p className="mt-4 text-xs text-green-800">
+              {createResult.card_hold_requested
+                ? STAFF_CARD_HOLD_LINK_SENT_LINE
+                : 'Deposit link sent to the guest.'}
+            </p>
           ) : (
             <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
           )}

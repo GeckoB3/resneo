@@ -64,6 +64,7 @@ import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-e
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
   const [startH, startM] = startHHmm.split(':').map(Number);
@@ -93,6 +94,12 @@ const phoneBookingSchema = z.object({
   occasion: z.string().max(200).optional(),
   special_requests: z.string().max(500).optional(),
   require_deposit: z.boolean().optional(),
+  /**
+   * Card-hold toggle (spec 7.6 / D6). Only honoured when the selected entity's
+   * effective requirement is card_hold (owner venue flag on); defaults to true
+   * there, for BOTH 'phone' and 'walk-in' sources. Ignored otherwise.
+   */
+  require_card_hold: z.boolean().optional(),
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
   /** Optional sub-option for the appointment service (variant duration / price overrides). */
@@ -221,7 +228,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions, email, reply_to_email')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions, email, reply_to_email, feature_flags')
       .eq('id', venueId)
       .single();
 
@@ -230,6 +237,14 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(admin, venueId);
+
+    // Card-hold gate (spec 7.6 / D6): the flag is the OWNER venue's (`venue` is the
+    // owner row via `resolveLinkedStaffCreateScope`); the hold rides its account.
+    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
+      'card_hold_deposits',
+      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
+    );
+    const require_card_hold = parsed.data.require_card_hold;
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
@@ -322,6 +337,21 @@ export async function POST(request: NextRequest) {
         depositAmountPence = 0;
       }
 
+      // Card hold (spec 7.6): per-person fee x tickets, server-derived. Unlike
+      // deposits, holds are honoured for walk-ins too (D6). Flag off resolves as none.
+      let eventCardHoldFeePence: number | null = null;
+      if (eventValidation.value.cardHoldFeePence != null) {
+        if (cardHoldEnabled) {
+          eventCardHoldFeePence = eventValidation.value.cardHoldFeePence;
+        } else {
+          console.warn(
+            '[venue/bookings] card_hold event booked while card_hold_deposits flag is off; ignoring',
+            { venue_id: venueId, experience_event_id: parsed.data.experience_event_id },
+          );
+        }
+      }
+      const eventHoldRequired = eventCardHoldFeePence != null && (require_card_hold ?? true);
+
       const ticketTotalDisplay = ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
       const eventEmailExtras = {
         email_variant: 'appointment' as const,
@@ -360,6 +390,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      if (eventHoldRequired && !venue.stripe_connected_account_id) {
+        return NextResponse.json(
+          { error: 'Venue has not set up payments; a card hold is required for this booking type.' },
+          { status: 400 },
+        );
+      }
 
       const eventInsert = {
         venue_id: venueId,
@@ -369,15 +405,17 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'event_ticket' as const,
-        status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
+        status: requiresDeposit || eventHoldRequired ? ('Pending' as const) : ('Booked' as const),
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
         guest_phone: phoneE164,
+        // Card holds keep deposit_amount_pence NULL (D4); the fee lives on the hold row.
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
-        deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
+        deposit_status:
+          requiresDeposit || eventHoldRequired ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline,
         cancellation_policy_snapshot: cancellationPolicySnapshot,
         estimated_end_time: estimatedEndTime,
@@ -441,6 +479,7 @@ export async function POST(request: NextRequest) {
           dietary_notes: dietary_notes ?? null,
           requiresDeposit: Boolean(requiresDeposit && depositAmountPence > 0),
           depositAmountPence: depositAmountPence ?? 0,
+          cardHoldFeePence: eventHoldRequired ? eventCardHoldFeePence : null,
           emailExtras: eventEmailExtras,
           logContext: 'staff event booking',
         });
@@ -458,7 +497,12 @@ export async function POST(request: NextRequest) {
         {
           booking_id: evBooking.id,
           payment_url: payment_url ?? undefined,
-          message: payment_url ? 'Event booking created. Deposit link sent.' : 'Event booking created.',
+          ...(eventHoldRequired ? { card_hold_requested: true as const } : {}),
+          message: payment_url
+            ? eventHoldRequired
+              ? 'Event booking created. Card request link sent.'
+              : 'Event booking created. Deposit link sent.'
+            : 'Event booking created.',
         },
         { status: 201 },
       );
@@ -504,6 +548,29 @@ export async function POST(request: NextRequest) {
         requiresDeposit = true;
         depositAmountPence = classDepPerPerson * party_size;
       }
+
+      // Card hold (spec 7.6): the engine degrades a card_hold class type to 'none',
+      // so read the raw class type. Per-person fee x spots; walk-ins included (D6).
+      // Flag-off and zero-fee configs resolve as none.
+      let classCardHoldFeePence: number | null = null;
+      const rawClassType = classInput.classTypes.find((ct) => ct.id === cls.class_type_id);
+      if (rawClassType?.payment_requirement === 'card_hold') {
+        const holdPerPerson = rawClassType.deposit_amount_pence ?? 0;
+        if (!cardHoldEnabled) {
+          console.warn(
+            '[venue/bookings] card_hold class booked while card_hold_deposits flag is off; ignoring',
+            { venue_id: venueId, class_instance_id: parsed.data.class_instance_id },
+          );
+        } else if (holdPerPerson > 0) {
+          classCardHoldFeePence = holdPerPerson * party_size;
+        } else {
+          console.warn(
+            '[venue/bookings] card_hold class has no positive per-person fee; ignoring',
+            { venue_id: venueId, class_instance_id: parsed.data.class_instance_id },
+          );
+        }
+      }
+      const classHoldRequired = classCardHoldFeePence != null && (require_card_hold ?? true);
       const classPriceDisplay =
         cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
       const classEmailExtras = {
@@ -542,6 +609,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      if (classHoldRequired && !venue.stripe_connected_account_id) {
+        return NextResponse.json(
+          { error: 'Venue has not set up payments; a card hold is required for this booking type.' },
+          { status: 400 },
+        );
+      }
 
       const classInsert = {
         venue_id: venueId,
@@ -551,15 +624,17 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'class_session' as const,
-        status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
+        status: requiresDeposit || classHoldRequired ? ('Pending' as const) : ('Booked' as const),
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
         guest_phone: phoneE164,
+        // Card holds keep deposit_amount_pence NULL (D4); the fee lives on the hold row.
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
-        deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
+        deposit_status:
+          requiresDeposit || classHoldRequired ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline: cancellation_deadline_class,
         cancellation_policy_snapshot: cancellationPolicySnapshotClass,
         estimated_end_time: estimatedEndTimeClass,
@@ -609,6 +684,7 @@ export async function POST(request: NextRequest) {
           dietary_notes: dietary_notes ?? null,
           requiresDeposit: Boolean(requiresDeposit && depositAmountPence > 0),
           depositAmountPence,
+          cardHoldFeePence: classHoldRequired ? classCardHoldFeePence : null,
           emailExtras: classEmailExtras,
           logContext: 'staff class booking',
         });
@@ -625,7 +701,12 @@ export async function POST(request: NextRequest) {
         {
           booking_id: classBooking.id,
           payment_url: payment_url_class ?? undefined,
-          message: payment_url_class ? 'Class booking created. Deposit link sent.' : 'Class booking created.',
+          ...(classHoldRequired ? { card_hold_requested: true as const } : {}),
+          message: payment_url_class
+            ? classHoldRequired
+              ? 'Class booking created. Card request link sent.'
+              : 'Class booking created. Deposit link sent.'
+            : 'Class booking created.',
         },
         { status: 201 },
       );
@@ -706,6 +787,24 @@ export async function POST(request: NextRequest) {
         depositAmountPenceRes = depConfiguredRes;
       }
 
+      // Card hold (spec 7.6): flat no-show fee; walk-ins included (D6). Flag-off and
+      // zero-fee configs resolve as none and the requirement snapshot degrades to
+      // 'none', mirroring the public create route.
+      let resourceCardHoldFeePence: number | null = null;
+      let resourcePaymentRequirementSnapshot = payReqRes;
+      if (payReqRes === 'card_hold') {
+        if (cardHoldEnabled && depConfiguredRes > 0) {
+          resourceCardHoldFeePence = depConfiguredRes;
+        } else {
+          resourcePaymentRequirementSnapshot = 'none';
+          console.warn(
+            '[venue/bookings] card_hold resource degraded to no protection (flag off or fee <= 0)',
+            { venue_id: venueId, resource_id: parsed.data.resource_id },
+          );
+        }
+      }
+      const resourceHoldRequired = resourceCardHoldFeePence != null && (require_card_hold ?? true);
+
       const resourceLabels = await getResourceBookingEmailLabels(admin, parsed.data.resource_id);
       const resourcePriceDisplay =
         requiresDepositRes && depositAmountPenceRes != null && depositAmountPenceRes > 0
@@ -749,6 +848,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      if (resourceHoldRequired && !venue.stripe_connected_account_id) {
+        return NextResponse.json(
+          { error: 'Venue has not set up payments; a card hold is required for this booking type.' },
+          { status: 400 },
+        );
+      }
 
       const bookingEndForDb = booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time;
 
@@ -761,16 +866,21 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'resource_booking' as const,
-        status: requiresDepositRes ? ('Pending' as const) : ('Booked' as const),
+        status:
+          requiresDepositRes || resourceHoldRequired ? ('Pending' as const) : ('Booked' as const),
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
         guest_phone: phoneE164,
+        // Card holds keep deposit_amount_pence NULL (D4); the fee lives on the hold row.
         deposit_amount_pence: requiresDepositRes ? depositAmountPenceRes : null,
-        deposit_status: requiresDepositRes ? ('Pending' as const) : ('Not Required' as const),
-        resource_payment_requirement: payReqRes,
+        deposit_status:
+          requiresDepositRes || resourceHoldRequired
+            ? ('Pending' as const)
+            : ('Not Required' as const),
+        resource_payment_requirement: resourcePaymentRequirementSnapshot,
         cancellation_deadline: cancellation_deadline_res,
         cancellation_policy_snapshot: cancellationPolicySnapshotRes,
         estimated_end_time: estimatedEndTimeRes,
@@ -824,6 +934,7 @@ export async function POST(request: NextRequest) {
             requiresDepositRes && depositAmountPenceRes != null && depositAmountPenceRes > 0,
           ),
           depositAmountPence: depositAmountPenceRes ?? 0,
+          cardHoldFeePence: resourceHoldRequired ? resourceCardHoldFeePence : null,
           emailExtras: resourceEmailExtras,
           logContext: 'staff resource booking',
         });
@@ -840,7 +951,12 @@ export async function POST(request: NextRequest) {
         {
           booking_id: resBooking.id,
           payment_url: payment_url_res ?? undefined,
-          message: payment_url_res ? 'Resource booking created. Deposit link sent.' : 'Resource booking created.',
+          ...(resourceHoldRequired ? { card_hold_requested: true as const } : {}),
+          message: payment_url_res
+            ? resourceHoldRequired
+              ? 'Resource booking created. Card request link sent.'
+              : 'Resource booking created. Deposit link sent.'
+            : 'Resource booking created.',
         },
         { status: 201 },
       );
@@ -1097,9 +1213,30 @@ export async function POST(request: NextRequest) {
         (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffWantsDeposit));
       const depositAmountPence = requiresDeposit ? online!.amountPence : null;
 
+      // Card hold (spec 7.6): fixed service fee (variant-adjusted, add-ons excluded);
+      // walk-ins included (D6). Flag off resolves as none.
+      let apptCardHoldFeePence: number | null = null;
+      if (online != null && online.chargeLabel === 'card_hold' && online.amountPence > 0) {
+        if (cardHoldEnabled) {
+          apptCardHoldFeePence = online.amountPence;
+        } else {
+          console.warn(
+            '[venue/bookings] card_hold service booked while card_hold_deposits flag is off; ignoring',
+            { venue_id: venueId, appointment_service_id },
+          );
+        }
+      }
+      const apptHoldRequired = apptCardHoldFeePence != null && (require_card_hold ?? true);
+
       if (requiresDeposit && !venue.stripe_connected_account_id) {
         return NextResponse.json(
           { error: 'Venue has not set up payments; deposits are required for this booking type.' },
+          { status: 400 },
+        );
+      }
+      if (apptHoldRequired && !venue.stripe_connected_account_id) {
+        return NextResponse.json(
+          { error: 'Venue has not set up payments; a card hold is required for this booking type.' },
           { status: 400 },
         );
       }
@@ -1113,15 +1250,17 @@ export async function POST(request: NextRequest) {
         party_size: 1,
         /** Must not rely on DB default `table_reservation` — that requires area_id for multi-area venues. */
         booking_model: appointmentBookingModel,
-        status: requiresDeposit ? 'Pending' : 'Booked',
+        status: requiresDeposit || apptHoldRequired ? 'Pending' : 'Booked',
         source: bookingSource,
         created_by_staff_id: staff.id,
         guest_email: guest.email || null,
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
         guest_phone: phoneE164,
+        // Card holds keep deposit_amount_pence NULL (D4); the fee lives on the hold row.
         deposit_amount_pence: depositAmountPence,
-        deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
+        deposit_status:
+          requiresDeposit || apptHoldRequired ? ('Pending' as const) : ('Not Required' as const),
         cancellation_deadline: cancellationDeadlineAppt,
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
@@ -1252,7 +1391,43 @@ export async function POST(request: NextRequest) {
       }
 
       let payment_url: string | undefined;
-      if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
+      if (apptHoldRequired && apptCardHoldFeePence != null) {
+        // Card hold (spec 7.6): shared staff card-hold implementation (customer +
+        // SetupIntent + hold row + card-request link). Never sends deposit comms.
+        try {
+          const comms = await applyStaffBookingPaymentAndComms({
+            admin,
+            request,
+            venueId,
+            venueName: venue.name,
+            venueAddress: venue.address ?? undefined,
+            venueProfileEmail: venue.email ?? null,
+            venueReplyToEmail: venue.reply_to_email ?? null,
+            stripeConnectedAccountId: venue.stripe_connected_account_id,
+            bookingId: apptBooking.id,
+            guestName: staffGuestDisplayName,
+            guestEmail: guest.email ?? null,
+            guestPhone: guest.phone ?? null,
+            booking_date,
+            booking_time,
+            party_size: 1,
+            special_requests: special_requests ?? null,
+            dietary_notes: dietary_notes ?? null,
+            requiresDeposit: false,
+            depositAmountPence: 0,
+            cardHoldFeePence: apptCardHoldFeePence,
+            emailExtras: apptEmailExtras,
+            logContext: 'staff appointment booking',
+          });
+          payment_url = comms.payment_url;
+        } catch (e) {
+          if (e instanceof Error && e.message === 'payment_failed') {
+            await admin.from('bookings').delete().eq('id', apptBooking.id);
+            return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+          }
+          throw e;
+        }
+      } else if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
         try {
           const paymentIntent = await stripe.paymentIntents.create(
             {
@@ -1378,7 +1553,12 @@ export async function POST(request: NextRequest) {
         {
           booking_id: apptBooking.id,
           payment_url: payment_url ?? undefined,
-          message: payment_url ? 'Appointment created. Deposit link sent.' : 'Appointment created.',
+          ...(apptHoldRequired ? { card_hold_requested: true as const } : {}),
+          message: payment_url
+            ? apptHoldRequired
+              ? 'Appointment created. Card request link sent.'
+              : 'Appointment created. Deposit link sent.'
+            : 'Appointment created.',
           // audit M2: surface unmet warn_staff/warn_client requirements so the staff UI can flag them.
           ...(apptCompliance.warnings.length > 0 ? { compliance_warnings: apptCompliance.warnings } : {}),
         },
@@ -1443,11 +1623,15 @@ export async function POST(request: NextRequest) {
 
     const { data: tableRestriction } = await admin
       .from('booking_restrictions')
-      .select('deposit_amount_per_person_gbp')
+      .select('deposit_amount_per_person_gbp, deposit_type')
       .eq('service_id', slot.service_id)
       .maybeSingle();
 
-    const legacyGbp = (venue.deposit_config as { amount_per_person_gbp?: number } | null)?.amount_per_person_gbp;
+    const legacyDepositConfig = venue.deposit_config as {
+      amount_per_person_gbp?: number;
+      type?: string;
+    } | null;
+    const legacyGbp = legacyDepositConfig?.amount_per_person_gbp;
     const amountPerPersonGbp =
       typeof tableRestriction?.deposit_amount_per_person_gbp === 'number'
         ? tableRestriction.deposit_amount_per_person_gbp
@@ -1455,7 +1639,29 @@ export async function POST(request: NextRequest) {
           ? legacyGbp
           : null;
 
-    const requiresDeposit = !staffWalkIn && Boolean(require_deposit);
+    // Protection kind (D5): restriction.deposit_type ?? legacy deposit_config.type ?? 'charge'.
+    const restrictionDepositType =
+      tableRestriction?.deposit_type === 'card_hold' || tableRestriction?.deposit_type === 'charge'
+        ? tableRestriction.deposit_type
+        : null;
+    const legacyDepositType =
+      legacyDepositConfig?.type === 'card_hold' || legacyDepositConfig?.type === 'charge'
+        ? legacyDepositConfig.type
+        : null;
+    const tableDepositType = restrictionDepositType ?? legacyDepositType ?? 'charge';
+    const tableEntityIsCardHold = tableDepositType === 'card_hold' && cardHoldEnabled;
+    if (tableDepositType === 'card_hold' && !cardHoldEnabled) {
+      console.warn(
+        '[venue/bookings] card_hold table service booked while card_hold_deposits flag is off; ignoring',
+        { venue_id: venueId, service_id: slot.service_id },
+      );
+    }
+
+    // Card-hold services never charge a deposit (D6: the two toggles are never shown
+    // together); staff discretion is `require_card_hold`, default on, walk-ins included.
+    // The party-size threshold is NOT applied in the staff path, mirroring deposits.
+    const requiresDeposit = !staffWalkIn && Boolean(require_deposit) && !tableEntityIsCardHold;
+    const tableHoldRequired = tableEntityIsCardHold && (require_card_hold ?? true);
 
     if (requiresDeposit && (amountPerPersonGbp == null || amountPerPersonGbp <= 0)) {
       return NextResponse.json(
@@ -1466,9 +1672,22 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (tableHoldRequired && (amountPerPersonGbp == null || amountPerPersonGbp <= 0)) {
+      return NextResponse.json(
+        {
+          error:
+            'No per-person no-show fee is configured for this dining service. Set it under Availability → Booking rules for that service.',
+        },
+        { status: 400 },
+      );
+    }
 
     const depositAmountPence =
       requiresDeposit && amountPerPersonGbp != null
+        ? Math.round(amountPerPersonGbp * party_size * 100)
+        : null;
+    const tableCardHoldFeePence =
+      tableHoldRequired && amountPerPersonGbp != null
         ? Math.round(amountPerPersonGbp * party_size * 100)
         : null;
 
@@ -1478,6 +1697,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (tableHoldRequired && !venue.stripe_connected_account_id) {
+      return NextResponse.json(
+        { error: 'Venue has not set up payments; a card hold is required for this booking type.' },
+        { status: 400 },
+      );
+    }
 
     const bookingInsert = {
       venue_id: venueId,
@@ -1485,15 +1710,17 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time: timeForDb,
       party_size,
-      status: requiresDeposit ? 'Pending' : 'Booked',
+      status: requiresDeposit || tableHoldRequired ? 'Pending' : 'Booked',
       source: bookingSource,
       created_by_staff_id: staff.id,
       guest_email: guest.email || null,
       guest_first_name: guestFirst,
       guest_last_name: guestLast,
       guest_phone: phoneE164,
+      // Card holds keep deposit_amount_pence NULL (D4); the fee lives on the hold row.
       deposit_amount_pence: depositAmountPence,
-      deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
+      deposit_status:
+        requiresDeposit || tableHoldRequired ? ('Pending' as const) : ('Not Required' as const),
       cancellation_deadline: cancellationDeadline(booking_date, booking_time),
       dietary_notes: dietary_notes?.trim() || null,
       occasion: occasion?.trim() || null,
@@ -1541,7 +1768,43 @@ export async function POST(request: NextRequest) {
 
     let payment_url: string | undefined;
 
-    if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
+    if (tableHoldRequired && tableCardHoldFeePence != null) {
+      // Card hold (spec 7.6): shared staff card-hold implementation (customer +
+      // SetupIntent + hold row + card-request link). Never sends deposit comms.
+      try {
+        const comms = await applyStaffBookingPaymentAndComms({
+          admin,
+          request,
+          venueId,
+          venueName: venue.name,
+          venueAddress: venue.address ?? undefined,
+          venueProfileEmail: venue.email ?? null,
+          venueReplyToEmail: venue.reply_to_email ?? null,
+          stripeConnectedAccountId: venue.stripe_connected_account_id,
+          bookingId: booking.id,
+          guestName: staffGuestDisplayName,
+          guestEmail: guest.email ?? null,
+          guestPhone: guest.phone ?? null,
+          booking_date,
+          booking_time,
+          party_size,
+          special_requests: special_requests ?? null,
+          dietary_notes: dietary_notes ?? null,
+          requiresDeposit: false,
+          depositAmountPence: 0,
+          cardHoldFeePence: tableCardHoldFeePence,
+          emailExtras: {},
+          logContext: 'staff table booking',
+        });
+        payment_url = comms.payment_url;
+      } catch (e) {
+        if (e instanceof Error && e.message === 'payment_failed') {
+          await admin.from('bookings').delete().eq('id', booking.id);
+          return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+        }
+        throw e;
+      }
+    } else if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
       try {
         const paymentIntent = await stripe.paymentIntents.create(
           {
@@ -1672,7 +1935,12 @@ export async function POST(request: NextRequest) {
       {
         booking_id: booking.id,
         payment_url: payment_url ?? undefined,
-        message: payment_url ? 'Booking created. Deposit link sent to guest (stub: check logs).' : 'Booking created.',
+        ...(tableHoldRequired ? { card_hold_requested: true as const } : {}),
+        message: payment_url
+          ? tableHoldRequired
+            ? 'Booking created. Card request link sent.'
+            : 'Booking created. Deposit link sent to guest (stub: check logs).'
+          : 'Booking created.',
         ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
       },
       { status: 201 }

@@ -16,6 +16,7 @@ import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import {
   bookingConfirmationSmsPriceSuffix,
   confirmationStructuredPriceText,
@@ -248,6 +249,22 @@ export function renderCommunicationSms(
           ? `${leadPart}${vn}: Reminder: deposit still needed for ${clipSmsText(label, 30)} on ${smsDate} at ${time}.`
           : `${leadPart}${vn}: Reminder: deposit still needed for ${partySize} guests on ${smsDate} at ${time}.`;
         return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
+      }
+      case 'card_hold_request':
+      case 'card_hold_payment_reminder': {
+        // Card-hold deposits (§10.3). Single shape for both lanes; the reassurance
+        // clause ("No payment is taken now.") is dropped first when over 160 chars.
+        const url = opts.paymentLink?.trim() ?? '';
+        const prefix =
+          opts.messageKey === 'card_hold_payment_reminder' ? 'Reminder: ' : '';
+        const core = `${leadPart}${prefix}${vn}: card details needed to secure your booking for ${smsDate} at ${time}.`;
+        const withReassurance = joinSmsPrefixAndUrl(
+          `${core} No payment is taken now.`,
+          url || null,
+          'Add: ',
+        );
+        if (withReassurance.length <= SMS_CHAR_BUDGET) return withReassurance;
+        return joinSmsPrefixAndUrl(core, url || null, 'Add: ');
       }
       case 'pre_visit_reminder': {
         const core = isAppointmentLane(opts.lane)
@@ -508,6 +525,37 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
       };
+    case 'card_hold_request':
+    case 'card_hold_payment_reminder': {
+      // Card-hold deposits (§10.3): no payment is taken and there is no refund
+      // deadline copy (holds have none; the consent rule is stated in the body).
+      const isReminder = opts.messageKey === 'card_hold_payment_reminder';
+      const fee = formatCardHoldFeePence(opts.booking.card_hold_fee_pence ?? 0);
+      const bodyCore =
+        `No payment is taken now. Add your card details to secure your booking. ` +
+        `${opts.venue.name} may charge a no-show fee of up to ${fee} if you do not attend.`;
+      return {
+        subject: isReminder
+          ? `Reminder: add your card details to confirm your booking at ${opts.venue.name}`
+          : `Add your card details to confirm your booking at ${opts.venue.name}`,
+        heading: 'Card details needed',
+        mainContent: [
+          htmlParagraph(`Hi ${guestName},`),
+          htmlParagraph(bodyCore),
+        ].join(''),
+        textLines: [
+          `Hi ${guestName},`,
+          '',
+          bodyCore,
+          appointment ? `Service: ${withStaffLabel}` : null,
+          `Date: ${date}`,
+          `Time: ${time}`,
+          appointment ? null : `Guests: ${partySize}`,
+        ],
+        ctaLabel: 'Add card details',
+        ctaUrl: opts.paymentLink ?? null,
+      };
+    }
     case 'pre_visit_reminder': {
       const acctPre = accountBookingsLinkParts(opts.booking);
       return {

@@ -6,6 +6,8 @@ export type MessageType =
   | 'booking_confirmation'
   | 'deposit_payment_request'
   | 'deposit_payment_reminder'
+  | 'card_hold_request'
+  | 'card_hold_payment_reminder'
   | 'pre_visit_reminder'
   | 'confirm_or_cancel_prompt'
   | 'dietary_digest'

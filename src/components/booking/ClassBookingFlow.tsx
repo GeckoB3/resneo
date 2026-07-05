@@ -28,6 +28,11 @@ import {
   type CardHoldPaymentMode,
 } from './card-hold-copy';
 import { StaffBookingConfirmationFooter } from '@/components/booking/StaffBookingConfirmationFooter';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffEntityCardHold,
+  STAFF_CARD_HOLD_LINK_SENT_LINE,
+} from '@/components/booking/staff-card-hold';
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
@@ -213,6 +218,10 @@ export function ClassBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
+  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
+  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
+  /** Card-hold classes only (design doc 7.6): default ON, staff may waive per booking. */
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
   const [step, setStep] = useState<Step>('pick-class');
 
@@ -265,6 +274,8 @@ export function ClassBookingFlow({
     /** Card capture mode from the create / checkout response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
+    card_hold_requested?: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -384,6 +395,20 @@ export function ClassBookingFlow({
     return paymentSummaryLines(selectedClass, spots, currency, isStaffWalkIn);
   }, [selectedClass, spots, currency, isStaffWalkIn]);
 
+  /** Card-hold classes in the staff flow (design doc 7.6; walk-ins included, D6). */
+  const staffCardHold = useMemo(
+    () =>
+      isStaff && selectedClass
+        ? resolveStaffEntityCardHold({
+            paymentRequirement: selectedClass.payment_requirement,
+            feePerUnitPence: selectedClass.deposit_amount_pence,
+            cardHoldFlagEnabled: cardHoldDepositsEnabled,
+            units: spots,
+          })
+        : null,
+    [isStaff, selectedClass, spots, cardHoldDepositsEnabled],
+  );
+
   const classRefundNoticeHours = useMemo(() => {
     const h = selectedClass?.cancellation_notice_hours;
     if (typeof h === 'number' && Number.isFinite(h)) return h;
@@ -423,6 +448,9 @@ export function ClassBookingFlow({
               class_instance_id: selectedClass.instance_id,
               dietary_notes: details.dietary_notes,
               source: staffBookingSource,
+              // Card-hold classes (design doc 7.6): send the toggle state explicitly
+              // (server defaults to true when omitted; ignored otherwise).
+              ...(staffCardHold ? { require_card_hold: staffRequireCardHold } : {}),
               ...(details.returning_guest ? { returning_guest: true } : {}),
               ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
             }),
@@ -433,6 +461,7 @@ export function ClassBookingFlow({
             booking_id: data.booking_id,
             requires_deposit: Boolean(data.payment_url),
             payment_url: data.payment_url,
+            card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
           });
           setStep('confirmation');
           return;
@@ -497,7 +526,7 @@ export function ClassBookingFlow({
         setSubmitting(false);
       }
     },
-    [venue.id, selectedClass, spots, isStaff, isPublicGuest, accountGate, staffBookingSource, payWithClassCredits, linkedOwnerVenueId],
+    [venue.id, selectedClass, spots, isStaff, isPublicGuest, accountGate, staffBookingSource, payWithClassCredits, linkedOwnerVenueId, staffCardHold, staffRequireCardHold],
   );
 
   const depositPenceForDetails = isStaffWalkIn || payWithClassCredits ? 0 : (summary?.chargePence ?? 0);
@@ -1024,6 +1053,15 @@ export function ClassBookingFlow({
           {submitting ? (
             <BookingSubmittingPanel variant="class" />
           ) : (
+            <>
+              {staffCardHold ? (
+                <StaffCardHoldToggle
+                  checked={staffRequireCardHold}
+                  onChange={setStaffRequireCardHold}
+                  feePence={staffCardHold.feePence}
+                  className="mb-4"
+                />
+              ) : null}
             <DetailsStep
               slot={{
                 key: selectedClass.instance_id,
@@ -1064,6 +1102,7 @@ export function ClassBookingFlow({
               initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
               emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
             />
+            </>
           )}
         </div>
       )}
@@ -1120,7 +1159,11 @@ export function ClassBookingFlow({
             </p>
           ) : null}
           {isStaff && createResult?.payment_url ? (
-            <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
+            <p className="mt-4 text-xs text-green-800">
+              {createResult.card_hold_requested
+                ? STAFF_CARD_HOLD_LINK_SENT_LINE
+                : 'Deposit link sent to the guest.'}
+            </p>
           ) : (
             <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
           )}

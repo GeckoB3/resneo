@@ -20,6 +20,11 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffEntityCardHold,
+  STAFF_CARD_HOLD_LINK_SENT_LINE,
+} from '@/components/booking/staff-card-hold';
 import {
   cardHoldCatalogNoticeLine,
   cardHoldConfirmationLine,
@@ -583,7 +588,16 @@ export function AppointmentBookingFlow({
     [venue.feature_flags?.any_available_practitioner_config],
   );
   const appointmentWaitlistEnabled = Boolean(venue.feature_flags?.resolved?.waitlist_v2);
+  /**
+   * Owner venue's card-hold flag (design doc 7.6 / D6). Present on staff venue
+   * payloads (GET /api/venue, linked venue-profile, dashboard page bootstrap);
+   * absent (falsy) on the public /api/booking/venue payload, which is fine
+   * because the toggle is staff-audience only.
+   */
+  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
+  /** Card-hold services only (design doc 7.6): default ON, staff may waive per booking. */
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
   // Public compliance pre-check (Phase 2 / G4): the guest's email, seeded from a
   // signed-in account and updated as they type, drives the pre-check resolve.
   const [precheckEmail, setPrecheckEmail] = useState<string>(
@@ -674,6 +688,8 @@ export function AppointmentBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
+    card_hold_requested?: boolean;
     /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
     compliance_warnings?: Array<{ compliance_type_name: string }>;
   } | null>(null);
@@ -2118,6 +2134,13 @@ export function AppointmentBookingFlow({
             online != null &&
             online.amountPence > 0 &&
             (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffRequireDeposit));
+          // Card-hold services (design doc 7.6): send the toggle state explicitly
+          // (server defaults to true when omitted; ignored for non-card-hold services).
+          const staffCardHold = resolveStaffEntityCardHold({
+            paymentRequirement: online?.chargeLabel,
+            feePerUnitPence: online?.amountPence,
+            cardHoldFlagEnabled: cardHoldDepositsEnabled,
+          });
           const res = await fetch(venueBookingsCreateUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2133,6 +2156,7 @@ export function AppointmentBookingFlow({
               occasion: details.occasion,
               ...clientAddressPayloadFields(details),
               require_deposit,
+              ...(staffCardHold ? { require_card_hold: staffRequireCardHold } : {}),
               practitioner_id: practitionerIdForCreate,
               appointment_service_id: selectedServiceId,
               service_variant_id: selectedVariantId ?? undefined,
@@ -2158,6 +2182,7 @@ export function AppointmentBookingFlow({
             deposit_amount_pence: 0,
             cancellation_notice_hours: refundNoticeHours,
             payment_url: data.payment_url,
+            card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
             compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
           });
           setStep('confirmation');
@@ -2233,6 +2258,8 @@ export function AppointmentBookingFlow({
       validateMultiServiceChain,
       isStaff,
       staffRequireDeposit,
+      staffRequireCardHold,
+      cardHoldDepositsEnabled,
       staffBookingSource,
       isStaffWalkInAppointment,
       selectedServiceForPractitioner,
@@ -4051,9 +4078,27 @@ export function AppointmentBookingFlow({
               ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
               : null;
             if (!o || o.amountPence <= 0) return null;
-            // Card-hold services never show the deposit toggle (the staff card-hold toggle
-            // is a separate control; the two are never shown together, design doc 7.6).
-            if (o.chargeLabel === 'card_hold') return null;
+            // Card-hold services show the card-hold toggle INSTEAD of the deposit toggle
+            // (the two are never shown together, design doc 7.6). Applies to walk-ins
+            // too: card holds, unlike deposits, are allowed for walk-in bookings (D6).
+            // Hidden when editing, like the deposit toggle (7.6).
+            if (o.chargeLabel === 'card_hold') {
+              if (isEdit) return null;
+              const hold = resolveStaffEntityCardHold({
+                paymentRequirement: o.chargeLabel,
+                feePerUnitPence: o.amountPence,
+                cardHoldFlagEnabled: cardHoldDepositsEnabled,
+              });
+              if (!hold) return null;
+              return (
+                <StaffCardHoldToggle
+                  checked={staffRequireCardHold}
+                  onChange={setStaffRequireCardHold}
+                  feePence={hold.feePence}
+                  className="mb-4"
+                />
+              );
+            }
             if (o.chargeLabel === 'full_payment') {
               return (
                 <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -4229,7 +4274,11 @@ export function AppointmentBookingFlow({
             <p className="mt-3 text-xs text-brand-700">Your changes have been saved.</p>
           ) : null}
           {!isEdit && isStaff && createResult?.payment_url ? (
-            <p className="mt-3 text-xs text-brand-800">A deposit payment link was sent to the guest.</p>
+            <p className="mt-3 text-xs text-brand-800">
+              {createResult.card_hold_requested
+                ? STAFF_CARD_HOLD_LINK_SENT_LINE
+                : 'A deposit payment link was sent to the guest.'}
+            </p>
           ) : null}
           {!isEdit && cardHoldConfirmationLine(createResult?.payment_mode) ? (
             <p className="mt-3 text-sm font-medium text-brand-800">

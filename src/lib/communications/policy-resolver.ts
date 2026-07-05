@@ -20,6 +20,13 @@ export type CommunicationLogMessageType =
   | 'confirm_or_cancel_prompt_sms'
   | 'deposit_payment_reminder_email'
   | 'deposit_payment_reminder_sms'
+  // Card-hold deposits (§10.3 / §10.2.2). `card_hold_charged_email` is the
+  // no-show fee receipt, sent by the charge path rather than this resolver.
+  | 'card_hold_request_email'
+  | 'card_hold_request_sms'
+  | 'card_hold_payment_reminder_email'
+  | 'card_hold_payment_reminder_sms'
+  | 'card_hold_charged_email'
   | 'pre_visit_reminder_email'
   | 'pre_visit_reminder_sms'
   | 'booking_modification_email'
@@ -73,6 +80,14 @@ const LOG_MESSAGE_TYPE_MAP: Record<
   deposit_payment_reminder: {
     email: 'deposit_payment_reminder_email',
     sms: 'deposit_payment_reminder_sms',
+  },
+  card_hold_request: {
+    email: 'card_hold_request_email',
+    sms: 'card_hold_request_sms',
+  },
+  card_hold_payment_reminder: {
+    email: 'card_hold_payment_reminder_email',
+    sms: 'card_hold_payment_reminder_sms',
   },
   pre_visit_reminder: {
     email: 'pre_visit_reminder_email',

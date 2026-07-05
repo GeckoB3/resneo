@@ -32,6 +32,14 @@ export function formatCommunicationLogLabel(messageType: string): string {
     class_membership_renewed: 'Membership renewed',
     class_membership_cancelling: 'Membership cancellation scheduled',
     class_membership_ended: 'Membership ended',
+    // Card-hold deposits (§10.3 / §10.2.2). Keyed by the full log type (with
+    // channel suffix) so each channel keeps its own label; the normalized
+    // lookup above misses these on purpose.
+    card_hold_request_email: 'Card request email',
+    card_hold_request_sms: 'Card request SMS',
+    card_hold_payment_reminder_email: 'Card reminder email',
+    card_hold_payment_reminder_sms: 'Card reminder SMS',
+    card_hold_charged_email: 'No-show fee receipt',
   };
   if (titles[normalized]) return titles[normalized];
   if (titles[messageType]) return titles[messageType];

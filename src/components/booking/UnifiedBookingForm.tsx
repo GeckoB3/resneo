@@ -16,6 +16,12 @@ import {
   STAFF_BOOKING_WEEK_OFFSETS,
   weekShortcutAnchorDate,
 } from '@/components/booking/ResourceCalendarMonth';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffTableSlotCardHold,
+  STAFF_CARD_HOLD_CREATED_TOAST,
+  STAFF_CARD_HOLD_LINK_SENT_LINE,
+} from '@/components/booking/staff-card-hold';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 /** YYYY-MM-DD in the browser's local calendar (matches guest BookingFlow / DateStep). */
@@ -58,6 +64,14 @@ interface Slot {
   end_time?: string;
   available_covers: number;
   area_id?: string;
+  /**
+   * Staff card-hold exposure (design doc 6.3): the engine populates these
+   * unconditionally (threshold NOT applied, D5 staff semantics) and has already
+   * resolved the owner venue's `card_hold_deposits` flag and zero-fee safety
+   * into `deposit_type`, so `card_hold` here means the staff toggle applies.
+   */
+  deposit_type?: 'charge' | 'card_hold';
+  configured_deposit_per_person_gbp?: number | null;
 }
 
 interface Suggestion {
@@ -216,10 +230,16 @@ export function UnifiedBookingForm({
   }, [date, selectedTime, partySize, diningAreas.length, tableAssignmentAreaId]);
 
   const [requireDeposit, setRequireDeposit] = useState(false);
+  /** Card-hold slots only (design doc 7.6): default ON, staff may waive per booking. */
+  const [requireCardHold, setRequireCardHold] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [result, setResult] = useState<{ booking_id: string; payment_url?: string } | null>(null);
+  const [result, setResult] = useState<{
+    booking_id: string;
+    payment_url?: string;
+    card_hold?: boolean;
+  } | null>(null);
 
   const [openPanel, setOpenPanel] = useState<'party' | 'date' | 'time' | null>(null);
   const [gridCenter, setGridCenter] = useState('20:00');
@@ -245,6 +265,26 @@ export function UnifiedBookingForm({
   const showStaffAreaTabs = useMemo(
     () => diningAreas.length > 1 && publicBookingAreaMode === 'manual',
     [diningAreas.length, publicBookingAreaMode],
+  );
+
+  /** Slot the staff member has picked (by key first; duplicate clock times differ by key). */
+  const selectedSlot = useMemo(() => {
+    if (!selectedTime) return null;
+    return (
+      (selectedSlotKey ? slots.find((s) => s.key === selectedSlotKey) : undefined) ??
+      slots.find((s) => s.start_time.slice(0, 5) === selectedTime.slice(0, 5)) ??
+      null
+    );
+  }, [slots, selectedSlotKey, selectedTime]);
+
+  /**
+   * Card hold applies to the selected slot (design doc 7.6). The engine resolved
+   * the owner venue's `card_hold_deposits` flag server-side, so no client-side
+   * flag check is needed here; threshold is NOT applied (D5 staff semantics).
+   */
+  const staffCardHold = useMemo(
+    () => (isEdit ? null : resolveStaffTableSlotCardHold(selectedSlot, partySize)),
+    [isEdit, selectedSlot, partySize],
   );
 
   useLayoutEffect(() => {
@@ -555,6 +595,11 @@ export function UnifiedBookingForm({
               end_time: (s.end_time as string) ?? undefined,
               available_covers: (s.available_covers as number) ?? 0,
               area_id: typeof s.area_id === 'string' ? s.area_id : undefined,
+              deposit_type: s.deposit_type === 'card_hold' ? ('card_hold' as const) : ('charge' as const),
+              configured_deposit_per_person_gbp:
+                typeof s.configured_deposit_per_person_gbp === 'number'
+                  ? s.configured_deposit_per_person_gbp
+                  : null,
             }))
             .filter((s: Slot) => s.start_time);
           if (!controller.signal.aborted) {
@@ -845,6 +890,7 @@ export function UnifiedBookingForm({
     setManualTableIds([]);
     setOccupiedTableIds([]);
     setRequireDeposit(false);
+    setRequireCardHold(true);
     setError(null);
     setResult(null);
     setCoverDurationMinutes(90);
@@ -1035,6 +1081,9 @@ export function UnifiedBookingForm({
           dietary_notes: dietaryNotes.trim() || undefined,
           special_requests: notes.trim() || undefined,
           require_deposit: requireDeposit,
+          // Card-hold slots (design doc 7.6): always send the toggle state explicitly
+          // (the server defaults to true when omitted; ignored for charge slots).
+          ...(staffCardHold ? { require_card_hold: requireCardHold } : {}),
           ...(resolvedAreaId ? { area_id: resolvedAreaId } : {}),
           ...(coverDurationDirty
             ? {
@@ -1079,15 +1128,21 @@ export function UnifiedBookingForm({
         }
       }
 
+      const cardHoldRequested = Boolean(staffCardHold && requireCardHold);
       const bookingResult = {
         booking_id: payload.booking_id as string,
         payment_url: payload.payment_url as string | undefined,
+        card_hold: cardHoldRequested,
       };
       staffFlowStartedAtRef.current = Date.now();
 
       if (asModal) {
         addToast(
-          requireDeposit ? 'Booking created - deposit link sent' : 'Booking confirmed',
+          cardHoldRequested
+            ? STAFF_CARD_HOLD_CREATED_TOAST
+            : requireDeposit
+              ? 'Booking created - deposit link sent'
+              : 'Booking confirmed',
           'success',
         );
         onCreated(bookingResult);
@@ -1104,6 +1159,7 @@ export function UnifiedBookingForm({
   // Success state (inline mode only - modals close on success)
   if (!asModal && result) {
     const hasDeposit = Boolean(result.payment_url);
+    const isCardHold = Boolean(result.card_hold && result.payment_url);
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-6">
         <div className={`rounded-lg border p-4 sm:rounded-xl sm:p-5 ${hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
@@ -1114,19 +1170,27 @@ export function UnifiedBookingForm({
               </svg>
             </div>
             <p className={`text-base font-semibold ${hasDeposit ? 'text-amber-800' : 'text-emerald-800'}`}>
-              {hasDeposit ? 'Booking Created - Deposit Requested' : 'Booking Confirmed'}
+              {isCardHold
+                ? 'Booking Created - Card Request Sent'
+                : hasDeposit
+                  ? 'Booking Created - Deposit Requested'
+                  : 'Booking Confirmed'}
             </p>
           </div>
           <p className={`text-sm ${hasDeposit ? 'text-amber-700' : 'text-emerald-700'}`}>
-            {hasDeposit
-              ? 'A deposit payment link has been sent to the guest.'
-              : 'A confirmation has been sent to the guest.'}
+            {isCardHold
+              ? STAFF_CARD_HOLD_LINK_SENT_LINE
+              : hasDeposit
+                ? 'A deposit payment link has been sent to the guest.'
+                : 'A confirmation has been sent to the guest.'}
           </p>
         </div>
 
         {result.payment_url && (
           <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
-            <p className="mb-1 text-xs font-medium text-slate-500">Payment link</p>
+            <p className="mb-1 text-xs font-medium text-slate-500">
+              {isCardHold ? 'Card request link' : 'Payment link'}
+            </p>
             <a
               href={result.payment_url}
               target="_blank"
@@ -1140,7 +1204,9 @@ export function UnifiedBookingForm({
 
         {hasDeposit && (
           <p className="mt-3 text-xs text-slate-400">
-            If deposit is not paid within 24 hours, the booking will be auto-cancelled.
+            {isCardHold
+              ? 'If card details are not added within 24 hours, the booking will be auto-cancelled.'
+              : 'If deposit is not paid within 24 hours, the booking will be auto-cancelled.'}
           </p>
         )}
 
@@ -1726,8 +1792,14 @@ export function UnifiedBookingForm({
         </p>
       )}
 
-      {/* Deposit toggle */}
-      {!isEdit && (
+      {/* Card-hold toggle (card-hold slots) or deposit toggle (charge slots); never both (design doc 7.6) */}
+      {!isEdit && staffCardHold ? (
+        <StaffCardHoldToggle
+          checked={requireCardHold}
+          onChange={setRequireCardHold}
+          feePence={staffCardHold.feePence}
+        />
+      ) : !isEdit ? (
       <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:rounded-xl sm:px-4 sm:py-3">
         <div className="min-w-0 pr-1">
           <p className="text-xs font-medium text-slate-700 sm:text-sm">Require deposit</p>
@@ -1750,7 +1822,7 @@ export function UnifiedBookingForm({
           />
         </button>
       </div>
-      )}
+      ) : null}
 
       {/* Error */}
       {error && (

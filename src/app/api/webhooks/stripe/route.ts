@@ -26,6 +26,7 @@ import { syncClassMembershipFromStripeSubscription } from '@/lib/class-commerce/
 import { recordSalesRevenueRefund } from '@/lib/sales/invoice-revenue';
 import { restoreClassCreditsForBooking } from '@/lib/class-commerce/restore-class-credits';
 import { restoreMembershipAllowanceForBooking } from '@/lib/class-commerce/restore-membership-allowance';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import {
   bookingWasCreditPaid,
   bookingWasMembershipPaid,
@@ -117,6 +118,15 @@ async function restoreAndReleaseClassBookings(
             nextStatus: 'Cancelled',
             actorId: null,
           });
+          // Spec §9.3: every cancel path releases holds. Entitlement-paid rows
+          // do not normally carry holds (D8), so this is defence in depth.
+          try {
+            await releaseCardHoldsForBookings(admin, [b.id], 'cancelled');
+          } catch (releaseErr) {
+            console.error('[Stripe webhook] hold release after cancel failed:', releaseErr, {
+              bookingId: b.id,
+            });
+          }
         }
       }
     } catch (err) {

@@ -33,12 +33,23 @@ async function handlePost(request: NextRequest) {
   try {
     const supabase = getSupabaseAdminClient();
 
+    // Server-side prefilter: an expired hold's booking_date is always at least
+    // CARD_HOLD_CHARGE_WINDOW_DAYS in the past (the end is on booking_date or,
+    // for overnight tables, the day after, and the window adds the full 14
+    // days on top). Filtering on the joined booking_date keeps the 200-row
+    // batch from being starved by older-but-not-yet-expired holds (for
+    // example, holds on far-future bookings created long ago). The JS check
+    // below stays the precise gate.
+    const prefilterCutoffYmd = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     const { data: rows, error: fetchErr } = await supabase
       .from('booking_card_holds')
       .select(
         'booking_id, booking:bookings!inner(id, booking_date, booking_time, booking_end_time, estimated_end_time)',
       )
       .is('released_at', null)
+      .lte('booking.booking_date', prefilterCutoffYmd)
       .order('created_at', { ascending: true })
       .limit(200);
 

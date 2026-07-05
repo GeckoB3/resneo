@@ -113,7 +113,7 @@ export async function materializeRecurringReservation(
       status: 'skipped',
       booking_ids: [],
       next_materialize_on: addDaysYmd(todayYmd(), 7),
-      message: 'Membership lapsed — recurring auto-booking paused',
+      message: 'Membership lapsed, recurring auto-booking paused',
     };
   }
 

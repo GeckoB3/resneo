@@ -504,7 +504,9 @@ async function handlePost(request: NextRequest) {
               booking_id: b.id,
               event_type: 'auto_cancelled',
               payload: {
-                reason: b.class_instance_id ? 'class_cart_abandoned' : 'card_hold_setup_abandoned',
+                // Hold units (hold_account set) are card-hold abandonment even
+                // when they are class-cart lines (spec §12.1).
+                reason: b.hold_account ? 'card_hold_setup_abandoned' : 'class_cart_abandoned',
                 stripe_payment_intent_id: piId,
                 stripe_status: pi.status,
               },

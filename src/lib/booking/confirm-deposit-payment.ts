@@ -290,11 +290,15 @@ export async function confirmBookingsForSucceededSetupIntent(
   const { setupIntentId, paymentMethodId, venueId, guestEmail } = params;
   const logContext = { setupIntentId, venueId };
 
+  // Released holds are excluded: a waived/cancelled hold must never be
+  // resurrected by a guest completing a stale payment page (review finding:
+  // it flipped a Waived booking to 'Card Held' on a dead hold).
   const { data: holdRows, error: holdErr } = await admin
     .from('booking_card_holds')
     .select(CARD_HOLD_CONFIRM_COLUMNS)
     .eq('stripe_setup_intent_id', setupIntentId)
-    .eq('venue_id', venueId);
+    .eq('venue_id', venueId)
+    .is('released_at', null);
 
   if (holdErr) {
     console.error('[confirmBookingsForSucceededSetupIntent] hold load failed:', holdErr, logContext);
@@ -322,6 +326,9 @@ export async function confirmBookingsForSucceededSetupIntent(
     .in('id', holds.map((h) => h.booking_id))
     .eq('venue_id', venueId)
     .eq('status', 'Pending')
+    // Mirror the PI path: only awaiting-capture rows flip. A staff-waived
+    // booking ('Waived') stays waived even if the card save completes.
+    .eq('deposit_status', 'Pending')
     .select('id');
 
   if (updateErr) {

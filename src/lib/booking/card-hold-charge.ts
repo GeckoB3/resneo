@@ -114,6 +114,7 @@ async function claimChargeAttempt(
       .eq('charge_attempt_count', snapshot.charge_attempt_count ?? 0)
       .is('charge_payment_intent_id', null)
       .is('released_at', null)
+      .is('charged_at', null) // defence in depth: never reopen after a capture
       .select('charge_attempt_count');
     if (error) {
       console.error('[card-hold-charge] claim update failed', error, { holdId });
@@ -176,12 +177,18 @@ export async function applyCardHoldChargedState(
   }
   const applied = (stamped ?? []).length > 0;
 
-  // Converge the booking either way: 'Charged' is the source-of-truth display state.
-  const { error: bookingErr } = await admin
+  // Flip the booking to 'Charged'. When THIS call applied the stamp, converge
+  // from any state; on a replay (applied=false) converge only from
+  // 'Card Held', so a crash between stamp and flip still heals on retry but a
+  // late payment_intent.succeeded replay can never resurrect a fee that has
+  // since been refunded (review finding).
+  const flip = admin
     .from('bookings')
     .update({ deposit_status: 'Charged', updated_at: nowIso })
-    .eq('id', input.bookingId)
-    .neq('deposit_status', 'Charged');
+    .eq('id', input.bookingId);
+  const { error: bookingErr } = applied
+    ? await flip.neq('deposit_status', 'Charged')
+    : await flip.eq('deposit_status', 'Card Held');
   if (bookingErr) {
     console.error('[card-hold-charge] booking Charged flip failed', bookingErr, {
       bookingId: input.bookingId,
@@ -348,6 +355,25 @@ export async function recordCardHoldChargeFailure(
     .is('charged_at', null);
   if (error) {
     console.error('[card-hold-charge] failure record failed', error, { holdId: hold.id });
+  }
+
+  // When the PERSISTED PI is the one that failed asynchronously, the claim
+  // would otherwise stay closed forever and every retry would 409 until the
+  // window expired (review finding). Clearing only when the persisted id
+  // matches this failed PI cannot collide with a newer attempt: a newer
+  // attempt cannot exist while the id is set.
+  if (paymentIntentId && hold.charge_payment_intent_id === paymentIntentId) {
+    const { error: reopenErr } = await admin
+      .from('booking_card_holds')
+      .update({ charge_payment_intent_id: null, updated_at: new Date().toISOString() })
+      .eq('id', hold.id)
+      .eq('charge_payment_intent_id', paymentIntentId)
+      .is('charged_at', null);
+    if (reopenErr) {
+      console.error('[card-hold-charge] failed-PI claim reopen failed', reopenErr, {
+        holdId: hold.id,
+      });
+    }
   }
 }
 
@@ -565,10 +591,21 @@ export async function chargeCardHoldNoShowFee(
       await stripe.paymentIntents.cancel(pi.id, { stripeAccount: hold.stripe_connected_account_id });
     } catch (cancelErr) {
       // Best effort per §8.3: if the PI already succeeded, the standard refund
-      // action is the operator remedy.
+      // action is the operator remedy. Surface it in-product (review finding:
+      // a succeeded loser PI is otherwise invisible outside the logs).
       console.error('[card-hold-charge] losing PI cancel failed (operator remedy: refund)', cancelErr, {
         pi: pi.id,
       });
+      const { error: alertErr } = await admin.from('reconciliation_alerts').insert({
+        booking_id: bookingId,
+        expected_status: 'single_charge',
+        actual_stripe_status: `duplicate_pi_uncancelled:${pi.id}`,
+      });
+      if (alertErr) {
+        console.error('[card-hold-charge] duplicate-PI alert insert failed', alertErr, {
+          pi: pi.id,
+        });
+      }
     }
     return {
       ok: false,
@@ -630,18 +667,35 @@ async function handleSynchronousCardError(
   const failureCode = err.code ?? 'card_declined';
   const nowIso = new Date().toISOString();
 
+  // A synchronous decline means paymentIntents.create THREW, so this request
+  // never persisted a PI id: the claim is already open and there is nothing
+  // of ours to clear. Clearing unconditionally could wipe a CONCURRENT
+  // winner's persisted PI in the window before it stamps charged_at,
+  // breaking the single-charge gate (review finding). Only clear when the
+  // persisted id is this attempt's own dead PI.
   const { error: recordErr } = await admin
     .from('booking_card_holds')
     .update({
       charge_failure_code: failureCode,
       charge_failure_at: nowIso,
-      charge_payment_intent_id: null, // the attempt's PI is dead; free the claim for a retry
       updated_at: nowIso,
     })
     .eq('id', hold.id)
     .is('charged_at', null);
   if (recordErr) {
     console.error('[card-hold-charge] failure record failed', recordErr, { holdId: hold.id });
+  }
+  const deadPiId = err.payment_intent?.id ?? err.raw?.payment_intent?.id ?? null;
+  if (deadPiId) {
+    const { error: clearErr } = await admin
+      .from('booking_card_holds')
+      .update({ charge_payment_intent_id: null, updated_at: nowIso })
+      .eq('id', hold.id)
+      .eq('charge_payment_intent_id', deadPiId)
+      .is('charged_at', null);
+    if (clearErr) {
+      console.error('[card-hold-charge] dead PI clear failed', clearErr, { holdId: hold.id });
+    }
   }
 
   const { error: evErr } = await admin.from('events').insert({

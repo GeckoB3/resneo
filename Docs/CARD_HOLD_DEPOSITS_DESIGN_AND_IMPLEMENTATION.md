@@ -951,3 +951,21 @@ Staging walkthrough: configure one card-hold entity per model incl. a table serv
 7. **`booking_payments` ledger rows** for card-hold charges once the Tap to Pay ledger ships.
 8. **Automated dispute evidence** assembly from the terms snapshot + events trail.
 9. **Retiring the dead `phone_requires_deposit` legacy config field** (2.1), independent cleanup.
+
+---
+
+## 20. As-built deviations (recorded at implementation review, 5 July 2026)
+
+The implementation was adversarially reviewed against this document after it shipped; every confirmed bug was fixed in code. The following are deliberate, reviewed deviations where the code differs from the letter of the spec. The code is correct; this section keeps the document truthful.
+
+1. **§10.3 sender signature.** `sendCardHoldRequestNotifications(booking, venue, venueId, paymentLink, feePence, opts?: { reminder?: boolean })`: the fee and reminder-variant parameters were necessary for rendering and the cron reuse.
+2. **§9.2 class roster affordance.** The roster's admin "Charge no-show fee" is a deep link to the full booking detail (`/dashboard/bookings?openBooking=...`), not an inline dialog: the attendees payload does not carry hold-row fields, and adding them was judged worse than the sheet's existing deep-link pattern. The real gate and dialog live on the booking detail surface.
+3. **§9.1 wording vs §9.2c.** The awaiting-card state shows the card-aware Resend link AND the Waive action (this section's "shows only the Resend link" contradicted §9.2c, which defines waive precisely for that state). Waive remains pre-save only.
+4. **§7.6 success toast.** The exact toast string is used by the table form and the resource slot form (toast-based surfaces). The appointment, class, event, and resource FLOWS are confirmation-screen surfaces with no toast system; they render the inline line "A card request link was sent to the guest." instead, mirroring their existing deposit line.
+5. **§7.3 confirm call.** All flows post `booking_id` to the confirm route (the pre-existing contract); the server resolves it to the PI or the open hold SI per §7.4. The literal "called with setup_intent_id" applies to the /pay/success redirect fallback, which also posts `setup_intent_id` when no booking id is present.
+6. **§6.2 legacy venue-wide selector.** No dashboard surface edits `venues.deposit_config` (the onboarding wizard is its only writer and stays charge-only), so there is no surface to add the selector to. The schema and PATCH route accept and gate `type: 'card_hold'` (with a £1 floor), ready for any future editor.
+7. **§6.2 editor option visibility, flag off.** The appointments editor hides the Card hold option entirely and shows the disabled-warning; the class/event/resource editors keep showing the configured state (with the same warning) so staff can see and change it. Both satisfy the safety intent; the divergence is cosmetic and recorded.
+8. **§12.4 skip message.** The materialization skip message omits the trailing full stop, matching the file's eight sibling messages.
+9. **§6.4 course enrollment.** No warning was added: course enrollment never reads class `payment_requirement` and cannot misbehave on `card_hold`; course-covered sessions are deliberately hold-free (Section 4).
+10. **§12.3 expiry sweep.** Charged holds are excluded from the expiry sweep (`charged_at IS NULL`): a charged hold's lifecycle ends via refund, and `release_reason: 'expired'` on a consumed hold would pollute reporting. Their booking-scoped Stripe customers persist until refund (or venue/booking deletion cleanup); Stripe retains charge evidence regardless.
+11. **§8.6.6 partial refunds.** A PARTIAL dashboard refund of a fee PI leaves the product state `Charged` (with a logged warning); only a full refund flips to `Refunded` and releases the hold.

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { featureFlagDisabledResponse } from '@/lib/feature-flags/http';
+import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 import { z } from 'zod';
 
 const restrictionFieldsSchema = z.object({
@@ -14,6 +16,8 @@ const restrictionFieldsSchema = z.object({
   large_party_message: z.string().max(500).nullable().optional(),
   deposit_required_from_party_size: z.number().int().min(1).nullable().optional(),
   deposit_amount_per_person_gbp: z.number().min(0).max(100).nullable().optional(),
+  /** 'charge' takes a deposit payment; 'card_hold' saves the card for a no-show fee (flag-gated). */
+  deposit_type: z.enum(['charge', 'card_hold']).optional(),
   online_requires_deposit: z.boolean().optional(),
   /** Table reservation: hours before start for deposit refund for this dining service. */
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
@@ -95,6 +99,14 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    if (parsed.data.deposit_type === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+    }
+
     const { data: svcRow } = await admin
       .from('venue_services')
       .select('id')
@@ -139,6 +151,14 @@ export async function PATCH(request: NextRequest) {
     const { id, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
+
+    if (fields.deposit_type === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+    }
+
     const { data: existingFull } = await admin.from('booking_restrictions').select('*').eq('id', id).maybeSingle();
     if (!existingFull) {
       return NextResponse.json({ error: 'Restriction not found' }, { status: 404 });

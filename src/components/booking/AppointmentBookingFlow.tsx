@@ -370,7 +370,8 @@ interface PersonSelection {
   pricePence: number | null;
   /** Includes add-on price when the online charge is a full payment. */
   depositPence: number;
-  onlineChargeLabel?: 'deposit' | 'full_payment';
+  /** `card_hold`: no money due at booking; `depositPence` is the no-show fee to authorise. */
+  onlineChargeLabel?: 'deposit' | 'full_payment' | 'card_hold';
   /** Add-ons chosen for this attendee. */
   addonIds?: string[];
   addonTotalPence?: number;
@@ -392,7 +393,8 @@ export interface MultiServiceSegment {
   /** Service+variant price only (add-on price is tracked separately in `addonTotalPence`). */
   pricePence: number | null;
   depositPence: number;
-  onlineChargeLabel?: 'deposit' | 'full_payment';
+  /** `card_hold`: no money due at booking; `depositPence` is the no-show fee to authorise. */
+  onlineChargeLabel?: 'deposit' | 'full_payment' | 'card_hold';
   /** Chosen add-on ids for this segment (sent to create-multi-service / validate-slot). */
   addonIds?: string[];
   /** Sum of add-on price for display on the review card. */

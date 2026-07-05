@@ -12,6 +12,7 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
@@ -181,11 +182,14 @@ export default async function AvailabilitySettingsPage({
   const rawTab = resolveSearchTab(sp.tab, sp.fp);
   const initialTab = normalizeTabForVenue(rawTab, venue, Boolean(isRestaurantTableTier));
 
+  const { resolved: featureFlags } = await loadVenueFeatureFlags(admin, venueId);
+
   return (
     <AvailabilitySettingsClient
       initialVenue={venue}
       hasServiceConfig={hasServiceConfig}
       initialTab={initialTab}
+      cardHoldDepositsEnabled={featureFlags.card_hold_deposits}
     />
   );
 }

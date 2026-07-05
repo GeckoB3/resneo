@@ -38,6 +38,13 @@ export interface ValidatedEventTicketBooking {
   ticketTotalPence: number;
   requiresDeposit: boolean;
   depositAmountPence: number;
+  /**
+   * Card-hold no-show fee for the whole booking (per-person fee x validated party
+   * size), server-derived (design doc §7.1). Non-null only when the event's
+   * payment requirement is 'card_hold' with a positive configured fee; card holds
+   * never set `requiresDeposit`/`depositAmountPence` (no upfront charge).
+   */
+  cardHoldFeePence: number | null;
 }
 
 export type EventTicketValidationResult =
@@ -110,18 +117,27 @@ export function validateEventTicketBooking(params: {
   const depPerPerson = slot.deposit_amount_pence ?? 0;
   let requiresDeposit = false;
   let depositAmountPence = 0;
-  // 'card_hold' intentionally falls through both branches below (no upfront charge, same as
-  // 'none') until the card-hold booking flows ship (design doc §6.4 guard rail).
+  let cardHoldFeePence: number | null = null;
+  // 'card_hold' intentionally falls through both charge branches below (no upfront
+  // charge, same as 'none'); it surfaces only as `cardHoldFeePence` so the create
+  // route can save the card instead of charging (design doc §7.1).
   if (payReq === 'full_payment' && ticketTotalPence > 0) {
     requiresDeposit = true;
     depositAmountPence = ticketTotalPence;
   } else if (payReq === 'deposit' && depPerPerson > 0) {
     requiresDeposit = true;
     depositAmountPence = depPerPerson * partySize;
+  } else if (payReq === 'card_hold') {
+    if (depPerPerson > 0) {
+      cardHoldFeePence = depPerPerson * partySize;
+    } else {
+      // Zero-fee safety (design doc §6.3): a card hold with no fee resolves as 'none'.
+      console.warn('[validate-event-ticket-booking] card_hold event has no positive fee; treating as none');
+    }
   }
 
   return {
     ok: true,
-    value: { ticketLines: validatedLines, ticketTotalPence, requiresDeposit, depositAmountPence },
+    value: { ticketLines: validatedLines, ticketTotalPence, requiresDeposit, depositAmountPence, cardHoldFeePence },
   };
 }

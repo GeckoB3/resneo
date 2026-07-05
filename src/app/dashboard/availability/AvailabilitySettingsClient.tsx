@@ -56,12 +56,15 @@ interface Props {
   initialVenue: VenueSettings | null;
   hasServiceConfig: boolean;
   initialTab: TabKey;
+  /** Venue `card_hold_deposits` flag, resolved server-side. */
+  cardHoldDepositsEnabled: boolean;
 }
 
 export default function AvailabilitySettingsClient({
   initialVenue,
   hasServiceConfig,
   initialTab,
+  cardHoldDepositsEnabled,
 }: Props) {
   const searchParams = useSearchParams();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
@@ -587,6 +590,7 @@ export default function AvailabilitySettingsClient({
           services={services}
           setServices={setServices}
           selectedAreaId={selectedAreaId}
+          cardHoldDepositsEnabled={cardHoldDepositsEnabled}
           showToast={showToast}
         />
       )}

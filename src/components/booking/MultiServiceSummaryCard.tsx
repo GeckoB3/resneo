@@ -11,8 +11,8 @@ export interface MultiServiceLine {
   durationMinutes: number;
   pricePence: number | null;
   depositPence: number;
-  /** When set, refines the total line label (deposit vs full payment). */
-  chargeKind?: 'deposit' | 'full_payment';
+  /** When set, refines the total line label (deposit vs full payment vs card hold). */
+  chargeKind?: 'deposit' | 'full_payment' | 'card_hold';
   /** Add-ons stacked on this service, shown beneath the service line. */
   extras?: Array<{ name: string; pricePence: number; durationMinutes: number }>;
   /** When true and `onEditAddons` is provided, an "Edit extras" control is shown. */

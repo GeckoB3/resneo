@@ -43,6 +43,8 @@ export const depositConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Amount per person in GBP (stored as number, e.g. 5 for £5). */
   amount_per_person_gbp: z.number().min(0).max(100).default(5),
+  /** 'charge' takes a deposit payment; 'card_hold' saves the card for a no-show fee (flag-gated). */
+  type: z.enum(['charge', 'card_hold']).default('charge'),
   /** Online bookings always require deposit when enabled. */
   online_requires_deposit: z.boolean().default(true),
   /** Phone bookings: optional per venue. */

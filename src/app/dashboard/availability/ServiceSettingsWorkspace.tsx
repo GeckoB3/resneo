@@ -39,6 +39,8 @@ interface Props {
   services: VenueServiceRow[];
   setServices: (s: VenueServiceRow[]) => void;
   selectedAreaId: string | null | undefined;
+  /** Venue `card_hold_deposits` flag, resolved server-side on the availability page. */
+  cardHoldDepositsEnabled: boolean;
   showToast: (msg: string) => void;
 }
 
@@ -65,7 +67,7 @@ async function createDurationApi(
   return data.duration;
 }
 
-export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId, showToast }: Props) {
+export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId, cardHoldDepositsEnabled, showToast }: Props) {
   const [rules, setRules] = useState<ServiceCapacityRule[]>([]);
   const [durations, setDurations] = useState<PartySizeDuration[]>([]);
   const [restrictions, setRestrictions] = useState<ServiceBookingRestriction[]>([]);
@@ -533,6 +535,7 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
                       key={selected.id}
                       serviceId={selected.id}
                       restriction={restrictionForSelected}
+                      cardHoldDepositsEnabled={cardHoldDepositsEnabled}
                       showToast={showToast}
                       onRestrictionSaved={onRestrictionSaved}
                     />

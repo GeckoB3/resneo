@@ -153,6 +153,7 @@ export function AppointmentServicesView({
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   const [error, setError] = useState<string | null>(null);
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
@@ -876,6 +877,7 @@ export function AppointmentServicesView({
               setForm={setForm}
               isAdmin={isAdmin}
               stripeConnected={stripeConnected}
+              cardHoldEnabled={cardHoldEnabled}
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
               venueOpeningHours={venueOpeningHours}

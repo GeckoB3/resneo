@@ -9,6 +9,7 @@ import {
   type AppointmentServiceFormValues,
 } from '@/components/dashboard/appointment-services/appointment-service-form-values';
 import { appointmentServiceFormToPayload } from '@/components/dashboard/appointment-services/appointment-service-form-to-payload';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { readResponseJson } from '@/lib/api/read-response-json';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
@@ -68,6 +69,8 @@ export function AppointmentServiceModal({
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Defaults to off outside the dashboard's VenueFeatureFlagsProvider, keeping the form charge-only.
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
 
   // Re-seed the form each time the modal is (re)opened so prefills from the
   // caller (e.g. the service name pulled from the import) take effect.
@@ -149,6 +152,7 @@ export function AppointmentServiceModal({
         setForm={setForm}
         isAdmin={isAdmin}
         stripeConnected={stripeConnected}
+        cardHoldEnabled={cardHoldEnabled}
         currencySymbol={currencySymbol}
         fieldGroupSuffix={editingId ?? 'import-new-service'}
         venueOpeningHours={venueOpeningHours}

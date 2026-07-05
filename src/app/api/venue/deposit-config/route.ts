@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { featureFlagDisabledResponse } from '@/lib/feature-flags/http';
+import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 import { depositConfigSchema } from '@/types/config-schemas';
 
 /** PATCH /api/venue/deposit-config - update deposit_config (admin only). */
@@ -25,6 +27,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     const deposit_config = parsed.data;
+
+    if (deposit_config.type === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(staff.db, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+    }
 
     const { data: venue, error } = await staff.db
       .from('venues')

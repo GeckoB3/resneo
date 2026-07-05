@@ -16,6 +16,7 @@ import type {
   VenueService,
 } from '@/types/availability';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 export interface FetchEngineInputParams {
   supabase: SupabaseClient;
@@ -96,7 +97,7 @@ export async function fetchEngineInput({
       .gte('date_end', date),
     supabase
       .from('venues')
-      .select('deposit_config')
+      .select('deposit_config, feature_flags')
       .eq('id', venueId)
       .single(),
     resolvedAreaId
@@ -174,7 +175,7 @@ export async function fetchEngineInput({
       ? supabase
           .from('booking_restrictions')
           .select(
-            'id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, deposit_amount_per_person_gbp, online_requires_deposit, cancellation_notice_hours',
+            'id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, deposit_amount_per_person_gbp, deposit_type, online_requires_deposit, cancellation_notice_hours',
           )
           .in('service_id', serviceIds)
       : Promise.resolve({ data: [] as BookingRestriction[] }),
@@ -195,8 +196,19 @@ export async function fetchEngineInput({
     const n = (cfg as { amount_per_person_gbp?: unknown }).amount_per_person_gbp;
     return typeof n === 'number' && !Number.isNaN(n) ? n : null;
   };
+  const depositTypeFromJson = (cfg: unknown): 'charge' | 'card_hold' | null => {
+    if (!cfg || typeof cfg !== 'object') return null;
+    const t = (cfg as { type?: unknown }).type;
+    return t === 'charge' || t === 'card_hold' ? t : null;
+  };
   const deposit_legacy_amount_per_person_gbp =
     depositFromJson(areaRes.data?.deposit_config) ?? depositFromJson(venueRes.data?.deposit_config);
+  const deposit_legacy_type =
+    depositTypeFromJson(areaRes.data?.deposit_config) ?? depositTypeFromJson(venueRes.data?.deposit_config);
+  const card_hold_deposits_enabled = resolveAppointmentsFeatureFlag(
+    'card_hold_deposits',
+    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
+  );
 
   if (restrictionExcRes.error) {
     console.error('fetchEngineInput: booking_restriction_exceptions', restrictionExcRes.error.message);
@@ -264,6 +276,7 @@ export async function fetchEngineInput({
           row.deposit_amount_per_person_gbp != null && row.deposit_amount_per_person_gbp !== ''
             ? Number(row.deposit_amount_per_person_gbp)
             : null,
+        deposit_type: row.deposit_type === 'card_hold' ? ('card_hold' as const) : ('charge' as const),
         online_requires_deposit: row.online_requires_deposit !== false,
       };
     }),
@@ -272,6 +285,8 @@ export async function fetchEngineInput({
     schedule_exceptions,
     bookings,
     deposit_legacy_amount_per_person_gbp,
+    deposit_legacy_type,
+    card_hold_deposits_enabled,
     now: now ?? new Date(),
   };
 }

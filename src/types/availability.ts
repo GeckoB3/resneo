@@ -146,6 +146,12 @@ export interface BookingRestriction {
   deposit_required_from_party_size: number | null;
   /** Per-person deposit for this dining service; null falls back to legacy venue deposit_config amount. */
   deposit_amount_per_person_gbp: number | null;
+  /**
+   * Kind of protection for this service: 'charge' takes a deposit payment, 'card_hold'
+   * saves the card for a possible no-show fee. Missing/null (no row loaded, or synthetic
+   * defaults) falls back to legacy `deposit_config.type`, then 'charge'.
+   */
+  deposit_type?: 'charge' | 'card_hold' | null;
   /** When deposits apply, gate online/widget bookings (staff phone flow uses the Require deposit toggle only). */
   online_requires_deposit: boolean;
   /** Hours before start for deposit refund for this dining service. */
@@ -235,6 +241,22 @@ export interface ServiceAvailableSlot {
   deposit_required: boolean;
   /** Total deposit in GBP for this slot and party size (per-person × party_size). */
   deposit_amount: number | null;
+  /**
+   * Kind of protection configured for this service: 'charge' (take a deposit payment)
+   * or 'card_hold' (save the card, charge a no-show fee on no-show). ALWAYS populated,
+   * even when the party-size threshold is not met and `deposit_required` is false, so
+   * staff surfaces can see the configured protection unconditionally (the engine is
+   * audience-blind; the threshold-gated `deposit_required`/`deposit_amount` pair stays
+   * the sole online gate). Flag-off or zero-fee card-hold config resolves to 'charge'
+   * with `configured_deposit_per_person_gbp: null` (treated as no protection).
+   */
+  deposit_type: 'charge' | 'card_hold';
+  /**
+   * Configured per-person amount in GBP (deposit or no-show fee, per `deposit_type`),
+   * ALWAYS populated when a positive amount is configured, regardless of the party-size
+   * threshold. Null when nothing (or a non-positive amount) is configured.
+   */
+  configured_deposit_per_person_gbp: number | null;
   /** When deposits apply, whether online/widget bookings should require payment (public flow). */
   online_requires_deposit: boolean;
   /** From `booking_restrictions` for this service (merged with exceptions). */
@@ -265,6 +287,16 @@ export interface EngineInput {
    * venue-level amount (from `venues.deposit_config`) so migrated venues stay stable.
    */
   deposit_legacy_amount_per_person_gbp: number | null;
+  /**
+   * Legacy `deposit_config.type` fallback used when the restriction row does not supply
+   * `deposit_type` (rule: restriction.deposit_type ?? deposit_config.type ?? 'charge').
+   */
+  deposit_legacy_type?: 'charge' | 'card_hold' | null;
+  /**
+   * Resolved `card_hold_deposits` venue flag. When off (or omitted), card-hold config
+   * resolves as no deposit (`deposit_required: false`) with a console.warn.
+   */
+  card_hold_deposits_enabled?: boolean;
   now: Date;
 }
 

@@ -50,6 +50,23 @@ export function appointmentServiceFormToPayload(
       return { ok: false, error: 'Enter a valid deposit amount' };
     }
   }
+  if (form.payment_requirement === 'card_hold') {
+    const d = poundsToPence(form.deposit);
+    if (d == null || d < 100) {
+      return { ok: false, error: 'Enter a no-show fee of at least £1' };
+    }
+    for (const v of form.variants) {
+      if (v.deposit.trim()) {
+        const vd = poundsToPence(v.deposit);
+        if (vd == null || vd < 100) {
+          return {
+            ok: false,
+            error: `Option "${v.name.trim()}": set a no-show fee of at least £1, or leave it blank to use the service fee.`,
+          };
+        }
+      }
+    }
+  }
   if (form.payment_requirement === 'full_payment') {
     if (usesVariants) {
       if (activeVariants.length === 0) {
@@ -127,7 +144,11 @@ export function appointmentServiceFormToPayload(
     usesVariantsPayload && primaryForParent ? primaryForParent.buffer_minutes : form.buffer_minutes;
   const priceStrPayload = usesVariantsPayload && primaryForParent ? primaryForParent.price : form.price;
 
-  const depositPence = form.payment_requirement === 'deposit' ? (poundsToPence(form.deposit) ?? 0) : 0;
+  // Card holds store the no-show fee in the same deposit_pence column as deposits.
+  const depositPence =
+    form.payment_requirement === 'deposit' || form.payment_requirement === 'card_hold'
+      ? (poundsToPence(form.deposit) ?? 0)
+      : 0;
   const payload: Record<string, unknown> = {
     ...(editingId ? { id: editingId } : {}),
     name: form.name.trim(),

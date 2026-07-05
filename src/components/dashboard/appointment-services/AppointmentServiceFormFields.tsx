@@ -53,6 +53,11 @@ export interface AppointmentServiceFormFieldsProps {
   /** Appointments Light: hide “optional overrides per calendar” only. */
   hideStaffMaySection?: boolean;
   staffNotice?: ReactNode;
+  /**
+   * Venue has the `card_hold_deposits` flag on: shows the "Card hold" payment option.
+   * Omit (or pass false) to keep the form charge-only, e.g. during onboarding.
+   */
+  cardHoldEnabled?: boolean;
 }
 
 export function AppointmentServiceFormFields({
@@ -68,8 +73,10 @@ export function AppointmentServiceFormFields({
   calendarsSection,
   hideStaffMaySection = false,
   staffNotice,
+  cardHoldEnabled = false,
 }: AppointmentServiceFormFieldsProps) {
   const usesVariants = isAdmin && form.variants.length > 0;
+  const isCardHold = form.payment_requirement === 'card_hold';
   const paymentName = `payment-requirement-${fieldGroupSuffix}`;
   const bookingModeName = `service-booking-mode-${fieldGroupSuffix}`;
   const locationName = `service-location-${fieldGroupSuffix}`;
@@ -404,7 +411,8 @@ export function AppointmentServiceFormFields({
                   </div>
                   <div>
                     <label className="mb-0.5 block text-[11px] font-medium text-slate-600">
-                      Deposit ({sym}) <span className="font-normal text-slate-400">optional</span>
+                      {form.payment_requirement === 'card_hold' ? <>No-show fee ({sym})</> : <>Deposit ({sym})</>}{' '}
+                      <span className="font-normal text-slate-400">optional</span>
                     </label>
                     <input
                       type="text"
@@ -416,7 +424,11 @@ export function AppointmentServiceFormFields({
                           variants: f.variants.map((row, i) => (i === idx ? { ...row, deposit: e.target.value } : row)),
                         }))
                       }
-                      placeholder={form.payment_requirement === 'deposit' ? 'Uses service default' : '—'}
+                      placeholder={
+                        form.payment_requirement === 'deposit' || form.payment_requirement === 'card_hold'
+                          ? 'Uses service default'
+                          : '—'
+                      }
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                     />
                   </div>
@@ -558,17 +570,44 @@ export function AppointmentServiceFormFields({
               />
               <span>Pay full price online at booking</span>
             </label>
+            {cardHoldEnabled && (
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name={paymentName}
+                  className="mt-0.5"
+                  checked={form.payment_requirement === 'card_hold'}
+                  onChange={() => setForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
+                />
+                <span>
+                  Card hold
+                  <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                    No payment is taken when the client books. Their card is stored securely and you can charge a
+                    no-show fee if they do not attend.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
-          {form.payment_requirement === 'deposit' && (
+          {!cardHoldEnabled && isCardHold && (
+            <p className="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950/90">
+              Card hold is disabled for this venue; this service currently takes no deposit.
+            </p>
+          )}
+          {(form.payment_requirement === 'deposit' || isCardHold) && (
             <div>
               <label className="mb-1 block text-sm text-slate-600">
                 {usesVariants ? (
                   <>
-                    Default deposit ({sym}){' '}
+                    {isCardHold ? <>Default no-show fee ({sym})</> : <>Default deposit ({sym})</>}{' '}
                     <span className="font-normal text-slate-500">
-                      — used when an option leaves its deposit field blank
+                      {isCardHold
+                        ? '(used when an option leaves its fee field blank)'
+                        : '(used when an option leaves its deposit field blank)'}
                     </span>
                   </>
+                ) : isCardHold ? (
+                  <>No-show fee ({sym})</>
                 ) : (
                   <>Deposit amount ({sym})</>
                 )}
@@ -584,6 +623,9 @@ export function AppointmentServiceFormFields({
                   placeholder="5.00"
                 />
               </div>
+              {isCardHold && (
+                <p className="mt-1 text-xs text-slate-500">The no-show fee must be at least {sym}1.</p>
+              )}
             </div>
           )}
           {form.payment_requirement === 'full_payment' && (
@@ -596,7 +638,9 @@ export function AppointmentServiceFormFields({
           <StripePaymentWarning
             stripeConnected={stripeConnected}
             requiresOnlinePayment={
-              form.payment_requirement === 'deposit' || form.payment_requirement === 'full_payment'
+              form.payment_requirement === 'deposit' ||
+              form.payment_requirement === 'full_payment' ||
+              form.payment_requirement === 'card_hold'
             }
           />
         </SectionCard.Body>

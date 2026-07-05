@@ -18,6 +18,7 @@ import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/expe
 import { validateEventCalendarPlacement } from '@/lib/experience-events/validate-event-calendar-placement';
 import { syncEventTicketTypes } from '@/lib/experience-events/sync-event-ticket-types';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
+import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
@@ -43,7 +44,10 @@ const eventSchema = z.object({
   min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
   allow_same_day_booking: z.boolean().optional(),
-  payment_requirement: z.enum(['none', 'deposit', 'full_payment']).optional(),
+  // The DB column is plain text, so this union is the ONLY gate on stored values
+  // (design doc §6.2): extending it for 'card_hold' is mandatory, and nothing else
+  // stops an unknown value from being written.
+  payment_requirement: z.enum(['none', 'deposit', 'full_payment', 'card_hold']).optional(),
   deposit_amount_pence: z.number().int().min(0).nullish(),
   ticket_types: z.array(z.object({
     name: z.string().min(1),
@@ -141,6 +145,20 @@ export async function POST(request: NextRequest) {
         { error: 'Deposit amount must be greater than zero when payment requirement is deposit.' },
         { status: 400 },
       );
+    }
+
+    if (payment_requirement === 'card_hold') {
+      // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+      if (!deposit_amount_pence || deposit_amount_pence < 100) {
+        return NextResponse.json(
+          { error: 'No-show fee must be at least £1 per person when payment requirement is card hold.' },
+          { status: 400 },
+        );
+      }
     }
 
     if (new_calendar_name && requestedCalendarId !== undefined) {
@@ -283,7 +301,11 @@ export async function POST(request: NextRequest) {
       allow_same_day_booking:
         eventFields.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
       payment_requirement: payment_requirement ?? 'none',
-      deposit_amount_pence: payment_requirement === 'deposit' ? (deposit_amount_pence ?? null) : null,
+      // 'card_hold' stores the per-person no-show fee in the same column (design doc D5).
+      deposit_amount_pence:
+        payment_requirement === 'deposit' || payment_requirement === 'card_hold'
+          ? (deposit_amount_pence ?? null)
+          : null,
     };
 
     const startHm = timeHhMm(baseInsert.start_time);
@@ -441,6 +463,20 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    if (patchPayReq === 'card_hold') {
+      // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+      if (patchDepositPence === undefined || patchDepositPence === null || patchDepositPence < 100) {
+        return NextResponse.json(
+          { error: 'No-show fee must be at least £1 per person when payment requirement is card hold.' },
+          { status: 400 },
+        );
+      }
+    }
+
     if (newCalendarName && fieldsForResolve.calendar_id !== undefined) {
       return NextResponse.json(
         { error: 'Use either calendar_id or new_calendar_name, not both.' },
@@ -474,7 +510,9 @@ export async function PATCH(request: NextRequest) {
     const paymentPatch: Record<string, unknown> = {};
     if (patchPayReq !== undefined) {
       paymentPatch.payment_requirement = patchPayReq;
-      paymentPatch.deposit_amount_pence = patchPayReq === 'deposit' ? (patchDepositPence ?? null) : null;
+      // 'card_hold' stores the per-person no-show fee in the same column (design doc D5).
+      paymentPatch.deposit_amount_pence =
+        patchPayReq === 'deposit' || patchPayReq === 'card_hold' ? (patchDepositPence ?? null) : null;
     }
 
     let patchInput = { ...fieldsForResolve, ...paymentPatch };

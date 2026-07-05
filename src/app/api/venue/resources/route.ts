@@ -25,6 +25,7 @@ import {
   buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueResource,
 } from '@/lib/venue/entity-delete-booking-guards';
+import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -34,7 +35,7 @@ const availabilityExceptionDaySchema = z.union([
   }),
 ]);
 
-const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment', 'card_hold']);
 
 const resourceFieldSchema = z.object({
   name: z.string().min(1).max(200),
@@ -84,6 +85,14 @@ function validateResourcePaymentFields(input: {
     const maxTotal = price * maxSlots;
     if (price > 0 && d > maxTotal) {
       return 'Deposit cannot exceed the maximum possible booking total for this resource';
+    }
+  }
+  // 'card_hold' has no price relationship (design doc §6.2): the flat no-show fee just
+  // has to be at least £1. A zero-fee card hold must be impossible to configure.
+  if (req === 'card_hold') {
+    const d = input.deposit_amount_pence;
+    if (d == null || d < 100) {
+      return 'No-show fee must be at least £1';
     }
   }
   return null;
@@ -353,6 +362,14 @@ export async function POST(request: NextRequest) {
     const payReq = parsed.data.payment_requirement ?? 'none';
     const dep = parsed.data.deposit_amount_pence ?? null;
 
+    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+    if (payReq === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+    }
+
     if (!parsed.data.display_on_calendar_id) {
       return NextResponse.json(
         { error: 'Choose a calendar column to show this resource on' },
@@ -402,7 +419,8 @@ export async function POST(request: NextRequest) {
       max_booking_minutes: parsed.data.max_booking_minutes ?? 180,
       price_per_slot_pence: parsed.data.price_per_slot_pence ?? null,
       payment_requirement: payReq,
-      deposit_amount_pence: payReq === 'deposit' ? dep : null,
+      // 'card_hold' stores the flat no-show fee in the same column (design doc D5).
+      deposit_amount_pence: payReq === 'deposit' || payReq === 'card_hold' ? dep : null,
       is_active: parsed.data.is_active ?? true,
       sort_order: parsed.data.sort_order ?? 0,
       display_on_calendar_id: parsed.data.display_on_calendar_id,
@@ -469,6 +487,14 @@ export async function PATCH(request: NextRequest) {
     const parsed = resourcePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+    if (parsed.data.payment_requirement === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
     }
 
     const { data: existing, error: exErr } = await admin

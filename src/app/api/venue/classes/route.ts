@@ -19,9 +19,63 @@ import {
   hasActiveBookingsForClassInstance,
   hasUpcomingActiveBookingsForClassType,
 } from '@/lib/venue/entity-delete-booking-guards';
+import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 
-const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment', 'card_hold']);
+
+/** Card-hold no-show fee bounds (design doc §6.2): at least £1, capped at £150. */
+const CARD_HOLD_FEE_MIN_PENCE = 100;
+const CARD_HOLD_FEE_MAX_PENCE = 15000;
+
+/**
+ * Payment-rule validation shared by the POST and merged-PATCH schemas.
+ * 'card_hold' has no price relationship (design doc §6.2): it does not require a
+ * price per person and the "deposit cannot exceed price" constraint does not apply;
+ * instead the no-show fee must be £1 to £150 per person.
+ */
+function validateClassTypePaymentRule(
+  data: { price_pence?: number | null; payment_requirement?: string; deposit_amount_pence?: number | null },
+  ctx: z.RefinementCtx,
+): void {
+  const price = data.price_pence ?? 0;
+  const req = data.payment_requirement ?? 'none';
+  if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Set a price per person before choosing deposit or full payment',
+      path: ['payment_requirement'],
+    });
+  }
+  if (req === 'deposit') {
+    const d = data.deposit_amount_pence;
+    if (d == null || d <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Deposit amount is required', path: ['deposit_amount_pence'] });
+    } else if (price > 0 && d > price) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Deposit cannot exceed price per person',
+        path: ['deposit_amount_pence'],
+      });
+    }
+  }
+  if (req === 'card_hold') {
+    const d = data.deposit_amount_pence;
+    if (d == null || d < CARD_HOLD_FEE_MIN_PENCE) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'No-show fee must be at least £1 per person',
+        path: ['deposit_amount_pence'],
+      });
+    } else if (d > CARD_HOLD_FEE_MAX_PENCE) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'No-show fee cannot exceed £150 per person',
+        path: ['deposit_amount_pence'],
+      });
+    }
+  }
+}
 
 const classTypeSchema = z
   .object({
@@ -43,29 +97,7 @@ const classTypeSchema = z
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
   })
-  .superRefine((data, ctx) => {
-    const price = data.price_pence ?? 0;
-    const req = data.payment_requirement ?? 'none';
-    if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Set a price per person before choosing deposit or full payment',
-        path: ['payment_requirement'],
-      });
-    }
-    if (req === 'deposit') {
-      const d = data.deposit_amount_pence;
-      if (d == null || d <= 0) {
-        ctx.addIssue({ code: 'custom', message: 'Deposit amount is required', path: ['deposit_amount_pence'] });
-      } else if (price > 0 && d > price) {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'Deposit cannot exceed price per person',
-          path: ['deposit_amount_pence'],
-        });
-      }
-    }
-  });
+  .superRefine(validateClassTypePaymentRule);
 
 /**
  * Full class type row when `instructor_id` may be null (unassigned from any team calendar).
@@ -89,29 +121,7 @@ const classTypeMergedSchema = z
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
   })
-  .superRefine((data, ctx) => {
-    const price = data.price_pence ?? 0;
-    const req = data.payment_requirement ?? 'none';
-    if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Set a price per person before choosing deposit or full payment',
-        path: ['payment_requirement'],
-      });
-    }
-    if (req === 'deposit') {
-      const d = data.deposit_amount_pence;
-      if (d == null || d <= 0) {
-        ctx.addIssue({ code: 'custom', message: 'Deposit amount is required', path: ['deposit_amount_pence'] });
-      } else if (price > 0 && d > price) {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'Deposit cannot exceed price per person',
-          path: ['deposit_amount_pence'],
-        });
-      }
-    }
-  });
+  .superRefine(validateClassTypePaymentRule);
 
 /** Partial updates: cannot use .partial() on classTypeSchema (Zod forbids .partial() when superRefine is used). */
 const classTypePatchSchema = z.object({
@@ -353,6 +363,14 @@ export async function POST(request: NextRequest) {
     const parsed = classTypeSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+    if (parsed.data.payment_requirement === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
     }
 
     const insertRow = {
@@ -638,6 +656,14 @@ export async function PATCH(request: NextRequest) {
     const patchParsed = classTypePatchSchema.safeParse(rest);
     if (!patchParsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: patchParsed.error.flatten() }, { status: 400 });
+    }
+
+    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
+    if (patchParsed.data.payment_requirement === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
     }
 
     const { data: existing, error: fetchErr } = await admin

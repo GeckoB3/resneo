@@ -3,10 +3,11 @@
 **Status: Proposed, not yet implemented (4 July 2026). No code written.**
 When implementation ships, update this header (and move the doc to `Docs/archive/` per `Docs/archive/README.md` once it is purely historical). Do not leave a stale "not built" header on a shipped feature.
 
-**Owner scope:** appointments (booking models `practitioner_appointment` and `unified_scheduling`). See Section 4 for explicit non-goals.
+**Covers booking models:** appointments (`practitioner_appointment`, `unified_scheduling`), **classes** (`class_session`, including the class cart), **events** (`event_ticket`), and **resources** (`resource_booking`). Table reservations are out of scope (Section 4).
 
 **Relationship to other docs:**
-- `Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md` is a separate, also-unshipped payments design (in-person balance collection). Card hold does **not** depend on it. Shared conventions (pence integers, direct charges, PI purpose constants, webhook-as-source-of-truth) are followed so the two can coexist. If the `booking_payments` ledger from that doc ships first, a card-hold charge should additionally write a ledger row (Section 8.6 note); v1 of card hold does not require the ledger.
+- `Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md` is a separate, also-unshipped payments design (in-person balance collection). Card hold does **not** depend on it. Shared conventions (pence integers, direct charges, PI purpose constants, webhook-as-source-of-truth) are followed so the two can coexist. If the `booking_payments` ledger from that doc ships first, a card-hold charge should additionally write a ledger row; v1 of card hold does not require the ledger.
+- `Docs/CLASS_COMMERCE_PRODUCT_RULES.md` is the normative rules doc for class entitlements (courses, memberships, credits). Section 7.4 of this document defines how card holds compose with those rules without changing them.
 - `Docs/PRD.md` §3.4 (phone booking deposit requests) and the existing deposit architecture are the UX baseline this feature extends.
 
 ---
@@ -15,24 +16,26 @@ When implementation ships, update this header (and move the doc to `Docs/archive
 
 ### 1.1 Problem
 
-Venues want no-show protection without charging guests money up front. Today the only options per service are `none`, `deposit` (fixed pence charged at booking), or `full_payment`. A deposit deters no-shows but adds friction and refund admin; many venues want the Fresha-style middle ground: **take no money now, keep a card on file, and charge a defined no-show fee only if the client fails to attend, at the venue's explicit discretion**.
+Venues want no-show protection without charging guests money up front. Today the per-service/per-type payment options are `none`, `deposit` (charged at booking), or `full_payment`. A deposit deters no-shows but adds friction and refund admin. Venues want the Fresha-style middle ground: **take no money now, keep a card on file, and charge a defined no-show fee only if the client fails to attend, at the venue's explicit discretion.** For class-based businesses (gyms, studios) this is the dominant model: members book "free" classes under a membership or credits, but a no-show fee applies.
 
 ### 1.2 Solution
 
-A new deposit variant, **Card hold**:
+A new payment requirement, **Card hold**, available on appointment services, unified-scheduling service items, class types, events, and resources:
 
-- The venue enables deposits for a service as today, and chooses **Card hold** as the type, with a defined no-show fee (for example £25).
+- The venue enables deposits as today and chooses **Card hold** as the type, with a defined no-show fee.
 - The guest must enter card details to book. **£0 is taken.** The card is saved securely with Stripe against the venue's connected account.
 - If the guest does not attend, staff mark the booking **No-Show** exactly as today. That unlocks an explicit **"Charge no-show fee"** action on the booking. Nothing is ever charged automatically.
 - The charge is a merchant-initiated, off-session Stripe payment of up to the defined fee, on the venue's connected account (direct charge, no platform fee, matching the existing deposit flow).
-- If the guest cancels (any time, any actor), the hold is released and can never be charged. Holds also auto-release 14 days after the appointment.
+- If the guest cancels (any time, any actor), the hold is released and can never be charged. Holds also auto-release 14 days after the appointment/session.
+- For class carts, card holds compose with entitlements: a membership- or credit-covered class can still require a card hold, and a single card entry covers the whole cart.
 
 ### 1.3 Design principles (hard requirements)
 
-1. **Seamless with deposits.** Same settings surface, same booking-flow payment step, same staff booking-detail deposit block, same `deposit_status` state machine, same comms patterns. A venue that understands deposits should understand card holds with zero new concepts beyond "no money now, fee only if you charge it".
+1. **Seamless with deposits.** Same settings surfaces, same booking-flow payment step, same staff booking-detail deposit block, same `deposit_status` state machine, same comms patterns. A venue that understands deposits should understand card holds with zero new concepts beyond "no money now, fee only if you charge it".
 2. **Explicit charge only.** No automation ever moves money. The only path to a charge is a staff/admin clicking the charge action on a booking that is already marked No-Show.
-3. **Webhook is source of truth** for money state (matches the existing deposit confirm/webhook split and the Tap to Pay principle).
-4. **No em-dashes in any user-facing copy** (CLAUDE.md rule). All copy strings in this doc comply and must be used as written or adapted without introducing em-dashes.
+3. **Card required to book.** A booking whose configuration demands a card hold must never reach `Booked` without a successfully saved card.
+4. **Webhook is source of truth** for money state (matches the existing deposit confirm/webhook split).
+5. **No em-dashes in any user-facing copy** (CLAUDE.md rule). All copy strings in this doc comply and must be used as written or adapted without introducing em-dashes.
 
 ---
 
@@ -40,93 +43,122 @@ A new deposit variant, **Card hold**:
 
 Facts the design builds on. File references are current as of writing; re-verify line numbers before editing.
 
-### 2.1 Deposit configuration
+### 2.1 Payment configuration by model
 
-- Appointments: `appointment_services.payment_requirement` (enum `class_payment_requirement`: `'none' | 'deposit' | 'full_payment'`) + `appointment_services.deposit_pence int` (migration `20260506120000_appointment_service_payment_requirement.sql`). Unified scheduling mirrors this on `service_items` (same migration). Per-variant override: `service_variants.deposit_pence` (`20260730120000_service_variants.sql`).
-- Resolution: `src/lib/appointments/appointment-service-payment.ts`, notably `resolveAppointmentPaymentRequirement()` (falls back to `'deposit'` when legacy `deposit_pence > 0`), `resolveAppointmentServiceOnlineCharge()` (returns `{ amountPence, chargeLabel: 'deposit' | 'full_payment' }`), and `resolveAppointmentServiceOnlineChargeWithAddons()` (add-ons roll into `full_payment` only; a deposit stays base + variant).
-- Settings UI: `src/components/dashboard/appointment-services/AppointmentServiceFormFields.tsx` plus `appointment-service-form-to-payload.ts` / `appointment-service-form-values.ts`.
-- (Restaurant/table deposits are a separate per-person-GBP system in `booking_restrictions`; out of scope, Section 4.)
+| Model | Requirement column | Fee/deposit column | Semantics |
+|---|---|---|---|
+| Appointment services | `appointment_services.payment_requirement` (enum `class_payment_requirement`: `'none' | 'deposit' | 'full_payment'`) | `appointment_services.deposit_pence` (+ per-variant override `service_variants.deposit_pence`) | Fixed per booking (base + variant; add-ons excluded from deposits) |
+| Unified service items | `service_items.payment_requirement` (same enum) | `service_items.deposit_pence` | Same as appointment services |
+| Class types | `class_types.payment_requirement` (same enum; migration `20260429100000`) | `class_types.deposit_amount_pence` (per person; `price_pence` for full payment) | Charge = per-person amount x `party_size` (seats) |
+| Events | `experience_events.payment_requirement` (**plain `text`**, not the enum; migration `20260515120000`) | `experience_events.deposit_amount_pence` (per person) | Event-level, NOT per ticket type; `event_ticket_types` carry `price_pence` only. Deposit = per-person x `party_size` (total tickets); full payment = ticket total |
+| Resources | `unified_calendars.payment_requirement` (same enum, `calendar_type='resource'`; migration `20260503120000`) | `unified_calendars.deposit_amount_pence` (**flat per booking**) | Full payment = `price_per_slot_pence` x slots; deposit = flat. Snapshot column `bookings.resource_payment_requirement` records the mode at booking time |
+| Table reservations | separate per-person GBP system in `booking_restrictions` | | Out of scope |
 
-### 2.2 Deposit collection
+Resolution code: appointments in `src/lib/appointments/appointment-service-payment.ts` (`resolveAppointmentPaymentRequirement`, `resolveAppointmentServiceOnlineCharge[WithAddons]`, returns `chargeLabel: 'deposit' | 'full_payment'`); classes/events/resources resolve inline in the create route from the availability slot, which surfaces `payment_requirement` + amounts (`class-session-engine.ts`, `event-ticket-engine.ts`, resource branch). Events validate through `src/lib/experience-events/validate-event-ticket-booking.ts` (server-side price enforcement, returns `ticketTotalPence`, `requiresDeposit`, `depositAmountPence`).
 
-- `POST /api/booking/create` (`src/app/api/booking/create/route.ts`): inserts booking rows with `status: 'Pending'`, `deposit_status: 'Pending'` when a charge is required, then creates a **customer-less PaymentIntent** on the connected account: `stripe.paymentIntents.create({ amount, currency: 'gbp', metadata: { booking_id, venue_id }, automatic_payment_methods: { enabled: true } }, { stripeAccount: venue.stripe_connected_account_id })` (around lines 530-538). PI id stored on `bookings.stripe_payment_intent_id`. If PI creation fails the booking row is deleted. If a deposit is required but the venue has no `stripe_connected_account_id`, the route 400s.
-- Client: `src/components/booking/PaymentStep.tsx` caches `loadStripe(publishableKey, { stripeAccount })`, renders `<Elements clientSecret=...><PaymentElement/>`, calls `stripe.confirmPayment(...)`, then hits the confirm route. Used by `AppointmentBookingFlow.tsx` and the other model flows.
-- Confirm: `POST /api/booking/confirm-payment` retrieves the PI on the connected account, requires `status === 'succeeded'`, then `confirmBookingsForSucceededPaymentIntent()` (`src/lib/booking/confirm-deposit-payment.ts`) flips matching `Pending` rows to `status: 'Booked'`, `deposit_status: 'Paid'` and assigns the manage-link token.
-- Backup confirm: webhook `payment_intent.succeeded` (Section 2.5).
+### 2.2 Collection paths
+
+- **Direct bookings (all models):** `POST /api/booking/create` (`src/app/api/booking/create/route.ts`). Model branches: event `~1109-1139`, class `~1140-1272`, resource `~1273-1357`, appointments elsewhere. Paid path inserts `status:'Pending'`, `deposit_status:'Pending'`; free path inserts `status:'Booked'`, `deposit_status:'Not Required'`. One customer-less PaymentIntent per booking unit on the connected account (`~1688-1710` for CDE, `~530-538` for tables/appointments): `{ amount, currency:'gbp', metadata:{ booking_id, venue_id }, automatic_payment_methods:{enabled:true} }`, `{ stripeAccount }`. PI id stored on `bookings.stripe_payment_intent_id`; on PI create failure the booking rows are deleted.
+- **Class cart:** `POST /api/booking/class-cart/checkout` -> `orchestrateClassCartCheckout` (`src/lib/class-commerce/orchestrate-class-cart-checkout.ts`). Quotes lines (`quote-class-cart.ts`), creates a `class_booking_groups` row (`group_booking_id` on every child), resolves entitlement per line in precedence **course -> membership -> credits (opt-in) -> card** via `decideClassLineEntitlement` (`src/lib/class-commerce/entitlement-engine.ts:32-101`). Covered/free lines insert as `Booked` immediately (`insertFreeClassSessionBooking`); card lines insert as `Pending/Pending` (`insertPendingPaidClassSessionBooking`) and one PI covers them all (`metadata.booking_ids`, purpose `RESERVE_NI_PI_PURPOSE.CLASS_CART_CHECKOUT`). **Total covered by entitlements = no PI at all**, response `{ status:'completed' }`. Rollback (`rollbackGroup`) restores credits/allowance and deletes the group's rows on capacity error or PI failure.
+- **Client:** `src/components/booking/PaymentStep.tsx` (Stripe Elements, `loadStripe(pk, { stripeAccount })`, `confirmPayment`) is shared by `AppointmentBookingFlow`, `ClassBookingFlow` (line ~1032), `EventBookingFlow` (~757), `ResourceBookingFlow` (~1145).
+- **Confirm:** `POST /api/booking/confirm-payment` -> `confirmBookingsForSucceededPaymentIntent()` (`src/lib/booking/confirm-deposit-payment.ts`) flips all `Pending` rows on the PI to `Booked` / `'Paid'` and assigns the manage token. Webhook `payment_intent.succeeded` is the backup path.
 
 ### 2.3 Booking and deposit state
 
-- `booking_status` enum: `Pending, Booked, Confirmed, Seated, Completed, No-Show, Cancelled` (TS source of truth `BOOKING_STATUSES`, `src/lib/table-management/booking-status.ts:20-28`; `'Booked'` was added by standalone migration `20260626120000_booking_status_add_booked.sql` because `ALTER TYPE ... ADD VALUE` cannot run in a transaction that also uses the value).
-- `deposit_status` enum: `'Not Required' | 'Pending' | 'Paid' | 'Refunded' | 'Forfeited' | 'Waived' | 'Failed'` (`20260301000001_create_enums.sql` + `20260312000002` + `20260524140000`). **`'Forfeited'` is written by exactly one path:** marking No-Show forfeits a `'Paid'` deposit (`src/app/api/venue/bookings/[id]/route.ts`, No-Show block around lines 868-970); the undo path restores `'Paid'` (around lines 1029-1035).
-- No-show: first-class status. Grace gate `canMarkNoShowForSlot` (`booking-status.ts:117-134`) + server `validateNoShowGracePeriod` (`lifecycle.ts:233-246`, `venues.no_show_grace_minutes` default 15). `applyBookingLifecycleStatusEffects` increments/decrements `guests.no_show_count` (`lifecycle.ts:290-311`).
-- Staff deposit actions: `POST /api/venue/bookings/[id]/deposit` with `action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund'` (+ optional `amount_pence`). Surfaced in `src/components/booking/BookingDetailContent.tsx` (deposit pills and buttons around lines 591-640).
-- Guest cancel: `POST /api/confirm` with `action: 'cancel'`; refund iff `now <= cancellation_deadline && deposit_status === 'Paid' && stripe_payment_intent_id` (route around lines 502-561). Late cancel keeps the deposit `'Paid'` and explains non-refundability.
-- Staff cancel: `src/lib/booking/staff-cancel-booking.ts` (same refund predicate; refund failure blocks the cancel with `REFUND_FAILED`).
+- `booking_status` enum: `Pending, Booked, Confirmed, Seated, Completed, No-Show, Cancelled` (`BOOKING_STATUSES`, `src/lib/table-management/booking-status.ts:20-28`; `'Booked'` added by standalone migration `20260626120000` because `ALTER TYPE ... ADD VALUE` cannot run in a transaction that also uses the value).
+- `deposit_status` enum: `'Not Required' | 'Pending' | 'Paid' | 'Refunded' | 'Forfeited' | 'Waived' | 'Failed'`.
+- **No-show, staff PATCH path:** `PATCH /api/venue/bookings/[id]` (`route.ts:868-970`), all models including CDE. Grace gate (`validateNoShowGracePeriod`, `venues.no_show_grace_minutes` default 15), forfeits a `'Paid'` deposit to `'Forfeited'`, group-aware, sends `no_show_notification` + staff push, `applyBookingLifecycleStatusEffects` maintains `guests.no_show_count`. Undo restores `'Paid'`.
+- **No-show, class roster path:** `POST /api/venue/class-instances/[id]/attendees/[bookingId]/no-show` -> `applyAttendanceMutation({ kind:'no_show' })` (`src/lib/class-commerce/class-attendance.ts:124-163`). **Pre-existing bug:** it writes `status = 'No Show'` (space) but the `booking_status` enum only contains `'No-Show'` (hyphen) and no migration adds the space variant, so this update should fail at the database. It also does not forfeit deposits, restore credits, or free the seat; it mirrors course enrollments and inserts a `class_no_show` events row. Roster UI: `src/components/practitioner-calendar/ClassInstanceDetailSheet.tsx` (~214-217).
+- **Cancels:** staff PATCH cancel branch (`~662-867`) and guest `POST /api/confirm` cancel (`~479-755`): refund iff `now <= cancellation_deadline && deposit_status === 'Paid' && stripe_payment_intent_id`. Guest class cancel within window restores credits/allowance (`restore-class-credits.ts`, `restore-membership-allowance.ts`). `restoreAndReleaseClassBookings` (webhook, `route.ts:48-119`) restores entitlements and frees seats on payment failure/refund.
+- All CDE creates set `cancellation_deadline` + `cancellation_policy_snapshot` via `resolveCancellationNoticeHoursForCreate` (per-entity hours; class -> `class_types`, event -> `experience_events`, resource -> `unified_calendars`).
+- Staff deposit actions: `POST /api/venue/bookings/[id]/deposit` with `action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund'`. Surfaced in `src/components/booking/BookingDetailContent.tsx` (~591-640).
 
-### 2.4 Saved-card machinery that already exists (but is not used by deposits)
+### 2.4 Saved-card machinery that already exists (but is not used by bookings)
 
-- Per-venue Stripe Customers: table `venue_customer_stripe` (`user_id`, `venue_id`, `stripe_connected_account_id`, `stripe_customer_id`; migration `20260701120000_class_commerce_foundation.sql`), created by `ensureVenueStripeCustomerForUser()` (`src/lib/class-commerce/venue-stripe-customer.ts`).
-- `POST /api/account/payment-methods/setup-intent` creates a `SetupIntent` with `usage: 'off_session'`, `payment_method_types: ['card']` on the connected account for that customer. `GET /api/account/payment-methods` lists cards; there is a delete route that detaches PMs.
+- Per-venue Stripe Customers: `venue_customer_stripe` (`user_id`, `venue_id`, `stripe_connected_account_id`, `stripe_customer_id`), created by `ensureVenueStripeCustomerForUser()` (`src/lib/class-commerce/venue-stripe-customer.ts`).
+- `POST /api/account/payment-methods/setup-intent` creates a `SetupIntent` (`usage: 'off_session'`, `payment_method_types: ['card']`) on the connected account. `GET /api/account/payment-methods` lists; a delete route detaches.
 - **No booking flow currently attaches a customer, uses `setup_future_usage`, or performs off-session confirmation.**
 
 ### 2.5 Webhook
 
-`POST /api/webhooks/stripe` (`src/app/api/webhooks/stripe/route.ts`), signature-verified, idempotent via `claimStripeWebhookEvent` against `webhook_events`. Connected account read from `event.account`. Handles `payment_intent.succeeded` (branches on `metadata.reserve_ni_purpose` for class-commerce purposes, else treats it as a booking deposit and confirms), `payment_intent.payment_failed` (sets `'Failed'` on `Pending` rows), `charge.refunded` / `charge.refund.updated` (marks bookings on that PI `'Refunded'`), `account.updated`, subscription events.
+`POST /api/webhooks/stripe`, signature-verified, idempotent via `claimStripeWebhookEvent` (`webhook_events`). Connected account from `event.account`. Handles `payment_intent.succeeded` (purpose branches for class-commerce, else generic booking confirm), `payment_intent.payment_failed` (sets `'Failed'` on `Pending` rows + `restoreAndReleaseClassBookings`), `charge.refunded`/`charge.refund.updated` (marks `'Refunded'` + restore), `account.updated`, subscription events.
 
 ### 2.6 Crons
 
-- `auto-cancel-bookings`: cancels `source='phone' AND status='Pending' AND deposit_status='Pending'` after 24h; cancels abandoned online **class-cart** bookings after 30 min when the PI is definitively non-payable.
-- `deposit-reminder-2h`: messaging only, same phone `Pending/Pending` predicate.
+- `auto-cancel-bookings`: phone `Pending/Pending` after 24h; abandoned online **class-cart** rows (`class_instance_id` + PI, 30 min, PI status in `requires_payment_method | canceled | requires_confirmation`) -> `Cancelled` + `'Failed'`.
+- `deposit-reminder-2h`: phone `Pending/Pending`, messaging only.
 - `reconciliation`: 48h lookback over `deposit_status IN ('Paid','Refunded')` with a PI; writes `reconciliation_alerts` on divergence.
+- `class-recurring-materialize` -> `materializeRecurringReservation` (`src/lib/class-commerce/materialize-recurring-reservation.ts:184-196`): **auto-books only classes with no online card charge** (skips `full_payment`/`deposit` with a "no online card charge" message); books via `insertFreeClassSessionBooking`.
 
 ### 2.7 Reporting, events, flags
 
-- `report_deposit_summary` RPC (`20260304000001_reconciliation_and_reporting.sql:219-238`): collected = `Paid + Forfeited`, refunded, forfeited buckets. `report_by_booking_model` counts `deposit_status='Paid'` only.
-- `events` table: DB trigger logs `booking_created` / `booking_status_changed`; app code inserts custom rows (`auto_cancelled` etc). This feeds reporting.
-- Feature flags: add key to `APPOINTMENTS_FEATURE_FLAG_KEYS` (`src/lib/feature-flags/types.ts:10-16`), zod key in `venueFeatureFlagsSchema`, env in `ENV_BY_FLAG` (`resolve.ts:9-15`); default off unless in `FLAG_DEFAULT_ON`. Route gating example: `assertAppointmentsFeatureEnabled('guest_self_reschedule', flags)` in `src/app/api/confirm/route.ts:804`.
+- `report_deposit_summary` RPC: collected = `Paid + Forfeited`, refunded, forfeited buckets. `report_by_booking_model` counts `deposit_status='Paid'`.
+- `events` table: trigger logs `booking_created` / `booking_status_changed`; app code inserts custom rows (`auto_cancelled`, `class_no_show`, `class_credit_restored`, ...).
+- Feature flags: key in `APPOINTMENTS_FEATURE_FLAG_KEYS` (`src/lib/feature-flags/types.ts`), zod key, env in `ENV_BY_FLAG` (`resolve.ts`); default off unless in `FLAG_DEFAULT_ON`. Route gating via `assertAppointmentsFeatureEnabled`, 403 helper `featureFlagDisabledResponse` (`http.ts`).
 
 ---
 
 ## 3. Key design decisions (with rationale)
 
-### D1. Stripe mechanism: SetupIntent now, off-session PaymentIntent later. NOT a manual-capture authorization.
+### D1. Stripe mechanism: save the card now, charge off-session later. NOT a manual-capture authorization.
 
-Two candidate Stripe patterns:
-
-| | Manual-capture PaymentIntent (auth at booking, capture on no-show) | SetupIntent (save card at booking, charge on no-show) |
-|---|---|---|
-| Money held on guest's card | Yes, whole time | No, £0 |
-| Validity window | **Authorizations expire after about 7 days** (card-network limit) | Card stays chargeable indefinitely |
-| Works for bookings weeks ahead | **No** | Yes |
-| SCA handled | At auth | At save (off-session charges are merchant-initiated and normally exempt; declines possible, Section 8.5) |
-
-Appointments are routinely booked more than 7 days out, so manual capture is not viable. **Decision: `SetupIntent` with `usage: 'off_session'` at booking; explicit off-session `PaymentIntent` at charge time.** This is also exactly what the user-facing promise says: "no payment taken up front".
+Card-network authorizations expire after about 7 days; bookings are made weeks or months out. **Decision: the card is saved (SetupIntent, or PaymentIntent with `setup_future_usage`, both `off_session`) at booking; the no-show fee is a later merchant-initiated off-session PaymentIntent.** No funds are reserved on the guest's card in the meantime, matching the promise "no payment taken up front".
 
 ### D2. A dedicated, booking-scoped Stripe Customer. NOT the guest's account wallet customer.
 
-The saved PaymentMethod must be attached to a Stripe Customer to be charged off-session. The existing `venue_customer_stripe` customer is the guest's **self-serve wallet**: it is listed by `GET /api/account/payment-methods` and the guest can **detach** cards there at will. Attaching the hold card to it would (a) surprise guests with a card silently appearing in their wallet and (b) let a guest defeat the hold by deleting the card before no-showing.
+The saved PaymentMethod must be attached to a Stripe Customer to be charged off-session. The `venue_customer_stripe` customer is the guest's **self-serve wallet**: listed by `GET /api/account/payment-methods`, and the guest can **detach** cards there, which would let them defeat the hold before no-showing, and would surprise guests with a card silently appearing in their wallet.
 
-**Decision: every card-hold "payment unit" creates a dedicated Stripe Customer on the connected account (metadata: `booking_id`, `venue_id`, `reserve_ni_purpose: 'card_hold'`).** It never appears in the guest wallet, cannot be self-detached, and can be deleted wholesale at release time (which detaches the card, satisfying data minimisation).
+**Decision: every card-hold capture unit creates a dedicated Stripe Customer on the connected account (metadata: `booking_id` of the lead row, `venue_id`, `reserve_ni_purpose: 'card_hold'`).** Never visible in the wallet, not self-detachable, deleted wholesale at release time (which detaches the card: data minimisation).
 
 ### D3. Charge is gated strictly on booking status = `No-Show`, staff-explicit, admin-only.
 
-The user requirement is "charge if they fail to show up, explicitly by the venue after no show". Therefore:
-- The charge action is enabled only when `status = 'No-Show'`, `deposit_status = 'Card Held'`, hold not released, and within the charge window.
-- **Any cancellation (guest or staff, early or late) releases the hold.** In v1 a cancelled booking can never be charged. (Late-cancellation fees are a plausible future extension; Section 19.)
-- Admin-only (money movement; consistent with admin-only destructive actions like experience-event cancel). Staff see the state but not the button.
+- The charge action is enabled only when `status = 'No-Show'`, `deposit_status = 'Card Held'`, hold not released, within the charge window.
+- **Any cancellation (guest or staff, early or late) releases the hold.** A cancelled booking can never be charged in v1. (Late-cancellation fees: Section 19.)
+- Admin-only (money movement). Staff see the state but not the button.
 
 ### D4. State lives in the existing `deposit_status` enum plus one new 1:1 table.
 
-- Two new `deposit_status` values: **`'Card Held'`** (card saved, nothing charged) and **`'Charged'`** (no-show fee captured). This keeps every existing surface (pills, crons, reports, reconciliation) on one state machine, and all existing predicates (`= 'Paid'`, `= 'Pending'`) are naturally false for card holds, which is the correct default behaviour everywhere (for example: the refund button, deposit forfeit-on-no-show, auto-cancel).
-- Hold internals (Stripe ids, fee snapshot, consent snapshot, charge/release bookkeeping) live in a new **`booking_card_holds`** table, 1:1 with bookings, service-role only (RLS enabled, no policies), following the class-commerce ledger conventions. Bookings stays lean; the deposit columns keep their existing meanings (`deposit_amount_pence` stays NULL for card holds: no money was taken up front).
+- Two new `deposit_status` values: **`'Card Held'`** and **`'Charged'`**. Every existing surface stays on one state machine; existing predicates (`= 'Paid'`, `= 'Pending'`) are naturally false for card holds, which is correct everywhere (refund button, forfeit-on-no-show, auto-cancel, entitlement restore).
+- Hold internals (Stripe ids, fee snapshot, consent snapshot, charge/release bookkeeping) live in a new **`booking_card_holds`** table, one row per booking row, service-role only. `deposit_amount_pence` stays NULL for card-hold rows (no money up front).
 
-### D5. Configuration reuses the existing per-service payment requirement.
+### D5. Configuration reuses each model's existing payment requirement and amount columns.
 
-New `class_payment_requirement` enum value **`'card_hold'`**. When selected, the existing `deposit_pence` column holds the **no-show fee** (UI label switches accordingly). No new service columns, no second amount field to keep in sync, and the existing resolution pipeline (`appointment-service-payment.ts`, variant override, payload mappers) extends naturally. v1 offers the option only on appointment services and unified `service_items`; class/event/resource forms must not render it and their create paths must reject it (the enum is shared, so this is a UI + validation restriction, Section 6.4).
+`'card_hold'` becomes a fourth requirement value everywhere the current three exist. When selected, **the existing deposit amount column holds the no-show fee** and the UI label switches to "No-show fee". Fee semantics deliberately mirror each model's deposit semantics, so venues' existing mental model transfers:
+
+| Model | Fee configured as | Booking fee snapshot |
+|---|---|---|
+| Appointment service / service item | fixed, per booking (`deposit_pence`, variant override applies, add-ons excluded) | the fixed amount |
+| Class type | per person (`deposit_amount_pence`) | per-person fee x `party_size` (seats) |
+| Event | per person (`deposit_amount_pence`, event-level) | per-person fee x `party_size` (tickets) |
+| Resource | flat per booking (`deposit_amount_pence`) | the flat amount |
+
+The requirement is **exclusive** per entity: a class type is `card_hold` OR `deposit` OR `full_payment`, never a combination. (Compound "charge AND hold on the same entity" is future work; carts mixing entities with different requirements are handled by D7.)
 
 ### D6. v1 is online-booking-flow only.
 
-Phone/staff-created bookings keep today's deposit-request behaviour. Extending the pay-link page (`/pay`) to a "save your card" mode is a well-shaped fast-follow (Section 19), but v1 keeps the surface area down and avoids reworking the deposit-request comms templates.
+Phone/staff-created bookings keep today's deposit-request behaviour; the `/pay` link page is untouched. Staff-side card-save links are a fast-follow (Section 19).
+
+### D7. Three capture modes; mixed carts and bundles save the card on the payment.
+
+A booking unit (single booking, appointment multi-service bundle, group appointment, or class cart) resolves to one **capture mode**:
+
+| Mode | When | Stripe object | Client confirm call |
+|---|---|---|---|
+| `payment` | money due, no card-hold lines | PaymentIntent (exactly today's) | `confirmPayment` |
+| `setup` | no money due, at least one card-hold line | SetupIntent (`usage:'off_session'`) | `confirmSetup` |
+| `payment_with_setup` | money due AND at least one card-hold line | PaymentIntent + `customer` + `setup_future_usage:'off_session'` | `confirmPayment` |
+
+`payment_with_setup` is the key to seamlessness: one card entry, one confirmation, Stripe charges the money AND vaults the card (auto-attached to the customer). This covers the class cart containing both a paid class and a card-hold class, and the appointment bundle mixing a deposit service with a card-hold service. No hold is ever silently dropped.
+
+### D8. Class entitlements compose with card holds; the covered-but-held case is first-class.
+
+Per `Docs/CLASS_COMMERCE_PRODUCT_RULES.md`, entitlements (course -> membership -> credits -> card) decide **how money is paid**. A card-hold class charges no money, so entitlements are not consumed for it: members and non-members book a card-hold class identically (free, card held). The gym pattern "membership covers the class, no-show fee applies" is exactly this: set the class type to `card_hold`.
+
+In a cart, entitlement resolution runs per line exactly as today for `deposit`/`full_payment` lines; `card_hold` lines bypass the entitlement engine (they cost nothing) and instead join the capture unit as hold lines. A cart of one credit-covered paid class + one card-hold class therefore consumes the credit, charges nothing, and saves the card (`setup` mode, because the covered line contributes £0 to `totalStripePence`).
+
+### D9. One canonical no-show status, and the roster bug gets fixed first.
+
+The charge gate keys on `status = 'No-Show'` (the enum value). The class attendance route currently writes `'No Show'` (space), which is not an enum value and should be failing at the database today (Section 2.3). **Phase 0 fixes `class-attendance.ts` to write `'No-Show'`** (and its idempotency check likewise), verifies the route against a real database, and adds a regression test. The roster no-show then flows into the same charge gate as the staff PATCH path. (The roster route still deliberately does not forfeit paid deposits; that pre-existing inconsistency is out of scope, flagged in Section 19.)
 
 ---
 
@@ -134,36 +166,38 @@ Phone/staff-created bookings keep today's deposit-request behaviour. Extending t
 
 ### In scope (v1)
 
-- Booking models: `practitioner_appointment` and `unified_scheduling` appointments, via the public online flows that hit `POST /api/booking/create` and `POST /api/booking/create-multi-service`, plus group appointments via `POST /api/booking/create-group`.
-- Per-service configuration in the appointment service form (dashboard and anywhere else `AppointmentServiceFormFields` renders, including onboarding).
-- Guest payment step in setup mode, confirm path, webhook backup path.
-- Staff booking detail: hold visibility, charge action, refund of a charged fee.
-- Guest manage page visibility and cancellation behaviour (cancel releases hold).
+- **Models:** appointments (single, multi-service, group), classes (single booking and cart), events, resources; online public flows only (`/api/booking/create`, `/api/booking/create-multi-service`, `/api/booking/create-group`, `/api/booking/class-cart/checkout`).
+- Per-entity configuration in each model's editor (appointment service form, class type form in the class timetable manager, event form in the event manager, resource form in the resource timeline).
+- Guest payment step in all three capture modes; confirm paths; webhook backup paths.
+- Staff: hold visibility, charge action (booking detail and class roster), refund of a charged fee.
+- Guest manage page visibility; cancellation releases the hold; class credit/allowance interplay.
 - Comms: confirmation email hold terms, charged-fee receipt email.
-- Crons: abandoned-setup cleanup, hold auto-release, reconciliation awareness.
+- Crons: abandoned-capture cleanup (incl. class carts with entitlement restore), hold auto-release, reconciliation awareness, recurring-materialization skip.
 - Reporting: card-hold buckets in the deposit summary.
 - Feature flag `card_hold_deposits`, default off.
 
 ### Out of scope (v1), with reasons
 
-- **Table reservations** (separate per-person GBP deposit system; product focus is appointments).
-- **Classes, events, resources** (shared enum gains the value, but no UI or create-path support; prevents scope explosion).
+- **Table reservations** (separate per-person GBP deposit system; product focus is appointments-type businesses).
 - **Phone/staff-created bookings and the `/pay` link page** (D6).
 - **Automatic charging of any kind**, including late-cancel fees (D3).
-- **Charging more than the disclosed fee.** Charge amount is clamped to the snapshot fee.
-- **Mixed-requirement bundles taking both a payment and a hold.** Resolution precedence in Section 7.2. (A PaymentIntent with `setup_future_usage` could do both later; Section 19.)
-- **Tap to Pay integration / `booking_payments` ledger** (independent; see header note).
-- **Multi-currency.** `'gbp'` hardcoded, matching every existing deposit PI.
+- **Charging more than the disclosed fee** (clamped to the snapshot).
+- **Compound per-entity config** ("charge a deposit AND hold for a further fee" on one entity; D5). Mixed *units* are covered by D7.
+- **Recurring class reservations**: materialized bookings are auto-created with no guest present, so no card can be captured. Materialization skips card-hold classes (Section 12.4).
+- **Waitlists**: the waitlist subsystem is appointment-only today and its conversion paths are staff-driven; card hold does not integrate with waitlist conversion in v1.
+- **Courses** (prepaid enrollments; no-show economics do not apply per session in v1).
+- **Partial ticket no-show for events**: no-show and the fee apply to the whole booking (ticket-line edits are rejected today: "Ticket line edits are not supported (v1)").
+- **Tap to Pay / `booking_payments` ledger**; **multi-currency** (`'gbp'` hardcoded, matching every existing PI).
 
 ---
 
 ## 5. Data model
 
-Three migrations. Follow house conventions: `IF NOT EXISTS` guards, `gen_random_uuid()`, pence integer checks, RLS enabled with no policies (service-role only), named unique indexes.
+Three migrations. House conventions: `IF NOT EXISTS` guards, `gen_random_uuid()`, pence integer checks, RLS enabled with no policies (service-role only), named unique indexes.
 
 ### 5.1 Migration A: enum values (standalone, no transaction with usage)
 
-`ALTER TYPE ... ADD VALUE` cannot run in the same transaction that uses the value. Copy the structure of `supabase/migrations/20260626120000_booking_status_add_booked.sql`.
+Copy the structure of `supabase/migrations/20260626120000_booking_status_add_booked.sql`.
 
 ```sql
 -- <timestamp>_card_hold_enums.sql
@@ -171,6 +205,10 @@ ALTER TYPE deposit_status ADD VALUE IF NOT EXISTS 'Card Held';
 ALTER TYPE deposit_status ADD VALUE IF NOT EXISTS 'Charged';
 ALTER TYPE class_payment_requirement ADD VALUE IF NOT EXISTS 'card_hold';
 ```
+
+Notes:
+- `class_payment_requirement` is shared by `appointment_services`, `service_items`, `class_types`, `unified_calendars`, and `bookings.resource_payment_requirement`; one `ADD VALUE` covers them all.
+- **Events need no DDL**: `experience_events.payment_requirement` is plain `text`; `'card_hold'` is accepted as data. Application validation unions are the gate (Section 6).
 
 ### 5.2 Migration B: `booking_card_holds`
 
@@ -183,13 +221,13 @@ CREATE TABLE IF NOT EXISTS public.booking_card_holds (
   -- Connected account the customer/PM/charge live on; snapshotted so later
   -- account changes cannot orphan the hold.
   stripe_connected_account_id text NOT NULL,
-  stripe_customer_id text,             -- dedicated, booking-scoped customer (D2)
-  stripe_setup_intent_id text,
-  stripe_payment_method_id text,       -- set at confirm time from the succeeded SetupIntent
-  fee_pence int NOT NULL CHECK (fee_pence > 0),   -- max chargeable, snapshotted at booking
+  stripe_customer_id text,             -- dedicated, booking-scoped customer (D2), shared across the capture unit
+  stripe_setup_intent_id text,         -- set in 'setup' mode; NULL in 'payment_with_setup' mode
+  stripe_payment_method_id text,       -- set at confirm time from the succeeded intent
+  fee_pence int NOT NULL CHECK (fee_pence > 0),   -- max chargeable for THIS booking row, snapshotted at create
   currency text NOT NULL DEFAULT 'gbp',
   -- Consent snapshot shown to the guest at save time (dispute evidence):
-  -- { "text": "...", "version": 1, "accepted_at": "<iso>" }
+  -- { "text": "...", "version": 1, "fee_pence": <unit total>, "accepted_at": "<iso>" }
   terms_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
   charge_payment_intent_id text,       -- off-session PI, set when a charge is attempted
   charged_pence int CHECK (charged_pence IS NULL OR charged_pence > 0),
@@ -198,7 +236,7 @@ CREATE TABLE IF NOT EXISTS public.booking_card_holds (
   charge_failure_code text,            -- last failure: 'card_declined', 'authentication_required', ...
   charge_failure_at timestamptz,
   released_at timestamptz,
-  release_reason text,                 -- 'cancelled' | 'expired' | 'refunded' | 'admin'
+  release_reason text,                 -- 'cancelled' | 'expired' | 'refunded' | 'abandoned' | 'admin'
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -208,6 +246,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS booking_card_holds_booking_uq
 CREATE UNIQUE INDEX IF NOT EXISTS booking_card_holds_charge_pi_uq
   ON public.booking_card_holds (charge_payment_intent_id)
   WHERE charge_payment_intent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_booking_card_holds_setup_intent
+  ON public.booking_card_holds (stripe_setup_intent_id)
+  WHERE stripe_setup_intent_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_booking_card_holds_venue
   ON public.booking_card_holds (venue_id, created_at DESC);
 -- Release cron scans open holds:
@@ -217,22 +258,25 @@ CREATE INDEX IF NOT EXISTS idx_booking_card_holds_open
 ALTER TABLE public.booking_card_holds ENABLE ROW LEVEL SECURITY;  -- no policies: service-role only
 ```
 
-Group/multi-service note: **each booking row gets its own hold row** with its own per-service fee, but sibling rows share the same `stripe_customer_id` / `stripe_setup_intent_id` / `stripe_payment_method_id` (one card saved once). This lets staff charge exactly the no-showed attendee(s) of a group.
+**Row granularity and unit linkage.** One hold row per booking row, each with its own `fee_pence` (per D5 semantics for that row's model and party size). All rows in a capture unit share `stripe_customer_id` (and `stripe_setup_intent_id` in setup mode). Linkage for confirmation:
+- `setup` mode: hold rows found by `stripe_setup_intent_id`.
+- `payment_with_setup` mode: `stripe_setup_intent_id` is NULL; **every booking row of the unit, including card-hold-only rows, stores the unit's PI id in `bookings.stripe_payment_intent_id`** (card-hold-only rows keep `deposit_amount_pence` NULL), so the existing PI-based confirm lookup finds them.
+
+This lets staff charge exactly the no-showed attendee: in a class cart, each line (booking) has its own hold row and fee; in a group appointment, each member row likewise.
 
 ### 5.3 Migration C: reporting RPC update
 
 Extend `report_deposit_summary` (defined in `20260304000001_reconciliation_and_reporting.sql:219-238`) via a new migration that `CREATE OR REPLACE`s it, adding:
 
 ```sql
--- additional returned columns
 no_show_fees_charged_pence bigint,  -- SUM(bch.charged_pence) over bookings with deposit_status = 'Charged'
 no_show_fees_charged_count bigint,
 card_holds_active_count    bigint   -- deposit_status = 'Card Held' AND bch.released_at IS NULL
 ```
 
-Join `booking_card_holds` on `booking_id`. Do **not** fold charged fees into `total_collected_pence` (that bucket means "deposits taken up front"); the reports UI shows the new columns separately (Section 13). Keep the existing function signature backwards-compatible if the reports route destructures by name (verify at implementation time; the route is `src/app/api/venue/reports/route.ts`).
+Join `booking_card_holds` on `booking_id`. Do **not** fold charged fees into `total_collected_pence` (that bucket means "deposits taken up front"). Keep the function signature backwards-compatible with how `src/app/api/venue/reports/route.ts` destructures it (verify at implementation time).
 
-Also update `Docs/schema.sql` (the curated inventory): add `booking_card_holds` under a "Deposits and card holds" note and the two enum value additions.
+Also update `Docs/schema.sql` (curated inventory): add `booking_card_holds` and note the enum value additions.
 
 ---
 
@@ -240,145 +284,196 @@ Also update `Docs/schema.sql` (the curated inventory): add `booking_card_holds` 
 
 ### 6.1 Feature flag
 
-- Key: `card_hold_deposits`. Add to `APPOINTMENTS_FEATURE_FLAG_KEYS` (`src/lib/feature-flags/types.ts`), `venueFeatureFlagsSchema` (`card_hold_deposits: z.boolean().optional()`), `ENV_BY_FLAG` (`card_hold_deposits: 'FEATURE_FLAG_CARD_HOLD_DEPOSITS'`, `resolve.ts`). **Not** in `FLAG_DEFAULT_ON` (defaults off).
-- Surface in the dashboard flag section (`src/app/dashboard/settings/sections/FeatureFlagsSection.tsx`) and super admin (`src/app/super/flags/FlagsPageClient.tsx`) following how the last flag (`compliance_records_enabled`) was added.
-- Update `Docs/FEATURE_FLAGS.md` (new row; note default off).
+- Key: `card_hold_deposits`. Add to `APPOINTMENTS_FEATURE_FLAG_KEYS` (`src/lib/feature-flags/types.ts`), `venueFeatureFlagsSchema` (`card_hold_deposits: z.boolean().optional()`), `ENV_BY_FLAG` (`card_hold_deposits: 'FEATURE_FLAG_CARD_HOLD_DEPOSITS'`). **Not** in `FLAG_DEFAULT_ON`.
+- Surface in `FeatureFlagsSection.tsx` (dashboard) and `FlagsPageClient.tsx` (super), following the `compliance_records_enabled` precedent. Update `Docs/FEATURE_FLAGS.md`.
+- **Normative flag rule:** the flag gates the **creation of new holds** (config acceptance and booking-flow branches). It never gates charging, refunding, or releasing holds that already exist: a guest who consented keeps exactly the deal they were shown, and the venue keeps the protection they were promised, regardless of later flag changes.
 
-### 6.2 Service form (venue-facing)
+### 6.2 Editor surfaces (venue-facing)
 
-File: `src/components/dashboard/appointment-services/AppointmentServiceFormFields.tsx` (+ `appointment-service-form-values.ts`, `appointment-service-form-to-payload.ts`).
-
-The existing payment requirement selector (`none` / `deposit` / `full_payment`) gains a fourth option, rendered only when the `card_hold_deposits` flag resolves on for the venue:
+All four editors gain the same fourth option in their existing payment-requirement selector, rendered only when the flag resolves on for the venue. Shared copy:
 
 - Option label: **"Card hold"**
 - Helper text: `"No payment is taken when the client books. Their card is stored securely and you can charge a no-show fee if they do not attend."`
-- When selected, the existing amount field relabels from "Deposit (£)" to **"No-show fee (£)"** and continues to write `deposit_pence`. Validation: required, min £1, max £150 (mirror the deposit bounds used by the form; verify current bounds at implementation).
-- The per-variant `deposit_pence` override keeps working and is relabelled the same way in variant rows when the service is `card_hold`.
+- The existing amount field relabels to **"No-show fee (£)"** (and, for classes and events, **"No-show fee per person (£)"**) and continues to write the same column. Validation mirrors the current deposit bounds of each form (verify per form; appointment services currently allow up to £150-class bounds, classes constrain deposit <= price: for `card_hold` **drop the "<= price" constraint**, since there is no price relationship, but keep a sane cap, suggest £150).
 
-Persisting API: the appointment-services routes validate `payment_requirement` against a zod union; extend the union with `'card_hold'` and **gate acceptance on the flag** (if flag off, reject `'card_hold'` with 400 `{ code: 'feature_disabled', feature: 'card_hold_deposits' }` using the existing `featureFlagDisabledResponse` helper in `src/lib/feature-flags/http.ts`). Do the same for the `service_items` write path (unified scheduling service editor).
+Per-model touchpoints:
+
+| Model | Form location | Payload/zod to extend |
+|---|---|---|
+| Appointment services | `src/components/dashboard/appointment-services/AppointmentServiceFormFields.tsx` (+ `appointment-service-form-values.ts`, `appointment-service-form-to-payload.ts`; also rendered in onboarding via `OnboardingAppointmentServiceList.tsx`) | appointment-services API route unions; variant rows relabel their override field too |
+| Unified service items | the service-items editor (same field set; grep `payment_requirement` under the unified services dashboard) | service_items write path unions |
+| Class types | class type form inside `src/app/dashboard/class-timetable/ClassTimetableView.tsx` | class-types API route unions |
+| Events | event form inside `src/app/dashboard/event-manager/EventManagerView.tsx` | experience-events API route unions (text column; the zod union is the only gate, so extending it is mandatory, not optional) |
+| Resources | resource form inside `src/app/dashboard/resource-timeline/ResourceTimelineView.tsx` | unified-calendars resource write path unions |
+
+Every write path rejects `'card_hold'` with 403 `{ code: 'feature_disabled', feature: 'card_hold_deposits' }` (`featureFlagDisabledResponse`) when the venue flag is off.
 
 ### 6.3 Resolution logic
 
-`src/lib/appointments/appointment-service-payment.ts`:
+- Appointments: `src/lib/appointments/appointment-service-payment.ts`: `'card_hold'` must be **explicit** (the legacy `deposit_pence > 0` inference stays `'deposit'`). Extend `chargeLabel: 'deposit' | 'full_payment' | 'card_hold'`; for `card_hold`, `amountPence` = the fee (variant override respected, **add-ons never included**, same rule as deposit).
+- Classes/events/resources resolve inline in the create route from the slot (Section 7); the availability engines (`class-session-engine.ts`, `event-ticket-engine.ts`, resource branch) already surface `payment_requirement` and the amount columns, so `'card_hold'` flows through to slots with **no engine changes**; only the slot TS types need the widened union.
+- **Flag-off safety:** if an entity carries `payment_requirement = 'card_hold'` but the venue flag resolves off (flag later disabled), resolve as `'none'` and `console.warn` (`[card-hold] <entity> <id> configured but flag off; treating as none`). Silently charging a deposit instead would take money the guest was never shown; taking nothing is the safe degradation. Editors show a warning banner on such entities: `Card hold is disabled for this venue; this service currently takes no deposit.`
 
-- `resolveAppointmentPaymentRequirement()`: `'card_hold'` must be **explicit** (never inferred from legacy `deposit_pence > 0`; that inference stays `'deposit'`).
-- `resolveAppointmentServiceOnlineCharge()` / `...WithAddons()`: extend the return type to `chargeLabel: 'deposit' | 'full_payment' | 'card_hold'`. For `card_hold`, `amountPence` = the fee (base `deposit_pence`, variant override respected), and **add-ons never roll in** (same rule as deposit).
-- **Flag-off safety:** if a service row carries `payment_requirement = 'card_hold'` but the venue flag resolves off (flag later disabled), resolve as `'none'` and `console.warn` once per resolution (`[card-hold] service <id> configured but flag off; treating as none`). Rationale: silently charging a deposit instead would take money the guest was never shown; taking nothing is the safe degradation. The settings UI shows a warning banner on such services ("Card hold is disabled for this venue; this service currently takes no deposit.").
+### 6.4 Model guard rails
 
-### 6.4 Guarding other models
-
-The enum value is visible to every `class_payment_requirement` column. v1 requires:
-- Class type / event ticket / resource editors do not render the option (no UI change needed if they use their own hardcoded option lists; verify).
-- The class/event/resource booking create paths defensively reject `'card_hold'` config with a 400 (`unsupported payment requirement`) rather than treating it as `'none'`, so a misconfiguration is loud. Add one shared helper `assertCardHoldSupportedForModel(bookingModel)` in `appointment-service-payment.ts` used by the create routes.
+Table-reservation paths never consult `class_payment_requirement`, so no guard is needed there. Course enrollment and any other flow that reads these columns must treat `'card_hold'` as `'none'`-with-warning (6.3) rather than crashing on an unknown value: grep every `switch`/comparison on `payment_requirement` values and make the handling exhaustive (`none | deposit | full_payment | card_hold`).
 
 ---
 
-## 7. Public booking flow
+## 7. Public booking flows
 
-### 7.1 Decision and creation (`POST /api/booking/create`)
+### 7.0 Capture-mode resolution (shared helper)
 
-In `handleNonTableBooking`, where the online charge is resolved today (appointment branch around line 1066; unified `service_items` branch around lines 836-858):
+New module `src/lib/booking/card-hold-capture.ts`:
 
-1. Resolve the charge as today. If `chargeLabel === 'card_hold'` **and** the `card_hold_deposits` flag resolves on:
-   - Require `venue.stripe_connected_account_id` (same 400 as deposits: "This venue cannot take card details online right now").
-   - Insert the booking row(s) exactly like a deposit booking: `status: 'Pending'`, `deposit_status: 'Pending'`, but **leave `deposit_amount_pence` NULL** and **do not set `stripe_payment_intent_id`**.
-   - Create the dedicated Stripe Customer (D2) on the connected account:
-     ```ts
-     const customer = await stripe.customers.create(
-       {
-         email: guestEmail || undefined,
-         name: guestName || undefined,
-         metadata: {
-           reserve_ni_purpose: 'card_hold',
-           booking_id: bookingId,            // lead booking id for bundles
-           venue_id: venueId,
-         },
-       },
-       { stripeAccount: venue.stripe_connected_account_id },
-     );
-     ```
-   - Create the SetupIntent:
-     ```ts
-     const si = await stripe.setupIntents.create(
-       {
-         customer: customer.id,
-         usage: 'off_session',
-         payment_method_types: ['card'],
-         metadata: {
-           reserve_ni_purpose: 'card_hold_setup',
-           booking_id: bookingId,            // lead booking id
-           venue_id: venueId,
-         },
-       },
-       { stripeAccount: venue.stripe_connected_account_id },
-     );
-     ```
-   - Insert one `booking_card_holds` row **per booking row** (Section 5.2), all sharing `stripe_customer_id` and `stripe_setup_intent_id`, each with its own `fee_pence` (that row's service fee, variant-adjusted) and the `terms_snapshot` (Section 7.4).
-   - On any Stripe failure, delete the booking row(s) and the customer (mirror the existing PI-failure cleanup at line ~550).
-2. Response contract (extends the existing shape):
-   ```ts
-   {
-     ...existing fields,
-     requires_deposit: true,            // unchanged: tells the client to show the payment step
-     payment_mode: 'setup',             // NEW: 'payment' (default, existing) | 'setup'
-     client_secret: si.client_secret,   // a seti_..._secret_... value in setup mode
-     stripe_account_id: venue.stripe_connected_account_id,
-     card_hold_fee_pence: totalFeePence,  // NEW: sum across the unit, for copy
-   }
-   ```
-   Existing deposit/full-payment responses add `payment_mode: 'payment'` so the client branch is explicit.
+```ts
+export type CaptureMode = 'payment' | 'setup' | 'payment_with_setup';
 
-`POST /api/booking/create-multi-service` and `POST /api/booking/create-group` follow the same pattern. **Mixed bundles** (Section 4): resolve the unit-level requirement by precedence `full_payment > deposit > card_hold > none`; card hold engages only when it is the strongest requirement in the bundle. When a money requirement wins, card-hold services in the bundle contribute nothing extra (v1).
+export type CaptureUnitLine = {
+  bookingId: string;
+  chargePence: number;        // money due for this row (0 for card-hold and covered rows)
+  cardHoldFeePence: number | null;  // non-null when this row requires a hold
+};
 
-### 7.2 Payment step (client)
+export function resolveCaptureMode(lines: CaptureUnitLine[]): CaptureMode | 'none' {
+  const money = lines.reduce((s, l) => s + l.chargePence, 0);
+  const holds = lines.some((l) => l.cardHoldFeePence != null);
+  if (money > 0 && holds) return 'payment_with_setup';
+  if (money > 0) return 'payment';
+  if (holds) return 'setup';
+  return 'none';
+}
+```
 
-`src/components/booking/PaymentStep.tsx` gains a mode:
+Also here: `createCardHoldCustomer(stripe, { leadBookingId, venueId, email, name, stripeAccount })` (D2 metadata), `createCardHoldSetupIntent(...)`, and `insertCardHoldRows(admin, lines, { customerId, setupIntentId | null, connectedAccountId, termsSnapshot })`.
+
+Stripe calls:
+
+```ts
+// setup mode
+const si = await stripe.setupIntents.create(
+  {
+    customer: customer.id,
+    usage: 'off_session',
+    payment_method_types: ['card'],
+    metadata: { reserve_ni_purpose: 'card_hold_setup', booking_id: leadBookingId, venue_id: venueId },
+  },
+  { stripeAccount },
+);
+
+// payment_with_setup mode: today's PI create gains two fields
+const pi = await stripe.paymentIntents.create(
+  {
+    amount: totalMoneyPence,
+    currency: 'gbp',
+    customer: customer.id,                 // NEW
+    setup_future_usage: 'off_session',     // NEW: vaults the card on success, auto-attached
+    metadata: { ...existingMetadata },     // unchanged (booking_id / booking_ids / purpose)
+    automatic_payment_methods: { enabled: true },
+  },
+  { stripeAccount },
+);
+```
+
+On any Stripe failure during create, delete the unit's booking rows and the customer (mirror the existing PI-failure cleanup), and for class carts run the existing `rollbackGroup` (which also restores entitlements).
+
+### 7.1 Direct bookings: `POST /api/booking/create`
+
+Applies to the appointment, class (`~1140-1272`), event (`~1109-1139`), and resource (`~1273-1357`) branches. Each branch today computes `depositAmountPence` + `requiresDeposit`; extend each to also compute `cardHoldFeePence` when the entity's requirement is `'card_hold'` (and the flag is on):
+
+| Branch | `cardHoldFeePence` |
+|---|---|
+| Appointment / service item | resolved fee (fixed; variant override; no add-ons) |
+| Class | `class_types.deposit_amount_pence x party_size` |
+| Event | `experience_events.deposit_amount_pence x party_size` (validated party = ticket total; extend `validate-event-ticket-booking.ts` to return `cardHoldFeePence` alongside the deposit fields so pricing stays server-derived) |
+| Resource | `unified_calendars.deposit_amount_pence` (flat). `bookings.resource_payment_requirement` snapshot gets `'card_hold'` automatically |
+
+Then:
+1. `resolveCaptureMode` over the unit's rows. For single bookings the unit is one row; `create-multi-service` and `create-group` pass all their rows.
+2. `'none'` and `'payment'` behave exactly as today.
+3. `'setup'`: insert rows `status:'Pending'`, `deposit_status:'Pending'`, `deposit_amount_pence: NULL`; require `venue.stripe_connected_account_id` (same 400 as deposits); create customer + SetupIntent; insert hold rows.
+4. `'payment_with_setup'`: as today's paid path, plus customer + `setup_future_usage` on the PI; card-hold-only rows also insert `Pending/Pending` with `deposit_amount_pence: NULL` and **store the unit PI id** on `bookings.stripe_payment_intent_id`; insert hold rows (`stripe_setup_intent_id: NULL`).
+5. **Class entitlements (single-booking path):** the existing entitlement short-circuit (`~1179-1272`) applies only to priced classes and is unchanged. A `card_hold` class never enters it (charge is 0; no credits or allowance consumed), per D8. `pay_with_class_credits` for a card-hold class is a 400 (`nothing to pay with credits`).
+
+Response contract (all create endpoints):
+
+```ts
+{
+  ...existing fields,
+  requires_deposit: boolean,           // true whenever a payment step must render (any mode)
+  payment_mode: 'payment' | 'setup' | 'payment_with_setup',   // NEW; 'payment' for legacy paths
+  client_secret: string,               // pi_..._secret_... or seti_..._secret_...
+  stripe_account_id: string,
+  card_hold_fee_pence: number | null,  // NEW: unit total of hold fees, for consent copy
+}
+```
+
+### 7.2 Class cart: `orchestrateClassCartCheckout`
+
+Changes in `src/lib/class-commerce/orchestrate-class-cart-checkout.ts` (and `quote-class-cart.ts`):
+
+1. **Quote:** each line gains `card_hold_fee_pence: number | null` (per-person fee x line party size when the class type is `card_hold` and the flag is on). `online_charge_pence` for such lines is 0. The quote response (used by the cart UI) surfaces it so the cart review can show "No-show fee up to £X applies" per line and in the total summary.
+2. **Line handling:** `card_hold` lines bypass `decideClassLineEntitlement` (D8) and insert via `insertPendingPaidClassSessionBooking` **with `deposit_amount_pence: NULL`** (extend that helper to accept the null-money case, or add a sibling `insertPendingCardHoldClassSessionBooking`; either way `status:'Pending'`, `deposit_status:'Pending'`, `group_booking_id`, `cancellation_deadline` handling as the helper already does). Track `cardHoldLines[]`.
+3. **Capture mode** over `totalStripePence` and `cardHoldLines`:
+   - `none` (no money, no holds): unchanged `{ status:'completed' }`.
+   - `payment` (money, no holds): unchanged single PI.
+   - `setup` (no money, holds present, for example every paid line is entitlement-covered and one line is card-hold): customer + SetupIntent; hold rows for the card-hold lines; response `{ status:'payment_required', payment_mode:'setup', client_secret: si.client_secret, ... }`. Entitlement-covered lines are **already `Booked`** at this point (existing behaviour for covered lines, unchanged): only the card-hold lines await the card. This preserves principle 1.3 ("card required to book") for the card-hold lines specifically, without changing the covered lines' semantics.
+   - `payment_with_setup` (money and holds): the single PI gains `customer` + `setup_future_usage`; card-hold lines' booking rows store the PI id; hold rows inserted.
+4. **Rollback:** `rollbackGroup` already deletes all group rows and restores entitlements; extend it to delete the card-hold customer (best effort) when one was created.
+5. **Response type** (`ClassCartCheckoutResponse`): add `payment_mode` and `card_hold_fee_pence` (cart total of hold fees).
+
+`POST /api/booking/class-cart/quote` passes the new quote fields through untouched.
+
+### 7.3 Payment step (client)
+
+`src/components/booking/PaymentStep.tsx` gains:
 
 ```ts
 type PaymentStepProps = {
   // existing props...
-  mode?: 'payment' | 'setup';        // default 'payment'
-  cardHoldFeePence?: number;         // required in setup mode
-  venueName?: string;                // for consent copy
+  mode?: 'payment' | 'setup' | 'payment_with_setup';   // default 'payment'
+  cardHoldFeePence?: number | null;    // required when mode !== 'payment'
+  venueName?: string;                  // for consent copy
 };
 ```
 
-- `Elements` accepts a SetupIntent `clientSecret` unchanged; the confirm call branches: `mode === 'setup' ? stripe.confirmSetup({...}) : stripe.confirmPayment({...})`.
-- On success, call the confirm route with `setup_intent_id` instead of `payment_intent_id` (Section 7.3).
-- Copy in setup mode (exact strings; note title case and no em-dashes):
-  - Heading: `Secure your booking`
-  - Sub-heading: `No payment is taken today.`
-  - Body: `Your card details are stored securely by our payment provider, Stripe. {venueName} may charge a no-show fee of up to {fee} if you miss your appointment.`
-  - Consent line, rendered directly above the submit button (this is the disclosure Stripe expects for merchant-initiated charges, and the string is snapshotted; Section 7.4): `By saving your card you authorise {venueName} to charge up to {fee} if you do not attend this appointment. If you cancel the booking before the appointment, nothing will be charged.`
-  - Submit button: `Save card and book`
-- The flows that render `PaymentStep` (`AppointmentBookingFlow.tsx` and the unified flow path) pass the new props through from the create response. The step already only renders when `requires_deposit` is true; no flow-structure change.
-- Confirmation screen (post-book) in setup mode: `Card saved. No payment has been taken.` alongside the normal confirmation content.
+- Confirm call: `mode === 'setup' ? stripe.confirmSetup({...}) : stripe.confirmPayment({...})` (`payment_with_setup` is a normal PaymentIntent confirmation; `setup_future_usage` is server-side).
+- On success, call the confirm route with `setup_intent_id` (setup mode) or `payment_intent_id` (both payment modes).
+- Copy (exact strings; no em-dashes):
+  - `setup` mode heading: `Secure your booking`; sub-heading: `No payment is taken today.`
+  - `setup` body: `Your card details are stored securely by our payment provider, Stripe. {venueName} may charge a no-show fee of up to {fee} if you miss your booking.`
+  - `payment_with_setup` keeps the normal amount display, plus the body line: `Your card will also be stored securely. {venueName} may charge a no-show fee of up to {fee} if you miss your booking.`
+  - Consent line, rendered directly above the submit button in both hold modes (snapshotted; Section 7.5): `By saving your card you authorise {venueName} to charge up to {fee} if you do not attend. If you cancel the booking before it starts, nothing extra will be charged.`
+  - Submit button: `setup` mode `Save card and book`; `payment_with_setup` keeps the pay wording.
+- All four flows (`AppointmentBookingFlow`, `ClassBookingFlow`, `EventBookingFlow`, `ResourceBookingFlow`) thread `payment_mode` / `card_hold_fee_pence` / venue name from the create/checkout response into `PaymentStep`. They already gate the step on `requires_deposit`/`payment_required` + `client_secret`; no flow-structure change.
+- Confirmation screens: in `setup` mode add `Card saved. No payment has been taken.`; in `payment_with_setup` add `Your card has been stored securely for this booking.`
+- Service/class/event/resource cards in the public catalogs show, for card-hold entities: `No-show fee of {fee} applies. No payment is taken when you book.` (fee shown per person for classes/events). The engines already surface the fields (6.3); the flows and `appointment-catalog` response need the widened union + display line.
 
-### 7.3 Confirm path (`POST /api/booking/confirm-payment`)
+### 7.4 Confirm paths
 
-Extend the request schema: exactly one of `payment_intent_id` (existing) or `setup_intent_id` (new). Setup branch:
+`POST /api/booking/confirm-payment` accepts exactly one of `payment_intent_id` | `setup_intent_id`.
 
-1. Retrieve the SetupIntent on the connected account; require `status === 'succeeded'`; extract `payment_method` id.
-2. Find the `booking_card_holds` rows by `stripe_setup_intent_id` and their bookings with `status = 'Pending'` in this venue (mirror `confirmBookingsForSucceededPaymentIntent`'s matching and idempotency: already-confirmed rows return `alreadyConfirmed`).
-3. Update holds: `stripe_payment_method_id`. Update bookings: `status: 'Booked'`, `deposit_status: 'Card Held'`, assign `confirm_token_hash` manage token exactly as the deposit path does.
-4. Insert an `events` row per booking: `event_type: 'card_hold_saved'`, payload `{ booking_id, fee_pence }`.
-5. Send booking confirmation comms (Section 11).
+**Setup branch** (new sibling `confirmBookingsForSucceededSetupIntent()` in `src/lib/booking/confirm-deposit-payment.ts`):
+1. Retrieve the SetupIntent on the connected account; require `status === 'succeeded'`; extract `payment_method`.
+2. Find hold rows by `stripe_setup_intent_id`, their bookings `Pending` in this venue (idempotent: already-confirmed rows count as `alreadyConfirmed`).
+3. Update holds: `stripe_payment_method_id`; stamp `terms_snapshot.accepted_at`. Update bookings: `status:'Booked'`, `deposit_status:'Card Held'`, assign `confirm_token_hash` manage token exactly as the deposit path.
+4. Insert `events` rows `card_hold_saved` (`{ fee_pence }`); send booking confirmation comms (Section 10).
 
-Implement as a sibling function `confirmBookingsForSucceededSetupIntent()` in `src/lib/booking/confirm-deposit-payment.ts` so both the route and the webhook share it.
+**Payment branch** (extend `confirmBookingsForSucceededPaymentIntent()`): today it flips every `Pending` row on the PI to `'Paid'`. Change to per-row:
+- Row has a hold row and `deposit_amount_pence IS NULL` -> `deposit_status: 'Card Held'`.
+- Otherwise -> `'Paid'` (existing behaviour).
+- When the retrieved PI carries a `payment_method` and any unit hold rows exist (`payment_with_setup`), populate their `stripe_payment_method_id` from it and stamp `accepted_at`, and insert `card_hold_saved` events.
+The webhook `payment_intent.succeeded` path calls the same function, so both routes stay in lockstep.
 
-### 7.4 Consent snapshot
+### 7.5 Consent snapshot
 
-`terms_snapshot` is written at create time with the exact consent string that will be displayed (server-rendered from the same template constant the client uses; export the template from a shared module `src/lib/booking/card-hold-terms.ts` so client copy and snapshot cannot drift):
+`terms_snapshot` is written at create time with the exact consent string that will be displayed. The template constant lives in `src/lib/booking/card-hold-terms.ts` and is imported by both the client copy and the server snapshot so they cannot drift:
 
 ```json
-{ "version": 1, "text": "By saving your card you authorise {venue} to charge up to £25.00 if you do not attend this appointment. If you cancel the booking before the appointment, nothing will be charged.", "fee_pence": 2500, "accepted_at": null }
+{ "version": 1, "text": "By saving your card you authorise {venue} to charge up to £25.00 if you do not attend. If you cancel the booking before it starts, nothing extra will be charged.", "fee_pence": 2500, "accepted_at": null }
 ```
 
-`accepted_at` is stamped in the confirm path (card successfully saved = consent acted on). This is the venue's dispute evidence package together with the booking record.
-
-### 7.5 Public catalog surfacing
-
-Wherever the public appointment catalog exposes deposit info per service today (check `GET /api/booking/appointment-catalog` and the service cards in the appointment flow), card-hold services surface: `payment_requirement: 'card_hold'` and the fee, so the service list can show a short line: `No-show fee of {fee} applies. No payment taken at booking.` If the catalog does not currently expose deposit info, add the two fields for card-hold services only (needed so guests are not surprised at the payment step).
+`fee_pence` in the snapshot is the **capture-unit total** the guest saw; each row's chargeable maximum is its own `booking_card_holds.fee_pence`. `accepted_at` is stamped at confirm (card successfully saved = consent acted on). This is the dispute evidence package together with the booking record and events trail.
 
 ---
 
@@ -386,16 +481,18 @@ Wherever the public appointment catalog exposes deposit info per service today (
 
 ### 8.1 Objects and account
 
-Everything on the venue's connected account via `{ stripeAccount: venue.stripe_connected_account_id }` (direct charges; no `application_fee_amount`, matching deposits). Statement descriptor is the venue's own (a benefit of direct charges for dispute recognition).
+Everything on the venue's connected account via `{ stripeAccount }` (direct charges; no `application_fee_amount`, matching deposits). Statement descriptor is the venue's own, which helps dispute recognition.
 
 ### 8.2 Purpose constants
 
-Add to the existing purpose-constant module used by the webhook branches (`RESERVE_NI_PI_PURPOSE` in `src/types/class-commerce.ts`, or its successor if relocated):
+Add to `RESERVE_NI_PI_PURPOSE` (`src/types/class-commerce.ts`, alongside `CLASS_CART_CHECKOUT`):
 
 ```ts
-CARD_HOLD_SETUP: 'card_hold_setup',            // SetupIntent metadata
-CARD_HOLD_NO_SHOW_FEE: 'card_hold_no_show_fee' // charge PI metadata
+CARD_HOLD_SETUP: 'card_hold_setup',              // SetupIntent metadata
+CARD_HOLD_NO_SHOW_FEE: 'card_hold_no_show_fee',  // charge PI metadata
 ```
+
+(`payment_with_setup` PIs keep their existing purpose: they ARE the deposit/cart payment; the hold is a side effect discovered via the hold rows.)
 
 ### 8.3 The charge call (off-session, merchant-initiated)
 
@@ -417,41 +514,40 @@ const pi = await stripe.paymentIntents.create(
   },
   {
     stripeAccount: hold.stripe_connected_account_id,
-    idempotencyKey: `card-hold-charge-${hold.id}`,   // one charge per hold, double-click safe
+    idempotencyKey: `card-hold-charge-${hold.id}-${attempt}`,  // attempt = 0 or a persisted retry counter
   },
 );
 ```
 
-The idempotency key is scoped to the hold id (not the request), so a retried click can never create a second charge. A **partial-then-full** charge is intentionally impossible in v1 (one charge per hold).
+One successful charge per hold, enforced by the `'Card Held'` state check plus the unique index on `charge_payment_intent_id`. Partial-then-full charging is intentionally impossible in v1.
 
 ### 8.4 SCA / MIT compliance
 
-- The SetupIntent performs SCA (3DS) at save time when the issuer requires it; `PaymentElement` handles the challenge inline in the booking flow.
-- The later charge is a **merchant-initiated transaction (MIT)**: `off_session: true` tells Stripe to apply the MIT exemption using the SetupIntent's authentication as the mandate basis.
-- The consent text (7.4) plus explicit save action is the mandate evidence. This mirrors the standard Stripe "charge for no-shows" integration pattern.
+- The SetupIntent (or the `setup_future_usage` payment) performs SCA at save time when the issuer requires it; `PaymentElement` handles the challenge inline.
+- The later charge is a merchant-initiated transaction: `off_session: true` applies the MIT framework using the save-time authentication as the mandate basis.
+- The consent text (7.5) plus the explicit save action is the mandate evidence. This mirrors Stripe's documented "charge for no-shows" integration pattern.
 
 ### 8.5 Charge failure handling
 
-`stripe.paymentIntents.create` with `confirm: true` throws `StripeCardError` on decline. Handle:
+`stripe.paymentIntents.create` with `confirm: true` throws `StripeCardError` on decline:
 
 | Error `code` | Meaning | v1 behaviour |
 |---|---|---|
-| `card_declined`, `expired_card`, `insufficient_funds`, etc | Issuer refused | Record `charge_failure_code` + `charge_failure_at` on the hold; keep `deposit_status = 'Card Held'`; insert `events` row `card_hold_charge_failed`; return 402 with a plain message: `The card was declined ({reason}). You can try again, or contact the client to arrange payment.` Retry allowed (new attempt updates the same hold; the idempotency key gains a `-retry-{n}` suffix derived from a persisted attempt counter, or simpler: append `charge_failure_at` epoch; implementer picks one and keeps it deterministic per attempt). |
-| `authentication_required` | Issuer demands 3DS; impossible off-session | Same recording, message: `The card issuer requires the client to authorise this payment in person. Off-session charging is not possible for this card.` v1 offers no on-session fallback (Section 19 covers the fee-payment-link fast-follow). Cancel the stray `requires_action` PI (`stripe.paymentIntents.cancel`) so it does not linger. |
+| `card_declined`, `expired_card`, `insufficient_funds`, ... | Issuer refused | Record `charge_failure_code` + `charge_failure_at` on the hold; keep `deposit_status = 'Card Held'`; insert `events` row `card_hold_charge_failed`; return 402: `The card was declined ({reason}). You can try again, or contact the client to arrange payment.` Retries allowed within the window (attempt counter feeds the idempotency key). |
+| `authentication_required` | Issuer demands 3DS; impossible off-session | Same recording; message: `The card issuer requires the client to authorise this payment in person. Off-session charging is not possible for this card.` Cancel the stray `requires_action` PI (`stripe.paymentIntents.cancel`). v1 offers no on-session fallback (Section 19). |
 
-Never mutate `deposit_status` on failure. The hold remains chargeable until released/expired.
+Never mutate `deposit_status` on failure; the hold remains chargeable until released/expired.
 
 ### 8.6 Webhook changes (`src/app/api/webhooks/stripe/route.ts`)
 
-Order matters: the purpose branch must run **before** the generic `metadata.booking_id` deposit-confirm path, otherwise a fee PI would be misread as a deposit payment and wrongly flip statuses.
+Purpose branches must run **before** the generic `metadata.booking_id` deposit-confirm path, otherwise a fee PI would be misread as a deposit payment.
 
-1. **`payment_intent.succeeded`** with `metadata.reserve_ni_purpose === 'card_hold_no_show_fee'`: source-of-truth completion. Find the hold by `charge_payment_intent_id` (or by `metadata.booking_id` if the row has no PI id yet, then set it). Set hold `charged_pence` (from `pi.amount_received`), `charged_at`; set booking `deposit_status: 'Charged'`; insert `events` row `card_hold_charged`; send the receipt email (Section 11) in `after()`. Idempotent: skip if already `'Charged'`.
-2. **`payment_intent.payment_failed`** with the same purpose: record failure fields on the hold (as 8.5) if not already recorded; do not touch booking status. (The existing generic failure path only touches `deposit_status = 'Pending'` rows, so card holds are naturally excluded; the explicit branch is for bookkeeping and staff push notification `'payment_failed'` reuse.)
-3. **`setup_intent.succeeded`** (new event type): backup confirm path; call `confirmBookingsForSucceededSetupIntent()` (7.3). Add the event to the webhook endpoint's enabled events (deployment checklist, Section 16).
-4. **`setup_intent.setup_failed`** (new event type): informational log only in v1 (the client surface handles inline failure; abandoned rows are cleaned by cron, Section 12.1).
-5. **`charge.refunded` / `charge.refund.updated`**: the existing handler looks up bookings by `bookings.stripe_payment_intent_id` and will miss fee PIs (stored on the hold). Add a purpose-aware branch: if the PI's metadata purpose is `card_hold_no_show_fee`, set booking `deposit_status: 'Refunded'`, stamp hold `released_at` (reason `'refunded'`), insert `events` row `card_hold_charge_refunded`. Idempotent on already-`'Refunded'`.
-
-The charge endpoint (Section 9.2) also optimistically applies the success state when the synchronous confirm returns `succeeded` (same pattern as `/api/booking/confirm-payment` vs the webhook: either may land first; both are idempotent).
+1. **`payment_intent.succeeded`**, purpose `card_hold_no_show_fee`: source-of-truth completion. Find the hold by `charge_payment_intent_id` (or `metadata.booking_id` if unset, then set it). Set `charged_pence` (`pi.amount_received`), `charged_at`; booking `deposit_status: 'Charged'`; `events` row `card_hold_charged`; receipt email in `after()`. Idempotent on already-`'Charged'`.
+2. **`payment_intent.succeeded`**, generic and `CLASS_CART_CHECKOUT` paths: both funnel into the extended `confirmBookingsForSucceededPaymentIntent` (7.4), which now handles `payment_with_setup` units per-row. No new branch needed beyond that extension.
+3. **`payment_intent.payment_failed`**, purpose `card_hold_no_show_fee`: record failure fields (as 8.5) if not already recorded; do not touch booking status. (The generic failure path only touches `deposit_status='Pending'` rows plus `restoreAndReleaseClassBookings`; card-hold rows in `'Card Held'` are naturally excluded. Card-hold rows still `Pending` at payment failure of a `payment_with_setup` unit ARE included, which is correct: the capture failed, restore/cleanup applies.)
+4. **`setup_intent.succeeded`** (new event type): backup confirm; call `confirmBookingsForSucceededSetupIntent()`. Enable the event type on the Stripe webhook endpoint (deployment checklist).
+5. **`setup_intent.setup_failed`** (new event type): informational log only (client handles inline failure; abandoned rows cleaned by cron 12.1).
+6. **`charge.refunded` / `charge.refund.updated`**: the existing handler looks up bookings by `bookings.stripe_payment_intent_id` and misses fee PIs (stored on the hold). Add a purpose-aware branch: fee-PI refund -> booking `deposit_status: 'Refunded'`, hold `released_at` (reason `'refunded'`), `events` row `card_hold_charge_refunded`. Idempotent on already-`'Refunded'`.
 
 ---
 
@@ -459,58 +555,58 @@ The charge endpoint (Section 9.2) also optimistically applies the success state 
 
 ### 9.1 Booking detail display
 
-`src/components/booking/BookingDetailContent.tsx` deposit block (pills around lines 591-602, actions from line 607):
+`src/components/booking/BookingDetailContent.tsx` deposit block:
 
 | State | Pill | Detail line |
 |---|---|---|
-| `deposit_status = 'Card Held'`, not released | `Card held` (teal/info variant) | `No-show fee up to {fee}. No payment taken.` |
-| `'Card Held'`, released (`released_at` set) | `Card hold ended` (neutral) | `The card hold was released on {date}.` |
+| `'Card Held'`, not released | `Card held` (teal/info) | `No-show fee up to {fee}. No payment taken.` |
+| `'Card Held'`, released | `Card hold ended` (neutral) | `The card hold was released on {date}.` |
 | `'Charged'` | `No-show fee charged` (amber) | `{amount} charged on {date}.` |
 | `'Refunded'` (was `'Charged'`) | `No-show fee refunded` (existing refunded styling) | `{amount} refunded.` |
-| last charge attempt failed | keep `Card held` pill | append: `Last charge attempt failed: {plain reason}.` |
+| last charge attempt failed | keep `Card held` pill | append `Last charge attempt failed: {plain reason}.` |
 
-Data comes from `GET /api/venue/bookings/[id]` (extend the GET around lines 132-302 to include a `card_hold` object: `{ fee_pence, charged_pence, charged_at, released_at, charge_failure_code, charge_window_ends_at }`; null when no hold row).
-
-Existing deposit action buttons must not appear for hold states: they are gated on `deposit_status` values (`'Pending'`, `'Paid'`) that card holds never occupy; verify each gate rather than assuming.
+`GET /api/venue/bookings/[id]` gains `card_hold: { fee_pence, charged_pence, charged_at, released_at, charge_failure_code, charge_window_ends_at } | null`. Existing deposit action buttons are gated on `deposit_status` values card holds never occupy; verify each gate rather than assuming.
 
 ### 9.2 Charge action
 
-**API:** extend `POST /api/venue/bookings/[id]/deposit` (`src/app/api/venue/bookings/[id]/deposit/route.ts`):
+**API:** extend `POST /api/venue/bookings/[id]/deposit`:
 
 ```ts
-// zod: action gains 'charge_no_show_fee'; amount_pence optional
 { action: 'charge_no_show_fee', amount_pence?: number }
 ```
 
-Guards, in order, each with a distinct 4xx `{ code }`. Note there is deliberately **no feature-flag guard here**: the flag gates the creation of new holds (config acceptance and booking-flow branch), never the servicing of holds that already exist with guest consent (see the normative rule at the end of Section 14).
-1. Admin session (`requireAdmin` from `src/lib/venue-auth.ts`): 403 `admin_only`.
+Guards, in order, distinct 4xx `{ code }` each. Deliberately **no feature-flag guard** (6.1 normative rule):
+1. Admin session (`requireAdmin`): 403 `admin_only`.
 2. Hold row exists: 404 `no_card_hold`.
-3. `booking.status === 'No-Show'`: 409 `not_no_show` (message: `Mark the booking as a no-show before charging the fee.`).
-4. `deposit_status === 'Card Held'`: 409 `invalid_state` (already charged/refunded).
-5. `released_at IS NULL` and now within charge window (Section 12.2): 409 `hold_released` / `hold_expired`.
+3. `booking.status === 'No-Show'`: 409 `not_no_show` (`Mark the booking as a no-show before charging the fee.`).
+4. `deposit_status === 'Card Held'`: 409 `invalid_state`.
+5. `released_at IS NULL` and within window: 409 `hold_released` / `hold_expired`.
 6. `stripe_payment_method_id` present: 409 `no_saved_card`.
-7. `amount_pence` (default `fee_pence`) clamped to `[1, fee_pence]`: 400 `invalid_amount` if above.
+7. `amount_pence` (default `fee_pence`) within `[1, fee_pence]`: 400 `invalid_amount`.
 
-Then: create the PI (8.3); on synchronous success set hold + booking state as in 8.6.1 (idempotent with the webhook); `logBookingOp` structured line (`operation: 'card_hold_charge'`); insert the `events` row; if the write is cross-venue (linked accounts), call `recordBookingWriteAudit` with `action_type: 'edited_booking'` and before/after deposit states. Response: `200 { ok: true, charged_pence, payment_intent_id }` or `402 { code, message }` per 8.5.
+Then create the PI (8.3); on synchronous success apply the same state as webhook branch 8.6.1 (idempotent, either may land first); `logBookingOp` (`operation: 'card_hold_charge'`); `events` row; cross-venue writes also call `recordBookingWriteAudit` (`action_type: 'edited_booking'`, before/after deposit states). Response `200 { ok, charged_pence, payment_intent_id }` or `402 { code, message }`.
 
-**UI:** in the deposit actions block, when the client-side mirror of guards 3-7 passes and the viewer is admin, render a destructive-styled button `Charge no-show fee`. Clicking opens the existing confirm-dialog pattern (the same one destructive status changes use):
+**UI (booking detail):** destructive-styled `Charge no-show fee` button when the client-side mirror of guards 2-6 passes and viewer is admin. Confirm dialog:
 - Title: `Charge no-show fee`
-- Body: `Charge {guestName}'s saved card for missing this appointment. The maximum you can charge is {fee}.`
-- Amount input, pre-filled with the full fee, validated to at most the fee.
-- Confirm button: `Charge {amount}` (updates live with the input).
-- On 402, show the API's plain-language message inline.
+- Body: `Charge {guestName}'s saved card for missing this booking. The maximum you can charge is {fee}.`
+- Amount input pre-filled with the full fee, max = fee.
+- Confirm button: `Charge {amount}` (live).
+- 402 messages shown inline.
 
-The button must also appear in the compact surfaces that reuse `BookingDetailContent` (panel, expanded row, appointment sheet) automatically, since they share the deposit block.
+The button appears automatically in every surface that reuses `BookingDetailContent` (panel, expanded row, appointment sheet).
+
+**UI (class roster):** `ClassInstanceDetailSheet.tsx` attendee rows: after a successful roster no-show, an attendee whose booking is chargeable (same client-side mirror) shows a compact `Charge no-show fee` affordance for admins, invoking the same endpoint with the same dialog. Non-admin staff see the `Card held` state only.
 
 ### 9.3 Refunding a charged fee
 
-Extend the existing `refund` action: when `deposit_status === 'Charged'`, refund against `charge_payment_intent_id` instead of `stripe_payment_intent_id` (`stripe.refunds.create({ payment_intent: hold.charge_payment_intent_id }, { stripeAccount })`). On success (or via the webhook branch 8.6.5): booking `deposit_status: 'Refunded'`, hold `released_at = now()`, `release_reason: 'refunded'`. UI: the existing `Refund deposit` button relabels to `Refund no-show fee` when the state is `'Charged'`. Admin-only, same as charging.
+Extend the existing `refund` action: when `deposit_status === 'Charged'`, refund against `hold.charge_payment_intent_id`. On success (or via webhook 8.6.6): booking `'Refunded'`, hold `released_at = now()`, `release_reason: 'refunded'`. Button relabels to `Refund no-show fee`. Admin-only.
 
-### 9.4 No-Show interplay (`PATCH /api/venue/bookings/[id]`)
+### 9.4 No-show and cancel interplay
 
-- Marking No-Show: the existing forfeit branch (`deposit_status === 'Paid'` -> `'Forfeited'`, around lines 883-884) is untouched; card holds are not `'Paid'` so nothing money-related happens. **Do not auto-charge.** The no-show guest email (`no_show_notification`, lines ~906-942) gains no charge language at this point (nothing has been charged); if the venue later charges, the receipt email covers it.
-- Undo No-Show (`No-Show -> Booked/Confirmed`): if `deposit_status === 'Card Held'`, nothing to restore (hold intact). If `'Charged'`, leave as `'Charged'`; the undo succeeds and the UI keeps showing the charged pill with the refund action available. Do not silently refund on undo (explicit money movement only, D3).
-- Cancellation (staff cancel in `staff-cancel-booking.ts` and the PATCH cancel branch): after a successful cancel of a booking with an open hold, release it: `released_at = now()`, `release_reason: 'cancelled'`, insert `events` row `card_hold_released`, and (best-effort, non-blocking) delete the booking-scoped Stripe customer (Section 12.2). The refund-eligibility logic is untouched (holds are never `'Paid'`).
+- **Staff PATCH No-Show:** the paid-deposit forfeit branch is untouched (holds are never `'Paid'`). **Do not auto-charge.** The `no_show_notification` email gains no charge language (nothing has been charged yet).
+- **Class roster no-show:** Phase 0 fixes the status string to `'No-Show'` (D9). The roster route then feeds the same charge gate. It still does not forfeit paid deposits (pre-existing, out of scope, Section 19). Note the roster route does not enforce the venue grace window (`validateNoShowGracePeriod` lives in the PATCH path only); acceptable for v1 since the roster is a deliberate attendance surface, but the charge gate itself is status-based either way.
+- **Undo No-Show:** `'Card Held'` -> nothing to restore (hold intact). `'Charged'` -> stays `'Charged'`; refund is explicit (9.3). Never silently refund.
+- **Cancels release the hold.** After a successful cancel in ANY path: staff PATCH cancel branch, `staff-cancel-booking.ts`, guest `POST /api/confirm` cancel, cart `rollbackGroup`, webhook `restoreAndReleaseClassBookings` when it cancels rows: if the booking has an open hold, set `released_at`, `release_reason: 'cancelled'`, insert `events` row `card_hold_released`, and best-effort delete the booking-scoped Stripe customer **only when no other live booking row shares it** (a class-cart cancel of one line must not detach the card that other lines' holds still rely on; check for sibling holds with `released_at IS NULL` sharing `stripe_customer_id` before deleting). Class credit/allowance restore logic is unrelated to holds and unchanged.
 
 ---
 
@@ -518,188 +614,200 @@ Extend the existing `refund` action: when `deposit_status === 'Charged'`, refund
 
 ### 10.1 Manage page (`/manage/[bookingId]/[token]`, `ManageBookingView.tsx`)
 
-- `GET /api/confirm` response gains the hold summary (fee, charged state) for the booking.
-- Display, when `deposit_status = 'Card Held'` and not released: an info line in the booking summary: `Your card is securely on file. {venueName} may charge a no-show fee of up to {fee} if you miss this appointment. Cancel before your appointment to avoid any charge.`
-- When `'Charged'`: `A no-show fee of {amount} was charged for this booking on {date}.`
-- Cancel behaviour: unchanged UI. The cancel path (`POST /api/confirm`, cancel branch) releases the hold exactly like the staff cancel (9.4). Because holds are never `'Paid'`, the refund machinery is naturally skipped; ensure the late-cancel copy branch (route lines ~650-651) is not triggered for holds (it is keyed on paid deposits; verify) and instead the success message for a card-hold booking says: `Your booking is cancelled. Your card will not be charged and the card hold has been released.`
-- Reschedule/modify: the hold carries over untouched (same card, same fee snapshot). The modify path re-computes `cancellation_deadline` as today; no hold changes. If a modify changes the service to one with a different card-hold fee, **keep the original snapshot** (the guest consented to that amount); note this in the modify code comment.
+- `GET /api/confirm` gains the guest-safe hold summary (fee, charged state).
+- `'Card Held'`, not released: `Your card is securely on file. {venueName} may charge a no-show fee of up to {fee} if you miss this booking. Cancel before it starts to avoid any charge.`
+- `'Charged'`: `A no-show fee of {amount} was charged for this booking on {date}.`
+- Cancel: unchanged UI; the cancel path releases the hold (9.4). Success message for a card-hold booking: `Your booking is cancelled. Your card will not be charged and the card hold has been released.` Verify the late-cancel "non-refundable" copy branch (keyed on paid deposits) does not fire for holds.
+- Reschedule/modify (incl. class/resource self-reschedule under `guest_self_reschedule`): the hold carries over untouched, same card, same fee snapshot; the modify path re-computes `cancellation_deadline` as today. If the modify changes the service/class to one with a different card-hold fee, **keep the original snapshot** (the guest consented to that amount); code comment required.
 
 ### 10.2 Emails and SMS
 
-Templates live in `src/lib/emails/templates/`, senders in `src/lib/communications/send-templated.ts`, comm-log message types are constrained by migration (see `20260402000000_deposit_request_email_and_comm_logs_types.sql` for the mechanism; add new types the same way).
+Templates in `src/lib/emails/templates/`, senders in `src/lib/communications/send-templated.ts`, comm-log message types constrained per the `20260402000000` migration mechanism. The renderer already varies nouns by model via `bookingLabel(booking)`; reuse it so copy says "class"/"booking"/"tickets" appropriately.
 
-1. **Booking confirmation** (existing template): when the booking has an open hold, append a short section:
-   - `No payment has been taken. Your card is securely on file and {venueName} may charge a no-show fee of up to {fee} if you do not attend. Cancel before your appointment to avoid any charge.`
-2. **No-show fee receipt** (new): `card-hold-charged.ts`, comm-log type `card_hold_charged_email`. Sent from the webhook/charge success path.
+1. **Booking confirmation** (existing template, all models): when the booking has an open hold, append: `No payment has been taken. Your card is securely on file and {venueName} may charge a no-show fee of up to {fee} if you do not attend. Cancel before your booking starts to avoid any charge.`
+2. **No-show fee receipt** (new): `card-hold-charged.ts`, comm-log type `card_hold_charged_email`, sent from the charge/webhook success path.
    - Subject: `No-show fee charged: {venueName}`
-   - Body core: `You missed your appointment at {venueName} on {date} at {time}. As set out when you booked, a no-show fee of {amount} has been charged to your saved card. If you think this is a mistake, please contact {venueName} directly.` Include venue contact block (reuse the standard footer partial).
-3. **No SMS in v1** for the receipt (email only; SMS allowance is billed and the email is the receipt of record). The confirmation SMS, if the venue has SMS confirmations on, keeps its existing copy (it links to the manage page where hold terms are shown).
-
-All copy: second person, plain, no em-dashes.
+   - Body: `You missed your {bookingLabel} at {venueName} on {date} at {time}. As set out when you booked, a no-show fee of {amount} has been charged to your saved card. If you think this is a mistake, please contact {venueName} directly.` Standard footer partial.
+3. **No SMS receipt in v1** (email is the receipt of record; SMS allowance is billed). CDE reminder crons (`cde_reminder_1/2`) are unchanged.
 
 ---
 
 ## 11. Events, audit, observability
 
-- `events` rows (manual inserts, following the `auto_cancelled` precedent): `card_hold_saved`, `card_hold_charged`, `card_hold_charge_failed`, `card_hold_charge_refunded`, `card_hold_released`. Payloads carry `{ booking_id, fee_pence | charged_pence | failure_code | release_reason }`. These appear in the booking detail timeline automatically.
-- `logBookingOp` (`src/lib/observability/booking-ops-log.ts`): new operations `card_hold_charge` and `card_hold_charge_failed` alongside the existing `cancel` / `refund_failed`.
-- Cross-venue writes: `recordBookingWriteAudit` with `action_type: 'edited_booking'` (9.2).
+- `events` rows (manual inserts): `card_hold_saved`, `card_hold_charged`, `card_hold_charge_failed`, `card_hold_charge_refunded`, `card_hold_released`, payloads `{ booking_id, fee_pence | charged_pence | failure_code | release_reason }`. They surface in the booking timeline automatically. (The class roster's existing `class_no_show` event is unchanged and complements these.)
+- `logBookingOp` (`src/lib/observability/booking-ops-log.ts`): operations `card_hold_charge`, `card_hold_charge_failed`.
+- Cross-venue writes: `recordBookingWriteAudit` (9.2).
 
 ---
 
 ## 12. Crons
 
-### 12.1 Abandoned setup cleanup (extend `auto-cancel-bookings`)
+### 12.1 Abandoned capture cleanup (extend `auto-cancel-bookings`)
 
-The class-cart sweep pattern (online, `Pending/Pending`, older than 30 min, Stripe object definitively non-payable) gains a card-hold arm: select bookings joined to `booking_card_holds` where `status='Pending' AND deposit_status='Pending' AND source='online'` and created more than 30 minutes ago; retrieve the SetupIntent; if its status is `requires_payment_method` or `canceled`, cancel the booking (`status:'Cancelled'`, `deposit_status:'Failed'`, `cancellation_actor_type:'system'`, `events` row `auto_cancelled` with `reason:'card_hold_setup_abandoned'`), release the hold (`release_reason:'expired'`), and delete the Stripe customer. SetupIntents in `requires_action`/`processing` are left for the next sweep.
+Generalise the existing 30-minute online class-cart sweep into an abandoned-capture sweep covering all card-hold units:
 
-The phone 24h sweep and `deposit-reminder-2h` key on `source='phone'` and are unaffected (card hold is online-only in v1).
+- **Selection:** `status='Pending' AND deposit_status='Pending' AND source='online'` created > 30 min ago, joined to `booking_card_holds` (any model) **or** matching the existing class-cart predicate (unchanged).
+- **Setup-mode units** (hold has `stripe_setup_intent_id`): retrieve the SI; if `requires_payment_method` or `canceled` -> cancel the rows (`status:'Cancelled'`, `deposit_status:'Failed'`, `cancellation_actor_type:'system'`), `events` `auto_cancelled` (`reason:'card_hold_setup_abandoned'`), release holds (`release_reason:'abandoned'`), delete the customer, and for class rows call `restoreAndReleaseClassBookings`-equivalent entitlement restore (card-hold class lines consumed no entitlements, so this is usually a no-op; paid siblings are covered by the existing sweep). SIs in `requires_action`/`processing` wait for the next sweep.
+- **`payment_with_setup` units:** already covered by the existing PI-status sweep for class carts; extend the same PI check to non-class card-hold units (appointments bundles), cancelling + releasing as above.
+
+The phone 24h sweep and `deposit-reminder-2h` key on `source='phone'` and are unaffected (v1 online-only).
 
 ### 12.2 Hold release (new cron `/api/cron/release-card-holds`)
 
-- Route: `src/app/api/cron/release-card-holds/route.ts`, `GET`/`POST`, `requireCronAuthorisation()` (`src/lib/cron-auth.ts`), registered in `vercel.json` daily at `30 5 * * *` (offset from the existing 05:00/05:15 deletes). Document in `Docs/DEVELOPMENT.md` alongside the other cron notes.
-- Charge window constant: `CARD_HOLD_CHARGE_WINDOW_DAYS = 14` in `src/lib/booking/card-hold-terms.ts`. `charge_window_ends_at` = appointment end + 14 days (computed, not stored; the GET in 9.1 derives it).
-- Sweep: holds with `released_at IS NULL` whose booking's appointment ended more than 14 days ago (any status, including No-Show that the venue chose not to charge, and Completed). For each: `released_at = now()`, `release_reason: 'expired'`, `events` row `card_hold_released`, best-effort `stripe.customers.del(hold.stripe_customer_id, { stripeAccount })` (deleting the customer detaches the card: data minimisation). Stripe deletion failure logs and continues; the row is still marked released (the charge guard keys on `released_at`, so an undeleted customer is a cleanup miss, not a security hole).
-- Immediate release also happens inline on cancel (9.4, 10.1) and refund (9.3); the cron is the backstop and the expiry path.
+- Route: `src/app/api/cron/release-card-holds/route.ts`, `GET`/`POST`, `requireCronAuthorisation()`, registered in `vercel.json` daily at `30 5 * * *`. Document in `Docs/DEVELOPMENT.md`.
+- Window constant: `CARD_HOLD_CHARGE_WINDOW_DAYS = 14` in `src/lib/booking/card-hold-terms.ts`; `charge_window_ends_at` = booking end datetime + 14 days (derived, not stored).
+- Sweep: holds `released_at IS NULL` whose booking ended > 14 days ago (any status, including No-Show never charged, and Completed). Set `released_at`, `release_reason:'expired'`, `events` `card_hold_released`, best-effort `stripe.customers.del` **with the shared-customer check from 9.4** (skip deletion while a sibling hold is still open; the last released hold deletes the customer). Stripe deletion failure logs and continues; the row is still released (the charge guard keys on `released_at`, so an undeleted customer is a cleanup miss, not a security hole).
+- Inline releases on cancel (9.4) and refund (9.3) do the same; the cron is the backstop and the expiry path.
 
 ### 12.3 Reconciliation (extend `/api/cron/reconciliation`)
 
-Current query covers `deposit_status IN ('Paid','Refunded')` with a PI. Add:
-- `'Card Held'` (not released): retrieve the SetupIntent; alert if not `succeeded` or if `stripe_payment_method_id` no longer attached (`expected_status: 'Card Held'`, `actual_stripe_status: si.status`).
+Add to the 48h sweep:
+- `'Card Held'` (not released): retrieve the saving intent (SI, or the unit PI for `payment_with_setup`); alert if it is not `succeeded` or the PM is detached (`expected_status:'Card Held'`, `actual_stripe_status`).
 - `'Charged'`: retrieve `charge_payment_intent_id`; alert if not `succeeded`.
-The `reconciliation_alerts` row shape (`booking_id, expected_status, actual_stripe_status`) is reused unchanged.
+Reuses the `reconciliation_alerts` row shape unchanged.
+
+### 12.4 Recurring class materialization (extend the skip)
+
+`materializeRecurringReservation` (`~184-196`) currently skips `full_payment`/`deposit` classes. Add `card_hold` to the skip: auto-booking runs with no guest present, so no card can be captured, and booking without the hold would violate principle 1.3. Skip message: `Auto-booking is only supported for classes with no online card requirement.` (Also update the account recurring UI copy if it enumerates eligible classes.)
 
 ---
 
 ## 13. Reporting
 
-- RPC change in Section 5.3.
-- `src/app/api/venue/reports/route.ts`: pass through the three new columns in `report4_deposit`.
-- Reports UI (`src/app/dashboard/reports/ReportsView.tsx`, deposit section): add two stat lines under the existing deposit tiles: `No-show fees charged: {amount} ({count})` and `Active card holds: {count}`. Keep charged fees visually separate from deposits collected (different money semantics).
-- `report_by_booking_model` (`deposit_pence_collected` counts `'Paid'` only) is intentionally unchanged in v1; card-hold revenue is venue-level in the deposit summary. Note this in the reports section code comment.
+- RPC change in 5.3; pass-through in `src/app/api/venue/reports/route.ts` (`report4_deposit`).
+- Reports UI (`ReportsView.tsx`, deposit section): two stat lines: `No-show fees charged: {amount} ({count})` and `Active card holds: {count}`, visually separate from deposits collected.
+- `report_by_booking_model` (`deposit_pence_collected` counts `'Paid'` only) intentionally unchanged in v1; card-hold revenue is venue-level in the deposit summary. Code comment required.
 
 ---
 
-## 14. State machine summary
+## 14. State machine and edge cases
 
 `deposit_status` transitions introduced (all others unchanged):
 
 ```
-Pending ──(SetupIntent succeeded: confirm route or webhook)──▶ Card Held
-Pending ──(setup abandoned: cron)─────────────────────────────▶ Failed
-Card Held ──(admin charge succeeds, status must be No-Show)──▶ Charged
-Card Held ──(cancel / expiry / admin release)────────────────▶ Card Held + released_at   (terminal)
+Pending ──(save succeeded: confirm route or webhook; setup OR payment_with_setup)──▶ Card Held
+Pending ──(capture abandoned: cron 12.1)────────────────────────────────────────────▶ Failed
+Card Held ──(admin charge succeeds; status must be No-Show)────────────────────────▶ Charged
+Card Held ──(cancel / expiry / abandonment / admin release)──▶ Card Held + released_at   (terminal)
 Charged ──(admin refund or Stripe refund webhook)────────────▶ Refunded (+ released_at)  (terminal)
 ```
 
-Booking `status` machine is completely unchanged. Charge eligibility = `status = 'No-Show' AND deposit_status = 'Card Held' AND released_at IS NULL AND now() <= charge_window_ends_at`.
-
-Edge-case matrix:
+Booking `status` machine unchanged. Charge eligibility = `status='No-Show' AND deposit_status='Card Held' AND released_at IS NULL AND now() <= charge_window_ends_at`.
 
 | Scenario | Behaviour |
 |---|---|
-| Guest abandons at card step | Booking stays `Pending/Pending`; 30-min cron cancels + releases (12.1) |
+| Guest abandons at card step (any model) | Rows stay `Pending/Pending`; 30-min sweep cancels, releases, restores entitlements where consumed (12.1) |
 | Guest cancels early or late | Cancel proceeds; hold released; no charge ever possible (D3) |
-| Staff cancels | Same as guest cancel |
-| Guest reschedules | Hold carries over, fee snapshot unchanged (10.1) |
-| No-show, venue charges full fee | `Charged`; receipt email |
-| No-show, venue charges partial | Allowed (clamp `[1, fee]`); remainder is forgone (one charge per hold) |
-| No-show, venue does nothing | Hold expires 14 days after appointment; card detached |
-| Charge declined | Hold stays chargeable; staff may retry within window (8.5) |
-| Card requires 3DS off-session | Charge impossible; surfaced plainly; hold remains until expiry (8.5) |
-| Undo No-Show after charge | Status reverts; money state untouched; refund is explicit (9.4) |
-| Charged then disputed | Stripe dispute on venue's connected account; evidence = terms_snapshot + booking record + no-show event trail (Section 15) |
-| Flag disabled after holds exist | Existing holds remain chargeable, refundable, and releasable; only the creation of new holds stops (normative rule below) |
-| Venue disconnects Stripe | Charge fails at Stripe; connected account id was snapshotted on the hold so refunds/cleanup still route correctly |
-| Group booking, one attendee no-shows | That booking row alone is marked No-Show and charged its own fee (5.2) |
-
-Normative flag rule: **`card_hold_deposits` gates creation of new holds (config acceptance and the booking-flow branch). It does not gate charging, refunding, or releasing holds that already exist.** A guest who consented to a hold keeps exactly the deal they were shown, and the venue keeps the protection they were promised, regardless of later flag changes.
+| Staff cancels | Same |
+| Guest reschedules / self-reschedules class or resource | Hold carries over, fee snapshot unchanged (10.1) |
+| No-show, venue charges full or partial fee | `Charged` (clamp `[1, fee]`); one charge per hold; receipt email |
+| No-show, venue does nothing | Hold expires 14 days after the booking; card detached |
+| Charge declined / requires 3DS | Hold stays chargeable; retry within window; plain-language surfacing (8.5) |
+| Undo No-Show after charge | Status reverts; money untouched; refund explicit (9.4) |
+| Charged then disputed | Direct charge on the venue's account; evidence = terms snapshot + booking + events trail (15) |
+| Flag disabled after holds exist | Existing holds chargeable/refundable/releasable; only new-hold creation stops (6.1) |
+| Venue disconnects Stripe | Charges fail at Stripe; account id snapshotted on the hold keeps refunds/cleanup routed |
+| Group appointment, one member no-shows | That row alone is marked and charged (per-row holds, 5.2) |
+| Class cart: paid line + card-hold line, payment succeeds | Paid line `'Paid'`, hold line `'Card Held'`, one card entry (`payment_with_setup`, 7.2) |
+| Class cart: credit-covered line + card-hold line | Credit consumed for the covered line (already `Booked`); hold line `Pending` until card saved (`setup` mode); abandonment cancels only the hold line |
+| Card-hold class line cancelled from a multi-line cart | Its hold releases; shared customer survives while sibling holds remain open (9.4) |
+| Member books a card-hold class | Identical to non-member: free, card held; no allowance consumed (D8) |
+| `pay_with_class_credits` on a card-hold class | 400: nothing to pay (7.1) |
+| Recurring reservation hits a card-hold class | Materialization skips with message (12.4) |
+| Event booking with N tickets no-shows | One booking, one hold, fee = per-person x N; all-or-nothing (Section 4) |
+| Roster no-show then charge | Works: roster writes canonical `'No-Show'` after the Phase 0 fix (D9) |
 
 ---
 
 ## 15. Security, compliance, privacy
 
-- **PCI:** card data never touches ResNeo servers (Stripe Elements + SetupIntent, same posture as deposits).
-- **SCA/MIT:** Section 8.4. Consent text + snapshot is the mandate record.
-- **Authorization:** charging and refunding are admin-only server-side (`requireAdmin`); staff visibility only. All Stripe mutations service-role; `booking_card_holds` has no RLS policies (service-role only), matching the ledger convention.
-- **Disputes:** no-show fees carry elevated dispute risk. Evidence pack per charge: `terms_snapshot` (exact consent text and fee), booking record (service, date/time), `events` trail (`booking_created`, `card_hold_saved` with timestamp, `booking_status_changed` to No-Show, `card_hold_charged`). v1 provides no automated dispute-evidence submission; the data is queryable.
-- **GDPR/data minimisation:** the saved card is held only as long as it can be charged; release deletes the booking-scoped Stripe customer (detaching the PM). Stripe ids remain on the hold row for audit. Account deletion flows: the existing `account-hard-delete` cron anonymises guests; card-hold rows reference bookings (cascade) and contain no PII beyond Stripe ids.
-- **Abuse guard:** amount clamped server-side to the consented fee; one charge per hold via unique idempotency key + `'Charged'` state check.
+- **PCI:** card data never touches ResNeo servers (Stripe Elements; same posture as deposits).
+- **SCA/MIT:** Section 8.4; consent text + snapshot is the mandate record for both save paths (SetupIntent and `setup_future_usage`).
+- **Authorization:** charging/refunding admin-only server-side (`requireAdmin`); all Stripe mutations service-role; `booking_card_holds` has no RLS policies.
+- **Disputes:** no-show fees carry elevated dispute risk. Evidence per charge: `terms_snapshot` (exact consent text, unit fee, accepted_at), booking record (entity, date/time, party/tickets), `events` trail (`booking_created`, `card_hold_saved`, `booking_status_changed` to No-Show or `class_no_show`, `card_hold_charged`). No automated evidence submission in v1.
+- **GDPR/data minimisation:** the saved card lives only while a hold can still be charged; release deletes the booking-scoped Stripe customer (detaching the PM), subject to the shared-customer check. Stripe ids remain on hold rows for audit. `account-hard-delete` anonymisation is unaffected (holds reference bookings, cascade, no direct PII beyond Stripe ids).
+- **Abuse guards:** server-side clamp to the consented fee; single-charge enforcement; grace-window gate on marking no-show (PATCH path) limits premature no-shows.
 
 ---
 
 ## 16. Implementation plan (phased, with file-by-file checklist)
 
-Recommended sequence; each phase leaves the app shippable with the flag off.
+Each phase leaves the app shippable with the flag off.
 
-### Phase 0: foundations
-1. Migration A (enums), Migration B (`booking_card_holds`). Files: two new `supabase/migrations/*.sql` (Section 5).
-2. `src/lib/booking/card-hold-terms.ts` (new): consent template + `CARD_HOLD_CHARGE_WINDOW_DAYS` + fee formatting helper.
-3. Feature flag plumbing: `src/lib/feature-flags/types.ts`, `resolve.ts`; dashboard + super flag UIs; `Docs/FEATURE_FLAGS.md`.
-4. Purpose constants (8.2).
-5. Type updates: `deposit_status` unions in `src/types/**` (grep `'Forfeited'` to find every union/label map), display label maps in UI helpers.
+### Phase 0: foundations and pre-existing fixes
+1. **Fix the class roster no-show status string** (D9): `src/lib/class-commerce/class-attendance.ts` lines ~126 and ~131, `'No Show'` -> `'No-Show'`; verify against a real database; regression test. Audit for any other `'No Show'` (space) literals.
+2. Migration A (enums), Migration B (`booking_card_holds`).
+3. `src/lib/booking/card-hold-terms.ts` (consent template, `CARD_HOLD_CHARGE_WINDOW_DAYS`, fee formatting) and `src/lib/booking/card-hold-capture.ts` (7.0).
+4. Feature flag plumbing: `types.ts`, `resolve.ts`, `FeatureFlagsSection.tsx`, `FlagsPageClient.tsx`, `Docs/FEATURE_FLAGS.md`.
+5. Purpose constants (8.2). Type updates: `deposit_status` unions and display-label maps (grep `'Forfeited'` for every union/map); `ClassPaymentRequirement` union + every exhaustive switch on it (6.4).
 
 ### Phase 1: configuration
-6. `src/lib/appointments/appointment-service-payment.ts`: `'card_hold'` in requirement + charge label resolution, flag-off degradation, `assertCardHoldSupportedForModel`.
-7. Service form: `AppointmentServiceFormFields.tsx`, `appointment-service-form-values.ts`, `appointment-service-form-to-payload.ts`; zod unions + flag gate in the appointment-services API routes and the `service_items` write path.
-8. Guard rails in class/event/resource create paths (6.4).
+6. `appointment-service-payment.ts`: `'card_hold'` resolution, flag-off degradation (6.3).
+7. Editor forms + payload/zod + flag gating for: appointment services (incl. onboarding list), service items, class types (`ClassTimetableView.tsx`), events (`EventManagerView.tsx`; zod union is the only gate for the text column), resources (`ResourceTimelineView.tsx`) (6.2).
+8. Availability slot TS types widened; `validate-event-ticket-booking.ts` returns `cardHoldFeePence` (7.1).
 
-### Phase 2: booking flow
-9. `POST /api/booking/create`: card-hold branch (7.1). Then `create-multi-service`, `create-group` with the bundle precedence rule.
-10. `PaymentStep.tsx` setup mode + flow prop threading (`AppointmentBookingFlow.tsx`, unified path) + confirmation screen copy (7.2).
-11. `confirm-deposit-payment.ts`: `confirmBookingsForSucceededSetupIntent()`; `POST /api/booking/confirm-payment` schema + branch (7.3).
-12. Webhook: `setup_intent.succeeded` / `setup_intent.setup_failed` branches; enable the event types on the Stripe webhook endpoint (deployment note).
-13. Public catalog surfacing (7.5).
+### Phase 2: booking flows
+9. `POST /api/booking/create`: capture-mode integration across the appointment, class, event, resource branches; `pay_with_class_credits` rejection for card-hold classes (7.1). Then `create-multi-service`, `create-group`.
+10. Class cart: `quote-class-cart.ts` line fields; `orchestrate-class-cart-checkout.ts` card-hold lines, capture modes, rollback customer cleanup; response types; `/class-cart/quote` pass-through (7.2). `insertPendingPaidClassSessionBooking` null-money support (or sibling helper).
+11. `PaymentStep.tsx` modes + copy; prop threading in all four flows; confirmation screens; catalog fee lines (7.3).
+12. Confirm paths: `confirmBookingsForSucceededSetupIntent()` (new) and per-row extension of `confirmBookingsForSucceededPaymentIntent()`; `confirm-payment` route schema (7.4).
+13. Webhook: `setup_intent.succeeded` / `setup_intent.setup_failed`; enable event types on the Stripe endpoint (deployment note) (8.6).
 
 ### Phase 3: staff charge + guest visibility
 14. `GET /api/venue/bookings/[id]`: `card_hold` object (9.1).
-15. `POST /api/venue/bookings/[id]/deposit`: `charge_no_show_fee` action + guards + refund extension (9.2, 9.3).
-16. Webhook: `payment_intent.succeeded` / `payment_failed` / `charge.refunded` purpose branches, ordered before the generic deposit path (8.6).
-17. `BookingDetailContent.tsx`: pills, detail lines, charge button + dialog, refund relabel (9.1, 9.2).
-18. Cancel paths release the hold: PATCH cancel branch, `staff-cancel-booking.ts`, `POST /api/confirm` cancel (9.4, 10.1).
-19. `GET /api/confirm` + `ManageBookingView.tsx` guest copy (10.1).
-20. Emails: confirmation section + `card-hold-charged.ts` template + comm-log type migration entry + sender in `send-templated.ts` (10.2).
+15. `POST /api/venue/bookings/[id]/deposit`: `charge_no_show_fee` + guards; `refund` extension for `'Charged'` (9.2, 9.3).
+16. Webhook purpose branches for the fee PI (succeeded / failed / refunded), ordered before generic paths (8.6).
+17. `BookingDetailContent.tsx` pills + charge dialog + refund relabel; `ClassInstanceDetailSheet.tsx` roster affordance (9.1, 9.2).
+18. Hold release on every cancel path: PATCH cancel, `staff-cancel-booking.ts`, `/api/confirm` cancel, `rollbackGroup`, `restoreAndReleaseClassBookings`; shared-customer deletion check (9.4).
+19. `GET /api/confirm` + `ManageBookingView.tsx` guest copy incl. cancel success message (10.1).
+20. Emails: confirmation hold section (model-aware noun), `card-hold-charged.ts` + comm-log type migration entry + sender (10.2).
 21. Events + `logBookingOp` + cross-venue audit (11).
 
 ### Phase 4: lifecycle hygiene
-22. `auto-cancel-bookings` card-hold sweep (12.1).
+22. `auto-cancel-bookings`: generalised abandoned-capture sweep (12.1).
 23. New cron `release-card-holds` + `vercel.json` + `Docs/DEVELOPMENT.md` (12.2).
 24. `reconciliation` extension (12.3).
-25. Reports: RPC migration (Migration C), route pass-through, `ReportsView.tsx` tiles (13); `Docs/schema.sql` inventory update.
+25. `materializeRecurringReservation` skip + message (12.4).
+26. Reports: Migration C, route pass-through, `ReportsView.tsx` tiles; `Docs/schema.sql` (13).
 
 ### Phase 5: docs and rollout
-26. Help centre: venue-side article update (how deposits work gains a card-hold section) and guest-facing manage/booking copy review. Follow CLAUDE.md help conventions (plain second person, no em-dashes, appointments focus).
-27. Update this document's status header; add row to `Docs/Resneo-Appointments-Review-And-Roadmap.md`.
-28. Rollout: deploy with flag off; enable `FEATURE_FLAG_CARD_HOLD_DEPOSITS` env on staging; pilot on one venue (flag per venue); watch `reconciliation_alerts`, webhook logs, and the first live charges; then default availability decision.
+27. Help centre: venue-side deposits article gains a card-hold section; class/appointments guest copy review. CLAUDE.md copy rules apply.
+28. Update this document's status header; add a row to `Docs/Resneo-Appointments-Review-And-Roadmap.md`.
+29. Rollout: deploy flag-off; staging env flag; pilot one venue (per-venue flag); watch `reconciliation_alerts`, webhook logs, first live charges; then default-availability decision.
 
 ---
 
 ## 17. Test plan
 
-### Unit (vitest, colocated `*.test.ts`)
-- `appointment-service-payment`: `'card_hold'` resolution, explicitness (legacy `deposit_pence` never infers it), variant override, add-on exclusion, flag-off degradation to `'none'`, bundle precedence (`full_payment > deposit > card_hold > none`).
-- `card-hold-terms`: consent rendering (amount formatting, venue name), snapshot shape, window computation.
-- Charge guard matrix (9.2 guards 1-8) as a pure function extracted for testability: every 4xx path.
-- Webhook branch ordering: fee-PI success must not hit the generic deposit confirm (regression test with a purpose-tagged PI payload).
-- `deposit_status` label maps render the two new values everywhere a map exists.
+### Unit (vitest, colocated)
+- `resolveCaptureMode`: all four outcomes; multi-line units.
+- `appointment-service-payment`: `'card_hold'` explicitness (legacy inference untouched), variant override, add-on exclusion, flag-off degradation, per-model fee math (class/event x party, resource flat).
+- `card-hold-terms`: consent rendering, snapshot shape, window computation.
+- Charge guard matrix (9.2, guards 1-7) as a pure function: every 4xx.
+- Webhook ordering: fee-PI success must not reach the generic confirm; `payment_with_setup` PI success confirms per-row (`'Paid'` vs `'Card Held'`).
+- `class-attendance` writes `'No-Show'` (Phase 0 regression).
+- Entitlement engine untouched by card-hold lines: card-hold line never consumes credits/allowance; `pay_with_class_credits` rejection.
+- Display-label maps cover the two new `deposit_status` values.
 
 ### Integration (mocked Stripe)
-- Create -> setup confirm -> `'Card Held'` (route and webhook paths, idempotent when both fire).
-- Abandon -> cron cancel + release.
-- No-Show -> charge success -> `'Charged'` + events + email enqueue; double-click -> single PI (idempotency key).
-- Charge declined / `authentication_required` -> hold intact, failure recorded, correct 402 body.
-- Cancel (guest and staff) -> hold released, customer deletion attempted.
-- Refund of charged fee -> `'Refunded'`, released.
-- Reconciliation: seeded divergence produces an alert for `'Card Held'` and `'Charged'`.
+- Each model: create -> save -> `'Card Held'` (route and webhook paths, idempotent overlap).
+- Class cart matrices: paid+hold (`payment_with_setup`), covered+hold (`setup`), hold-only (`setup`), covered-only (`completed`, unchanged); PM propagation to every hold row; rollback deletes customer.
+- Abandonment: setup-mode and payment_with_setup-mode units cancelled + released; covered lines survive; credits restored where applicable.
+- No-Show (PATCH and roster) -> charge success -> `'Charged'` + events + receipt; double-click -> one PI.
+- Declines: `card_declined`, `authentication_required` (stray PI cancelled); retry path.
+- Cancels from every path release the hold; shared-customer survival check for multi-line carts.
+- Refund of a charged fee -> `'Refunded'` + released.
+- Reconciliation alerts for both new states; release cron expiry incl. customer deletion skip logic.
+- Recurring materialization skips card-hold classes.
 
 ### Manual E2E (Stripe test mode, connected test account)
 | Card | Expectation |
 |---|---|
 | `4242 4242 4242 4242` | Saves; off-session charge succeeds |
-| `4000 0025 0000 3155` | Saves with 3DS challenge at booking; off-session charge later raises `authentication_required` (exercises 8.5 fallback messaging) |
-| `4000 0000 0000 0341` | Attaches, then off-session charge declines (`card_declined`) |
+| `4000 0025 0000 3155` | 3DS challenge at save; off-session charge later raises `authentication_required` |
+| `4000 0000 0000 0341` | Attaches; off-session charge declines (`card_declined`) |
 
-Walk the full journey on staging: configure a card-hold service, book as guest (check copy + £0), verify confirmation email terms, mark No-Show inside grace (should fail) and after grace, charge partial amount, verify receipt email + reports tiles + reconciliation silence, refund, and separately let a hold expire via cron and confirm the Stripe customer is deleted.
+Walk the journeys on staging: configure one card-hold entity per model; book each online (check copy and £0, or amount + save line for `payment_with_setup`); verify confirmation email terms; class cart with membership coverage + card-hold class; mark No-Show inside grace (PATCH must refuse) and after; roster no-show + roster charge; partial charge; receipt email; reports tiles; refund; hold expiry via cron with customer deletion; recurring skip message.
 
 ---
 
@@ -707,22 +815,26 @@ Walk the full journey on staging: configure a card-hold service, book as guest (
 
 | Surface | Change |
 |---|---|
-| `POST /api/booking/create` (and `create-multi-service`, `create-group`) | Response adds `payment_mode: 'payment' | 'setup'`, `card_hold_fee_pence`; setup mode returns SetupIntent `client_secret` |
-| `POST /api/booking/confirm-payment` | Accepts `setup_intent_id` (XOR with `payment_intent_id`) |
-| `GET /api/venue/bookings/[id]` | Adds `card_hold: { fee_pence, charged_pence, charged_at, released_at, charge_failure_code, charge_window_ends_at } | null` |
-| `POST /api/venue/bookings/[id]/deposit` | New `action: 'charge_no_show_fee'` (+ optional `amount_pence`); `refund` handles `'Charged'` state |
-| `GET /api/confirm` | Booking payload adds guest-safe hold summary |
-| `POST /api/webhooks/stripe` | New event types `setup_intent.succeeded`, `setup_intent.setup_failed`; purpose branches for `card_hold_no_show_fee` on PI events and refunds |
+| `POST /api/booking/create` (+ `create-multi-service`, `create-group`) | Response adds `payment_mode: 'payment' | 'setup' | 'payment_with_setup'`, `card_hold_fee_pence`; setup mode returns a SetupIntent `client_secret` |
+| `POST /api/booking/class-cart/checkout` (+ `/quote`) | Same additions; quote lines add `card_hold_fee_pence` |
+| `POST /api/booking/confirm-payment` | Accepts `setup_intent_id` (XOR `payment_intent_id`) |
+| `GET /api/venue/bookings/[id]` | Adds `card_hold: {...} | null` (9.1) |
+| `POST /api/venue/bookings/[id]/deposit` | New `action: 'charge_no_show_fee'` (+ `amount_pence`); `refund` handles `'Charged'` |
+| `GET /api/confirm` | Guest-safe hold summary |
+| `POST /api/webhooks/stripe` | New event types `setup_intent.succeeded`, `setup_intent.setup_failed`; purpose branches for `card_hold_no_show_fee`; per-row confirm for `payment_with_setup` |
 | `GET/POST /api/cron/release-card-holds` | New cron |
+| Entity editors' write APIs | `payment_requirement` unions accept `'card_hold'` (flag-gated) |
 
 ---
 
 ## 19. Future work (explicitly not v1)
 
-1. **Fee payment link fallback** for `authentication_required` declines: an on-session pay page (extend `/pay`) charging the fee with 3DS.
-2. **Phone/staff-created bookings**: send a "secure your booking" card-save link (deposit-request flow in setup mode) with template copy changes.
-3. **Late-cancellation fees**: charge window opening on late cancel, not just No-Show. Requires new consent text, policy configuration, and manage-page copy.
-4. **Charge deposit and save card together** (`setup_future_usage` on the deposit PI) for mixed bundles or "deposit + no-show top-up" policies.
-5. **Classes, events, resources** support (enum already carries the value).
-6. **`booking_payments` ledger rows** for card-hold charges once the Tap to Pay ledger ships.
-7. **Automated dispute evidence** assembly from the terms snapshot + event trail.
+1. **Fee payment link fallback** for `authentication_required` declines: on-session pay page charging the fee with 3DS.
+2. **Phone/staff-created bookings**: "secure your booking" card-save link (deposit-request flow in setup mode) with template copy changes.
+3. **Late-cancellation fees**: charge window opening on late cancel, not just No-Show; new consent text, policy config, manage-page copy.
+4. **Compound per-entity config**: "charge a deposit AND hold for a further no-show fee" on one entity (the `payment_with_setup` machinery already supports the capture; this is a config/UX extension).
+5. **Roster no-show parity**: make the class roster no-show honour the grace window and forfeit paid deposits like the PATCH path (pre-existing inconsistency).
+6. **Waitlist integration** if/when CDE waitlists ship.
+7. **Course session no-show fees.**
+8. **`booking_payments` ledger rows** for card-hold charges once the Tap to Pay ledger ships.
+9. **Automated dispute evidence** assembly from the terms snapshot + events trail.

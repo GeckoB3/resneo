@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import type { ResolvedAppointmentsFeatureFlags, VenueFeatureFlags } from '@/lib/feature-flags';
 import type { AnyAvailablePractitionerConfig } from '@/lib/feature-flags/any-available-practitioner-config';
@@ -72,6 +73,7 @@ export function FeatureFlagsSection({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const waitlistNavSync = useDashboardWaitlistNavSync();
+  const router = useRouter();
 
   useEffect(() => {
     if (!resolved.any_available_practitioner) return;
@@ -135,6 +137,10 @@ export function FeatureFlagsSection({
         if (data.calendars) setCalendars(data.calendars);
         waitlistNavSync?.setAppointmentWaitlistEnabled(savedResolved.waitlist_v2);
         onSaved(savedRaw, savedResolved);
+        // Purge the client router cache and re-render server components so
+        // pages that resolve flags server-side (e.g. availability rules) pick
+        // up the change on their next visit without a hard refresh.
+        router.refresh();
         if (options?.expectedOff && savedResolved[options.expectedOff]) {
           setError(
             'This feature is turned on for your account by Reserve NI and cannot be switched off in settings. Contact support if you need it changed.',
@@ -154,7 +160,7 @@ export function FeatureFlagsSection({
         setSaving(false);
       }
     },
-    [onSaved, resolved, waitlistNavSync],
+    [onSaved, resolved, waitlistNavSync, router],
   );
 
   const saveAnyAvailableConfig = useCallback(

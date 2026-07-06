@@ -180,9 +180,11 @@ export async function cancelStaffBookingWithNotify(
     }
   }
 
-  // §9.3 — cancels release card holds in every path; group cancels release per
-  // sibling row. Best-effort: the cancel already happened, and the charge gate
-  // also requires status = 'No-Show', so a missed release cannot enable a charge.
+  // §9.3 — this helper serves the VENUE-INITIATED cancel cascades (class
+  // instance and event cancels), so holds are always released, deliberately
+  // NOT the late-cancellation keep (settleCardHoldsOnCancellation): a guest
+  // must never stay chargeable for a cancellation the venue made. Group
+  // cancels release per sibling row. Best-effort: the cancel already happened.
   try {
     await releaseCardHoldsForBookings(admin, idsToCancel, 'cancelled');
   } catch (holdErr) {

@@ -20,15 +20,17 @@ import {
   CARD_HOLD_CHARGE_ACTION_LABEL,
   CARD_HOLD_CHARGE_DIALOG_TITLE,
   CARD_HOLD_REFUND_ACTION_LABEL,
+  CARD_HOLD_RELEASE_ACTION_LABEL,
   CARD_HOLD_RESEND_LINK_LABEL,
   CARD_HOLD_WAIVE_LABEL,
   cardHoldChargeConfirmLabel,
   cardHoldChargeDialogBody,
+  cardHoldReleaseDialogBody,
 } from '@/components/booking/card-hold-copy';
 import type { CardHoldUiState } from '@/components/booking/card-hold-ui-state';
 
-/** Legacy deposit-route actions the card-hold block re-uses (server swaps behaviour, §9.2b/c/e). */
-export type CardHoldLegacyDepositAction = 'send_payment_link' | 'waive' | 'refund';
+/** Deposit-route actions the card-hold block posts through the surface's runner (§9.2b/c/e + release_hold). */
+export type CardHoldLegacyDepositAction = 'send_payment_link' | 'waive' | 'refund' | 'release_hold';
 
 /**
  * Charge action state: posts `charge_no_show_fee` to the deposit route and
@@ -249,8 +251,13 @@ export function CardHoldDetailSection({
 }) {
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
+  const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const hasActions =
-    state.showResendLink || state.showWaive || state.showChargeAction || state.showRefundAction;
+    state.showResendLink ||
+    state.showWaive ||
+    state.showChargeAction ||
+    state.showRefundAction ||
+    state.showReleaseAction;
 
   return (
     <div className="mt-1.5 space-y-1.5">
@@ -301,6 +308,16 @@ export function CardHoldDetailSection({
               {CARD_HOLD_REFUND_ACTION_LABEL}
             </button>
           ) : null}
+          {state.showReleaseAction ? (
+            <button
+              type="button"
+              disabled={actionDisabled}
+              onClick={() => setReleaseConfirmOpen(true)}
+              className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {CARD_HOLD_RELEASE_ACTION_LABEL}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {state.showChargeAction && state.feePence != null && state.feePence > 0 ? (
@@ -312,6 +329,43 @@ export function CardHoldDetailSection({
           feePence={state.feePence}
           onCharged={onChanged}
         />
+      ) : null}
+      {state.showReleaseAction ? (
+        // Releasing forfeits the venue's ability to charge the fee and cannot
+        // be undone, so it gets a confirm dialog like the money actions.
+        <Dialog
+          open={releaseConfirmOpen}
+          onOpenChange={setReleaseConfirmOpen}
+          title={CARD_HOLD_RELEASE_ACTION_LABEL}
+          size="sm"
+          showClose={false}
+          contentClassName="max-w-sm"
+          footer={
+            <div className="flex gap-2.5">
+              <Button
+                type="button"
+                variant="danger"
+                className="flex-1"
+                onClick={() => {
+                  setReleaseConfirmOpen(false);
+                  onLegacyDepositAction('release_hold');
+                }}
+              >
+                {CARD_HOLD_RELEASE_ACTION_LABEL}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setReleaseConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm text-slate-600">{cardHoldReleaseDialogBody(guestName)}</p>
+        </Dialog>
       ) : null}
       {state.showRefundAction ? (
         // Refunding moves real money and cannot be undone (the hold is

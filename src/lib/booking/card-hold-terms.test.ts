@@ -29,25 +29,52 @@ describe('renderCardHoldConsentText', () => {
     );
   });
 
+  it('quotes the cancellation notice when one applies (late cancellations chargeable)', () => {
+    expect(renderCardHoldConsentText('The Copper Room', 2500, 24)).toBe(
+      'By saving your card you authorise The Copper Room to charge up to £25.00 ' +
+        'if you do not attend, or if you cancel less than 24 hours before your booking starts. ' +
+        'If you cancel earlier than that, nothing extra will be charged.',
+    );
+  });
+
+  it('singularises a one-hour notice', () => {
+    expect(renderCardHoldConsentText('Venue', 2500, 1)).toContain('less than 1 hour before');
+  });
+
+  it('keeps the before-it-starts wording when the notice is zero or unknown', () => {
+    for (const hours of [0, null, undefined]) {
+      expect(renderCardHoldConsentText('Venue', 2500, hours)).toContain(
+        'If you cancel the booking before it starts, nothing extra will be charged.',
+      );
+    }
+  });
+
   it('formats non-round fees in the consent text', () => {
     expect(renderCardHoldConsentText('Studio 9', 1250)).toContain('charge up to £12.50 if you do not attend');
   });
 
   it('contains no em-dashes', () => {
     expect(renderCardHoldConsentText('Venue', 2500)).not.toContain('—');
+    expect(renderCardHoldConsentText('Venue', 2500, 48)).not.toContain('—');
   });
 });
 
 describe('buildCardHoldTermsSnapshot', () => {
-  it('returns the version 1 snapshot shape with a null accepted_at', () => {
+  it('returns the version 2 snapshot shape with a null accepted_at', () => {
     expect(buildCardHoldTermsSnapshot('The Copper Room', 2500)).toEqual({
-      version: 1,
+      version: 2,
       text:
         'By saving your card you authorise The Copper Room to charge up to £25.00 if you do not attend. ' +
         'If you cancel the booking before it starts, nothing extra will be charged.',
       fee_pence: 2500,
       accepted_at: null,
     });
+  });
+
+  it('embeds the cancellation notice in the snapshotted text', () => {
+    expect(buildCardHoldTermsSnapshot('The Copper Room', 2500, 48).text).toContain(
+      'or if you cancel less than 48 hours before your booking starts',
+    );
   });
 
   it('stores the unit total fee in pence, not the formatted string', () => {

@@ -72,7 +72,9 @@ export interface BookingDetailDrawerContext {
   setProcessingBlocksDraft: Dispatch<SetStateAction<ProcessingTimeBlock[]>>;
   appointmentCoreMinutesForProcessing: number;
   persistProcessingBlocks: () => Promise<void>;
-  runDepositAction: (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => Promise<void>;
+  runDepositAction: (
+    action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund' | 'release_hold',
+  ) => Promise<void>;
   executePermanentDelete: () => Promise<void>;
   setConfirmDialog: Dispatch<
     SetStateAction<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>

@@ -9,6 +9,7 @@
  */
 
 import {
+  CARD_HOLD_LATE_CANCELLED_LINE,
   CARD_HOLD_PILL_CHARGED,
   CARD_HOLD_PILL_ENDED,
   CARD_HOLD_PILL_HELD,
@@ -34,6 +35,8 @@ export interface CardHoldSummary {
   released_at: string | null;
   charge_failure_code: string | null;
   charge_window_ends_at: string | null;
+  /** Set when a late cancellation kept the hold chargeable (§9.3 amended). */
+  late_cancellation_at?: string | null;
 }
 
 export interface CardHoldBookingFields {
@@ -74,6 +77,12 @@ export interface CardHoldUiState {
   showChargeAction: boolean;
   /** Admin-only `Refund no-show fee` when the fee was charged (§9.2e). */
   showRefundAction: boolean;
+  /**
+   * `Release card hold` for a hold kept by a late cancellation (§9.3 amended):
+   * releases without charging, e.g. when the venue asked for the cancellation.
+   * Any staff, matching the waive action.
+   */
+  showReleaseAction: boolean;
 }
 
 /**
@@ -104,6 +113,15 @@ export function resolveCardHoldUiState(
     : Number.NaN;
   const windowExpired = Number.isFinite(windowEndsAt) && now.getTime() > windowEndsAt;
 
+  // Kept by a late cancellation (§9.3 amended): booking Cancelled, hold open,
+  // late_cancellation_at stamped. The fee stays chargeable and staff may
+  // release without charging.
+  const keptByLateCancellation =
+    booking.status === 'Cancelled' &&
+    ds === 'Card Held' &&
+    !released &&
+    cardHold?.late_cancellation_at != null;
+
   let kind: CardHoldUiKind;
   if (ds === 'Charged') {
     kind = 'charged';
@@ -132,12 +150,21 @@ export function resolveCardHoldUiState(
     case 'held':
       pill = { label: CARD_HOLD_PILL_HELD, variant: 'info', dot: true };
       lines.push(cardHoldHeldLine(feePence));
+      // A hold kept by a late cancellation: say why it is still chargeable
+      // on a Cancelled booking (§9.3 amended).
+      if (keptByLateCancellation) {
+        lines.push(CARD_HOLD_LATE_CANCELLED_LINE);
+      }
       if (cardHold?.charge_failure_code) {
         lines.push(cardHoldChargeFailureLine(cardHold.charge_failure_code));
       }
       // Explain the missing Charge button once the window has passed for a
-      // saved, still-No-Show-chargeable-looking hold.
-      if (booking.status === 'No-Show' && cardHold?.saved && windowExpired) {
+      // saved hold that would otherwise still look chargeable.
+      if (
+        (booking.status === 'No-Show' || keptByLateCancellation) &&
+        cardHold?.saved &&
+        windowExpired
+      ) {
         lines.push(CARD_HOLD_WINDOW_EXPIRED_LINE);
       }
       break;
@@ -160,9 +187,10 @@ export function resolveCardHoldUiState(
   }
 
   // Client mirror of the §9.2a guards 2-6 (the server re-checks all of them):
-  // No-Show status, 'Card Held', hold open, saved card, within the charge window.
+  // No-Show status OR a late-cancellation keep, 'Card Held', hold open, saved
+  // card, within the charge window.
   const chargeEligible =
-    booking.status === 'No-Show' &&
+    (booking.status === 'No-Show' || keptByLateCancellation) &&
     ds === 'Card Held' &&
     cardHold != null &&
     cardHold.saved &&
@@ -180,6 +208,7 @@ export function resolveCardHoldUiState(
     showWaive: kind === 'awaiting_card',
     showChargeAction: opts.isAdmin && chargeEligible,
     showRefundAction: opts.isAdmin && kind === 'charged',
+    showReleaseAction: keptByLateCancellation && cardHold?.saved === true,
   };
 }
 

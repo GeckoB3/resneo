@@ -61,6 +61,11 @@ export async function applyStaffBookingPaymentAndComms(params: {
    * row, then sends the card-request link instead of any deposit comms.
    */
   cardHoldFeePence?: number | null;
+  /**
+   * The notice hours behind the booking's cancellation_deadline; quoted in the
+   * hold consent text so late cancellations are covered (§9.3 amended).
+   */
+  cancellationNoticeHours?: number | null;
   emailExtras: StaffBookingEmailExtras;
   logContext: string;
 }): Promise<{ payment_url?: string }> {
@@ -85,6 +90,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
     requiresDeposit,
     depositAmountPence,
     cardHoldFeePence,
+    cancellationNoticeHours,
     emailExtras,
     logContext,
   } = params;
@@ -119,7 +125,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
         stripeConnectedAccountId,
         stripeCustomerId: customer.id,
         stripeSetupIntentId: setupIntent.id,
-        termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeePence),
+        termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeePence, cancellationNoticeHours),
       });
       payment_url = await createOrGetPaymentShortLink(venueId, bookingId, publicBaseUrl);
     } catch (stripeErr) {

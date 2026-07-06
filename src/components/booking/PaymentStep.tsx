@@ -36,6 +36,13 @@ interface PaymentStepProps {
   cardHoldFeePence?: number | null;
   /** Venue name for the card-hold consent and body copy. */
   venueName?: string;
+  /**
+   * The exact consent line the server snapshotted onto the hold
+   * (`card_hold_consent_text` on the create/checkout response, §7.5). Shown
+   * verbatim so the displayed text cannot drift from the stored dispute
+   * evidence; the local render is only a fallback for older responses.
+   */
+  cardHoldConsentText?: string | null;
 }
 
 function PaymentForm({
@@ -168,6 +175,7 @@ export function PaymentStep({
   mode = 'payment',
   cardHoldFeePence,
   venueName,
+  cardHoldConsentText,
 }: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
   const perPerson = partySize > 0 ? (amountPence / 100 / partySize).toFixed(2) : amount;
@@ -183,9 +191,13 @@ export function PaymentStep({
   const holdMode = isCardHoldPaymentMode(mode);
   const holdFeePence = holdMode ? cardHoldFeePence ?? 0 : 0;
   const holdVenueName = venueName?.trim() || 'The venue';
-  // Consent line above the submit button in both hold modes (design doc 7.3 / 7.5).
+  // Consent line above the submit button in both hold modes (design doc 7.3 / 7.5):
+  // the server's snapshotted text when provided, so shown text and stored
+  // dispute evidence cannot drift.
   const consentText =
-    holdMode && holdFeePence > 0 ? renderCardHoldConsentText(holdVenueName, holdFeePence) : null;
+    holdMode && holdFeePence > 0
+      ? (cardHoldConsentText ?? renderCardHoldConsentText(holdVenueName, holdFeePence))
+      : null;
 
   return (
     <div className="space-y-5">

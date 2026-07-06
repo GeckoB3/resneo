@@ -102,7 +102,7 @@ import {
   createCardHoldSetupIntent,
   insertCardHoldRows,
 } from '@/lib/booking/card-hold-capture';
-import { buildCardHoldTermsSnapshot } from '@/lib/booking/card-hold-terms';
+import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const createBookingSchema = z.object({
@@ -625,7 +625,11 @@ export async function POST(request: NextRequest) {
             stripeConnectedAccountId: venue.stripe_connected_account_id,
             stripeCustomerId: customer.id,
             stripeSetupIntentId: setupIntent.id,
-            termsSnapshot: buildCardHoldTermsSnapshot(venue.name as string, cardHoldFeePence),
+            termsSnapshot: buildCardHoldTermsSnapshot(
+              venue.name as string,
+              cardHoldFeePence,
+              refundWindowHoursTable,
+            ),
           },
         );
         client_secret = setupIntent.client_secret;
@@ -715,6 +719,13 @@ export async function POST(request: NextRequest) {
         requires_deposit: requiresDeposit || captureMode === 'setup',
         payment_mode: captureMode === 'setup' ? ('setup' as const) : ('payment' as const),
         card_hold_fee_pence: cardHoldFeePence,
+        // The exact consent line the server snapshotted (§7.5): the payment
+        // step must display this string, not re-derive it, so the shown text
+        // cannot drift from the stored dispute evidence.
+        card_hold_consent_text:
+          cardHoldFeePence != null && cardHoldFeePence > 0
+            ? renderCardHoldConsentText(venue.name as string, cardHoldFeePence, refundWindowHoursTable)
+            : undefined,
         client_secret: client_secret ?? undefined,
         stripe_account_id:
           requiresDeposit || captureMode === 'setup' ? venue.stripe_connected_account_id : undefined,
@@ -1938,7 +1949,11 @@ async function handleNonTableBooking(
           stripeConnectedAccountId: stripeAccountId,
           stripeCustomerId: customer.id,
           stripeSetupIntentId: setupIntent.id,
-          termsSnapshot: buildCardHoldTermsSnapshot(venue.name as string, cardHoldFeePence),
+          termsSnapshot: buildCardHoldTermsSnapshot(
+            venue.name as string,
+            cardHoldFeePence,
+            refundWindowHours,
+          ),
         },
       );
       client_secret = setupIntent.client_secret;
@@ -2038,6 +2053,12 @@ async function handleNonTableBooking(
       requires_deposit: requiresDeposit || captureMode === 'setup',
       payment_mode: captureMode === 'setup' ? ('setup' as const) : ('payment' as const),
       card_hold_fee_pence: cardHoldFeePence,
+      // The exact consent line the server snapshotted (§7.5); the payment step
+      // displays this string so shown text and dispute evidence cannot drift.
+      card_hold_consent_text:
+        cardHoldFeePence != null && cardHoldFeePence > 0
+          ? renderCardHoldConsentText(venue.name as string, cardHoldFeePence, refundWindowHours)
+          : undefined,
       deposit_amount_pence: depositAmountPence ?? 0,
       client_secret: client_secret ?? undefined,
       stripe_account_id:

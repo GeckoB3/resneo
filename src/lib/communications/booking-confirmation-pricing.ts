@@ -53,6 +53,9 @@ export function bookingHasOpenCardHoldDisplay(booking: BookingEmailData): boolea
 /**
  * The §10.2 confirmation-email hold section, with the venue named. Returned as
  * one plain-text paragraph; null when the booking has no open hold.
+ * Deadline-aware (§9.3 amended): with a cancellation deadline (refund_cutoff)
+ * the guest must cancel before that instant to avoid the fee; late
+ * cancellations may still be charged.
  */
 export function cardHoldConfirmationNotice(
   booking: BookingEmailData,
@@ -60,10 +63,16 @@ export function cardHoldConfirmationNotice(
 ): string | null {
   if (!bookingHasOpenCardHoldDisplay(booking)) return null;
   const fee = formatCardHoldFeePence(booking.card_hold_fee_pence!);
+  const cutoff = booking.refund_cutoff;
+  const cutoffValid = typeof cutoff === 'string' && Number.isFinite(Date.parse(cutoff));
+  const cancelClause = cutoffValid
+    ? `Cancel before ${formatRefundDeadlineIso(cutoff!)} to avoid any charge.`
+    : `Cancel before your booking starts to avoid any charge.`;
   return (
     `No payment has been taken. Your card is securely on file and ${venueName} ` +
-    `may charge a no-show fee of up to ${fee} if you do not attend. ` +
-    `Cancel before your booking starts to avoid any charge.`
+    `may charge a no-show fee of up to ${fee} if you do not attend` +
+    `${cutoffValid ? ' or cancel late' : ''}. ` +
+    cancelClause
   );
 }
 

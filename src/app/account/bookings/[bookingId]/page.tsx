@@ -11,6 +11,7 @@ import {
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import {
   deriveGuestCardHoldSummary,
+  guestCardHoldHeldLine,
   type GuestCardHoldRowInput,
 } from '@/lib/booking/guest-card-hold-summary';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
@@ -86,7 +87,11 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         console.error('[account booking detail] payment short link failed:', linkErr);
       }
     } else if (holdSummary?.state === 'held') {
-      cardHoldLine = `Your card is securely on file. ${venueName} may charge a no-show fee of up to ${formatCardHoldFeePence(holdSummary.fee_pence)} if you miss this booking. Cancel before it starts to avoid any charge.`;
+      cardHoldLine = guestCardHoldHeldLine(
+        venueName,
+        holdSummary.fee_pence,
+        booking.cancellation_deadline,
+      );
     } else if (holdSummary?.state === 'charged' && holdSummary.charged_pence != null) {
       const chargedDate = holdSummary.charged_at
         ? ` on ${new Date(holdSummary.charged_at).toLocaleDateString('en-GB', {

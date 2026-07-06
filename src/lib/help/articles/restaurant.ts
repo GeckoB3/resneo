@@ -289,7 +289,7 @@ When a slot needs a deposit, guests complete **Stripe** before the booking is co
 
 ## Card holds instead of deposits
 
-Prefer not to take money up front? Choose **Card hold** as the deposit type in your booking rules and set a **no-show fee per person (£)**. Guests still add their card to book, but nothing is charged; the card is simply stored securely. If a party does not arrive, mark the booking as a no-show and an admin can charge the fee from the booking. The card is released automatically 14 days after the booking, or as soon as the booking is cancelled. If you do not see the Card hold option, it is not switched on for your venue yet; contact support.
+Prefer not to take money up front? Choose **Card hold** as the deposit type in your booking rules and set a **no-show fee per person (£)**. Guests still add their card to book, but nothing is charged; the card is simply stored securely. If a party does not arrive, mark the booking as a no-show and an admin can charge the fee from the booking. Card holds follow your **Cancellation notice (hours)** setting: cancel before the notice period and the card is released, cancel late and the fee can still be charged from the cancelled booking. Otherwise the card is released automatically 14 days after the booking. If you do not see the Card hold option, it is not switched on for your venue yet; contact support.
 
 ## Staff-created bookings
 

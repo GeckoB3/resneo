@@ -35,6 +35,7 @@ interface PaymentSessionState {
   /** Card capture mode from the checkout response ('setup' = card hold, no payment today). */
   payment_mode?: CardHoldPaymentMode;
   card_hold_fee_pence?: number | null;
+  card_hold_consent_text?: string | null;
   group_booking_id: string;
   total_party_size: number;
 }
@@ -214,6 +215,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
           checkout_charge_kind: data.checkout_charge_kind as 'deposit' | 'full_payment' | undefined,
           payment_mode: (data.payment_mode as CardHoldPaymentMode | undefined) ?? 'payment',
           card_hold_fee_pence: (data.card_hold_fee_pence as number | null | undefined) ?? null,
+          card_hold_consent_text: (data.card_hold_consent_text as string | null | undefined) ?? null,
           group_booking_id: data.group_booking_id as string,
           total_party_size: totalParty,
         });
@@ -290,6 +292,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             chargeKind={paymentSession.checkout_charge_kind ?? 'deposit'}
             mode={paymentSession.payment_mode ?? 'payment'}
             cardHoldFeePence={paymentSession.card_hold_fee_pence}
+            cardHoldConsentText={paymentSession.card_hold_consent_text}
             venueName={venue.name}
           />
         </div>

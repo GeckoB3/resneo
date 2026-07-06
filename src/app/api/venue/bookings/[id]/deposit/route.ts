@@ -25,7 +25,14 @@ import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import type { BookingModel } from '@/types/booking-models';
 
 const schema = z.object({
-  action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund', 'charge_no_show_fee']),
+  action: z.enum([
+    'send_payment_link',
+    'waive',
+    'record_cash',
+    'refund',
+    'charge_no_show_fee',
+    'release_hold',
+  ]),
   // No upper bound here: the charge engine clamps to [1 pence, the consented
   // fee], and a schema cap would turn a large-but-consented fee into a generic
   // 400 with no usable message in the charge dialog.
@@ -40,7 +47,9 @@ type DepositActionHoldRow = {
   fee_pence: number;
   charge_payment_intent_id: string | null;
   charged_pence: number | null;
+  charged_at: string | null;
   released_at: string | null;
+  late_cancellation_at: string | null;
 };
 
 /** §9.2a result-code -> HTTP status. Card errors are 402 per the spec contract. */
@@ -90,7 +99,7 @@ export async function POST(
   const { data: holdData, error: holdErr } = await admin
     .from('booking_card_holds')
     .select(
-      'id, stripe_connected_account_id, stripe_payment_method_id, fee_pence, charge_payment_intent_id, charged_pence, released_at',
+      'id, stripe_connected_account_id, stripe_payment_method_id, fee_pence, charge_payment_intent_id, charged_pence, charged_at, released_at, late_cancellation_at',
     )
     .eq('booking_id', id)
     .maybeSingle();
@@ -155,6 +164,37 @@ export async function POST(
       charged_pence: result.chargedPence,
       payment_intent_id: result.paymentIntentId,
     });
+  }
+
+  if (parsed.data.action === 'release_hold') {
+    // Late-cancellation keeps (§9.3 amended): a hold kept chargeable by a late
+    // cancellation may be released without charging, e.g. when the venue
+    // itself asked for the cancellation. This is the ONLY staff release for a
+    // saved hold; on a live booking the hold is released by cancel, refund, or
+    // expiry alone, so the protection cannot be switched off mid-booking.
+    if (!hold || hold.released_at != null) {
+      return NextResponse.json(
+        { error: 'There is no open card hold to release for this booking.', code: 'invalid_state' },
+        { status: 409 },
+      );
+    }
+    const keptByLateCancellation =
+      booking.status === 'Cancelled' &&
+      booking.deposit_status === 'Card Held' &&
+      hold.late_cancellation_at != null &&
+      hold.charged_at == null;
+    if (!keptByLateCancellation) {
+      return NextResponse.json(
+        {
+          error:
+            'Only a card hold kept after a late cancellation can be released without charging.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
+    await releaseCardHoldsForBookings(admin, [id], 'admin');
+    return NextResponse.json({ success: true });
   }
 
   if (parsed.data.action === 'waive') {

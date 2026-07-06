@@ -777,7 +777,13 @@ Clients enter their card details as part of booking, just like a deposit, but **
 2. Open the booking and choose **Charge no-show fee**.
 3. Check the amount and confirm. You can charge less than the maximum, never more.
 
-Only **admins** can charge the fee. The card is released automatically 14 days after the booking, or as soon as the booking is cancelled. Once released, it can never be charged.
+Only **admins** can charge the fee. The card is released automatically 14 days after the booking, or as soon as the booking is cancelled in time. Once released, it can never be charged.
+
+## Late cancellations
+
+Card holds follow your **Cancellation notice (hours)** setting, the same one that controls deposit refunds. If a client cancels before the notice period starts, the card is released and nothing can be charged. If they cancel late (inside the notice period), the card stays on file and you can still charge the no-show fee from the cancelled booking, exactly as you would for a no-show. Clients see the deadline in their confirmation, and they are warned before they confirm a late cancellation.
+
+Cancelled it yourself, or happy to let it go? Open the cancelled booking and choose **Release card hold** to release the card without charging. If you do nothing, the card is released automatically when the 14 day window ends.
 
 ## Refund a no-show fee
 

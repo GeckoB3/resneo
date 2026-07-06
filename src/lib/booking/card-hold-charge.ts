@@ -58,10 +58,11 @@ type ChargeableHoldRow = {
   charged_at: string | null;
   charge_attempt_count: number;
   released_at: string | null;
+  late_cancellation_at: string | null;
 };
 
 const HOLD_CHARGE_COLUMNS =
-  'id, booking_id, venue_id, stripe_connected_account_id, stripe_customer_id, stripe_payment_method_id, fee_pence, charge_payment_intent_id, charged_at, charge_attempt_count, released_at';
+  'id, booking_id, venue_id, stripe_connected_account_id, stripe_customer_id, stripe_payment_method_id, fee_pence, charge_payment_intent_id, charged_at, charge_attempt_count, released_at, late_cancellation_at';
 
 /** Booking ref shown on the Stripe charge, matching the email footer derivation. */
 function bookingRefForCharge(bookingId: string): string {
@@ -607,8 +608,21 @@ export async function chargeCardHoldNoShowFee(
     estimated_end_time?: string | null;
   };
 
-  // Guard 3: charge is gated strictly on booking status = 'No-Show' (D3).
-  if (booking.status !== 'No-Show') {
+  // Guard 3: charge is gated on booking status = 'No-Show' (D3), or on a
+  // 'Cancelled' booking whose hold was deliberately KEPT by a late
+  // cancellation (§9.3 amended). The late_cancellation_at stamp is required
+  // for the Cancelled branch so a hold merely left open by a failed release
+  // can never be charged.
+  const keptByLateCancellation =
+    booking.status === 'Cancelled' && hold.late_cancellation_at != null;
+  if (booking.status !== 'No-Show' && !keptByLateCancellation) {
+    if (booking.status === 'Cancelled') {
+      return {
+        ok: false,
+        code: 'not_no_show',
+        message: 'This booking was cancelled before the cancellation deadline, so the fee cannot be charged.',
+      };
+    }
     return { ok: false, code: 'not_no_show', message: 'Mark the booking as a no-show before charging the fee.' };
   }
 

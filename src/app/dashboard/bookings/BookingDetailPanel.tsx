@@ -640,7 +640,7 @@ export function BookingDetailPanel({
     void executeStatusChange(newStatus);
   }, [detail, executeStatusChange, isAppointment]);
 
-  const runDepositAction = useCallback(async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
+  const runDepositAction = useCallback(async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund' | 'release_hold') => {
     setActionLoading(true);
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}/deposit`, {

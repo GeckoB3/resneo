@@ -69,6 +69,8 @@ export interface AccountBookingRow {
   booking_model: BookingModel;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
+  /** Last instant the guest can cancel free of charge (deposit refund / card-hold release). */
+  cancellation_deadline?: string | null;
   special_requests?: string | null;
   dietary_notes?: string | null;
   occasion?: string | null;
@@ -89,7 +91,7 @@ export type AccountBookingDisplayItem =
 
 /** Columns selected from `bookings` for every account loader (kept in one place). */
 const ACCOUNT_BOOKING_COLUMNS =
-  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id';
+  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id';
 
 type RawBookingRow = {
   id: string;
@@ -103,6 +105,7 @@ type RawBookingRow = {
   booking_model?: BookingModel | null;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
+  cancellation_deadline?: string | null;
   special_requests?: string | null;
   dietary_notes?: string | null;
   occasion?: string | null;
@@ -372,6 +375,7 @@ async function hydrateAccountBookingRow(
     booking_model: (b.booking_model as BookingModel | null) ?? 'table_reservation',
     deposit_status: b.deposit_status ?? null,
     deposit_amount_pence: b.deposit_amount_pence ?? null,
+    cancellation_deadline: b.cancellation_deadline ?? null,
     special_requests: b.special_requests ?? null,
     dietary_notes: b.dietary_notes ?? null,
     occasion: b.occasion ?? null,

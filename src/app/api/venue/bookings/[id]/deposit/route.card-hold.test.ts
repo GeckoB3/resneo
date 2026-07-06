@@ -107,7 +107,9 @@ function holdRow(overrides?: Row): Row {
     fee_pence: 2500,
     charge_payment_intent_id: null,
     charged_pence: null,
+    charged_at: null,
     released_at: null,
+    late_cancellation_at: null,
     ...overrides,
   };
 }
@@ -427,6 +429,67 @@ describe('send_payment_link (§9.2b)', () => {
       'deposit_request_email',
       'deposit_request_sms',
     ]);
+  });
+});
+
+describe('release_hold (late-cancellation keeps, §9.3 amended)', () => {
+  it('releases a kept hold on a late-cancelled booking with reason admin', async () => {
+    const { bookingUpdates } = setup({
+      role: 'staff',
+      hold: holdRow({ late_cancellation_at: '2026-07-05T10:00:00.000Z' }),
+      booking: { status: 'Cancelled', deposit_status: 'Card Held' },
+    });
+    const res = await POST(makeRequest({ action: 'release_hold' }), routeParams);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(mockRelease).toHaveBeenCalledWith(expect.anything(), [BOOKING_ID], 'admin');
+    // deposit_status stays 'Card Held'; the released hold row renders "Card hold ended".
+    expect(bookingUpdates).toHaveLength(0);
+  });
+
+  it('returns 409 invalid_state for a live booking (protection cannot be switched off mid-booking)', async () => {
+    setup({
+      hold: holdRow(),
+      booking: { status: 'Booked', deposit_status: 'Card Held' },
+    });
+    const res = await POST(makeRequest({ action: 'release_hold' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'invalid_state' });
+    expect(mockRelease).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 invalid_state for a Cancelled booking without the late-cancellation stamp', async () => {
+    setup({
+      hold: holdRow(),
+      booking: { status: 'Cancelled', deposit_status: 'Card Held' },
+    });
+    const res = await POST(makeRequest({ action: 'release_hold' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(mockRelease).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 invalid_state when there is no open hold', async () => {
+    setup({
+      hold: holdRow({ released_at: '2026-07-05T12:00:00.000Z', late_cancellation_at: '2026-07-05T10:00:00.000Z' }),
+      booking: { status: 'Cancelled', deposit_status: 'Card Held' },
+    });
+    const res = await POST(makeRequest({ action: 'release_hold' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(mockRelease).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 invalid_state for a charged hold', async () => {
+    setup({
+      hold: holdRow({
+        late_cancellation_at: '2026-07-05T10:00:00.000Z',
+        charged_at: '2026-07-06T09:00:00.000Z',
+        charged_pence: 2500,
+      }),
+      booking: { status: 'Cancelled', deposit_status: 'Charged' },
+    });
+    const res = await POST(makeRequest({ action: 'release_hold' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(mockRelease).not.toHaveBeenCalled();
   });
 });
 

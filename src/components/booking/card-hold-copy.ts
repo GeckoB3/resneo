@@ -108,6 +108,7 @@ export const CARD_HOLD_RESEND_LINK_LABEL = 'Resend link';
 export const CARD_HOLD_WAIVE_LABEL = 'Waive';
 export const CARD_HOLD_CHARGE_ACTION_LABEL = 'Charge no-show fee';
 export const CARD_HOLD_REFUND_ACTION_LABEL = 'Refund no-show fee';
+export const CARD_HOLD_RELEASE_ACTION_LABEL = 'Release card hold';
 
 /** Short date used in staff hold detail lines, e.g. "3 Jul 2026". */
 export function formatCardHoldDate(iso: string): string {
@@ -150,6 +151,21 @@ export const CARD_HOLD_WAIVED_LINE = 'The card request was waived. No card is on
  */
 export const CARD_HOLD_WINDOW_EXPIRED_LINE =
   'The charge window has ended, so the no-show fee can no longer be charged.';
+
+/**
+ * Held line variant for a hold kept by a late cancellation (§9.3 amended):
+ * the booking is Cancelled but the fee is still chargeable.
+ */
+export const CARD_HOLD_LATE_CANCELLED_LINE =
+  'The booking was cancelled after the cancellation deadline, so the no-show fee can still be charged.';
+
+/** Release dialog body for a kept hold (release without charging). */
+export function cardHoldReleaseDialogBody(guestName: string): string {
+  return (
+    `This releases ${guestName}'s card without charging the no-show fee. ` +
+    'Use it when the cancellation was the venue\'s choice. It cannot be undone.'
+  );
+}
 
 /** `'Charged'` (§9.1). Degrades gracefully when amount or date is unknown. */
 export function cardHoldChargedLine(

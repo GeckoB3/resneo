@@ -8,6 +8,8 @@
  * terms snapshot never leave the server.
  */
 
+import { formatRefundDeadlineIso } from '@/lib/booking/cancellation-deadline';
+
 export type GuestCardHoldState =
   | 'awaiting_card'
   | 'held'
@@ -46,6 +48,41 @@ export interface GuestCardHoldRowInput {
  * Returns null when there is no hold row, or when the status combination is not
  * a guest-meaningful hold state (e.g. a paid deposit booking with no hold).
  */
+/**
+ * The guest-facing "card held" line for the manage page and the signed-in
+ * booking detail page (§10.1). Deadline-aware (§9.3 amended): with a
+ * cancellation deadline the guest must cancel before that instant to avoid the
+ * fee; without one, cancelling any time before the start is enough.
+ * No em-dashes.
+ */
+export function guestCardHoldHeldLine(
+  venueName: string,
+  feePence: number,
+  cancellationDeadlineIso?: string | null,
+): string {
+  const fee = `£${(Number(feePence) / 100).toFixed(2)}`;
+  const deadlineMs = cancellationDeadlineIso ? Date.parse(cancellationDeadlineIso) : Number.NaN;
+  const cancelClause = Number.isFinite(deadlineMs)
+    ? `Cancel before ${formatRefundDeadlineIso(cancellationDeadlineIso!)} to avoid any charge.`
+    : 'Cancel before it starts to avoid any charge.';
+  return (
+    `Your card is securely on file. ${venueName} may charge a no-show fee of up to ${fee} ` +
+    `if you miss this booking or cancel late. ${cancelClause}`
+  );
+}
+
+/**
+ * Warning shown before the guest confirms a cancellation once the deadline has
+ * passed and a saved hold is open (§9.3 amended). No em-dashes.
+ */
+export function guestCardHoldLateCancelWarning(venueName: string, feePence: number): string {
+  const fee = `£${(Number(feePence) / 100).toFixed(2)}`;
+  return (
+    `The free cancellation deadline for this booking has passed. ` +
+    `If you cancel now, ${venueName} may still charge a no-show fee of up to ${fee}.`
+  );
+}
+
 export function deriveGuestCardHoldSummary(
   booking: GuestCardHoldBookingInput,
   hold: GuestCardHoldRowInput | null | undefined,

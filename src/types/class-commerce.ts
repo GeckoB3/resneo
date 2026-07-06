@@ -168,4 +168,10 @@ export type ClassCartCheckoutResponse =
       checkout_charge_kind?: 'deposit' | 'full_payment';
       /** Cart total of no-show hold fees, for consent copy; null when no card-hold lines. */
       card_hold_fee_pence: number | null;
+      /**
+       * The exact consent line the server snapshotted (§7.5). The payment step
+       * displays this string, not a re-derivation, so the shown text cannot
+       * drift from the stored dispute evidence. Absent without hold lines.
+       */
+      card_hold_consent_text?: string;
     };

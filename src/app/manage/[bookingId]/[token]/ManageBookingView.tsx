@@ -14,6 +14,10 @@ import {
 } from '@/components/booking/GuestClassModifyInstancePicker';
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import {
+  guestCardHoldHeldLine,
+  guestCardHoldLateCancelWarning,
+} from '@/lib/booking/guest-card-hold-summary';
 
 /** Guest-safe card-hold summary from GET /api/confirm (card_hold deposits §10.1). */
 interface CardHoldSummary {
@@ -56,6 +60,8 @@ interface BookingDetails {
   /** Outstanding compliance forms the guest should complete before their visit. */
   compliance_forms?: Array<{ name: string; url: string }>;
   refund_notice_hours?: number;
+  /** Last instant the guest can cancel free of charge (deposit refund / card-hold release). */
+  cancellation_deadline?: string | null;
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
   venue_public?: VenuePublic | null;
@@ -157,6 +163,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const [cancelled, setCancelled] = useState(false);
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
   const [cardHoldMessage, setCardHoldMessage] = useState<string | null>(null);
+  const [cardHoldKept, setCardHoldKept] = useState(false);
   const [showModify, setShowModify] = useState(false);
   const [modifySuccess, setModifySuccess] = useState(false);
 
@@ -196,6 +203,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       setCancelled(true);
       if (data.refund_message) setRefundMessage(data.refund_message);
       if (data.card_hold_message) setCardHoldMessage(data.card_hold_message);
+      if (data.card_hold_kept) setCardHoldKept(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -263,9 +271,23 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <p className="text-sm text-slate-500">{subtitle}</p>
           {cardHoldMessage && (
-            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left">
-              <p className="text-sm font-medium text-blue-800">Card hold released</p>
-              <p className="mt-1 text-sm text-blue-700">{cardHoldMessage}</p>
+            <div
+              className={
+                cardHoldKept
+                  ? 'rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-left'
+                  : 'rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left'
+              }
+            >
+              <p
+                className={
+                  cardHoldKept ? 'text-sm font-medium text-amber-800' : 'text-sm font-medium text-blue-800'
+                }
+              >
+                {cardHoldKept ? 'No-show fee may apply' : 'Card hold released'}
+              </p>
+              <p className={cardHoldKept ? 'mt-1 text-sm text-amber-700' : 'mt-1 text-sm text-blue-700'}>
+                {cardHoldMessage}
+              </p>
             </div>
           )}
           {refundMessage && (
@@ -338,6 +360,19 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
     rawRefundHours == null || rawRefundHours <= 0
       ? `This ${bookingNoun} is non-refundable.`
       : `Full refund if cancelled ${rawRefundHours}+ hours before your ${bookingNoun}. No refund within ${rawRefundHours} hours or for no-shows.`;
+
+  // Card-hold late-cancellation warning (§9.3 amended): once the deadline has
+  // passed and a saved hold is open, cancelling no longer avoids the fee, so
+  // say so before the guest confirms.
+  const holdDeadlineMs = details.cancellation_deadline
+    ? Date.parse(details.cancellation_deadline)
+    : Number.NaN;
+  const cardHoldLateCancelWarning =
+    details.card_hold?.state === 'held' &&
+    Number.isFinite(holdDeadlineMs) &&
+    Date.now() > holdDeadlineMs
+      ? guestCardHoldLateCancelWarning(details.venue_name, details.card_hold.fee_pence)
+      : null;
 
   return (
     <div className="w-full min-w-0 max-w-lg">
@@ -434,7 +469,11 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
           {details.card_hold?.state === 'held' && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
               <p className="text-blue-800">
-                {`Your card is securely on file. ${details.venue_name} may charge a no-show fee of up to ${formatCardHoldFeePence(details.card_hold.fee_pence)} if you miss this booking. Cancel before it starts to avoid any charge.`}
+                {guestCardHoldHeldLine(
+                  details.venue_name,
+                  details.card_hold.fee_pence,
+                  details.cancellation_deadline,
+                )}
               </p>
             </div>
           )}
@@ -581,6 +620,9 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
                 <p className="text-xs text-red-700">
                   {`Are you sure you want to cancel this ${bookingNoun}?`}
                 </p>
+              )}
+              {cardHoldLateCancelWarning && (
+                <p className="text-xs font-medium text-red-700">{cardHoldLateCancelWarning}</p>
               )}
               {error && <p className="text-xs text-red-600">{error}</p>}
               <div className="flex gap-2">

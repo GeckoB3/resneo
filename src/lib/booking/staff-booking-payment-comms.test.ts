@@ -152,7 +152,7 @@ describe('applyStaffBookingPaymentAndComms card-hold variant (spec 7.6)', () => 
         stripe_setup_intent_id: 'seti_1',
         fee_pence: 2500,
         terms_snapshot: expect.objectContaining({
-          version: 1,
+          version: 2,
           fee_pence: 2500,
           accepted_at: null,
           text: renderCardHoldConsentText('The Copper Room', 2500),

@@ -282,6 +282,7 @@ export function ResourceBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
     /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
     card_hold_requested?: boolean;
   } | null>(null);
@@ -717,6 +718,7 @@ export function ResourceBookingFlow({
           amount_pence_charged: charged,
           payment_mode: data.payment_mode,
           card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+          card_hold_consent_text: data.card_hold_consent_text ?? null,
         });
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
@@ -1225,6 +1227,7 @@ export function ResourceBookingFlow({
           chargeKind={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
           mode={createResult.payment_mode ?? 'payment'}
           cardHoldFeePence={createResult.card_hold_fee_pence}
+          cardHoldConsentText={createResult.card_hold_consent_text}
           venueName={venue.name}
         />
       )}

@@ -48,7 +48,16 @@ export interface InsertPendingPaidClassSessionBookingParams {
  */
 export async function insertPendingPaidClassSessionBooking(
   params: InsertPendingPaidClassSessionBookingParams,
-): Promise<{ ok: true; bookingId: string; deposit_amount_pence: number | null } | { ok: false; status: number; error: string; code?: string }> {
+): Promise<
+  | {
+      ok: true;
+      bookingId: string;
+      deposit_amount_pence: number | null;
+      /** The resolved notice hours behind the row's cancellation_deadline (feeds hold consent text). */
+      cancellation_notice_hours: number;
+    }
+  | { ok: false; status: number; error: string; code?: string }
+> {
   const {
     admin,
     venueId,
@@ -206,5 +215,10 @@ export async function insertPendingPaidClassSessionBooking(
     return { ok: false, status: 500, error: 'Failed to create booking' };
   }
 
-  return { ok: true, bookingId: (booking as { id: string }).id, deposit_amount_pence: depositPence };
+  return {
+    ok: true,
+    bookingId: (booking as { id: string }).id,
+    deposit_amount_pence: depositPence,
+    cancellation_notice_hours: refundWindowHours,
+  };
 }

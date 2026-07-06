@@ -688,6 +688,7 @@ export function AppointmentBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
     /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
     card_hold_requested?: boolean;
     /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
@@ -737,6 +738,7 @@ export function AppointmentBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
   } | null>(null);
 
   /**
@@ -2104,6 +2106,7 @@ export function AppointmentBookingFlow({
               typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
             payment_mode: data.payment_mode,
             card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+            card_hold_consent_text: data.card_hold_consent_text ?? null,
           });
           const needsStripe = Boolean(data.requires_deposit && data.client_secret);
           setStep(needsStripe ? 'payment' : 'confirmation');
@@ -2234,6 +2237,7 @@ export function AppointmentBookingFlow({
             typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
           payment_mode: data.payment_mode,
           card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+          card_hold_consent_text: data.card_hold_consent_text ?? null,
         });
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
@@ -2477,6 +2481,7 @@ export function AppointmentBookingFlow({
         cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
         payment_mode: data.payment_mode,
         card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+        card_hold_consent_text: data.card_hold_consent_text ?? null,
       });
       const needsStripe = Boolean(data.requires_deposit && data.client_secret);
       setStep(needsStripe ? 'group_payment' : 'group_confirmation');
@@ -4233,6 +4238,7 @@ export function AppointmentBookingFlow({
           chargeKind={singleDetailsChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'}
           mode={createResult.payment_mode ?? 'payment'}
           cardHoldFeePence={createResult.card_hold_fee_pence}
+          cardHoldConsentText={createResult.card_hold_consent_text}
           venueName={venue.name}
         />
       )}
@@ -4922,6 +4928,7 @@ export function AppointmentBookingFlow({
           chargeKind={groupChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'}
           mode={groupCreateResult.payment_mode ?? 'payment'}
           cardHoldFeePence={groupCreateResult.card_hold_fee_pence}
+          cardHoldConsentText={groupCreateResult.card_hold_consent_text}
           venueName={venue.name}
         />
       )}

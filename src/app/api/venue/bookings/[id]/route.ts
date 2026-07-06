@@ -78,11 +78,10 @@ import {
 import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
 import { validateClassModification } from '@/lib/booking/validate-class-modification';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
-import {
-  deleteCardHoldCustomersForBookings,
-  releaseCardHoldsForBookings,
-} from '@/lib/booking/card-hold-release';
+import { deleteCardHoldCustomersForBookings } from '@/lib/booking/card-hold-release';
+import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -192,7 +191,7 @@ export async function GET(
       // (RLS enabled, no policies), so always read via the admin client.
       getSupabaseAdminClient()
         .from('booking_card_holds')
-        .select('fee_pence, stripe_payment_method_id, charged_pence, charged_at, released_at, charge_failure_code')
+        .select('fee_pence, stripe_payment_method_id, charged_pence, charged_at, released_at, charge_failure_code, late_cancellation_at')
         .eq('booking_id', id)
         .maybeSingle(),
     ]);
@@ -302,6 +301,7 @@ export async function GET(
       charged_at: string | null;
       released_at: string | null;
       charge_failure_code: string | null;
+      late_cancellation_at: string | null;
     } | null;
     const card_hold = holdRow
       ? {
@@ -311,6 +311,7 @@ export async function GET(
           charged_at: holdRow.charged_at ?? null,
           released_at: holdRow.released_at ?? null,
           charge_failure_code: holdRow.charge_failure_code ?? null,
+          late_cancellation_at: holdRow.late_cancellation_at ?? null,
           charge_window_ends_at: cardHoldChargeWindowEndsAtForBooking({
             booking_date: String(booking.booking_date),
             booking_time: String(booking.booking_time),
@@ -840,14 +841,18 @@ export async function PATCH(
           ),
         });
 
-        // §9.3 — cancels release card holds in every path; group cancels
-        // release per sibling row (idsToCancel carries every cancelled row and
-        // each has its own hold). Best-effort: the cancel itself already
-        // happened, and the charge gate also requires status = 'No-Show'.
+        // §9.3 (amended) — staff-recorded cancels settle holds per sibling row
+        // (idsToCancel carries every cancelled row and each has its own hold):
+        // released before the deadline, kept chargeable after it (e.g. a guest
+        // phoning in a late cancellation). Best-effort: the cancel itself
+        // already happened, and a settle failure leaves the release cron as
+        // the backstop.
+        let keptCardHolds: Array<{ bookingId: string; feePence: number }> = [];
         try {
-          await releaseCardHoldsForBookings(admin, idsToCancel, 'cancelled');
+          const settleResult = await settleCardHoldsOnCancellation(admin, idsToCancel);
+          keptCardHolds = settleResult.keptHolds;
         } catch (holdErr) {
-          console.error('[PATCH booking cancel] card-hold release failed:', holdErr, {
+          console.error('[PATCH booking cancel] card-hold settle failed:', holdErr, {
             bookingId: id,
           });
         }
@@ -919,6 +924,11 @@ export async function PATCH(
             refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
           } else if (hadPaidDeposit && canRefund && !refundSucceeded) {
             refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
+          } else if (keptCardHolds.length > 0) {
+            // Late-cancellation card hold (\u00a79.3 amended): tell the guest the
+            // fee is still chargeable. Group units sum the kept fees.
+            const keptFeePence = keptCardHolds.reduce((sum, k) => sum + k.feePence, 0);
+            refund_message = `Because the booking was cancelled after the cancellation deadline, ${venueRow.name} may charge a no-show fee of up to ${formatCardHoldFeePence(keptFeePence)}.`;
           }
           const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
           const { sendCancellationNotification } = await import('@/lib/communications/send-templated');

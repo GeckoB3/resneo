@@ -889,7 +889,9 @@ export function ExpandedBookingContent({
     }
   };
 
-  const runDepositAction = async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
+  const runDepositAction = async (
+    action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund' | 'release_hold',
+  ) => {
     setInlineActionLoading(`deposit:${action}`);
     setInlineActionError(null);
     const depositOverlay: BookingRowOverlay =

@@ -21,7 +21,8 @@ import {
   type GuestCardHoldRowInput,
   type GuestCardHoldSummary,
 } from "@/lib/booking/guest-card-hold-summary";
-import { releaseCardHoldsForBookings } from "@/lib/booking/card-hold-release";
+import { settleCardHoldsOnCancellation } from "@/lib/booking/card-hold-cancellation";
+import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
 import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
   validateBookingStatusTransition,
@@ -547,10 +548,10 @@ export async function POST(request: NextRequest) {
       const previousStatus = booking.status as string;
 
       // Card-hold deposits (§9.3/§10.1): note whether this booking carries an
-      // OPEN hold before we cancel, so we can release it afterwards and tell
-      // the guest their card will not be charged. Works for both saved holds
-      // ('Card Held') and unsaved staff-flow holds ('Pending', card never
-      // saved): in both cases the card is never charged after a cancel.
+      // OPEN hold before we cancel, so we can settle it afterwards. A saved
+      // hold cancelled BEFORE the deadline (and any unsaved hold) is released
+      // and the card is never charged; a saved hold cancelled AFTER the
+      // deadline is KEPT chargeable (late-cancellation change, §9.3 amended).
       const { data: cancelHoldRow } = await supabase
         .from("booking_card_holds")
         .select("id, released_at")
@@ -568,7 +569,8 @@ export async function POST(request: NextRequest) {
       // `deposit_status === 'Paid'`. Card holds never reach 'Paid'
       // (Pending -> Card Held -> Charged/Refunded, §14), so neither the refund
       // path nor the "non-refundable" late-cancel message can fire for a
-      // card-hold booking; a hold booking always cancels charge-free (§9.3).
+      // card-hold booking; hold cancellations are settled separately below
+      // (released before the deadline, kept chargeable after it).
       const canRefund =
         deadline &&
         new Date() <= deadline &&
@@ -658,22 +660,23 @@ export async function POST(request: NextRequest) {
         actorId: null,
       });
 
-      // Card-hold deposits (§9.3): guest cancel releases the hold (stamps
-      // released_at + reason 'cancelled', emits card_hold_released, best-effort
-      // deletes the booking-scoped Stripe customer). The booking is already
-      // cancelled at this point, so a release failure must not fail the
-      // request; the daily release cron (§12.3) is the backstop.
+      // Card-hold deposits (§9.3 amended): a guest cancel BEFORE the deadline
+      // releases the hold (stamps released_at + reason 'cancelled', emits
+      // card_hold_released, best-effort deletes the booking-scoped Stripe
+      // customer). A cancel AFTER the deadline keeps a saved hold chargeable
+      // (late_cancellation_at stamped). The booking is already cancelled at
+      // this point, so a settle failure must not fail the request; the release
+      // cron (§12.3) is the backstop and errs on the guest's side.
       let cardHoldReleased = false;
+      let keptCardHoldFeePence: number | null = null;
       if (hadOpenCardHold) {
         try {
-          const releaseResult = await releaseCardHoldsForBookings(
-            supabase,
-            [bookingId],
-            "cancelled",
-          );
-          cardHoldReleased = releaseResult.releasedBookingIds.includes(bookingId);
-        } catch (releaseErr) {
-          console.error("[confirm cancel] card-hold release failed:", releaseErr, {
+          const settleResult = await settleCardHoldsOnCancellation(supabase, [bookingId]);
+          cardHoldReleased = settleResult.releasedBookingIds.includes(bookingId);
+          keptCardHoldFeePence =
+            settleResult.keptHolds.find((k) => k.bookingId === bookingId)?.feePence ?? null;
+        } catch (settleErr) {
+          console.error("[confirm cancel] card-hold settle failed:", settleErr, {
             bookingId,
           });
         }
@@ -755,6 +758,16 @@ export async function POST(request: NextRequest) {
         48,
       );
 
+      // Late-cancellation card holds (§9.3 amended): the guest cancelled after
+      // the deadline, so the hold was kept and the fee stays chargeable. Shown
+      // on the cancel screen and repeated in the cancellation email.
+      const lateCancelFeeLine =
+        keptCardHoldFeePence != null
+          ? `Because the booking was cancelled after the cancellation deadline, ${
+              venue?.name ?? "the venue"
+            } may charge a no-show fee of up to ${formatCardHoldFeePence(keptCardHoldFeePence)}.`
+          : null;
+
       let refund_message: string;
       if (refundSucceeded) {
         refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5-10 business days.`;
@@ -827,7 +840,7 @@ export async function POST(request: NextRequest) {
           reply_to_email: venue.reply_to_email ?? null,
         });
         const vid = booking.venue_id;
-        const refundMsg = refund_message || null;
+        const refundMsg = refund_message || lateCancelFeeLine || null;
         after(async () => {
           try {
             const enriched = await enrichBookingEmailForComms(
@@ -854,12 +867,15 @@ export async function POST(request: NextRequest) {
         booking_model: cancelInferred,
       });
 
-      // Card-hold cancel copy (§10.1): true for saved holds (card detached) and
-      // for awaiting_card holds alike (card never saved, so it still "will not
-      // be charged"). Only claimed when the release actually happened.
-      const cardHoldMessage = cardHoldReleased
-        ? "Your booking is cancelled. Your card will not be charged and the card hold has been released."
-        : null;
+      // Card-hold cancel copy (§10.1): the released line is only claimed when
+      // the release actually happened (saved holds have the card detached;
+      // awaiting_card holds never saved one). A kept hold gets the
+      // late-cancellation line instead: the fee is still chargeable.
+      const cardHoldMessage = lateCancelFeeLine
+        ? `Your booking is cancelled. ${lateCancelFeeLine}`
+        : cardHoldReleased
+          ? "Your booking is cancelled. Your card will not be charged and the card hold has been released."
+          : null;
 
       return NextResponse.json({
         success: true,
@@ -872,6 +888,7 @@ export async function POST(request: NextRequest) {
         refund_eligible: refundSucceeded,
         deposit_amount_str: depositAmountStr,
         card_hold_released: cardHoldReleased,
+        card_hold_kept: keptCardHoldFeePence != null,
         card_hold_message: cardHoldMessage,
       });
     }

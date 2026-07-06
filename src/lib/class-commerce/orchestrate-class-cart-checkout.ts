@@ -8,7 +8,7 @@ import {
   resolveCaptureMode,
   type CaptureUnitLine,
 } from '@/lib/booking/card-hold-capture';
-import { buildCardHoldTermsSnapshot } from '@/lib/booking/card-hold-terms';
+import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
 import { insertFreeClassSessionBooking } from '@/lib/booking/insert-free-class-session-booking';
 import { insertPendingPaidClassSessionBooking } from '@/lib/booking/insert-pending-paid-class-session-booking';
 import { findOrCreateGuest } from '@/lib/guests';
@@ -157,6 +157,9 @@ export async function orchestrateClassCartCheckout(
   const stripeQuoteLines: ClassCartQuoteLine[] = [];
   /** Card-hold lines in the capture unit: booking row + its max chargeable no-show fee (§7.2). */
   const cardHoldLines: { bookingId: string; feePence: number }[] = [];
+  // The unit shares one consent text but each row keeps its own deadline; the
+  // consent quotes the LONGEST notice so it never under-warns for any line.
+  let maxCardHoldNoticeHours = 0;
   let primaryPaidBookingId: string | null = null;
   let totalStripePence = 0;
   let capacityFull = false;
@@ -197,6 +200,7 @@ export async function orchestrateClassCartCheckout(
         }
         bookingIds.push(res.bookingId);
         cardHoldLines.push({ bookingId: res.bookingId, feePence: qLine.card_hold_fee_pence });
+        maxCardHoldNoticeHours = Math.max(maxCardHoldNoticeHours, res.cancellation_notice_hours);
         continue;
       }
 
@@ -483,7 +487,7 @@ export async function orchestrateClassCartCheckout(
           stripeConnectedAccountId: stripeAccountId,
           stripeCustomerId: customer.id,
           stripeSetupIntentId: setupIntent.id,
-          termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeeTotal ?? 0),
+          termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeeTotal ?? 0, maxCardHoldNoticeHours),
         },
       );
 
@@ -502,6 +506,10 @@ export async function orchestrateClassCartCheckout(
           stripe_account_id: stripeAccountId,
           total_amount_pence: 0,
           card_hold_fee_pence: cardHoldFeeTotal,
+          card_hold_consent_text:
+            cardHoldFeeTotal != null && cardHoldFeeTotal > 0
+              ? renderCardHoldConsentText(venueName, cardHoldFeeTotal, maxCardHoldNoticeHours)
+              : undefined,
         },
       };
     } catch (setupErr) {
@@ -587,7 +595,7 @@ export async function orchestrateClassCartCheckout(
           stripeConnectedAccountId: stripeAccountId,
           stripeCustomerId: cardHoldCustomerId!,
           stripeSetupIntentId: null,
-          termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeeTotal ?? 0),
+          termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeeTotal ?? 0, maxCardHoldNoticeHours),
         },
       );
     }
@@ -620,6 +628,10 @@ export async function orchestrateClassCartCheckout(
         total_amount_pence: totalStripePence,
         checkout_charge_kind: checkoutChargeKindFromLines(stripeQuoteLines),
         card_hold_fee_pence: cardHoldFeeTotal,
+        card_hold_consent_text:
+          cardHoldFeeTotal != null && cardHoldFeeTotal > 0
+            ? renderCardHoldConsentText(venueName, cardHoldFeeTotal, maxCardHoldNoticeHours)
+            : undefined,
       },
     };
   } catch (stripeErr) {

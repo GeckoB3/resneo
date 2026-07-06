@@ -20,7 +20,7 @@ import {
   type AppointmentServicePaymentFields,
 } from '@/lib/appointments/appointment-service-payment';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
-import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -141,15 +141,15 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update the booking.' }, { status: 500 });
     }
 
-    // Card-hold §9.3 — this cross-venue cancel goes through the SQL RPC and
-    // none of the other cancel hooks, so release any open hold here. Best
-    // effort: the cancel already happened and the charge gate also requires
-    // status = 'No-Show'.
+    // Card-hold §9.3 (amended) — this cross-venue cancel goes through the SQL
+    // RPC and none of the other cancel hooks, so settle any open hold here:
+    // released before the deadline, kept chargeable after it (a staff-recorded
+    // late cancellation). Best effort: the cancel already happened.
     if (parsed.data.changes.status === 'Cancelled') {
       try {
-        await releaseCardHoldsForBookings(admin, [parsed.data.bookingId], 'cancelled');
+        await settleCardHoldsOnCancellation(admin, [parsed.data.bookingId]);
       } catch (holdErr) {
-        console.error('linked-calendar booking cancel: card-hold release failed:', holdErr);
+        console.error('linked-calendar booking cancel: card-hold settle failed:', holdErr);
       }
     }
 

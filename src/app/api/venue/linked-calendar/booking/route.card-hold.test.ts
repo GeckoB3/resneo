@@ -25,10 +25,10 @@ vi.mock('@/lib/linked-accounts/notifications', () => ({
   notifyCrossVenueBookingWrite: vi.fn(),
 }));
 
-vi.mock('@/lib/booking/card-hold-release', () => ({
-  releaseCardHoldsForBookings: vi.fn(async () => ({
+vi.mock('@/lib/booking/card-hold-cancellation', () => ({
+  settleCardHoldsOnCancellation: vi.fn(async () => ({
     releasedBookingIds: [],
-    deletedCustomerIds: [],
+    keptHolds: [],
   })),
 }));
 
@@ -37,7 +37,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
-import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { PATCH, POST } from './route';
 
 const mockCreateClient = vi.mocked(createRouteHandlerClientFromHeaders);
@@ -195,8 +195,8 @@ describe('POST /api/venue/linked-calendar/booking card-hold rejection (spec D6)'
   });
 });
 
-describe('PATCH /api/venue/linked-calendar/booking card-hold release on cancel (spec 9.3)', () => {
-  it('releases open card holds after a successful cross-venue PATCH cancel', async () => {
+describe('PATCH /api/venue/linked-calendar/booking card-hold settle on cancel (spec 9.3)', () => {
+  it('settles open card holds after a successful cross-venue PATCH cancel', async () => {
     const BOOKING_ID = 'f0000000-0000-4000-8000-000000000099';
     const rpc = vi.fn().mockResolvedValue({ data: { id: BOOKING_ID, status: 'Cancelled' }, error: null });
     const client = {
@@ -236,9 +236,10 @@ describe('PATCH /api/venue/linked-calendar/booking card-hold release on cancel (
     expect(res.status).toBe(200);
     expect(rpc).toHaveBeenCalledWith('linked_apply_booking_update', expect.anything());
     // The cross-venue cancel goes through the SQL RPC and skips every other
-    // cancel hook, so this route must release the hold itself.
-    expect(releaseCardHoldsForBookings).toHaveBeenCalledTimes(1);
-    expect(releaseCardHoldsForBookings).toHaveBeenCalledWith(client, [BOOKING_ID], 'cancelled');
+    // cancel hook, so this route must settle the hold itself (released before
+    // the deadline, kept chargeable after it).
+    expect(settleCardHoldsOnCancellation).toHaveBeenCalledTimes(1);
+    expect(settleCardHoldsOnCancellation).toHaveBeenCalledWith(client, [BOOKING_ID]);
   });
 
   it('does not touch holds on a non-cancel PATCH (reschedule keeps the hold open)', async () => {
@@ -280,6 +281,6 @@ describe('PATCH /api/venue/linked-calendar/booking card-hold release on cancel (
 
     expect(res.status).toBe(200);
     expect(rpc).toHaveBeenCalledWith('linked_apply_booking_update', expect.anything());
-    expect(releaseCardHoldsForBookings).not.toHaveBeenCalled();
+    expect(settleCardHoldsOnCancellation).not.toHaveBeenCalled();
   });
 });

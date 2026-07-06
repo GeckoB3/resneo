@@ -16,6 +16,7 @@ function hold(overrides: Partial<CardHoldSummary> = {}): CardHoldSummary {
     released_at: null,
     charge_failure_code: null,
     charge_window_ends_at: null,
+    late_cancellation_at: null,
     ...overrides,
   };
 }
@@ -255,6 +256,83 @@ describe('resolveCardHoldUiState: charge gate (client mirror of 9.2a guards)', (
   it('never shows the charge action without the hold row fields (enum-only fallback)', () => {
     const s = resolveCardHoldUiState(noShowHeld, null, { isAdmin: true, now: NOW });
     expect(s?.showChargeAction).toBe(false);
+  });
+});
+
+describe('resolveCardHoldUiState: late-cancellation keeps (§9.3 amended)', () => {
+  const cancelledHeld = { status: 'Cancelled', deposit_status: 'Card Held' };
+  const keptHold = () =>
+    hold({
+      saved: true,
+      charge_window_ends_at: '2026-07-15T12:00:00Z',
+      late_cancellation_at: '2026-07-04T09:00:00Z',
+    });
+
+  it('renders held with the late-cancellation line, charge action for admins, and the release action', () => {
+    const s = resolveCardHoldUiState(cancelledHeld, keptHold(), { isAdmin: true, now: NOW });
+    expect(s?.kind).toBe('held');
+    expect(s?.pill?.label).toBe('Card held');
+    expect(s?.lines).toEqual([
+      'No-show fee up to £25.00. No payment taken.',
+      'The booking was cancelled after the cancellation deadline, so the no-show fee can still be charged.',
+    ]);
+    expect(s?.showChargeAction).toBe(true);
+    expect(s?.showReleaseAction).toBe(true);
+  });
+
+  it('offers the release action to non-admin staff but not the charge action', () => {
+    const s = resolveCardHoldUiState(cancelledHeld, keptHold(), { isAdmin: false, now: NOW });
+    expect(s?.showChargeAction).toBe(false);
+    expect(s?.showReleaseAction).toBe(true);
+  });
+
+  it('never treats a Cancelled booking without the stamp as chargeable', () => {
+    const s = resolveCardHoldUiState(cancelledHeld, savedOpenHold(), { isAdmin: true, now: NOW });
+    expect(s?.showChargeAction).toBe(false);
+    expect(s?.showReleaseAction).toBe(false);
+    expect(s?.lines).toEqual(['No-show fee up to £25.00. No payment taken.']);
+  });
+
+  it('appends the window-expired line and hides the charge action once the window passes', () => {
+    const s = resolveCardHoldUiState(
+      cancelledHeld,
+      hold({
+        saved: true,
+        charge_window_ends_at: '2026-07-04T12:00:00Z',
+        late_cancellation_at: '2026-06-20T09:00:00Z',
+      }),
+      { isAdmin: true, now: NOW },
+    );
+    expect(s?.showChargeAction).toBe(false);
+    expect(s?.lines).toContain(
+      'The charge window has ended, so the no-show fee can no longer be charged.',
+    );
+  });
+
+  it('shows no release or charge action once the kept hold is released', () => {
+    const s = resolveCardHoldUiState(
+      cancelledHeld,
+      hold({
+        saved: true,
+        released_at: '2026-07-05T10:00:00Z',
+        late_cancellation_at: '2026-07-04T09:00:00Z',
+      }),
+      { isAdmin: true, now: NOW },
+    );
+    expect(s?.kind).toBe('ended');
+    expect(s?.showChargeAction).toBe(false);
+    expect(s?.showReleaseAction).toBe(false);
+  });
+
+  it('keeps the release action hidden on live and No-Show bookings', () => {
+    for (const status of ['Booked', 'Confirmed', 'No-Show']) {
+      const s = resolveCardHoldUiState(
+        { status, deposit_status: 'Card Held' },
+        savedOpenHold(),
+        { isAdmin: true, now: NOW },
+      );
+      expect(s?.showReleaseAction).toBe(false);
+    }
   });
 });
 

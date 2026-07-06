@@ -54,6 +54,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
   } | null>(null);
   const [_paymentComplete, setPaymentComplete] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -280,6 +281,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         requires_deposit: data.requires_deposit ?? false,
         payment_mode: data.payment_mode,
         card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+        card_hold_consent_text: data.card_hold_consent_text ?? null,
       });
       if (data.requires_deposit && data.client_secret) {
         setStepIndex(steps.indexOf('payment'));
@@ -409,6 +411,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           cancellationPolicy={isCardHoldPaymentMode(createResult.payment_mode) ? undefined : tablePaymentPolicy}
           mode={createResult.payment_mode ?? 'payment'}
           cardHoldFeePence={createResult.card_hold_fee_pence}
+          cardHoldConsentText={createResult.card_hold_consent_text}
           venueName={venue.name}
         />
       )}

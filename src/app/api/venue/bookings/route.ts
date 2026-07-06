@@ -480,6 +480,7 @@ export async function POST(request: NextRequest) {
           requiresDeposit: Boolean(requiresDeposit && depositAmountPence > 0),
           depositAmountPence: depositAmountPence ?? 0,
           cardHoldFeePence: eventHoldRequired ? eventCardHoldFeePence : null,
+          cancellationNoticeHours: refundWindowHours,
           emailExtras: eventEmailExtras,
           logContext: 'staff event booking',
         });
@@ -685,6 +686,7 @@ export async function POST(request: NextRequest) {
           requiresDeposit: Boolean(requiresDeposit && depositAmountPence > 0),
           depositAmountPence,
           cardHoldFeePence: classHoldRequired ? classCardHoldFeePence : null,
+          cancellationNoticeHours: refundWindowHoursClass,
           emailExtras: classEmailExtras,
           logContext: 'staff class booking',
         });
@@ -935,6 +937,7 @@ export async function POST(request: NextRequest) {
           ),
           depositAmountPence: depositAmountPenceRes ?? 0,
           cardHoldFeePence: resourceHoldRequired ? resourceCardHoldFeePence : null,
+          cancellationNoticeHours: refundWindowHoursRes,
           emailExtras: resourceEmailExtras,
           logContext: 'staff resource booking',
         });
@@ -1416,6 +1419,7 @@ export async function POST(request: NextRequest) {
             requiresDeposit: false,
             depositAmountPence: 0,
             cardHoldFeePence: apptCardHoldFeePence,
+            cancellationNoticeHours: refundWindowHoursAppt,
             emailExtras: apptEmailExtras,
             logContext: 'staff appointment booking',
           });
@@ -1806,6 +1810,8 @@ export async function POST(request: NextRequest) {
           requiresDeposit: false,
           depositAmountPence: 0,
           cardHoldFeePence: tableCardHoldFeePence,
+          // Matches the 48h deadline stamped by cancellationDeadline() on the insert.
+          cancellationNoticeHours: 48,
           emailExtras: {},
           logContext: 'staff table booking',
         });

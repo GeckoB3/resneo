@@ -62,7 +62,7 @@ import {
   createCardHoldSetupIntent,
   insertCardHoldRows,
 } from '@/lib/booking/card-hold-capture';
-import { buildCardHoldTermsSnapshot } from '@/lib/booking/card-hold-terms';
+import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const personEntrySchema = z.object({
@@ -579,6 +579,10 @@ export async function POST(request: NextRequest) {
         venueMode.bookingModel === 'practitioner_appointment' ? firstForNotice.appointment_service_id : null,
     });
 
+    // The unit shares one consent text but each row keeps its own deadline;
+    // the consent quotes the LONGEST notice so it never under-warns a member.
+    let maxCardHoldNoticeHours = groupCancellationNoticeHours;
+
     for (const person of validatedPeople) {
       const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
         supabase,
@@ -588,6 +592,7 @@ export async function POST(request: NextRequest) {
         appointmentServiceId:
           venueMode.bookingModel === 'practitioner_appointment' ? person.appointment_service_id : null,
       });
+      maxCardHoldNoticeHours = Math.max(maxCardHoldNoticeHours, refundWindowHours);
       const timeForDb = person.booking_time + ':00';
       const deadline = cancellationDeadlineHoursBefore(person.booking_date, person.booking_time, refundWindowHours);
       const policySnapshot = {
@@ -755,7 +760,7 @@ export async function POST(request: NextRequest) {
             stripeConnectedAccountId: stripeAccountId,
             stripeCustomerId: customer.id,
             stripeSetupIntentId: setupIntent.id,
-            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence),
+            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence, maxCardHoldNoticeHours),
           });
           client_secret = setupIntent.client_secret;
         } else {
@@ -794,7 +799,7 @@ export async function POST(request: NextRequest) {
             stripeConnectedAccountId: stripeAccountId,
             stripeCustomerId: customer.id,
             stripeSetupIntentId: null,
-            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence),
+            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence, maxCardHoldNoticeHours),
           });
         }
       } catch (stripeErr) {
@@ -875,6 +880,12 @@ export async function POST(request: NextRequest) {
         requires_deposit: hasPaymentStep,
         payment_mode: captureMode === 'none' ? ('payment' as const) : captureMode,
         card_hold_fee_pence: hasCardHold ? totalCardHoldFeePence : null,
+        // The exact consent line the server snapshotted (§7.5); the payment step
+        // displays this string so shown text and dispute evidence cannot drift.
+        card_hold_consent_text:
+          hasCardHold && totalCardHoldFeePence > 0
+            ? renderCardHoldConsentText(venue.name, totalCardHoldFeePence, maxCardHoldNoticeHours)
+            : undefined,
         total_deposit_pence: totalDepositPence,
         client_secret: client_secret ?? undefined,
         stripe_account_id: hasPaymentStep ? venue.stripe_connected_account_id : undefined,

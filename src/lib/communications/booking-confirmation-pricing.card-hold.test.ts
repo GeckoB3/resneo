@@ -120,6 +120,26 @@ describe('cardHoldConfirmationNotice (§10.2 email section)', () => {
       cardHoldConfirmationNotice({ ...heldBooking, deposit_status: 'Charged' }, 'Glow Studio'),
     ).toBeNull();
   });
+
+  it('quotes the cancellation deadline and covers late cancellations when refund_cutoff is set', () => {
+    const notice = cardHoldConfirmationNotice(
+      { ...heldBooking, refund_cutoff: '2026-07-08T19:00:00.000Z' },
+      'Glow Studio',
+    );
+    expect(notice).toContain('if you do not attend or cancel late.');
+    expect(notice).toContain('Cancel before ');
+    expect(notice).toContain('to avoid any charge.');
+    expect(notice).not.toContain('before your booking starts');
+    expect(notice).not.toContain('\u2014');
+  });
+
+  it('falls back to the before-it-starts wording on an unparseable cutoff', () => {
+    const notice = cardHoldConfirmationNotice(
+      { ...heldBooking, refund_cutoff: 'not-a-date' },
+      'Glow Studio',
+    );
+    expect(notice).toContain('Cancel before your booking starts to avoid any charge.');
+  });
 });
 
 describe('no em-dashes in card-hold confirmation copy', () => {

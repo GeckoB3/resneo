@@ -262,6 +262,7 @@ export function EventBookingFlow({
     /** Card capture mode from the create response ('setup' = card hold, no payment today). */
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
     /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
     card_hold_requested?: boolean;
   } | null>(null);
@@ -514,6 +515,7 @@ export function EventBookingFlow({
           requires_deposit: data.requires_deposit ?? false,
           payment_mode: data.payment_mode,
           card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+          card_hold_consent_text: data.card_hold_consent_text ?? null,
         });
         const needsStripe = Boolean(data.requires_deposit && data.client_secret);
         setStep(needsStripe ? 'payment' : 'confirmation');
@@ -848,6 +850,7 @@ export function EventBookingFlow({
           chargeKind={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
           mode={createResult.payment_mode ?? 'payment'}
           cardHoldFeePence={createResult.card_hold_fee_pence}
+          cardHoldConsentText={createResult.card_hold_consent_text}
           venueName={venue.name}
         />
       )}

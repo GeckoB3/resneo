@@ -151,6 +151,7 @@ function holdRow(overrides?: Row): Row {
     charge_failure_at: null,
     charge_attempt_count: 0,
     released_at: null,
+    late_cancellation_at: null,
     ...overrides,
   };
 }
@@ -198,6 +199,30 @@ describe('chargeCardHoldNoShowFee guards (§9.2a)', () => {
       message: 'Mark the booking as a no-show before charging the fee.',
     });
     expect(mockPiCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Cancelled booking whose hold was NOT kept by a late cancellation', async () => {
+    // An open hold on a Cancelled booking without the late_cancellation_at
+    // stamp means a release failed somewhere: it must stay unchargeable.
+    const { admin } = makeDb({ hold: holdRow(), booking: bookingRow({ status: 'Cancelled' }) });
+    const result = await chargeCardHoldNoShowFee(admin, chargeParams);
+    expect(result).toEqual({
+      ok: false,
+      code: 'not_no_show',
+      message: 'This booking was cancelled before the cancellation deadline, so the fee cannot be charged.',
+    });
+    expect(mockPiCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows the charge on a Cancelled booking kept by a late cancellation (§9.3 amended)', async () => {
+    const { admin } = makeDb({
+      hold: holdRow({ late_cancellation_at: '2026-07-05T10:00:00.000Z' }),
+      booking: bookingRow({ status: 'Cancelled' }),
+    });
+    mockPiCreate.mockResolvedValueOnce(succeededPi('pi_late_cancel', 2500) as never);
+    const result = await chargeCardHoldNoShowFee(admin, chargeParams);
+    expect(result).toMatchObject({ ok: true, chargedPence: 2500, pending: false });
+    expect(mockPiCreate).toHaveBeenCalledTimes(1);
   });
 
   it('returns invalid_state when deposit_status is not Card Held', async () => {

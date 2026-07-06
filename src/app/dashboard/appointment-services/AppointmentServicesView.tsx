@@ -687,6 +687,11 @@ export function AppointmentServicesView({
                 ? myLinkForService(svc.id) ?? undefined
                 : undefined,
             );
+            const paymentRequirement =
+              display.payment_requirement ??
+              (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+            const variants = svc.variants ?? [];
+            const addonGroups = svc.addon_groups ?? [];
             return (
               <SectionCard key={svc.id} className={!svc.is_active ? 'opacity-75' : ''}>
                 <SectionCard.Header
@@ -733,9 +738,7 @@ export function AppointmentServicesView({
                       {formatPrice(display.price_pence)}
                     </Pill>
                     {(() => {
-                      const pr =
-                        display.payment_requirement ??
-                        (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+                      const pr = paymentRequirement;
                       if (pr === 'full_payment') {
                         return (
                           <Pill variant="success" size="sm">
@@ -750,6 +753,24 @@ export function AppointmentServicesView({
                           </Pill>
                         );
                       }
+                      if (pr === 'card_hold') {
+                        // D5: for card-hold services the deposit column holds the
+                        // no-show fee; no money is taken at booking time.
+                        return (
+                          <>
+                            <Pill variant="info" size="sm">
+                              {display.deposit_pence != null && display.deposit_pence > 0
+                                ? `Card hold: ${formatPrice(display.deposit_pence)} no-show fee`
+                                : 'Card hold'}
+                            </Pill>
+                            {!cardHoldEnabled ? (
+                              <Pill variant="warning" size="sm">
+                                Card holds are switched off in Settings
+                              </Pill>
+                            ) : null}
+                          </>
+                        );
+                      }
                       return (
                         <Pill variant="neutral" size="sm">
                           No online payment
@@ -757,6 +778,74 @@ export function AppointmentServicesView({
                       );
                     })()}
                   </div>
+                      {variants.length > 0 ? (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Variants
+                          </p>
+                          <ul className="mt-1 space-y-0.5">
+                            {variants.map((v) => {
+                              const parts = [formatDuration(v.duration_minutes)];
+                              if (v.price_pence != null) parts.push(formatPrice(v.price_pence));
+                              if (v.deposit_pence != null && v.deposit_pence > 0) {
+                                parts.push(
+                                  paymentRequirement === 'card_hold'
+                                    ? `${formatPrice(v.deposit_pence)} no-show fee`
+                                    : `${formatPrice(v.deposit_pence)} deposit`,
+                                );
+                              }
+                              return (
+                                <li key={v.id} className="text-xs leading-snug text-slate-600">
+                                  <span className="font-medium text-slate-700">{v.name}</span>
+                                  <span> · {parts.join(' · ')}</span>
+                                  {!v.is_active ? (
+                                    <span className="text-slate-400"> · inactive</span>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {addonGroups.length > 0 ? (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Add-ons
+                          </p>
+                          <ul className="mt-1 space-y-0.5">
+                            {addonGroups.map(({ group, addons }) => {
+                              const activeAddons = addons.filter((a) => a.is_active && !a.archived_at);
+                              const shown = activeAddons.slice(0, 4);
+                              const extra = activeAddons.length - shown.length;
+                              return (
+                                <li key={group.id} className="text-xs leading-snug text-slate-600">
+                                  <span className="font-medium text-slate-700">{group.name}</span>
+                                  <span className="text-slate-500">
+                                    {' '}
+                                    · {group.min_select > 0 ? 'required' : 'optional'}
+                                  </span>
+                                  {shown.length > 0 ? (
+                                    <span>
+                                      {' '}
+                                      ·{' '}
+                                      {shown
+                                        .map((a) =>
+                                          a.additional_price_pence > 0
+                                            ? `${a.name} (+${formatPrice(a.additional_price_pence)})`
+                                            : a.name,
+                                        )
+                                        .join(', ')}
+                                      {extra > 0 ? ` and ${extra} more` : ''}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400"> · no active options</span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
                       {!isAdmin &&
                         linkedPractitionerIds.length > 0 &&
                         (

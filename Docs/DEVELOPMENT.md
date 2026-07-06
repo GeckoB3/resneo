@@ -18,3 +18,7 @@ Cron routes live under `src/app/api/cron/*/route.ts` and are registered in `verc
 ## Stripe webhook events (card hold)
 
 The card-hold feature relies on two SetupIntent events in addition to the existing PaymentIntent/charge events: `setup_intent.succeeded` (backup confirm for card saves) and `setup_intent.setup_failed` (informational). When deploying to a new environment, enable both event types on the Stripe Connect webhook endpoint alongside the existing ones, or card saves will confirm only through the synchronous route path.
+
+Also ensure `charge.refund.updated` is enabled (in addition to `charge.refunded`): the no-show-fee refund path reconciles partial-to-full refunds from this event. `payment_intent.succeeded` and `payment_intent.payment_failed` (already enabled for deposits) also carry the no-show fee PaymentIntents, so no extra config is needed there.
+
+The feature ships behind the per-venue `card_hold_deposits` flag, which defaults **off** (env override `FEATURE_FLAG_CARD_HOLD_DEPOSITS` forces it on for every venue when set, so leave it unset in staging unless you want it globally enabled).

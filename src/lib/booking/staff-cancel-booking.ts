@@ -7,6 +7,7 @@ import {
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -177,6 +178,15 @@ export async function cancelStaffBookingWithNotify(
       console.error('[staff-cancel-booking] cancel update failed:', cancelErr, { bookingId });
       return { cancelled: false, reason: 'not_found' };
     }
+  }
+
+  // §9.3 — cancels release card holds in every path; group cancels release per
+  // sibling row. Best-effort: the cancel already happened, and the charge gate
+  // also requires status = 'No-Show', so a missed release cannot enable a charge.
+  try {
+    await releaseCardHoldsForBookings(admin, idsToCancel, 'cancelled');
+  } catch (holdErr) {
+    console.error('[staff-cancel-booking] card-hold release failed:', holdErr, { bookingId });
   }
 
   for (const row of beforeRows ?? []) {

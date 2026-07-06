@@ -14,63 +14,153 @@ export type ConfirmDepositPaymentResult =
   | { ok: true; confirmedIds: string[]; alreadyConfirmed: boolean }
   | { ok: false; reason: string };
 
+/** Hold-row fields the confirm paths need (card holds, spec §7.4). */
+type CardHoldConfirmRow = {
+  id: string;
+  booking_id: string;
+  fee_pence: number;
+  stripe_payment_method_id: string | null;
+  terms_snapshot: unknown;
+};
+
+const CARD_HOLD_CONFIRM_COLUMNS = 'id, booking_id, fee_pence, stripe_payment_method_id, terms_snapshot';
+
+/** Merge accepted_at (now, ISO) into the §7.5 terms snapshot without clobbering an earlier stamp. */
+function stampSnapshotAcceptedAt(snapshot: unknown): Record<string, unknown> {
+  const base =
+    snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? { ...(snapshot as Record<string, unknown>) }
+      : {};
+  if (!base.accepted_at) base.accepted_at = new Date().toISOString();
+  return base;
+}
+
 /**
- * Marks every Pending booking row sharing a succeeded PaymentIntent as Booked / Paid
- * and assigns manage-booking tokens when missing.
+ * Persist the "card saved" facts onto hold rows: the payment method from the
+ * succeeded intent and the consent accepted_at stamp. Idempotent: an already
+ * stamped/populated row is left untouched, so webhook/route double-fires and
+ * retried events are safe. Runs BEFORE the booking status flip so a failure
+ * here leaves the unit re-confirmable by the webhook retry.
  */
-export async function confirmBookingsForSucceededPaymentIntent(
+async function persistCardHoldsSaved(
   admin: SupabaseClient,
-  params: {
-    paymentIntentId: string;
-    venueId: string;
-    guestEmail?: string | null;
-  },
-): Promise<ConfirmDepositPaymentResult> {
-  const { paymentIntentId, venueId, guestEmail } = params;
+  holds: CardHoldConfirmRow[],
+  paymentMethodId: string | null | undefined,
+  logContext: Record<string, unknown>,
+): Promise<boolean> {
+  for (const hold of holds) {
+    const snapshot = hold.terms_snapshot as { accepted_at?: unknown } | null;
+    const needsAcceptedAt = !snapshot?.accepted_at;
+    const needsPaymentMethod = Boolean(paymentMethodId) && !hold.stripe_payment_method_id;
+    if (!needsAcceptedAt && !needsPaymentMethod) continue;
 
-  const { data: updatedRows, error: updateErr } = await admin
-    .from('bookings')
-    .update({
-      status: 'Booked',
-      deposit_status: 'Paid',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('stripe_payment_intent_id', paymentIntentId)
-    .eq('venue_id', venueId)
-    .eq('status', 'Pending')
-    .select('id');
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (needsAcceptedAt) update.terms_snapshot = stampSnapshotAcceptedAt(hold.terms_snapshot);
+    if (needsPaymentMethod) update.stripe_payment_method_id = paymentMethodId;
 
-  if (updateErr) {
-    console.error('[confirmBookingsForSucceededPaymentIntent] booking update failed:', updateErr, {
-      paymentIntentId,
-      venueId,
-    });
-    return { ok: false, reason: 'booking_update_failed' };
-  }
-
-  if (!updatedRows?.length) {
-    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
-  }
-
-  const confirmedIds = updatedRows.map((r) => r.id).filter(Boolean) as string[];
-
-  if (guestEmail) {
-    const { error: emailErr } = await admin
-      .from('bookings')
-      .update({ guest_email: guestEmail, updated_at: new Date().toISOString() })
-      .in('id', confirmedIds);
-    if (emailErr) {
-      console.error('[confirmBookingsForSucceededPaymentIntent] guest_email update failed:', emailErr, {
-        paymentIntentId,
-        venueId,
+    const { error } = await admin.from('booking_card_holds').update(update).eq('id', hold.id);
+    if (error) {
+      console.error('[confirm-deposit-payment] card hold update failed:', error, {
+        holdId: hold.id,
+        ...logContext,
       });
-      return { ok: false, reason: 'guest_email_update_failed' };
+      return false;
     }
   }
+  return true;
+}
 
+/** Insert `card_hold_saved` events for newly confirmed hold rows (spec §11). Best-effort observability. */
+async function insertCardHoldSavedEvents(
+  admin: SupabaseClient,
+  venueId: string,
+  holds: CardHoldConfirmRow[],
+): Promise<void> {
+  if (holds.length === 0) return;
+  const { error } = await admin.from('events').insert(
+    holds.map((hold) => ({
+      venue_id: venueId,
+      booking_id: hold.booking_id,
+      event_type: 'card_hold_saved',
+      payload: { booking_id: hold.booking_id, fee_pence: hold.fee_pence },
+    })),
+  );
+  if (error) {
+    console.error('[confirm-deposit-payment] card_hold_saved events insert failed:', error, {
+      venueId,
+      bookingIds: holds.map((h) => h.booking_id),
+    });
+  }
+}
+
+/**
+ * A confirm that flipped 0 rows is usually a benign webhook/route replay (the
+ * unit is already Booked), but it can also mean the abandonment sweep
+ * Cancelled the unit between the guest's payment and this confirm. The two
+ * must not be conflated: reporting alreadyConfirmed for a Cancelled unit tells
+ * the guest "Booking confirmed" for a booking that no longer exists (review
+ * finding, J2). Classifies by re-reading current statuses: any Booked row is a
+ * genuine replay; otherwise any Cancelled row means the sweep won the race.
+ */
+async function classifyZeroRowConfirm(
+  admin: SupabaseClient,
+  bookingIds: string[],
+  venueId: string,
+  logContext: Record<string, unknown>,
+): Promise<'already_confirmed' | 'cancelled'> {
+  if (bookingIds.length === 0) return 'already_confirmed';
+  const { data, error } = await admin
+    .from('bookings')
+    .select('id, status')
+    .in('id', bookingIds)
+    .eq('venue_id', venueId);
+  if (error) {
+    console.error('[confirm-deposit-payment] zero-row status re-read failed:', error, logContext);
+    return 'already_confirmed';
+  }
+  return classifyZeroRowStatuses((data ?? []).map((r) => (r as { status: string | null }).status));
+}
+
+function classifyZeroRowStatuses(
+  statuses: Array<string | null>,
+): 'already_confirmed' | 'cancelled' {
+  // Any non-Cancelled row means the unit is live or already past (a Booked row
+  // legitimately moves on to Confirmed / Seated / Completed / No-Show, and
+  // Stripe can replay payment_intent.succeeded days later against such a row).
+  // Only an all-Cancelled unit is the abandonment-sweep race we must surface.
+  if (statuses.some((s) => s && s !== 'Cancelled')) return 'already_confirmed';
+  if (statuses.some((s) => s === 'Cancelled')) return 'cancelled';
+  return 'already_confirmed';
+}
+
+/** Overwrite guest_email on the confirmed rows when the confirm call carried one. */
+async function applyGuestEmail(
+  admin: SupabaseClient,
+  confirmedIds: string[],
+  guestEmail: string | null | undefined,
+  logContext: Record<string, unknown>,
+): Promise<boolean> {
+  if (!guestEmail || confirmedIds.length === 0) return true;
+  const { error } = await admin
+    .from('bookings')
+    .update({ guest_email: guestEmail, updated_at: new Date().toISOString() })
+    .in('id', confirmedIds);
+  if (error) {
+    console.error('[confirm-deposit-payment] guest_email update failed:', error, logContext);
+    return false;
+  }
+  return true;
+}
+
+/** Assign a manage-booking confirm token to each confirmed row that lacks one. */
+async function assignConfirmTokens(
+  admin: SupabaseClient,
+  confirmedIds: string[],
+  logContext: Record<string, unknown>,
+): Promise<boolean> {
   for (const bid of confirmedIds) {
     const candidateToken = generateConfirmToken();
-    const { error: tokenErr } = await admin
+    const { error } = await admin
       .from('bookings')
       .update({
         confirm_token_hash: hashConfirmToken(candidateToken),
@@ -78,14 +168,265 @@ export async function confirmBookingsForSucceededPaymentIntent(
       })
       .eq('id', bid)
       .is('confirm_token_hash', null);
-    if (tokenErr) {
-      console.error('[confirmBookingsForSucceededPaymentIntent] confirm token update failed:', tokenErr, {
+    if (error) {
+      console.error('[confirm-deposit-payment] confirm token update failed:', error, {
         bookingId: bid,
-        paymentIntentId,
+        ...logContext,
       });
-      return { ok: false, reason: 'confirm_token_update_failed' };
+      return false;
     }
   }
+  return true;
+}
+
+/**
+ * Marks every Pending booking row sharing a succeeded PaymentIntent as Booked
+ * and assigns manage-booking tokens when missing. Per-row deposit_status
+ * (spec §7.4 payment branch):
+ * - deposit_status 'Pending' + hold row + null deposit_amount_pence -> 'Card Held'
+ * - deposit_status 'Pending' otherwise -> 'Paid'
+ * - any other deposit_status (e.g. 'Not Required' zero-deposit group siblings)
+ *   keeps its deposit_status; only the booking status flips to 'Booked'.
+ *
+ * When `paymentMethodId` is provided (payment_with_setup units) it is written
+ * onto the unit's hold rows together with the consent accepted_at stamp and a
+ * `card_hold_saved` event per newly confirmed hold row.
+ */
+export async function confirmBookingsForSucceededPaymentIntent(
+  admin: SupabaseClient,
+  params: {
+    paymentIntentId: string;
+    venueId: string;
+    guestEmail?: string | null;
+    paymentMethodId?: string | null;
+  },
+): Promise<ConfirmDepositPaymentResult> {
+  const { paymentIntentId, venueId, guestEmail, paymentMethodId } = params;
+  const logContext = { paymentIntentId, venueId };
+
+  const { data: candidateRows, error: candidateErr } = await admin
+    .from('bookings')
+    .select('id, status, deposit_status, deposit_amount_pence')
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .eq('venue_id', venueId);
+
+  if (candidateErr) {
+    console.error('[confirmBookingsForSucceededPaymentIntent] booking load failed:', candidateErr, logContext);
+    return { ok: false, reason: 'booking_load_failed' };
+  }
+
+  const allRows = (candidateRows ?? []) as Array<{
+    id: string;
+    status: string | null;
+    deposit_status: string | null;
+    deposit_amount_pence: number | null;
+  }>;
+  const candidates = allRows.filter((r) => r.status === 'Pending');
+
+  if (candidates.length === 0) {
+    // No Pending rows: usually a benign replay (already Booked), but if the
+    // abandonment sweep Cancelled the unit after this payment succeeded, the
+    // caller must not tell the guest "confirmed" (review finding, J2).
+    if (
+      allRows.length > 0 &&
+      classifyZeroRowStatuses(allRows.map((r) => r.status)) === 'cancelled'
+    ) {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
+    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+  }
+
+  const candidateIds = candidates.map((c) => c.id);
+
+  const { data: holdRows, error: holdErr } = await admin
+    .from('booking_card_holds')
+    .select(CARD_HOLD_CONFIRM_COLUMNS)
+    .in('booking_id', candidateIds)
+    // Exclude released holds so a stale-tab confirm of a long-since-released
+    // hold (e.g. an expired payment_with_setup 'Failed' row) can never stamp a
+    // payment method onto a dead hold or classify the row as 'Card Held'
+    // (mirrors the setup path's released_at guard).
+    .is('released_at', null);
+
+  if (holdErr) {
+    console.error('[confirmBookingsForSucceededPaymentIntent] hold load failed:', holdErr, logContext);
+    return { ok: false, reason: 'hold_load_failed' };
+  }
+
+  const holds = (holdRows ?? []) as unknown as CardHoldConfirmRow[];
+  const holdByBookingId = new Map(holds.map((h) => [h.booking_id, h]));
+
+  // Stamp the hold rows before flipping bookings so a failure here keeps the
+  // unit re-confirmable (webhook retries would otherwise see alreadyConfirmed).
+  if (holds.length > 0) {
+    const ok = await persistCardHoldsSaved(admin, holds, paymentMethodId, logContext);
+    if (!ok) return { ok: false, reason: 'card_hold_update_failed' };
+  }
+
+  const heldIds: string[] = [];
+  const paidIds: string[] = [];
+  const untouchedDepositIds: string[] = [];
+  for (const row of candidates) {
+    // 'Pending' is the normal awaiting-payment state; 'Failed' is a prior
+    // payment_intent.payment_failed on the SAME PI that the guest then
+    // retried from the still-open payment element, so a success must flip
+    // it too (the pre-per-row behaviour, review regression finding).
+    // 'Not Required' zero-deposit siblings only get their status confirmed.
+    if (row.deposit_status !== 'Pending' && row.deposit_status !== 'Failed') {
+      untouchedDepositIds.push(row.id);
+    } else if (holdByBookingId.has(row.id) && row.deposit_amount_pence == null) {
+      heldIds.push(row.id);
+    } else {
+      paidIds.push(row.id);
+    }
+  }
+
+  const confirmedIds: string[] = [];
+  const groups: Array<{ ids: string[]; update: Record<string, unknown> }> = [
+    { ids: heldIds, update: { status: 'Booked', deposit_status: 'Card Held' } },
+    { ids: paidIds, update: { status: 'Booked', deposit_status: 'Paid' } },
+    { ids: untouchedDepositIds, update: { status: 'Booked' } },
+  ];
+
+  for (const group of groups) {
+    if (group.ids.length === 0) continue;
+    const { data: updatedRows, error: updateErr } = await admin
+      .from('bookings')
+      .update({ ...group.update, updated_at: new Date().toISOString() })
+      .in('id', group.ids)
+      .eq('venue_id', venueId)
+      .eq('status', 'Pending')
+      .select('id');
+    if (updateErr) {
+      console.error('[confirmBookingsForSucceededPaymentIntent] booking update failed:', updateErr, logContext);
+      return { ok: false, reason: 'booking_update_failed' };
+    }
+    for (const r of updatedRows ?? []) {
+      if (r.id) confirmedIds.push(r.id as string);
+    }
+  }
+
+  if (confirmedIds.length === 0) {
+    const outcome = await classifyZeroRowConfirm(admin, candidateIds, venueId, logContext);
+    if (outcome === 'cancelled') {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
+    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+  }
+
+  if (!(await applyGuestEmail(admin, confirmedIds, guestEmail, logContext))) {
+    return { ok: false, reason: 'guest_email_update_failed' };
+  }
+
+  if (!(await assignConfirmTokens(admin, confirmedIds, logContext))) {
+    return { ok: false, reason: 'confirm_token_update_failed' };
+  }
+
+  const confirmedSet = new Set(confirmedIds);
+  await insertCardHoldSavedEvents(
+    admin,
+    venueId,
+    holds.filter((h) => confirmedSet.has(h.booking_id)),
+  );
+
+  return { ok: true, confirmedIds, alreadyConfirmed: false };
+}
+
+/**
+ * Setup branch of the confirm path (spec §7.4): marks every Pending booking row
+ * in the capture unit of a succeeded SetupIntent as Booked / 'Card Held'.
+ * DB-only, like its PaymentIntent sibling: the caller retrieves the SI on the
+ * connected account, verifies status === 'succeeded' and passes the extracted
+ * payment method in. Idempotent: a second call (route/webhook race) returns
+ * alreadyConfirmed with no side effects.
+ */
+export async function confirmBookingsForSucceededSetupIntent(
+  admin: SupabaseClient,
+  params: {
+    setupIntentId: string;
+    paymentMethodId: string | null;
+    venueId: string;
+    guestEmail?: string | null;
+  },
+): Promise<ConfirmDepositPaymentResult> {
+  const { setupIntentId, paymentMethodId, venueId, guestEmail } = params;
+  const logContext = { setupIntentId, venueId };
+
+  // Released holds are excluded: a waived/cancelled hold must never be
+  // resurrected by a guest completing a stale payment page (review finding:
+  // it flipped a Waived booking to 'Card Held' on a dead hold).
+  const { data: holdRows, error: holdErr } = await admin
+    .from('booking_card_holds')
+    .select(CARD_HOLD_CONFIRM_COLUMNS)
+    .eq('stripe_setup_intent_id', setupIntentId)
+    .eq('venue_id', venueId)
+    .is('released_at', null);
+
+  if (holdErr) {
+    console.error('[confirmBookingsForSucceededSetupIntent] hold load failed:', holdErr, logContext);
+    return { ok: false, reason: 'hold_load_failed' };
+  }
+
+  const holds = (holdRows ?? []) as unknown as CardHoldConfirmRow[];
+  if (holds.length === 0) {
+    return { ok: false, reason: 'hold_not_found' };
+  }
+
+  // Stamp the hold rows before flipping bookings so a failure here keeps the
+  // unit re-confirmable (webhook retries would otherwise see alreadyConfirmed).
+  if (!(await persistCardHoldsSaved(admin, holds, paymentMethodId, logContext))) {
+    return { ok: false, reason: 'card_hold_update_failed' };
+  }
+
+  const { data: updatedRows, error: updateErr } = await admin
+    .from('bookings')
+    .update({
+      status: 'Booked',
+      deposit_status: 'Card Held',
+      updated_at: new Date().toISOString(),
+    })
+    .in('id', holds.map((h) => h.booking_id))
+    .eq('venue_id', venueId)
+    .eq('status', 'Pending')
+    // Mirror the PI path: only awaiting-capture rows flip. A staff-waived
+    // booking ('Waived') stays waived even if the card save completes.
+    .eq('deposit_status', 'Pending')
+    .select('id');
+
+  if (updateErr) {
+    console.error('[confirmBookingsForSucceededSetupIntent] booking update failed:', updateErr, logContext);
+    return { ok: false, reason: 'booking_update_failed' };
+  }
+
+  if (!updatedRows?.length) {
+    const outcome = await classifyZeroRowConfirm(
+      admin,
+      holds.map((h) => h.booking_id),
+      venueId,
+      logContext,
+    );
+    if (outcome === 'cancelled') {
+      return { ok: false, reason: 'booking_cancelled' };
+    }
+    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+  }
+
+  const confirmedIds = updatedRows.map((r) => r.id).filter(Boolean) as string[];
+
+  if (!(await applyGuestEmail(admin, confirmedIds, guestEmail, logContext))) {
+    return { ok: false, reason: 'guest_email_update_failed' };
+  }
+
+  if (!(await assignConfirmTokens(admin, confirmedIds, logContext))) {
+    return { ok: false, reason: 'confirm_token_update_failed' };
+  }
+
+  const confirmedSet = new Set(confirmedIds);
+  await insertCardHoldSavedEvents(
+    admin,
+    venueId,
+    holds.filter((h) => confirmedSet.has(h.booking_id)),
+  );
 
   return { ok: true, confirmedIds, alreadyConfirmed: false };
 }
@@ -112,7 +453,7 @@ export async function sendDepositPaidBookingComms(
     const { data: b } = await admin
       .from('bookings')
       .select(
-        'booking_model, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, source, cancellation_deadline',
+        'booking_model, booking_date, booking_time, party_size, deposit_amount_pence, deposit_status, guest_email, source, cancellation_deadline',
       )
       .eq('id', bid)
       .maybeSingle();
@@ -134,12 +475,16 @@ export async function sendDepositPaidBookingComms(
       booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : b.booking_time ?? '',
       party_size: b.party_size ?? 2,
       deposit_amount_pence: b.deposit_amount_pence ?? null,
-      deposit_status: 'Paid' as const,
+      deposit_status: ((b as { deposit_status?: string | null }).deposit_status ?? 'Paid') as string,
       manage_booking_link: manageBookingLink,
       booking_model: b.booking_model,
       refund_cutoff: (b as { cancellation_deadline?: string | null }).cancellation_deadline ?? null,
     };
 
+    // Deposit receipt only for rows that actually paid a deposit. Card-hold
+    // rows carry deposit_amount_pence NULL (no money taken) so a mixed
+    // payment_with_setup unit sends receipts to its paid rows only; hold-only
+    // rows get the booking confirmation alone.
     const hasDeposit = Boolean(rowEmail && b.deposit_amount_pence);
     const skipDepositReceipt = isSelfServeBookingSource(b.source as string | null);
 

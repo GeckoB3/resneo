@@ -8,6 +8,9 @@ import { withCronRunLogging } from '@/lib/platform/cron-log';
  * GET/POST /api/cron/reconciliation
  * Vercel Cron uses GET; POST kept for manual triggers.
  * Compares recent Paid/Refunded bookings to Stripe PaymentIntents; logs reconciliation_alerts.
+ * Card holds (design doc §12.4): recent 'Card Held' bookings whose hold is not
+ * released must have a succeeded saving intent with an attached payment method;
+ * 'Charged' bookings must have a succeeded charge PaymentIntent.
  */
 export async function GET(request: NextRequest) {
   return POST(request);
@@ -88,9 +91,156 @@ async function handlePost(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ checked: bookings.length, alerts });
+    const holdResult = await reconcileCardHolds(supabase, cutoff);
+
+    return NextResponse.json({
+      checked: bookings.length + holdResult.checked,
+      alerts: alerts + holdResult.alerts,
+    });
   } catch (err) {
     console.error('reconciliation cron failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+type HoldReconRow = {
+  booking_id: string;
+  stripe_setup_intent_id: string | null;
+  stripe_connected_account_id: string;
+  charge_payment_intent_id: string | null;
+  booking: {
+    id: string;
+    deposit_status: string | null;
+    stripe_payment_intent_id: string | null;
+  };
+};
+
+function normalizeHoldReconRows(rows: unknown[]): HoldReconRow[] {
+  const out: HoldReconRow[] = [];
+  for (const raw of rows) {
+    const r = raw as Omit<HoldReconRow, 'booking'> & {
+      booking: HoldReconRow['booking'] | HoldReconRow['booking'][] | null;
+    };
+    const booking = Array.isArray(r.booking) ? r.booking[0] ?? null : r.booking;
+    if (!booking) continue;
+    out.push({ ...r, booking });
+  }
+  return out;
+}
+
+/**
+ * Card-hold reconciliation (§12.4). 'Card Held' (hold not released): the
+ * saving intent is the SetupIntent in setup mode, else the booking's unit PI
+ * in payment_with_setup mode; alert when it is not succeeded or its payment
+ * method is detached. For the PI case, `pi.payment_method` presence is used as
+ * a cheap detachment check: it does not verify the method is still attached to
+ * the customer, only that the intent still references one. 'Charged': the
+ * charge PaymentIntent must be succeeded. Uses the hold's snapshotted
+ * connected account, never the venue's current one.
+ */
+async function reconcileCardHolds(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  cutoff: string,
+): Promise<{ checked: number; alerts: number }> {
+  let checked = 0;
+  let alerts = 0;
+
+  const insertAlert = async (bookingId: string, expected: string, actual: string) => {
+    await supabase.from('reconciliation_alerts').insert({
+      booking_id: bookingId,
+      expected_status: expected,
+      actual_stripe_status: actual,
+    });
+    alerts++;
+  };
+
+  // Arm 1: 'Card Held', hold not released -> the saved card must still be usable.
+  const { data: heldRows, error: heldErr } = await supabase
+    .from('booking_card_holds')
+    .select(
+      'booking_id, stripe_setup_intent_id, stripe_connected_account_id, charge_payment_intent_id, booking:bookings!inner(id, deposit_status, stripe_payment_intent_id)',
+    )
+    .is('released_at', null)
+    .eq('booking.deposit_status', 'Card Held')
+    .or(`created_at.gte.${cutoff},updated_at.gte.${cutoff}`)
+    .limit(200);
+
+  if (heldErr) {
+    console.error('reconciliation card-hold fetch failed:', heldErr);
+  } else {
+    for (const hold of normalizeHoldReconRows(heldRows ?? [])) {
+      checked++;
+      try {
+        if (hold.stripe_setup_intent_id) {
+          const si = await stripe.setupIntents.retrieve(hold.stripe_setup_intent_id, {
+            stripeAccount: hold.stripe_connected_account_id,
+          });
+          if (si.status !== 'succeeded') {
+            await insertAlert(hold.booking_id, 'Card Held', si.status);
+          } else if (!si.payment_method) {
+            await insertAlert(hold.booking_id, 'Card Held', 'succeeded_pm_detached');
+          }
+        } else if (hold.booking.stripe_payment_intent_id) {
+          const pi = await stripe.paymentIntents.retrieve(hold.booking.stripe_payment_intent_id, {
+            stripeAccount: hold.stripe_connected_account_id,
+          });
+          if (pi.status !== 'succeeded') {
+            await insertAlert(hold.booking_id, 'Card Held', pi.status);
+          } else if (!pi.payment_method) {
+            await insertAlert(hold.booking_id, 'Card Held', 'succeeded_pm_detached');
+          }
+        } else {
+          await insertAlert(hold.booking_id, 'Card Held', 'missing_saving_intent');
+        }
+      } catch (err) {
+        console.error('Stripe card-hold intent retrieve failed for booking', hold.booking_id, err);
+        await insertAlert(
+          hold.booking_id,
+          'Card Held',
+          `error: ${err instanceof Error ? err.message : 'unknown'}`,
+        );
+      }
+    }
+  }
+
+  // Arm 2: 'Charged' -> the charge PI must have succeeded.
+  const { data: chargedRows, error: chargedErr } = await supabase
+    .from('booking_card_holds')
+    .select(
+      'booking_id, stripe_setup_intent_id, stripe_connected_account_id, charge_payment_intent_id, booking:bookings!inner(id, deposit_status, stripe_payment_intent_id)',
+    )
+    .eq('booking.deposit_status', 'Charged')
+    .or(`created_at.gte.${cutoff},updated_at.gte.${cutoff}`)
+    .limit(200);
+
+  if (chargedErr) {
+    console.error('reconciliation charged-hold fetch failed:', chargedErr);
+  } else {
+    for (const hold of normalizeHoldReconRows(chargedRows ?? [])) {
+      checked++;
+      // A 'Charged' booking whose hold has no charge PI id is itself the
+      // anomaly: alert without a Stripe call (there is nothing to retrieve).
+      if (!hold.charge_payment_intent_id) {
+        await insertAlert(hold.booking_id, 'Charged', 'missing_charge_pi');
+        continue;
+      }
+      try {
+        const pi = await stripe.paymentIntents.retrieve(hold.charge_payment_intent_id, {
+          stripeAccount: hold.stripe_connected_account_id,
+        });
+        if (pi.status !== 'succeeded') {
+          await insertAlert(hold.booking_id, 'Charged', pi.status);
+        }
+      } catch (err) {
+        console.error('Stripe charge PI retrieve failed for booking', hold.booking_id, err);
+        await insertAlert(
+          hold.booking_id,
+          'Charged',
+          `error: ${err instanceof Error ? err.message : 'unknown'}`,
+        );
+      }
+    }
+  }
+
+  return { checked, alerts };
 }

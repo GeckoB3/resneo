@@ -272,6 +272,8 @@ function depositBadge(status: string, amountPence: number | null) {
     Pending: 'warning',
     Requested: 'warning',
     Unpaid: 'warning',
+    'Card Held': 'info',
+    Charged: 'warning',
   };
   const labelMap: Record<string, string> = {
     Paid: amt ? `${amt} paid` : 'Deposit paid',
@@ -280,6 +282,8 @@ function depositBadge(status: string, amountPence: number | null) {
     Requested: 'Deposit requested',
     Unpaid: 'Deposit due',
     Waived: 'Waived',
+    'Card Held': 'Card held',
+    Charged: 'Fee charged',
   };
   const variant = variantMap[status] ?? 'neutral';
   const label = labelMap[status] ?? status;

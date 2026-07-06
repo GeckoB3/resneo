@@ -37,6 +37,13 @@ export function mapVenueFeatureFlagsForPublic(
       any_available_practitioner: resolved.any_available_practitioner,
       guest_self_reschedule: resolved.guest_self_reschedule,
       waitlist_v2: resolved.waitlist_v2,
+      // Staff surfaces gate the "Card hold" toggle on the owner venue's flag
+      // (design doc 7.6 / D6). This mapper serves staff venue payloads
+      // (GET /api/venue via mapApiVenueToVenuePublic, the linked-calendar
+      // venue-profile route, buildVenuePublicForBookingById); the public
+      // /api/booking/venue route builds its own resolved object and does not
+      // expose this flag.
+      card_hold_deposits: resolved.card_hold_deposits,
     },
     any_available_practitioner_config: parseAnyAvailablePractitionerConfig(raw),
   };

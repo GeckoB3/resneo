@@ -100,6 +100,57 @@ describe('validateEventTicketBooking', () => {
     if (!res.ok) return;
     expect(res.value.requiresDeposit).toBe(true);
     expect(res.value.depositAmountPence).toBe(1000);
+    expect(res.value.cardHoldFeePence).toBeNull();
+  });
+
+  it('computes cardHoldFeePence as per-person fee x tickets for card_hold events, with no upfront charge', () => {
+    const res = validateEventTicketBooking({
+      slot: makeSlot({ payment_requirement: 'card_hold', deposit_amount_pence: 500 }),
+      ticketLines: [
+        { ticket_type_id: 'adult', quantity: 2, unit_price_pence: 2000 },
+        { ticket_type_id: 'child', quantity: 1, unit_price_pence: 1000 },
+      ],
+      partySize: 3,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // 500 per person x 3 tickets; the ticket total never influences the fee.
+    expect(res.value.cardHoldFeePence).toBe(1500);
+    // Card holds never set the charge fields.
+    expect(res.value.requiresDeposit).toBe(false);
+    expect(res.value.depositAmountPence).toBe(0);
+    expect(res.value.ticketTotalPence).toBe(5000);
+  });
+
+  it('treats a zero-fee card_hold event as none (cardHoldFeePence null, nothing charged)', () => {
+    const res = validateEventTicketBooking({
+      slot: makeSlot({ payment_requirement: 'card_hold', deposit_amount_pence: 0 }),
+      ticketLines: [{ ticket_type_id: 'adult', quantity: 1, unit_price_pence: 2000 }],
+      partySize: 1,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.cardHoldFeePence).toBeNull();
+    expect(res.value.requiresDeposit).toBe(false);
+    expect(res.value.depositAmountPence).toBe(0);
+  });
+
+  it('returns cardHoldFeePence null for full_payment and none events', () => {
+    const full = validateEventTicketBooking({
+      slot: makeSlot(),
+      ticketLines: [{ ticket_type_id: 'adult', quantity: 1, unit_price_pence: 2000 }],
+      partySize: 1,
+    });
+    expect(full.ok).toBe(true);
+    if (full.ok) expect(full.value.cardHoldFeePence).toBeNull();
+
+    const none = validateEventTicketBooking({
+      slot: makeSlot({ payment_requirement: 'none' }),
+      ticketLines: [{ ticket_type_id: 'adult', quantity: 1, unit_price_pence: 2000 }],
+      partySize: 1,
+    });
+    expect(none.ok).toBe(true);
+    if (none.ok) expect(none.value.cardHoldFeePence).toBeNull();
   });
 
   it('charges nothing for a "none" payment event', () => {

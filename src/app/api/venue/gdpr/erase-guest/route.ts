@@ -5,6 +5,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { eraseGuestVenuePii } from '@/lib/guests/gdpr-erase-guest';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 
 const bodySchema = z.object({
   guest_id: z.string().uuid(),
@@ -42,6 +43,27 @@ export async function POST(request: NextRequest) {
 
     if (guestErr || !guest) {
       return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
+    }
+
+    // Spec §15 — an "erased" guest must not keep a vaulted, chargeable card:
+    // release any open holds on their bookings (reason 'admin'); the helper
+    // also best-effort deletes the booking-scoped Stripe customers. Runs
+    // before anonymisation and fails the request on a release error so the
+    // admin can retry (the whole operation is idempotent).
+    try {
+      const { data: guestBookings, error: gbErr } = await admin
+        .from('bookings')
+        .select('id')
+        .eq('venue_id', staff.venue_id)
+        .eq('guest_id', guestId);
+      if (gbErr) throw gbErr;
+      const bookingIds = (guestBookings ?? []).map((b: { id: string }) => b.id);
+      if (bookingIds.length > 0) {
+        await releaseCardHoldsForBookings(admin, bookingIds, 'admin');
+      }
+    } catch (holdErr) {
+      console.error('erase-guest: card-hold release failed:', holdErr);
+      return NextResponse.json({ error: 'Failed to erase guest data' }, { status: 500 });
     }
 
     try {

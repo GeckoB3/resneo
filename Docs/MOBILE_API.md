@@ -18,6 +18,8 @@ The React Native app (`reserveni-app`) authenticates with Supabase and sends `Au
 | GET | `/api/venue/guests/[guestId]` |
 | GET | `/api/venue/appointment-availability` |
 
+Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card_hold` boolean (default true for card-hold entities), and `GET /api/venue/bookings/[id]` returns a `card_hold` object (or `null`). See `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` §18 for the full contract.
+
 ### Public endpoint (unchanged)
 
 `GET /api/booking/appointment-catalog` is a public guest-facing endpoint (no auth). It uses the admin client and does not require Bearer tokens.

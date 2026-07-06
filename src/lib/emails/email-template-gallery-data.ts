@@ -78,6 +78,8 @@ function messageKeyTitle(key: CommunicationMessageKey): string {
     deposit_confirmation: 'Deposit confirmation',
     confirm_or_cancel_prompt: 'Confirm or cancel prompt',
     deposit_payment_reminder: 'Deposit payment reminder',
+    card_hold_request: 'Card details request',
+    card_hold_payment_reminder: 'Card details reminder',
     pre_visit_reminder: 'Pre-visit reminder',
     booking_modification: 'Booking modification',
     cancellation_confirmation: 'Cancellation confirmation',

@@ -23,6 +23,11 @@ function setupSupabaseMock(returnData: unknown, error: { code: string } | null =
 // Import after mocking
 import { logToCommLogs } from './service';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
+import {
+  defaultCommunicationPolicies,
+  parseCommunicationPolicies,
+} from './policies';
+import { formatCommunicationLogLabel } from './display-labels';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -164,6 +169,72 @@ describe('settings toggle logic', () => {
   });
 });
 
+describe('card-hold communication policies (§10.3)', () => {
+  it('defaults both card-hold keys to email + SMS in both lanes', () => {
+    const defaults = defaultCommunicationPolicies();
+    for (const lane of ['table', 'appointments_other'] as const) {
+      expect(defaults[lane].card_hold_request.enabled).toBe(true);
+      expect(defaults[lane].card_hold_request.channels).toEqual(['email', 'sms']);
+      expect(defaults[lane].card_hold_payment_reminder.enabled).toBe(true);
+      expect(defaults[lane].card_hold_payment_reminder.channels).toEqual([
+        'email',
+        'sms',
+      ]);
+    }
+  });
+
+  it('sanitize round-trips card-hold customisations', () => {
+    const policies = defaultCommunicationPolicies();
+    policies.table.card_hold_request = {
+      ...policies.table.card_hold_request,
+      channels: ['sms'],
+      smsCustomMessage: 'From the front desk.',
+    };
+    policies.appointments_other.card_hold_payment_reminder = {
+      ...policies.appointments_other.card_hold_payment_reminder,
+      enabled: false,
+      emailCustomMessage: 'Reply to this email with any questions.',
+    };
+
+    const parsed = parseCommunicationPolicies(
+      JSON.parse(JSON.stringify(policies)),
+    );
+    expect(parsed.table.card_hold_request.channels).toEqual(['sms']);
+    expect(parsed.table.card_hold_request.smsCustomMessage).toBe(
+      'From the front desk.',
+    );
+    expect(parsed.appointments_other.card_hold_payment_reminder.enabled).toBe(false);
+    expect(
+      parsed.appointments_other.card_hold_payment_reminder.emailCustomMessage,
+    ).toBe('Reply to this email with any questions.');
+  });
+
+  it('drops unknown channels for the card-hold keys and falls back to defaults', () => {
+    const parsed = parseCommunicationPolicies({
+      table: { card_hold_request: { channels: ['whatsapp'] } },
+    });
+    expect(parsed.table.card_hold_request.channels).toEqual(['email', 'sms']);
+  });
+
+  it('labels the five card-hold log types', () => {
+    expect(formatCommunicationLogLabel('card_hold_request_email')).toBe(
+      'Card request email',
+    );
+    expect(formatCommunicationLogLabel('card_hold_request_sms')).toBe(
+      'Card request SMS',
+    );
+    expect(formatCommunicationLogLabel('card_hold_payment_reminder_email')).toBe(
+      'Card reminder email',
+    );
+    expect(formatCommunicationLogLabel('card_hold_payment_reminder_sms')).toBe(
+      'Card reminder SMS',
+    );
+    expect(formatCommunicationLogLabel('card_hold_charged_email')).toBe(
+      'No-show fee receipt',
+    );
+  });
+});
+
 describe('isSelfServeBookingSource', () => {
   it('returns true for public booking sources', () => {
     expect(isSelfServeBookingSource('online')).toBe(true);
@@ -202,7 +273,7 @@ describe('edge cases', () => {
 
   it('no-show and cancelled bookings should not receive post-visit thank you', () => {
     const completedStatuses = ['Completed'];
-    const excludedStatuses = ['No Show', 'Cancelled'];
+    const excludedStatuses = ['No-Show', 'Cancelled'];
 
     for (const status of excludedStatuses) {
       expect(completedStatuses.includes(status)).toBe(false);

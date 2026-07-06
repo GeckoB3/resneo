@@ -16,8 +16,10 @@ import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import {
   bookingConfirmationSmsPriceSuffix,
+  cardHoldConfirmationNotice,
   confirmationStructuredPriceText,
   eventBookingConfirmationSmsPriceSuffix,
   formatMoneyOrNull,
@@ -249,6 +251,22 @@ export function renderCommunicationSms(
           : `${leadPart}${vn}: Reminder: deposit still needed for ${partySize} guests on ${smsDate} at ${time}.`;
         return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
       }
+      case 'card_hold_request':
+      case 'card_hold_payment_reminder': {
+        // Card-hold deposits (§10.3). Single shape for both lanes; the reassurance
+        // clause ("No payment is taken now.") is dropped first when over 160 chars.
+        const url = opts.paymentLink?.trim() ?? '';
+        const prefix =
+          opts.messageKey === 'card_hold_payment_reminder' ? 'Reminder: ' : '';
+        const core = `${leadPart}${prefix}${vn}: card details needed to secure your booking for ${smsDate} at ${time}.`;
+        const withReassurance = joinSmsPrefixAndUrl(
+          `${core} No payment is taken now.`,
+          url || null,
+          'Add: ',
+        );
+        if (withReassurance.length <= SMS_CHAR_BUDGET) return withReassurance;
+        return joinSmsPrefixAndUrl(core, url || null, 'Add: ');
+      }
       case 'pre_visit_reminder': {
         const core = isAppointmentLane(opts.lane)
           ? `${leadPart}${vn}: Reminder: ${withStaffSms(opts.booking, label)} is on ${smsDate} at ${time}. See you soon.`
@@ -269,9 +287,17 @@ export function renderCommunicationSms(
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
       case 'auto_cancel_notification': {
+        // Card-hold variant (§12.1): the guest never owed a deposit, they never
+        // added card details.
+        const reason = opts.booking.card_hold
+          ? 'card details were not added in time'
+          : 'deposit was not paid in time';
+        const reasonShort = opts.booking.card_hold
+          ? 'card details were not added'
+          : 'deposit was not paid';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; deposit was not paid in time.`
-          : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; deposit was not paid.`;
+          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; ${reason}.`
+          : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; ${reasonShort}.`;
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
       case 'custom_message': {
@@ -329,6 +355,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       const structuredTextLines = structuredPrice
         ? ['Price and payment:', ...structuredPrice.split('\n')]
         : [];
+      // Card-hold deposits (§10.2): open hold -> append the card-on-file notice.
+      const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
       return {
         subject: appointment
           ? confirmationSubject(opts.booking, opts.venue.name)
@@ -358,6 +386,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
           ...structuredTextLines,
+          holdNotice ? '' : null,
+          holdNotice,
           ...complianceFormsTextLines(opts.booking.compliance_forms),
           opts.cancellationPolicy ? `Cancellation policy: ${opts.cancellationPolicy}` : null,
           opts.preAppointmentInstructions && appointment
@@ -508,6 +538,37 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
       };
+    case 'card_hold_request':
+    case 'card_hold_payment_reminder': {
+      // Card-hold deposits (§10.3): no payment is taken and there is no refund
+      // deadline copy (holds have none; the consent rule is stated in the body).
+      const isReminder = opts.messageKey === 'card_hold_payment_reminder';
+      const fee = formatCardHoldFeePence(opts.booking.card_hold_fee_pence ?? 0);
+      const bodyCore =
+        `No payment is taken now. Add your card details to secure your booking. ` +
+        `${opts.venue.name} may charge a no-show fee of up to ${fee} if you do not attend.`;
+      return {
+        subject: isReminder
+          ? `Reminder: add your card details to confirm your booking at ${opts.venue.name}`
+          : `Add your card details to confirm your booking at ${opts.venue.name}`,
+        heading: 'Card details needed',
+        mainContent: [
+          htmlParagraph(`Hi ${guestName},`),
+          htmlParagraph(bodyCore),
+        ].join(''),
+        textLines: [
+          `Hi ${guestName},`,
+          '',
+          bodyCore,
+          appointment ? `Service: ${withStaffLabel}` : null,
+          `Date: ${date}`,
+          `Time: ${time}`,
+          appointment ? null : `Guests: ${partySize}`,
+        ],
+        ctaLabel: 'Add card details',
+        ctaUrl: opts.paymentLink ?? null,
+      };
+    }
     case 'pre_visit_reminder': {
       const acctPre = accountBookingsLinkParts(opts.booking);
       return {
@@ -609,7 +670,15 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
-    case 'auto_cancel_notification':
+    case 'auto_cancel_notification': {
+      // Card-hold variant (§12.1): "the deposit wasn't paid in time" is false
+      // for a card hold, where only card details were requested.
+      const cancelReason = opts.booking.card_hold
+        ? 'because card details were not added in time'
+        : "because the deposit wasn't paid in time";
+      const cancelledLine = appointment
+        ? `We're sorry to let you know that your appointment has been cancelled ${cancelReason}:`
+        : `We're sorry to let you know that your booking has been cancelled ${cancelReason}:`;
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been cancelled`
@@ -617,11 +686,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         heading: 'Booking cancelled',
         mainContent: [
           htmlParagraph(`Hi ${guestName},`),
-          htmlParagraph(
-            appointment
-              ? "We're sorry to let you know that your appointment has been cancelled because the deposit wasn't paid in time:"
-              : "We're sorry to let you know that your booking has been cancelled because the deposit wasn't paid in time:",
-          ),
+          htmlParagraph(cancelledLine),
           htmlParagraph(
             appointment
               ? "The slot has been released. If you'd still like to book, you're welcome to choose a new time."
@@ -631,9 +696,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         textLines: [
           `Hi ${guestName},`,
           '',
-          appointment
-            ? "We're sorry to let you know that your appointment has been cancelled because the deposit wasn't paid in time:"
-            : "We're sorry to let you know that your booking has been cancelled because the deposit wasn't paid in time:",
+          cancelledLine,
           appointment ? `Service: ${withStaffLabel}` : null,
           `Date: ${date}`,
           `Time: ${time}`,
@@ -642,6 +705,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
+    }
     case 'custom_message':
       return {
         subject: `A message from ${opts.venue.name}`,
@@ -792,6 +856,13 @@ export function renderCommunicationEmail(
 
   if (opts.messageKey === 'booking_confirmation') {
     const structuredPrice = confirmationStructuredPriceText(opts.booking);
+    // Card-hold deposits (§10.2): render the card-on-file notice in the details
+    // card, in the slot the deposit callout uses (mirrors how deposit receipt
+    // lines are appended to the confirmation).
+    const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
+    const holdNoticeHtml = holdNotice
+      ? `<div style="margin:16px 0 0;padding:14px 16px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:10px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`
+      : null;
 
     html = renderBookingConfirmationDocumentHtml({
       booking: opts.booking,
@@ -802,7 +873,7 @@ export function renderCommunicationEmail(
       manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
         preambleHtml: complianceFormsHtml(opts.booking.compliance_forms),
-        depositHtml: null,
+        depositHtml: holdNoticeHtml,
         customMessage: opts.emailCustomMessage ?? null,
         postCtaAccountHtml: config.postCtaHtml ?? null,
         cancellationPolicy: opts.cancellationPolicy ?? null,

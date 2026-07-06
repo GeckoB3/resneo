@@ -723,21 +723,21 @@ If a staff member is stuck, they can still use **Support** from the sidebar foot
       helpSection: 'setup',
       title: 'Deposits, full payments, and refunds',
       description:
-        'Stripe Connect, per-service rules, guest checkout, staff-created bookings, and keeping cancellation policy consistent.',
-      tags: ['stripe', 'payments', 'deposits', 'refunds'],
+        'Stripe Connect, per-service rules, card holds with no-show fees, guest checkout, staff-created bookings, and keeping cancellation policy consistent.',
+      tags: ['stripe', 'payments', 'deposits', 'refunds', 'card hold', 'no-show'],
       content: `
 # Get paid the way you promise
 
-ResNeo never holds your funds—card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
+ResNeo never holds your funds. Card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
 
-**What this covers:** a short go-live checklist, staff-created bookings when payment is required, and keeping messages aligned with your policy.
+**What this covers:** a short go-live checklist, card holds for no-show protection, staff-created bookings when payment is required, and keeping messages aligned with your policy.
 
 ## Go-live checklist
 
 :::help-figure payments-flow
 
 1. Finish **Stripe Connect** onboarding (**Settings → Payments**).
-2. For each **service**, **class type**, **event**, or **resource**, choose the correct **payment requirement** (none, deposit, or full payment).
+2. For each **service**, **class type**, **event**, or **resource**, choose the correct **payment requirement** (none, deposit, full payment, or card hold).
 3. Review **Communications** templates for deposit **requests**, **confirmations**, and **reminders** so wording matches your legal policy.
 
 ## Guest checkout
@@ -748,9 +748,44 @@ Public flows automatically launch **Stripe** whenever money is required **before
 
 Phone and walk-in bookings follow the same payment rules. If the catalogue expects online payment, collect card details through the guided flow so ledgers stay consistent.
 
+## Card holds: no payment up front
+
+A **card hold** protects you from no-shows without charging clients when they book. No payment is taken. The client's card is stored securely with Stripe, and you can charge a **no-show fee** if they do not attend. Nothing is ever charged automatically.
+
+## Turn on card holds
+
+1. In **Settings**, open the **service editor** (the same place you set deposits today).
+2. Choose **Card hold** as the deposit type.
+3. Set the **no-show fee (£)**. This is the most you can charge if the client does not attend.
+
+Card holds also work for class types, events, resources, and table booking rules. For classes, events, and tables the fee is **per person**. If you do not see the Card hold option, it is not switched on for your venue yet; contact support.
+
+## What clients see online
+
+Clients enter their card details as part of booking, just like a deposit, but **no money is taken**. The booking confirms once the card is saved. Their confirmation explains that no payment was taken and shows the maximum no-show fee.
+
+## Card holds on phone bookings
+
+1. Create the booking as normal.
+2. When the service needs a card hold, a **Card hold** toggle appears on the New Booking form, switched on by default. Turn it off to waive the hold for this booking.
+3. Leave it on and the client receives a secure link by email or SMS to add their card details on their own device.
+4. The booking stays **Pending** until the card is saved, then confirms on its own. The client gets a reminder after 2 hours, and the booking cancels automatically after 24 hours if no card is added.
+
+## Charge a no-show fee
+
+1. Mark the booking as a **no-show**, exactly as you do today.
+2. Open the booking and choose **Charge no-show fee**.
+3. Check the amount and confirm. You can charge less than the maximum, never more.
+
+Only **admins** can charge the fee. The card is released automatically 14 days after the booking, or as soon as the booking is cancelled. Once released, it can never be charged.
+
+## Refund a no-show fee
+
+Charged in error, or the client had a genuine reason? Open the booking and choose **Refund no-show fee**. The money goes back to the saved card. Admins only.
+
 ## Confirm or cancel links
 
-Automated messages may include **confirm or cancel** links (for example \`/confirm/{bookingId}/{token}\`). Guests should understand deposit implications before they tap—mirror that language in your templates.
+Automated messages may include **confirm or cancel** links (for example \`/confirm/{bookingId}/{token}\`). Guests should understand deposit implications before they tap. Mirror that language in your templates.
 
 ## Refunds and disputes
 
@@ -758,7 +793,7 @@ Cancellation windows live on each catalogue row. When you change a window, updat
 
 ## Troubleshooting payments
 
-Start with [Troubleshooting — Stripe](/help/troubleshooting/stripe-issues) if Connect is disconnected or payments fail mid-checkout—most issues are incomplete onboarding or expired cards.
+Start with [Troubleshooting: Stripe](/help/troubleshooting/stripe-issues) if Connect is disconnected or payments fail mid-checkout. Most issues are incomplete onboarding or expired cards.
 `.trim(),
     },
     {

@@ -25,13 +25,14 @@ import { Button } from '@/components/ui/primitives/Button';
 import { Input, Textarea } from '@/components/ui/primitives/Input';
 import { FormField } from '@/components/ui/primitives/FormField';
 import { formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 
 interface PractitionerOption {
   id: string;
   name: string;
 }
 
-type PaymentRequirement = 'none' | 'deposit' | 'full_payment';
+type PaymentRequirement = 'none' | 'deposit' | 'full_payment' | 'card_hold';
 
 interface ClassType {
   id: string;
@@ -72,6 +73,11 @@ function paymentRuleSummary(ct: ClassType, formatPrice: (pence: number) => strin
   const req = ct.payment_requirement ?? 'none';
   if (req === 'none') return 'No online payment';
   if (req === 'full_payment') return 'Full payment online';
+  if (req === 'card_hold') {
+    return ct.deposit_amount_pence != null
+      ? `Card hold, no-show fee ${formatPrice(ct.deposit_amount_pence)}`
+      : 'Card hold';
+  }
   if (req === 'deposit' && ct.deposit_amount_pence != null) {
     return `Deposit ${formatPrice(ct.deposit_amount_pence)}`;
   }
@@ -146,6 +152,8 @@ export function ClassTimetableView({
   classCommerceEnabled?: boolean;
 }) {
   const sym = currencySymbolFromCode(currency);
+  /** Card-hold deposits rollout flag, resolved server-side by the dashboard layout (VenueFeatureFlagsProvider). */
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   /** Single source of truth for "today" across stats, agenda and the calendar — venue-local, never UTC/browser. */
   const venueToday = useMemo(() => formatYmdInTimezone(Date.now(), venueTimeZone), [venueTimeZone]);
   function formatPrice(pence: number): string {
@@ -442,8 +450,10 @@ export function ClassTimetableView({
     const calendarId = classTypeForm.instructor_staff_id.trim();
     const custom = classTypeForm.instructor_custom_name.trim();
     const depositRaw = classTypeForm.deposit_pounds.trim();
+    // 'card_hold' stores its per-person no-show fee in the same column as deposits.
     const depositPence =
-      classTypeForm.payment_requirement === 'deposit' && depositRaw !== ''
+      (classTypeForm.payment_requirement === 'deposit' || classTypeForm.payment_requirement === 'card_hold') &&
+      depositRaw !== ''
         ? Math.max(0, Math.round(parseFloat(depositRaw) * 100))
         : null;
 
@@ -474,6 +484,14 @@ export function ClassTimetableView({
     if (!classTypeForm.instructor_staff_id.trim()) {
       setClassTypeError('Select a calendar for this class.');
       return;
+    }
+    // Card hold has no price relationship, but the no-show fee must be £1 to £150 (design doc §6.2).
+    if (classTypeForm.payment_requirement === 'card_hold') {
+      const fee = parseFloat(classTypeForm.deposit_pounds);
+      if (!Number.isFinite(fee) || fee < 1 || fee > 150) {
+        setClassTypeError('Enter a no-show fee between £1 and £150 per person.');
+        return;
+      }
     }
     setClassTypeSaving(true);
     setClassTypeError(null);
@@ -511,7 +529,7 @@ export function ClassTimetableView({
     const staffId = ct.instructor_id ?? '';
     const payReq = ct.payment_requirement ?? 'none';
     const depositPounds =
-      payReq === 'deposit' && ct.deposit_amount_pence != null
+      (payReq === 'deposit' || payReq === 'card_hold') && ct.deposit_amount_pence != null
         ? (ct.deposit_amount_pence / 100).toFixed(2)
         : '';
     setClassTypeForm({
@@ -1372,11 +1390,37 @@ export function ClassTimetableView({
                         />
                         <span>Full payment online (per person)</span>
                       </label>
+                      {(cardHoldEnabled || classTypeForm.payment_requirement === 'card_hold') && (
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                          <input
+                            type="radio"
+                            name="payment_requirement_modal"
+                            className="mt-0.5"
+                            checked={classTypeForm.payment_requirement === 'card_hold'}
+                            onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
+                          />
+                          <span>
+                            Card hold
+                            <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                              No payment is taken when the client books. Their card is stored securely and you can
+                              charge a no-show fee if they do not attend.
+                            </span>
+                          </span>
+                        </label>
+                      )}
                     </div>
-                    {classTypeForm.payment_requirement === 'deposit' && (
+                    {!cardHoldEnabled && classTypeForm.payment_requirement === 'card_hold' && (
+                      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                        Card hold is disabled for this venue; this service currently takes no deposit.
+                      </p>
+                    )}
+                    {(classTypeForm.payment_requirement === 'deposit' ||
+                      classTypeForm.payment_requirement === 'card_hold') && (
                       <div className="mt-3 max-w-xs">
                         <label htmlFor="ct-deposit" className="mb-1 block text-xs font-medium text-slate-600">
-                          Deposit amount ({sym}) *
+                          {classTypeForm.payment_requirement === 'card_hold'
+                            ? 'No-show fee per person (£) *'
+                            : `Deposit amount (${sym}) *`}
                         </label>
                         <input
                           id="ct-deposit"
@@ -1388,6 +1432,9 @@ export function ClassTimetableView({
                           placeholder="e.g. 5.00"
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                         />
+                        {classTypeForm.payment_requirement === 'card_hold' && (
+                          <p className="mt-1 text-xs text-slate-500">At least £1 and at most £150 per person.</p>
+                        )}
                       </div>
                     )}
                     <p className="mt-2 text-xs text-slate-500">
@@ -1397,7 +1444,8 @@ export function ClassTimetableView({
                       stripeConnected={stripeConnected}
                       requiresOnlinePayment={
                         classTypeForm.payment_requirement === 'deposit' ||
-                        classTypeForm.payment_requirement === 'full_payment'
+                        classTypeForm.payment_requirement === 'full_payment' ||
+                        classTypeForm.payment_requirement === 'card_hold'
                       }
                     />
                   </div>

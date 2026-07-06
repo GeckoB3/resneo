@@ -2,6 +2,8 @@
 
 Short reference for `require_account_login_for_bookings` and silent auth signup.
 
+**Related:** for admin vs calendar-scoped-staff permissions on venue mutation routes, see [`api-venue-permissions-matrix.md`](api-venue-permissions-matrix.md).
+
 ## Public guest-facing (widget / online / booking_page)
 
 | Route | Notes |

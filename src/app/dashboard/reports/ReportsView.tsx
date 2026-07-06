@@ -45,6 +45,10 @@ interface Report4 {
   total_collected_pence: number;
   total_refunded_pence: number;
   total_forfeited_pence: number;
+  /** Card holds: no-show fees charged against stored cards (kept separate from deposits collected). */
+  no_show_fees_charged_pence?: number;
+  no_show_fees_charged_count?: number;
+  card_holds_active_count?: number;
 }
 
 interface AppointmentInsightsPayload {
@@ -438,6 +442,12 @@ export function ReportsView({
       ['Total collected', String(r.total_collected_pence), (r.total_collected_pence / 100).toFixed(2)],
       ['Total refunded', String(r.total_refunded_pence), (r.total_refunded_pence / 100).toFixed(2)],
       ['Total forfeited', String(r.total_forfeited_pence), (r.total_forfeited_pence / 100).toFixed(2)],
+      [
+        `No-show fees charged (${r.no_show_fees_charged_count ?? 0})`,
+        String(r.no_show_fees_charged_pence ?? 0),
+        ((r.no_show_fees_charged_pence ?? 0) / 100).toFixed(2),
+      ],
+      ['Active card holds', String(r.card_holds_active_count ?? 0), ''],
     ]);
   }, [data]);
 
@@ -1123,23 +1133,39 @@ export function ReportsView({
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r4 && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <StatTile
-              label="Total collected"
-              value={`£${(r4.total_collected_pence / 100).toFixed(2)}`}
-              color={reportMetricColor('emerald')}
-            />
-            <StatTile
-              label="Total refunded"
-              value={`£${(r4.total_refunded_pence / 100).toFixed(2)}`}
-              color={reportMetricColor('amber')}
-            />
-            <StatTile
-              label="Total forfeited"
-              value={`£${(r4.total_forfeited_pence / 100).toFixed(2)}`}
-              color={reportMetricColor('red')}
-            />
-          </div>
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatTile
+                label="Total collected"
+                value={`£${(r4.total_collected_pence / 100).toFixed(2)}`}
+                color={reportMetricColor('emerald')}
+              />
+              <StatTile
+                label="Total refunded"
+                value={`£${(r4.total_refunded_pence / 100).toFixed(2)}`}
+                color={reportMetricColor('amber')}
+              />
+              <StatTile
+                label="Total forfeited"
+                value={`£${(r4.total_forfeited_pence / 100).toFixed(2)}`}
+                color={reportMetricColor('red')}
+              />
+            </div>
+            {/* Card holds are shown separately from deposits collected: a charged
+                no-show fee is not a deposit payment (spec §13). */}
+            <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+              <StatTile
+                label="No-show fees charged"
+                value={`£${((r4.no_show_fees_charged_pence ?? 0) / 100).toFixed(2)} (${r4.no_show_fees_charged_count ?? 0})`}
+                color={reportMetricColor('teal')}
+              />
+              <StatTile
+                label="Active card holds"
+                value={String(r4.card_holds_active_count ?? 0)}
+                color={reportMetricColor()}
+              />
+            </div>
+          </>
         )}
       </ReportSection>
 

@@ -16,6 +16,8 @@ const FIELD_CLASS =
 interface Props {
   serviceId: string;
   restriction: ServiceBookingRestriction | undefined;
+  /** Venue `card_hold_deposits` flag; the Deposit type selector renders only when on. */
+  cardHoldDepositsEnabled: boolean;
   showToast: (msg: string) => void;
   onRestrictionSaved: (r: ServiceBookingRestriction) => void;
 }
@@ -29,6 +31,7 @@ interface ComparableFields {
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
   deposit_amount_per_person_gbp: number | null;
+  deposit_type: 'charge' | 'card_hold';
   cancellation_notice_hours: number;
 }
 
@@ -42,6 +45,7 @@ function toComparable(r: ServiceBookingRestriction): ComparableFields {
     large_party_message: r.large_party_message,
     deposit_required_from_party_size: r.deposit_required_from_party_size,
     deposit_amount_per_person_gbp: r.deposit_amount_per_person_gbp,
+    deposit_type: r.deposit_type === 'card_hold' ? 'card_hold' : 'charge',
     cancellation_notice_hours: r.cancellation_notice_hours ?? 48,
   };
 }
@@ -56,11 +60,12 @@ function comparableEqual(a: ComparableFields, b: ComparableFields): boolean {
     a.large_party_message === b.large_party_message &&
     a.deposit_required_from_party_size === b.deposit_required_from_party_size &&
     a.deposit_amount_per_person_gbp === b.deposit_amount_per_person_gbp &&
+    a.deposit_type === b.deposit_type &&
     a.cancellation_notice_hours === b.cancellation_notice_hours
   );
 }
 
-export function ServiceBookingRulesSection({ serviceId, restriction, showToast, onRestrictionSaved }: Props) {
+export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDepositsEnabled, showToast, onRestrictionSaved }: Props) {
   const [draft, setDraft] = useState<ServiceBookingRestriction>(() =>
     restriction
       ? { ...restriction, deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null }
@@ -95,14 +100,24 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
         showToast('Enter a deposit amount per person greater than £0 when deposits are required.');
         return;
       }
+      // Card-hold floor, mirrored server-side: the no-show fee must be at least £1.
+      if (d.deposit_type === 'card_hold' && amt < 1) {
+        showToast('Enter a no-show fee of at least £1 per person when the card hold option is selected.');
+        return;
+      }
     }
 
     const existing = restrictionRef.current;
     const { id: _draftId, ...rest } = d;
-    const payload = {
+    const payload: Record<string, unknown> = {
       ...rest,
       online_requires_deposit: true as const,
     };
+    if (!cardHoldDepositsEnabled) {
+      // Card hold is flag-gated server-side; never send deposit_type while the flag is
+      // off so a stored 'card_hold' value is left untouched (and other edits still save).
+      delete payload.deposit_type;
+    }
 
     try {
       if (existing?.id && existing.service_id === d.service_id) {
@@ -251,13 +266,47 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
                 <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
                 <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setDraft({ ...draft, deposit_required_from_party_size: v })} className={FIELD_CLASS} />
               </div>
+              {!cardHoldDepositsEnabled && draft.deposit_type === 'card_hold' && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  Card hold is disabled for this venue; this service currently takes no deposit.
+                </p>
+              )}
+              {cardHoldDepositsEnabled && (
+                <div className="max-w-xs">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit type</label>
+                  <select
+                    value={draft.deposit_type === 'card_hold' ? 'card_hold' : 'charge'}
+                    onChange={(e) =>
+                      setDraft({ ...draft, deposit_type: e.target.value === 'card_hold' ? 'card_hold' : 'charge' })
+                    }
+                    className={FIELD_CLASS}
+                  >
+                    <option value="charge">Take deposit payment</option>
+                    <option value="card_hold">Card hold</option>
+                  </select>
+                  {draft.deposit_type === 'card_hold' && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      No payment is taken when the client books. Their card is stored securely and you can charge a no-show fee if they do not attend.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="max-w-xs">
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                  Amount per person (£) <HelpTooltip content="Charged per guest when the party size threshold is met. Example: £5 × 4 guests = £20 total." />
+                  {cardHoldDepositsEnabled && draft.deposit_type === 'card_hold'
+                    ? 'No-show fee per person (£)'
+                    : 'Amount per person (£)'}{' '}
+                  <HelpTooltip
+                    content={
+                      cardHoldDepositsEnabled && draft.deposit_type === 'card_hold'
+                        ? 'The most you can charge per guest if the party does not attend. Example: £5 fee for 4 guests = £20 total.'
+                        : 'Charged per guest when the party size threshold is met. Example: £5 × 4 guests = £20 total.'
+                    }
+                  />
                 </label>
                 <NumericInput
                   allowFloat
-                  min={0.01}
+                  min={draft.deposit_type === 'card_hold' ? 1 : 0.01}
                   max={100}
                   value={draft.deposit_amount_per_person_gbp ?? 5}
                   onChange={(v) => setDraft({ ...draft, deposit_amount_per_person_gbp: v > 0 ? v : null })}

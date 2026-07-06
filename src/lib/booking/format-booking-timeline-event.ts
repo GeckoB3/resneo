@@ -74,11 +74,30 @@ export function shouldShowBookingTimelineEvent(event: BookingTimelineEventRow): 
     case 'booking_modified':
     case 'auto_cancelled':
     case 'waitlist_converted':
+    case 'card_hold_saved':
+    case 'card_hold_released':
+    case 'card_hold_charged':
+    case 'card_hold_charge_failed':
+    case 'card_hold_charge_refunded':
       return true;
     default:
       return false;
   }
 }
+
+/** "2500" -> "£25.00" for timeline detail lines. */
+function poundsFromPence(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return `£${(value / 100).toFixed(2)}`;
+}
+
+const CARD_HOLD_RELEASE_REASON_LABELS: Record<string, string> = {
+  cancelled: 'booking cancelled',
+  expired: 'charge window passed',
+  refunded: 'fee refunded',
+  abandoned: 'card not added in time',
+  admin: 'waived by staff',
+};
 
 export function formatBookingTimelineEvent(event: BookingTimelineEventRow): {
   title: string;
@@ -131,6 +150,50 @@ export function formatBookingTimelineEvent(event: BookingTimelineEventRow): {
 
     case 'waitlist_converted':
       return { title: 'Converted from waitlist' };
+
+    case 'card_hold_saved': {
+      const fee = poundsFromPence(payload?.fee_pence);
+      return {
+        title: 'Card saved for no-show fee',
+        detail: fee ? `No-show fee up to ${fee}` : undefined,
+      };
+    }
+
+    case 'card_hold_charged': {
+      const charged = poundsFromPence(payload?.charged_pence);
+      return {
+        title: 'No-show fee charged',
+        detail: charged ? `${charged} charged to the saved card` : undefined,
+      };
+    }
+
+    case 'card_hold_charge_refunded': {
+      const charged = poundsFromPence(payload?.charged_pence);
+      return {
+        title: 'No-show fee refunded',
+        detail: charged ? `${charged} refunded` : undefined,
+      };
+    }
+
+    case 'card_hold_charge_failed': {
+      const code =
+        typeof payload?.failure_code === 'string' ? payload.failure_code.replace(/_/g, ' ') : null;
+      return {
+        title: 'No-show fee charge failed',
+        detail: code ? `Reason: ${code}` : undefined,
+      };
+    }
+
+    case 'card_hold_released': {
+      const reason =
+        typeof payload?.release_reason === 'string'
+          ? CARD_HOLD_RELEASE_REASON_LABELS[payload.release_reason]
+          : null;
+      return {
+        title: 'Card hold ended',
+        detail: reason ? `Reason: ${reason}` : undefined,
+      };
+    }
 
     default:
       return {

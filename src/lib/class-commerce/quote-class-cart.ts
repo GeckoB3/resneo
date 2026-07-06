@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import type { ClassCartLineInput, ClassCartQuoteLine, ClassCartQuoteResult } from '@/types/class-commerce';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { getMembershipDiscountForClassType } from '@/lib/class-commerce/membership-discount';
@@ -23,6 +24,28 @@ function applyDiscount(pence: number, percent: number): { final: number; discoun
   return { final, discount: pence - final };
 }
 
+/**
+ * Resolve the no-show hold fee for one cart line (design doc §6.3/§7.2).
+ *
+ * Pure: the fee applies only when the class type is configured `card_hold` AND the
+ * venue `card_hold_deposits` flag is on AND a positive per-person fee is configured.
+ * Flag-off and zero-fee cases resolve as no hold (`feePence: null`) with a warning
+ * code so callers can `console.warn` per §6.3 instead of silently degrading.
+ */
+export function resolveClassCartLineCardHoldFee(params: {
+  classTypePaymentRequirement: string | null | undefined;
+  perPersonFeePence: number | null | undefined;
+  partySize: number;
+  cardHoldDepositsEnabled: boolean;
+}): { feePence: number | null; warning: 'flag_off' | 'zero_fee' | null } {
+  const { classTypePaymentRequirement, perPersonFeePence, partySize, cardHoldDepositsEnabled } = params;
+  if (classTypePaymentRequirement !== 'card_hold') return { feePence: null, warning: null };
+  if (!cardHoldDepositsEnabled) return { feePence: null, warning: 'flag_off' };
+  const perPerson = perPersonFeePence ?? 0;
+  if (perPerson <= 0) return { feePence: null, warning: 'zero_fee' };
+  return { feePence: perPerson * partySize, warning: null };
+}
+
 export async function quoteClassCart(
   admin: SupabaseClient,
   params: { venueId: string; lines: ClassCartLineInput[]; userId?: string },
@@ -30,6 +53,17 @@ export async function quoteClassCart(
   const { venueId, lines, userId } = params;
   const out: ClassCartQuoteLine[] = [];
   const discountCacheByType = new Map<string, number>();
+
+  // Resolve the venue's card_hold_deposits flag once for the whole cart (§6.3).
+  const { data: venueFlagsRow } = await admin
+    .from('venues')
+    .select('feature_flags')
+    .eq('id', venueId)
+    .maybeSingle();
+  const cardHoldEnabled = resolveAppointmentsFeatureFlag(
+    'card_hold_deposits',
+    parseVenueFeatureFlags((venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags),
+  );
 
   async function discountFor(classTypeId: string): Promise<number> {
     if (!userId) return 0;
@@ -64,6 +98,7 @@ export async function quoteClassCart(
         member_discount_pence: 0,
         member_discount_percent: 0,
         payment_requirement: 'none',
+        card_hold_fee_pence: null,
         requires_stripe_checkout: false,
         ok: false,
         error: 'Session not found',
@@ -80,7 +115,7 @@ export async function quoteClassCart(
 
     const { data: ctName, error: ctErr } = await admin
       .from('class_types')
-      .select('name, venue_id')
+      .select('name, venue_id, payment_requirement, deposit_amount_pence')
       .eq('id', row.class_type_id)
       .maybeSingle();
 
@@ -98,6 +133,7 @@ export async function quoteClassCart(
         member_discount_pence: 0,
         member_discount_percent: 0,
         payment_requirement: 'none',
+        card_hold_fee_pence: null,
         requires_stripe_checkout: false,
         ok: false,
         error: 'Session does not belong to this venue',
@@ -121,6 +157,7 @@ export async function quoteClassCart(
         member_discount_pence: 0,
         member_discount_percent: 0,
         payment_requirement: 'none',
+        card_hold_fee_pence: null,
         requires_stripe_checkout: false,
         ok: false,
         error: 'Session cancelled',
@@ -149,6 +186,28 @@ export async function quoteClassCart(
     const pct = ok && originalCharge > 0 ? await discountFor(classTypeId) : 0;
     const discounted = applyDiscount(originalCharge, pct);
 
+    // Card-hold lines charge no money today (`online_charge_pence` stays 0); the fee
+    // is the amount the venue may charge later on a no-show (§7.2). The raw
+    // class-type configuration decides here, gated on the venue flag resolved above,
+    // so this quote emits its own §6.3 warnings independent of the engine passthrough.
+    const ct = ctName as { payment_requirement?: string | null; deposit_amount_pence?: number | null };
+    const hold = resolveClassCartLineCardHoldFee({
+      classTypePaymentRequirement: ct.payment_requirement,
+      perPersonFeePence: ct.deposit_amount_pence,
+      partySize: line.party_size,
+      cardHoldDepositsEnabled: cardHoldEnabled,
+    });
+    if (hold.warning === 'flag_off') {
+      console.warn(
+        `[quoteClassCart] class type ${classTypeId} configured card_hold but card_hold_deposits flag is off for venue ${venueId}; treating as no deposit`,
+      );
+    } else if (hold.warning === 'zero_fee') {
+      console.warn(
+        `[quoteClassCart] class type ${classTypeId} configured card_hold with no per-person fee; treating as no deposit`,
+      );
+    }
+    const cardHoldFeePence = ok ? hold.feePence : null;
+
     out.push({
       class_instance_id: line.class_instance_id,
       party_size: line.party_size,
@@ -161,7 +220,8 @@ export async function quoteClassCart(
       original_pence: ok ? originalCharge : 0,
       member_discount_pence: ok ? discounted.discount : 0,
       member_discount_percent: ok ? pct : 0,
-      payment_requirement: ok ? payReq : 'none',
+      payment_requirement: ok ? (cardHoldFeePence != null ? 'card_hold' : payReq) : 'none',
+      card_hold_fee_pence: cardHoldFeePence,
       requires_stripe_checkout: ok ? requiresStripe : false,
       ok,
       error: ok ? undefined : cls ? 'Not enough spaces' : 'Session unavailable',
@@ -169,6 +229,8 @@ export async function quoteClassCart(
   }
 
   const totalOnline = out.reduce((s, l) => s + (l.ok ? l.online_charge_pence : 0), 0);
+  const anyHold = out.some((l) => l.ok && l.card_hold_fee_pence != null);
+  const totalHold = out.reduce((s, l) => s + (l.ok && l.card_hold_fee_pence != null ? l.card_hold_fee_pence : 0), 0);
 
   return {
     venue_id: venueId,
@@ -176,5 +238,6 @@ export async function quoteClassCart(
     all_ok: out.every((l) => l.ok),
     requires_authentication: true,
     total_online_charge_pence: totalOnline,
+    card_hold_fee_pence: anyHold ? totalHold : null,
   };
 }

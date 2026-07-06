@@ -38,6 +38,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StackedList } from '@/components/ui/dashboard/StackedList';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { useVenuePostgresLiveSync } from '@/lib/realtime/useVenuePostgresLiveSync';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 
 interface TicketType {
   id: string;
@@ -63,7 +64,7 @@ interface ExperienceEvent {
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
-  payment_requirement?: 'none' | 'deposit' | 'full_payment';
+  payment_requirement?: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_amount_pence?: number | null;
 }
 
@@ -118,7 +119,7 @@ interface EventFormState {
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
-  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  payment_requirement: 'none' | 'deposit' | 'full_payment' | 'card_hold';
   deposit_pounds: string;
 }
 
@@ -237,6 +238,8 @@ export function EventManagerView({
 }) {
   const { addToast } = useToast();
   const sym = currencySymbolFromCode(currency);
+  /** Card-hold deposits rollout flag, resolved server-side by the dashboard layout (VenueFeatureFlagsProvider). */
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
 
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
@@ -576,6 +579,15 @@ export function EventManagerView({
       }
     }
 
+    // Card hold has no price relationship, but the no-show fee must be at least £1 (design doc §6.2).
+    if (eventForm.payment_requirement === 'card_hold') {
+      const fee = parseFloat(eventForm.deposit_pounds);
+      if (!Number.isFinite(fee) || fee < 1) {
+        setEventError('Enter a no-show fee of at least £1 per person.');
+        return;
+      }
+    }
+
     let eventDateForPayload = eventForm.event_date;
     if (!editingEventId && eventForm.scheduleMode === 'custom') {
       const customDates = normaliseEventDates(eventForm.customDates);
@@ -623,8 +635,10 @@ export function EventManagerView({
     setEventSaving(true);
     setEventError(null);
     try {
+      // 'card_hold' stores its per-person no-show fee in the same column as deposits.
       const depositPence =
-        eventForm.payment_requirement === 'deposit' && eventForm.deposit_pounds.trim() !== ''
+        (eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'card_hold') &&
+        eventForm.deposit_pounds.trim() !== ''
           ? Math.max(0, Math.round(parseFloat(eventForm.deposit_pounds) * 100))
           : null;
 
@@ -1562,10 +1576,37 @@ export function EventManagerView({
                   />
                   <span>Full payment online (per ticket)</span>
                 </label>
+                {(cardHoldEnabled || eventForm.payment_requirement === 'card_hold') && (
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="event_payment_requirement"
+                      className="mt-0.5"
+                      checked={eventForm.payment_requirement === 'card_hold'}
+                      onChange={() => setEventForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
+                    />
+                    <span>
+                      Card hold
+                      <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                        No payment is taken when the client books. Their card is stored securely and you can charge a
+                        no-show fee if they do not attend.
+                      </span>
+                    </span>
+                  </label>
+                )}
               </div>
-              {eventForm.payment_requirement === 'deposit' && (
+              {!cardHoldEnabled && eventForm.payment_requirement === 'card_hold' && (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  Card hold is disabled for this venue; this service currently takes no deposit.
+                </p>
+              )}
+              {(eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'card_hold') && (
                 <div className="mt-3 max-w-full sm:max-w-xs">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    {eventForm.payment_requirement === 'card_hold'
+                      ? 'No-show fee per person (£) *'
+                      : `Deposit amount (${sym}) *`}
+                  </label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1575,6 +1616,9 @@ export function EventManagerView({
                     placeholder="e.g. 5.00"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
+                  {eventForm.payment_requirement === 'card_hold' && (
+                    <p className="mt-1 text-xs text-slate-500">At least £1 per person.</p>
+                  )}
                 </div>
               )}
               <p className="mt-2 text-xs text-slate-500">
@@ -1583,7 +1627,9 @@ export function EventManagerView({
               <StripePaymentWarning
                 stripeConnected={stripeConnected}
                 requiresOnlinePayment={
-                  eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'full_payment'
+                  eventForm.payment_requirement === 'deposit' ||
+                  eventForm.payment_requirement === 'full_payment' ||
+                  eventForm.payment_requirement === 'card_hold'
                 }
               />
             </div>

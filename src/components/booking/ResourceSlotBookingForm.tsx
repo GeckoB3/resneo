@@ -8,6 +8,13 @@ import {
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
 import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
+import { useToast } from '@/components/ui/Toast';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
+import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import {
+  resolveStaffEntityCardHold,
+  STAFF_CARD_HOLD_CREATED_TOAST,
+} from '@/components/booking/staff-card-hold';
 
 interface ResourceInfo {
   id: string;
@@ -17,6 +24,8 @@ interface ResourceInfo {
   max_booking_minutes: number;
   slot_interval_minutes: number;
   price_per_slot_pence: number | null;
+  payment_requirement: string;
+  deposit_amount_pence: number | null;
 }
 
 interface Props {
@@ -65,6 +74,11 @@ export function ResourceSlotBookingForm({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { addToast } = useToast();
+  /** Venue's card-hold flag from the dashboard provider (this form renders inside the dashboard). */
+  const cardHoldDepositsEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
+  /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
+  const [requireCardHold, setRequireCardHold] = useState(true);
 
   const [date, setDate] = useState(preselectedDate ?? '');
   const [startTime, setStartTime] = useState(preselectedTime ?? '');
@@ -100,6 +114,8 @@ export function ResourceSlotBookingForm({
           max_booking_minutes: r.max_booking_minutes ?? 180,
           slot_interval_minutes: r.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
           price_per_slot_pence: r.price_per_slot_pence ?? null,
+          payment_requirement: r.payment_requirement ?? 'none',
+          deposit_amount_pence: r.deposit_amount_pence ?? null,
         });
         setDurationMinutes(r.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES);
       })
@@ -115,8 +131,20 @@ export function ResourceSlotBookingForm({
       setGuestPhone('');
       setError(null);
       setSubmitting(false);
+      setRequireCardHold(true);
     }
   }, [open]);
+
+  /** Card-hold resources (design doc 7.6); fee is per booking. */
+  const staffCardHold = useMemo(
+    () =>
+      resolveStaffEntityCardHold({
+        paymentRequirement: resource?.payment_requirement,
+        feePerUnitPence: resource?.deposit_amount_pence,
+        cardHoldFlagEnabled: cardHoldDepositsEnabled,
+      }),
+    [resource?.payment_requirement, resource?.deposit_amount_pence, cardHoldDepositsEnabled],
+  );
 
   const durationOptions = useMemo(() => {
     if (!resource) return [];
@@ -165,11 +193,17 @@ export function ResourceSlotBookingForm({
             // Resources have no capacity model — a slot is the unit booked, so party size is always 1.
             party_size: 1,
             source: 'phone',
+            // Card-hold resources (design doc 7.6): send the toggle state explicitly
+            // (server defaults to true when omitted; ignored otherwise).
+            ...(staffCardHold ? { require_card_hold: requireCardHold } : {}),
           }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || 'Could not create this booking. Check the slot is still free.');
+        }
+        if (staffCardHold && requireCardHold) {
+          addToast(STAFF_CARD_HOLD_CREATED_TOAST, 'success');
         }
         onCreated();
       } catch (err) {
@@ -178,7 +212,7 @@ export function ResourceSlotBookingForm({
         setSubmitting(false);
       }
     },
-    [resource, date, startTime, endTime, firstName, lastName, guestEmail, guestPhone, venueId, onCreated],
+    [resource, date, startTime, endTime, firstName, lastName, guestEmail, guestPhone, venueId, onCreated, staffCardHold, requireCardHold, addToast],
   );
 
   if (!open) return null;
@@ -354,6 +388,14 @@ export function ResourceSlotBookingForm({
                   />
                 </div>
               </div>
+
+              {staffCardHold ? (
+                <StaffCardHoldToggle
+                  checked={requireCardHold}
+                  onChange={setRequireCardHold}
+                  feePence={staffCardHold.feePence}
+                />
+              ) : null}
 
               {error ? (
                 <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">

@@ -114,6 +114,12 @@ import {
 } from '@/lib/booking/booking-row-overlay';
 import { formatCommunicationLogLabel } from '@/lib/communications/display-labels';
 import { bookingTimelineEventsForDisplay } from '@/lib/booking/format-booking-timeline-event';
+import {
+  resolveCardHoldUiState,
+  type CardHoldSummary,
+} from '@/components/booking/card-hold-ui-state';
+import { CardHoldDetailSection } from '@/components/booking/CardHoldDetailSection';
+import { useDashboardToolbarVenueOptional } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 
 export interface BookingRow {
   id: string;
@@ -207,6 +213,8 @@ export interface BookingDetailLite {
     payload?: Record<string, unknown> | null;
   }>;
   combination_staff_notes?: string | null;
+  /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
+  card_hold?: CardHoldSummary | null;
   cde_context?: {
     inferred_model: BookingModel;
     title: string;
@@ -674,6 +682,23 @@ export function ExpandedBookingContent({
   const linkedLimitedEdit = linkedAct === 'edit_existing';
   const linkedBookingContext = linkedAct != null;
 
+  // Card-hold display + action gating (§9.1/§9.2): a hold row replaces the
+  // three legacy deposit actions. Charging is admin-only (toolbar venue context;
+  // absent context = non-admin, the server enforces regardless).
+  const isAdminViewer = useDashboardToolbarVenueOptional()?.isAdmin ?? false;
+  const cardHoldState = useMemo(
+    () =>
+      resolveCardHoldUiState(
+        {
+          status: String(effectiveBooking.status),
+          deposit_status: String(effectiveBooking.deposit_status),
+        },
+        activeDetail?.card_hold ?? null,
+        { isAdmin: isAdminViewer },
+      ),
+    [activeDetail?.card_hold, effectiveBooking.deposit_status, effectiveBooking.status, isAdminViewer],
+  );
+
   const canStaffModifyBooking =
     !linkedViewOnly &&
     ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(String(effectiveBooking.status));
@@ -885,8 +910,13 @@ export function ExpandedBookingContent({
         body: JSON.stringify({ action }),
       });
       if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        setInlineActionError(payload.error ?? 'Deposit action failed');
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        // Card-hold guard responses use { code, message }; legacy deposit
+        // responses use { error }. Read both so the specific copy surfaces.
+        setInlineActionError(payload.message ?? payload.error ?? 'Deposit action failed');
         setRowOverlay((prev) => pruneBookingRowOverlay(prev, booking));
         return;
       }
@@ -1108,15 +1138,21 @@ export function ExpandedBookingContent({
     key: 'deposit',
     node: (
     <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-      <span className="font-medium text-slate-500">Deposit</span>
+      <span className="font-medium text-slate-500">{cardHoldState ? 'Card hold' : 'Deposit'}</span>
       <span
-        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-800'}`}
+        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' || effectiveBooking.deposit_status === 'Charged' ? 'text-amber-700' : effectiveBooking.deposit_status === 'Card Held' ? 'text-sky-700' : 'text-slate-800'}`}
       >
-        {effectiveBooking.deposit_status === 'Not Required'
-          ? 'None'
-          : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
-            ? `${depositAmtStr} paid`
-            : effectiveBooking.deposit_status}
+        {cardHoldState?.pill
+          ? cardHoldState.pill.label
+          : effectiveBooking.deposit_status === 'Not Required'
+            ? 'None'
+            : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
+              ? `${depositAmtStr} paid`
+              : effectiveBooking.deposit_status === 'Card Held'
+                ? 'Card held'
+                : effectiveBooking.deposit_status === 'Charged'
+                  ? 'Fee charged'
+                  : effectiveBooking.deposit_status}
       </span>
     </span>
     ),
@@ -1848,28 +1884,55 @@ export function ExpandedBookingContent({
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
           <span><span className="sm:hidden">Payments</span><span className="hidden sm:inline">Payments and confirmation</span></span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{effectiveBooking.deposit_status}</span>
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{cardHoldState?.pill?.label ?? effectiveBooking.deposit_status}</span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
           {!linkedViewOnly ? (
+          <>
+          {cardHoldState ? (
+            /* §9.1 hiding rule: hold bookings never show the legacy deposit
+               actions; the card-aware set renders instead. */
+            <CardHoldDetailSection
+              bookingId={booking.id}
+              guestName={booking.guest_name}
+              state={cardHoldState}
+              actionDisabled={inlineActionLoading !== null || statusActionPending}
+              onLegacyDepositAction={(action) => {
+                void runDepositAction(action);
+              }}
+              onChanged={() => {
+                onDetailUpdated();
+              }}
+            />
+          ) : null}
           <div className="flex flex-wrap gap-1">
-            {effectiveBooking.deposit_status !== 'Paid' && effectiveBooking.deposit_status !== 'Refunded' ? (
+            {!cardHoldState && effectiveBooking.deposit_status !== 'Paid' && effectiveBooking.deposit_status !== 'Refunded' ? (
               <>
                 <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Send payment link</button>
                 <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Waive</button>
                 <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('record_cash'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Record cash</button>
               </>
             ) : null}
-            {effectiveBooking.deposit_status === 'Paid' ? (
+            {!cardHoldState && effectiveBooking.deposit_status === 'Paid' ? (
               <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Refund deposit</button>
             ) : null}
             <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Resend confirmation</button>
           </div>
+          </>
           ) : (
-            <p className="text-[11px] text-slate-500">Deposit status: {effectiveBooking.deposit_status}</p>
+            <div className="space-y-1">
+              <p className="text-[11px] text-slate-500">
+                {cardHoldState?.pill
+                  ? `Card hold: ${cardHoldState.pill.label}`
+                  : `Deposit status: ${effectiveBooking.deposit_status}`}
+              </p>
+              {cardHoldState?.lines.map((line) => (
+                <p key={line} className="text-[11px] text-slate-500">{line}</p>
+              ))}
+            </div>
           )}
           {activeDetail?.cancellation_deadline ? (
             <p className="text-[11px] text-slate-500">Cancellation deadline: {formatRelative(activeDetail.cancellation_deadline)}</p>

@@ -11,6 +11,8 @@ import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import { Sheet } from '@/components/ui/primitives/Sheet';
 import { isCapacityConsumingStatus } from '@/lib/availability/capacity-status';
+import { isRosterChargeLinkCandidate } from '@/components/booking/card-hold-ui-state';
+import { CARD_HOLD_CHARGE_ACTION_LABEL } from '@/components/booking/card-hold-copy';
 
 interface ClassTypePayload {
   id: string;
@@ -57,12 +59,49 @@ function formatCheckedInAt(value: string | null): string {
   return new Date(value).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/**
+ * Roster charge affordance (§9.2 class roster): the attendees payload carries
+ * only `status` + `deposit_status` (no hold `saved` / `released_at` / window
+ * fields), so instead of an inline dialog the roster deep-links chargeable
+ * attendees to the full booking detail surface, where the charge dialog lives
+ * and the real gate is re-derived from the full payload. Admin-only; non-admin
+ * staff see state only (the deposit column already shows it).
+ */
+function RosterChargeNoShowFeeLink({
+  attendee,
+  isAdmin,
+  compact = false,
+}: {
+  attendee: AttendeeRow;
+  isAdmin: boolean;
+  compact?: boolean;
+}) {
+  if (!isAdmin || !isRosterChargeLinkCandidate(attendee)) return null;
+  const href = `/dashboard/bookings?openBooking=${encodeURIComponent(attendee.booking_id)}`;
+  if (compact) {
+    return (
+      <Link href={href} className="mt-0.5 block text-[11px] font-semibold text-red-700 hover:underline">
+        {CARD_HOLD_CHARGE_ACTION_LABEL}
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="block rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-center text-xs font-semibold text-red-700 hover:bg-red-50"
+    >
+      {CARD_HOLD_CHARGE_ACTION_LABEL}
+    </Link>
+  );
+}
+
 function ClassBookingConcertina({
   attendee,
   currency,
   instanceId,
   onMutated,
   canManageAttendance,
+  isAdmin,
 }: {
   attendee: AttendeeRow;
   currency: string;
@@ -70,6 +109,8 @@ function ClassBookingConcertina({
   onMutated: () => void;
   /** Attendance mutations are gated behind the class-commerce plan; hide the buttons otherwise. */
   canManageAttendance: boolean;
+  /** Charging a no-show fee is admin-only (§9.2). */
+  isAdmin: boolean;
 }) {
   const guestName = attendee.guest_name ?? 'Guest';
   const contactSummary = attendee.guest_phone ?? attendee.guest_email ?? 'No contact';
@@ -130,6 +171,7 @@ function ClassBookingConcertina({
             <p className="truncate text-xs font-bold text-slate-800">{formatCheckedInAt(attendee.checked_in_at)}</p>
           </div>
         </div>
+        <RosterChargeNoShowFeeLink attendee={attendee} isAdmin={isAdmin} />
         <Link
           href={`/dashboard/bookings?openBooking=${encodeURIComponent(attendee.booking_id)}`}
           className="block rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-center text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -228,7 +270,7 @@ function AttendanceActions({
   }
 
   const alreadyCheckedIn = Boolean(checkedInAt);
-  const alreadyNoShow = status === 'No Show';
+  const alreadyNoShow = status === 'No-Show';
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -566,6 +608,7 @@ export function ClassInstanceDetailSheet({
                       instanceId={instanceId ?? ''}
                       onMutated={() => void load()}
                       canManageAttendance={canManageAttendance}
+                      isAdmin={isAdmin}
                     />
                   ))
                 )}
@@ -669,7 +712,7 @@ export function ClassInstanceDetailSheet({
                 </button>
               ) : null}
               {canManageAttendance &&
-              attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No Show' && !a.checked_in_at) ? (
+              attendees.some((a) => a.status !== 'Cancelled' && a.status !== 'No-Show' && !a.checked_in_at) ? (
                 <CheckInAllButton instanceId={instanceId ?? ''} onMutated={() => void load()} />
               ) : null}
               {isAdmin && instance && !instance.is_cancelled ? (
@@ -731,6 +774,7 @@ export function ClassInstanceDetailSheet({
                           {a.deposit_status ? (
                             <span className="ml-1 text-[10px] text-slate-400">({a.deposit_status})</span>
                           ) : null}
+                          <RosterChargeNoShowFeeLink attendee={a} isAdmin={isAdmin} compact />
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-600">
                           {a.checked_in_at

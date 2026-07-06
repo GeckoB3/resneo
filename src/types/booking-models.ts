@@ -69,8 +69,12 @@ export type ServiceCustomScheduleStored = WorkingHours | ServiceCustomScheduleV2
 
 // Model B: Practitioner appointment
 
-/** Stored as Postgres enum `class_payment_requirement` (shared with classes / resources). */
-export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
+/**
+ * Stored as Postgres enum `class_payment_requirement` (shared with classes / resources).
+ * 'card_hold' (save a card, charge only on no-show) is being rolled out in phases; until the
+ * card-hold booking flows ship, readers must treat it like 'none' (no upfront charge).
+ */
+export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment' | 'card_hold';
 
 /** Salon processing gap inside service core duration (see `lib/appointments/processing-time.ts`). */
 export interface ProcessingTimeBlock {

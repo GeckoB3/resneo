@@ -73,6 +73,8 @@ export function ServicesStep({ onDone }: Props) {
         services={services}
         setServices={setServices}
         selectedAreaId={selectedAreaId}
+        // Onboarding stays charge-only in v1 (spec 6.2): no card-hold option here.
+        cardHoldDepositsEnabled={false}
         showToast={showToast}
       />
 

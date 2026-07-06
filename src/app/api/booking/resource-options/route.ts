@@ -7,6 +7,7 @@ import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
+import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 
 /**
  * GET /api/booking/resource-options?venue_id=uuid
@@ -43,8 +44,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load resources' }, { status: 500 });
     }
 
+    // Card-hold passthrough (spec 6.3): 'card_hold' reaches guests only when the
+    // venue flag is on AND a positive fee is configured; otherwise degrade to
+    // 'none' (and drop the fee) with a warning, matching what create will do.
+    const { resolved: venueFlags } = await loadVenueFeatureFlags(supabase, venueId);
+    const cardHoldDepositsEnabled = venueFlags.card_hold_deposits;
+
     const resources = (data ?? []).map((row) => {
       const r = row as Record<string, unknown>;
+      let paymentRequirement = (r.payment_requirement as string) ?? 'none';
+      let depositAmountPence = (r.deposit_amount_pence as number | null) ?? null;
+      if (paymentRequirement === 'card_hold' && (!cardHoldDepositsEnabled || (depositAmountPence ?? 0) <= 0)) {
+        console.warn(
+          cardHoldDepositsEnabled
+            ? '[resource-options] card_hold resource has no positive fee; treating as none'
+            : '[resource-options] card_hold resource configured but card_hold_deposits flag is off; treating as none',
+          { resource_id: r.id },
+        );
+        paymentRequirement = 'none';
+        depositAmountPence = null;
+      }
       return {
         id: r.id as string,
         name: r.name as string,
@@ -55,8 +74,8 @@ export async function GET(request: NextRequest) {
         max_booking_minutes: (r.max_booking_minutes as number | null) ?? 180,
         slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
         price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
-        payment_requirement: (r.payment_requirement as string) ?? 'none',
-        deposit_amount_pence: (r.deposit_amount_pence as number | null) ?? null,
+        payment_requirement: paymentRequirement,
+        deposit_amount_pence: depositAmountPence,
         cancellation_notice_hours:
           typeof r.cancellation_notice_hours === 'number' && Number.isFinite(r.cancellation_notice_hours)
             ? r.cancellation_notice_hours

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { featureFlagDisabledResponse } from '@/lib/feature-flags/http';
+import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 import { z } from 'zod';
 
 const restrictionFieldsSchema = z.object({
@@ -14,6 +16,8 @@ const restrictionFieldsSchema = z.object({
   large_party_message: z.string().max(500).nullable().optional(),
   deposit_required_from_party_size: z.number().int().min(1).nullable().optional(),
   deposit_amount_per_person_gbp: z.number().min(0).max(100).nullable().optional(),
+  /** 'charge' takes a deposit payment; 'card_hold' saves the card for a no-show fee (flag-gated). */
+  deposit_type: z.enum(['charge', 'card_hold']).optional(),
   online_requires_deposit: z.boolean().optional(),
   /** Table reservation: hours before start for deposit refund for this dining service. */
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
@@ -48,6 +52,22 @@ function mergedDepositInvariant(
     amountGbp <= 100
   );
 }
+
+/**
+ * Card-hold floor (§6): a card_hold restriction needs a per-person fee of at
+ * least £1. Anything lower makes the saved card pointless and confuses guests
+ * shown a sub-£1 "no-show fee".
+ */
+function cardHoldFloorInvariant(
+  depositType: string | null | undefined,
+  amountGbp: number | null | undefined,
+): boolean {
+  if (depositType !== 'card_hold') return true;
+  return typeof amountGbp === 'number' && Number.isFinite(amountGbp) && amountGbp >= 1;
+}
+
+const CARD_HOLD_FLOOR_ERROR =
+  'The no-show fee must be at least £1 per person when the card hold option is selected.';
 
 /** GET /api/venue/booking-restrictions — optional `area_id` scopes to one dining area. */
 export async function GET(request: NextRequest) {
@@ -95,6 +115,17 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    if (parsed.data.deposit_type === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+      if (!cardHoldFloorInvariant(parsed.data.deposit_type, parsed.data.deposit_amount_per_person_gbp)) {
+        return NextResponse.json({ error: CARD_HOLD_FLOOR_ERROR }, { status: 400 });
+      }
+    }
+
     const { data: svcRow } = await admin
       .from('venue_services')
       .select('id')
@@ -139,6 +170,14 @@ export async function PATCH(request: NextRequest) {
     const { id, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
+
+    if (fields.deposit_type === 'card_hold') {
+      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
+      if (!resolved.card_hold_deposits) {
+        return featureFlagDisabledResponse('card_hold_deposits');
+      }
+    }
+
     const { data: existingFull } = await admin.from('booking_restrictions').select('*').eq('id', id).maybeSingle();
     if (!existingFull) {
       return NextResponse.json({ error: 'Restriction not found' }, { status: 404 });
@@ -152,6 +191,7 @@ export async function PATCH(request: NextRequest) {
     const merged = { ...(existingFull as Record<string, unknown>), ...fields } as {
       deposit_required_from_party_size?: number | null;
       deposit_amount_per_person_gbp?: number | null;
+      deposit_type?: string | null;
     };
     if (
       !mergedDepositInvariant(merged.deposit_required_from_party_size, merged.deposit_amount_per_person_gbp)
@@ -162,6 +202,11 @@ export async function PATCH(request: NextRequest) {
         },
         { status: 400 },
       );
+    }
+    // Merged card-hold floor (§6): an amount-only patch on a stored card_hold
+    // restriction must not slip under £1.
+    if (!cardHoldFloorInvariant(merged.deposit_type, merged.deposit_amount_per_person_gbp)) {
+      return NextResponse.json({ error: CARD_HOLD_FLOOR_ERROR }, { status: 400 });
     }
 
     const updateFields: Record<string, unknown> = { ...fields };

@@ -43,6 +43,8 @@ export interface ServiceBookingRestriction {
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
   deposit_amount_per_person_gbp: number | null;
+  /** 'charge' takes a deposit payment; 'card_hold' saves the card for a no-show fee. */
+  deposit_type?: 'charge' | 'card_hold' | null;
   online_requires_deposit?: boolean;
   cancellation_notice_hours?: number;
 }
@@ -94,6 +96,7 @@ export function defaultBookingRestriction(serviceId: string): Omit<ServiceBookin
     large_party_message: null,
     deposit_required_from_party_size: null,
     deposit_amount_per_person_gbp: null,
+    deposit_type: 'charge',
     cancellation_notice_hours: 48,
   };
 }

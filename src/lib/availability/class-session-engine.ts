@@ -21,6 +21,7 @@ import {
   venueWideBlocksQueryForDate,
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 // Types
 
@@ -38,6 +39,12 @@ export interface ClassEngineInput {
   instances: ClassInstance[];
   /** Total booked spots per class_instance_id. */
   bookedByInstance: Record<string, number>;
+  /**
+   * Resolved venue `card_hold_deposits` feature flag (spec 6.3). When true, class types
+   * configured `card_hold` with a positive per-person fee pass through as 'card_hold';
+   * otherwise they degrade to 'none' with a warning. Omitted/false = degrade.
+   */
+  cardHoldDepositsEnabled?: boolean;
   /**
    * When set (public booking API), excludes instances outside per-class-type booking windows
    * (`class_types` columns) and past starts. `minNoticeHours` on the window object is unused;
@@ -80,10 +87,41 @@ export interface ClassAvailabilitySlot {
   colour: string;
 }
 
+export interface ResolveClassPaymentRequirementOptions {
+  /** Resolved venue `card_hold_deposits` flag; card_hold passes through only when true. */
+  cardHoldDepositsEnabled?: boolean;
+  /** Warning sink for degraded card_hold configs; defaults to `console.warn`. */
+  warn?: (message: string) => void;
+}
+
 /** Resolves DB row to enum; supports legacy requires_online_payment. */
-export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequirement {
+export function resolveClassPaymentRequirement(
+  ct: ClassType,
+  opts?: ResolveClassPaymentRequirementOptions,
+): ClassPaymentRequirement {
   const raw = ct.payment_requirement;
   if (raw === 'deposit' || raw === 'full_payment' || raw === 'none') return raw;
+  // Card-hold passthrough (spec 6.3), mirroring the table engine: 'card_hold' passes
+  // through only when the venue's card_hold_deposits flag is on AND a positive per-person
+  // fee is configured. Otherwise it degrades to 'none' (no upfront charge) with a warning.
+  // Charging instead would take money the guest was never shown, and falling into the
+  // legacy requires_online_payment inference below would charge the full list price.
+  if (raw === 'card_hold') {
+    const warn = opts?.warn ?? console.warn;
+    if (opts?.cardHoldDepositsEnabled !== true) {
+      warn(
+        '[class-session-engine] class type configured card_hold but card_hold_deposits flag is off; treating as none',
+      );
+      return 'none';
+    }
+    if ((ct.deposit_amount_pence ?? 0) <= 0) {
+      warn(
+        '[class-session-engine] class type configured card_hold with no positive per-person fee; treating as none',
+      );
+      return 'none';
+    }
+    return 'card_hold';
+  }
   if (ct.requires_online_payment === false) return 'none';
   if (ct.requires_online_payment === true) {
     if (ct.price_pence != null && ct.price_pence > 0) return 'full_payment';
@@ -177,6 +215,10 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
   } = input;
   const typeMap = new Map(classTypes.map((ct) => [ct.id, ct]));
 
+  // Dedupe card-hold degrade warnings: one per class type per call (many instances can
+  // share a type), mirroring the table engine's per-call dedupe.
+  const cardHoldWarnedTypeIds = new Set<string>();
+
   const results: ClassAvailabilitySlot[] = [];
 
   for (const instance of instances) {
@@ -209,9 +251,18 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
     const booked = bookedByInstance[instance.id] ?? 0;
     const remaining = Math.max(0, capacity - booked);
 
-    const paymentRequirement = resolveClassPaymentRequirement(classType);
+    const paymentRequirement = resolveClassPaymentRequirement(classType, {
+      cardHoldDepositsEnabled: input.cardHoldDepositsEnabled,
+      warn: (message) => {
+        if (cardHoldWarnedTypeIds.has(classType.id)) return;
+        cardHoldWarnedTypeIds.add(classType.id);
+        console.warn(message, { class_type_id: classType.id });
+      },
+    });
+    // Per-person amount: the deposit charged today ('deposit') or the no-show fee the
+    // venue may charge later ('card_hold'); both ride the same slot field.
     const depositPerPerson =
-      paymentRequirement === 'deposit'
+      paymentRequirement === 'deposit' || paymentRequirement === 'card_hold'
         ? (classType.deposit_amount_pence ?? null)
         : null;
     const requiresStripe = stripeCheckoutNeeded(
@@ -312,7 +363,7 @@ export async function fetchClassInput(params: {
 
   const [typesRes, venueRes, venueBlocksRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
-    supabase.from('venues').select('timezone, opening_hours').eq('id', venueId).maybeSingle(),
+    supabase.from('venues').select('timezone, opening_hours, feature_flags').eq('id', venueId).maybeSingle(),
     venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
 
@@ -378,6 +429,10 @@ export async function fetchClassInput(params: {
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
+    'card_hold_deposits',
+    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
+  );
 
   let guestBookingWindow: GuestClassBookingWindow | undefined;
   if (forPublicBooking === true) {
@@ -399,6 +454,7 @@ export async function fetchClassInput(params: {
     instructorDisplayNamesById,
     venueWideBlocks,
     venueOpeningHours,
+    cardHoldDepositsEnabled,
   };
 }
 
@@ -417,7 +473,7 @@ export async function fetchClassInputForRange(params: {
 
   const [typesRes, venueRes, venueBlocksRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
-    supabase.from('venues').select('timezone, opening_hours').eq('id', venueId).maybeSingle(),
+    supabase.from('venues').select('timezone, opening_hours, feature_flags').eq('id', venueId).maybeSingle(),
     venueWideBlocksQueryForRange(supabase, venueId, fromDate, toDate),
   ]);
 
@@ -486,6 +542,10 @@ export async function fetchClassInputForRange(params: {
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
+    'card_hold_deposits',
+    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
+  );
 
   let guestBookingWindow: GuestClassBookingWindow | undefined;
   if (forPublicBooking === true) {
@@ -507,5 +567,6 @@ export async function fetchClassInputForRange(params: {
     instructorDisplayNamesById,
     venueWideBlocks,
     venueOpeningHours,
+    cardHoldDepositsEnabled,
   };
 }

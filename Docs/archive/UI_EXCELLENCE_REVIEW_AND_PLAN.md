@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-07-04).** This work has shipped. Kept for historical and architecture reference only; it does not describe pending work. Any "not yet built" / "proposed" / "no code written" status noted below is obsolete. See `Docs/archive/README.md`.
+
 # Resneo UI Excellence Review & Improvement Plan
 
 **Version:** 1.0  
@@ -47,7 +49,7 @@ This review combined:
 | **Live UI inspection** | Local dev server: marketing home, dashboard home, appointments list/calendar, settings (authenticated appointments venue) |
 | **Pattern inventory** | Modals/dialogs (`role="dialog"`), button class fragmentation, aria usage, form libraries |
 | **Architecture** | Next.js App Router, Tailwind v4 CSS-first tokens, no Radix/shadcn/MUI |
-| **Prior art** | `Docs/mobile-usability-audit.md`, `Docs/mobile-touch-layout-conventions.md` |
+| **Prior art** | `Docs/mobile-touch-layout-conventions.md`, `Docs/mobile-touch-layout-conventions.md` |
 
 **Not in scope for this document:** Backend API design, RLS, or payment correctness (covered elsewhere). Visual regression baselines and formal WCAG audit should follow Phase 1.
 
@@ -104,7 +106,7 @@ Newer dashboard code consistently uses shared layout primitives under `src/compo
 
 ### 4.3 Mobile and touch awareness
 
-Documented and partially implemented (see `Docs/mobile-usability-audit.md`):
+Documented and partially implemented (see `Docs/mobile-touch-layout-conventions.md`):
 
 - Viewport meta with `interactiveWidget: resizes-content`
 - Safe-area utilities (`pt-safe`, `pb-safe`, …)
@@ -766,7 +768,7 @@ Non-exhaustive list of bespoke overlays to migrate to `Dialog`/`Sheet`:
 
 ### 11.3 Related internal docs
 
-- `Docs/mobile-usability-audit.md`
+- `Docs/mobile-touch-layout-conventions.md`
 - `Docs/mobile-touch-layout-conventions.md`
 - `Docs/PRD.md` (product priorities)
 - `.cursor/rules/frontend.mdc`

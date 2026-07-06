@@ -59,7 +59,7 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 **Behaviour:** Code treats **`practitioner_appointment` and `unified_scheduling` identically** wherever `isUnifiedSchedulingVenue()` is used (`src/lib/booking/unified-scheduling.ts`): same public flow (`AppointmentBookingFlow`), same sidebar pattern, same unified comms eligibility, etc.
 
-**Signup:** New signup cards advertise **table** vs **unified appointments** (`unified_scheduling`). The deprecated signup key `model_practitioner_appointment` in `BUSINESS_TYPE_CONFIG` maps to the **`unified_scheduling`** model for stored config. `isSignupSupportedBookingModel()` still allows `practitioner_appointment` so legacy checks do not break.
+**Signup:** New signup cards advertise **all five** booking models, with **unified appointments** (`unified_scheduling`) as the appointment option (`BOOKING_MODEL_SIGNUP_CARDS` in `src/lib/business-config.ts`). The deprecated signup key `model_practitioner_appointment` in `BUSINESS_TYPE_CONFIG` maps to the **`unified_scheduling`** model for stored config. `isSignupSupportedBookingModel()` still allows `practitioner_appointment` so legacy checks do not break.
 
 **Rule of thumb:** **Prefer saying “unified scheduling” (or “appointment venues”)** in new docs; mention **`practitioner_appointment` only when discussing legacy DB values or migration.**
 
@@ -75,7 +75,9 @@ These are **not** the restaurant stack and **not** the same as `unified_scheduli
 | `class_session` | Timetabled classes | `ClassBookingFlow` | Class timetable, class types, instances, roster |
 | `resource_booking` | Bookable assets | `ResourceBookingFlow` | Resources, availability, timeline |
 
-**Business types in `BUSINESS_TYPE_CONFIG`:** Many directory entries (e.g. escape rooms, yoga studios, meeting rooms) map to C/D/E models, but **self-serve signup today** only lists **`table_reservation`** and **`unified_scheduling`** on the main cards. Venues with primary `event_ticket`, `class_session`, or `resource_booking` may be **admin-provisioned** or added when signup expands - see `isSignupSupportedBookingModel` and product rules.
+**Business types in `BUSINESS_TYPE_CONFIG`:** Many directory entries (e.g. escape rooms, yoga studios, meeting rooms) map to C/D/E models. **Self-serve signup now offers all five booking models** on the main cards: `table_reservation`, `unified_scheduling`, `event_ticket`, `class_session`, and `resource_booking` (see `BOOKING_MODEL_SIGNUP_CARDS` and `SIGNUP_SUPPORTED_BOOKING_MODELS` in `src/lib/business-config.ts`). A venue no longer needs to be admin-provisioned to start on `event_ticket`, `class_session`, or `resource_booking`.
+
+**Source of truth for enabled models:** `venues.active_booking_models` (migration `20260610120000_venues_active_booking_models.sql`, resolved in `src/lib/venue-mode.ts`) is now the authoritative set of models a venue exposes, superseding the older `enabled_models` column (which is retained only as a compatibility view).
 
 ---
 

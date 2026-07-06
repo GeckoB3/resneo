@@ -51,6 +51,12 @@ export interface VenuePublic {
       any_available_practitioner?: boolean;
       guest_self_reschedule?: boolean;
       waitlist_v2?: boolean;
+      /**
+       * Owner venue's card-hold flag; gates the staff "Card hold" toggle
+       * (design doc 7.6 / D6). Absent on the public /api/booking/venue payload,
+       * which never needs it (the toggle is staff-audience only).
+       */
+      card_hold_deposits?: boolean;
     };
     any_available_practitioner_config?: {
       mode: 'priority' | 'random';
@@ -89,6 +95,11 @@ export interface AvailableSlot {
   estimated_duration?: number;
   deposit_required?: boolean;
   deposit_amount?: number | null;
+  /**
+   * Table rules protection kind for this slot: classic upfront deposit ('charge') vs a
+   * card hold (save the card now, charge only on no-show). Absent means 'charge'.
+   */
+  deposit_type?: 'charge' | 'card_hold';
   /** When deposits apply for this dining service, require them for online/widget checkout. */
   online_requires_deposit?: boolean;
   /** Hours before start for deposit refund (from dining `booking_restrictions`). */

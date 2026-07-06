@@ -377,6 +377,14 @@ function depositThresholdMet(restriction: BookingRestriction | null, partySize: 
   return t != null && partySize >= t;
 }
 
+/** Resolution rule (D5): restriction.deposit_type ?? legacy deposit_config.type ?? 'charge'. */
+function resolveDepositType(
+  restriction: BookingRestriction | null,
+  legacyType: 'charge' | 'card_hold' | null | undefined,
+): 'charge' | 'card_hold' {
+  return restriction?.deposit_type ?? legacyType ?? 'charge';
+}
+
 function applicableRestrictionExceptions(
   exceptions: BookingRestrictionException[],
   venueId: string,
@@ -665,6 +673,9 @@ function generateServiceSlots(
 
   const defaultRule = resolveCapacityRule(input.capacity_rules, service.id, dayOfWeek, serviceStart);
 
+  // Dedupe card-hold safety warnings: the config is per-service, so one warning per call.
+  let cardHoldSafetyWarned = false;
+
   for (let slotMin = serviceStart; slotMin <= lastBooking; slotMin += SLOT_PROBE_STEP_MINUTES) {
     const slotRestriction = mergeBookingRestrictionForContext(
       baseRestriction,
@@ -679,10 +690,42 @@ function generateServiceSlots(
       slotRestriction,
       input.deposit_legacy_amount_per_person_gbp,
     );
-    const depositRequired =
-      perPersonGbp != null &&
-      perPersonGbp > 0 &&
-      depositThresholdMet(slotRestriction, input.party_size);
+    // Card-hold passthrough (spec 6.3). The engine is audience-blind, so instead of
+    // staff-only plumbing the slot carries two ALWAYS-populated fields (`deposit_type`,
+    // `configured_deposit_per_person_gbp`) alongside the threshold-gated
+    // `deposit_required`/`deposit_amount` pair, which stays the sole online gate.
+    // Staff surfaces read the configured fields unconditionally.
+    let depositType = resolveDepositType(slotRestriction, input.deposit_legacy_type);
+    let configuredPerPersonGbp = perPersonGbp != null && perPersonGbp > 0 ? perPersonGbp : null;
+    let depositRequired =
+      configuredPerPersonGbp != null && depositThresholdMet(slotRestriction, input.party_size);
+    if (depositType === 'card_hold') {
+      if (!input.card_hold_deposits_enabled) {
+        // Flag-off safety (spec 6.3): card_hold configured while the venue flag is off
+        // resolves as no deposit. Charging instead would take money the guest was never shown.
+        if (!cardHoldSafetyWarned) {
+          console.warn(
+            '[availability-engine] deposit_type card_hold configured but card_hold_deposits flag is off; treating as no deposit',
+            { venue_id: input.venue_id, service_id: service.id },
+          );
+          cardHoldSafetyWarned = true;
+        }
+        depositType = 'charge';
+        configuredPerPersonGbp = null;
+        depositRequired = false;
+      } else if (configuredPerPersonGbp == null) {
+        // Zero-fee safety (spec 6.3): a card hold with fee <= 0 resolves as no deposit.
+        if (!cardHoldSafetyWarned) {
+          console.warn(
+            '[availability-engine] deposit_type card_hold configured with no positive per-person fee; treating as no deposit',
+            { venue_id: input.venue_id, service_id: service.id },
+          );
+          cardHoldSafetyWarned = true;
+        }
+        depositType = 'charge';
+        depositRequired = false;
+      }
+    }
     const onlineRequiresDeposit = depositRequired ? true : (slotRestriction?.online_requires_deposit ?? true);
 
     if (slotRestriction) {
@@ -752,7 +795,12 @@ function generateServiceSlots(
       available_bookings: availableBookings,
       estimated_duration: duration,
       deposit_required: depositRequired,
-      deposit_amount: depositRequired && perPersonGbp != null ? perPersonGbp * input.party_size : null,
+      deposit_amount:
+        depositRequired && configuredPerPersonGbp != null
+          ? configuredPerPersonGbp * input.party_size
+          : null,
+      deposit_type: depositType,
+      configured_deposit_per_person_gbp: configuredPerPersonGbp,
       online_requires_deposit: onlineRequiresDeposit,
       cancellation_notice_hours: refundHours,
       limited,

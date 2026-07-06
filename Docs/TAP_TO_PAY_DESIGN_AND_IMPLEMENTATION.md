@@ -3,6 +3,8 @@
 > **Status:** Draft for implementation · **Scope:** `resneo` (Next.js backend) + `resneo-app` (Expo/React Native staff app)
 > **Canonical location:** this file (`resneo/Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md`). A pointer copy lives in `resneo-app/Docs/TAP_TO_PAY.md`.
 > **Verified against code:** 2026-06-24 — see §16 for the verification log and the adjustments it produced. Every new table, column, endpoint, file, and UI state is specified; code blocks are implementation sketches aligned to existing patterns (follow the cited reference files for exact house style).
+>
+> **Implementation status (as of 2026-07):** This is a design only. None of it is built yet: there are no tap-to-pay or Stripe Terminal payment routes, no `booking_payments` table, and no feature flag in the codebase. Treat everything below as a proposal, not a description of shipped behaviour.
 
 ---
 

@@ -110,6 +110,22 @@ const MESSAGE_CARDS: Array<{
     timing: "hoursBefore",
     timingLabel: "Send hours before",
   },
+  // Card-hold deposits (spec 10.3). This section has no venue feature-flag
+  // access, so the cards show unconditionally; they are harmless while the
+  // card_hold_deposits flag is off (the keys are simply never sent).
+  {
+    key: "card_hold_request",
+    label: "Card details request",
+    description:
+      "Asks the guest to add card details to secure a booking with a no-show fee.",
+    allowedChannels: ["email", "sms"],
+  },
+  {
+    key: "card_hold_payment_reminder",
+    label: "Card details reminder",
+    description: "Reminder for bookings that still need card details added.",
+    allowedChannels: ["email", "sms"],
+  },
   {
     key: "booking_modification",
     label: "Booking modification",

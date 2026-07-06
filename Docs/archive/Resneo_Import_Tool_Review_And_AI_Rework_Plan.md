@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-07-04).** This work has shipped. Kept for historical and architecture reference only; it does not describe pending work. Any "not yet built" / "proposed" / "no code written" status noted below is obsolete. See `Docs/archive/README.md`.
+
 # Resneo Data Import Tool — Code Review & AI-First Rework Plan
 
 *Reviewed June 2026. Covers `/dashboard/import` (entry from Settings → Data import), `src/lib/import/*`, `src/app/api/import/*`, and the import DB schema.*

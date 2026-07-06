@@ -9,6 +9,12 @@ import {
   loadAccountBookingById,
 } from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import {
+  deriveGuestCardHoldSummary,
+  type GuestCardHoldRowInput,
+} from '@/lib/booking/guest-card-hold-summary';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 type PageProps = { params: Promise<{ bookingId: string }> };
@@ -46,6 +52,52 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   const cde = booking.cde_context;
   const friendlyStatus = friendlyAccountBookingStatus(booking.status);
   const isClassGroup = booking.booking_model === 'class_session' && !!booking.group_booking_id;
+
+  // Card-hold deposits (§10.1): the signed-in booking detail page is a
+  // consent-bearing surface, so it carries the same hold line as the manage
+  // page for the awaiting-card/held/charged states. The fee comes from the
+  // hold row (one indexed admin read; only done when deposit_status says a
+  // hold may exist: 'Pending' is included for staff phone/walk-in bookings
+  // still awaiting card details, at the cost of one indexed read for pending
+  // bookings without a hold).
+  const depositStatusLower = (booking.deposit_status ?? '').toLowerCase();
+  let cardHoldLine: string | null = null;
+  let cardHoldPaymentLink: string | null = null;
+  if (
+    depositStatusLower === 'card held' ||
+    depositStatusLower === 'charged' ||
+    depositStatusLower === 'pending'
+  ) {
+    const { data: holdRow } = await getSupabaseAdminClient()
+      .from('booking_card_holds')
+      .select('fee_pence, released_at, charged_pence, charged_at, stripe_payment_method_id')
+      .eq('booking_id', booking.id)
+      .maybeSingle();
+    const holdSummary = deriveGuestCardHoldSummary(
+      booking,
+      (holdRow as GuestCardHoldRowInput | null) ?? null,
+    );
+    const venueName = booking.venue?.name ?? 'The venue';
+    if (holdSummary?.state === 'awaiting_card') {
+      cardHoldLine = 'Add your card details to secure this booking. No payment is taken.';
+      try {
+        cardHoldPaymentLink = await createOrGetPaymentShortLink(booking.venue_id, booking.id);
+      } catch (linkErr) {
+        console.error('[account booking detail] payment short link failed:', linkErr);
+      }
+    } else if (holdSummary?.state === 'held') {
+      cardHoldLine = `Your card is securely on file. ${venueName} may charge a no-show fee of up to ${formatCardHoldFeePence(holdSummary.fee_pence)} if you miss this booking. Cancel before it starts to avoid any charge.`;
+    } else if (holdSummary?.state === 'charged' && holdSummary.charged_pence != null) {
+      const chargedDate = holdSummary.charged_at
+        ? ` on ${new Date(holdSummary.charged_at).toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          })}`
+        : '';
+      cardHoldLine = `A no-show fee of ${formatCardHoldFeePence(holdSummary.charged_pence)} was charged for this booking${chargedDate}.`;
+    }
+  }
 
   const headerTitle = cde?.title ?? booking.venue?.name ?? 'Booking details';
   const headerSubtitleParts = [
@@ -166,6 +218,19 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
               {booking.deposit_status ?? 'Not required'}
               {money(booking.deposit_amount_pence) ? ` · ${money(booking.deposit_amount_pence)}` : ''}
             </dd>
+            {cardHoldLine ? (
+              <dd className="mt-1.5 text-sm leading-relaxed text-slate-600">{cardHoldLine}</dd>
+            ) : null}
+            {cardHoldPaymentLink ? (
+              <dd className="mt-1.5">
+                <a
+                  href={cardHoldPaymentLink}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 transition-colors hover:text-brand-800"
+                >
+                  Add card details
+                </a>
+              </dd>
+            ) : null}
           </div>
           {booking.venue?.address ? (
             <div className="sm:col-span-2">

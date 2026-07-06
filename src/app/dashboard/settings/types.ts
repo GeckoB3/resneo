@@ -99,6 +99,8 @@ export interface BookingRulesSettings {
 export interface DepositConfigSettings {
   enabled: boolean;
   amount_per_person_gbp: number;
+  /** 'charge' takes a deposit payment; 'card_hold' saves the card for a no-show fee. */
+  type?: 'charge' | 'card_hold';
   online_requires_deposit: boolean;
   phone_requires_deposit: boolean;
   min_party_size_for_deposit?: number;

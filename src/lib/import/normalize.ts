@@ -291,6 +291,7 @@ export function mapImportBookingStatus(params: {
   return mapBookingStatus(params.rawStatus);
 }
 
+// Card-hold statuses ('Card Held', 'Charged') are intentionally excluded: imports must never produce them (they require a real booking_card_holds row).
 const DEPOSIT_STATUS_ENUMS = [
   'Not Required',
   'Pending',

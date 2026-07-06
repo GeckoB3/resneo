@@ -118,7 +118,7 @@ function PaymentForm({
       )}
 
       <div className="flex gap-3">
-        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+        <button type="button" onClick={onBack} aria-label="Go back" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
@@ -203,8 +203,8 @@ export function PaymentStep({
       ) : (
         // Payment breakdown card (payment and payment_with_setup modes)
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div className={`flex items-center ${showSplit ? 'justify-between' : ''}`}>
-            <div>
+          <div className={`flex items-center gap-3 ${showSplit ? 'justify-between' : ''}`}>
+            <div className="min-w-0">
               <p className="text-xs font-medium text-slate-500">{amountTitle}</p>
               <p className="text-2xl font-bold text-slate-900">&pound;{amount}</p>
               {summaryMode === 'total' && partySize > 1 && (
@@ -212,7 +212,7 @@ export function PaymentStep({
               )}
             </div>
             {showSplit && (
-              <div className="text-right">
+              <div className="shrink-0 whitespace-nowrap text-right">
                 <p className="text-xs text-slate-400">{partySize} &times; &pound;{perPerson}</p>
                 <p className="text-xs text-slate-400">per person</p>
               </div>

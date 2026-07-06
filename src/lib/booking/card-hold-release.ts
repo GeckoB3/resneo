@@ -50,11 +50,20 @@ export async function releaseCardHoldsForBookings(
   const ids = bookingIds.filter(Boolean);
   if (ids.length === 0) return result;
 
-  const { data: holds, error: selErr } = await admin
+  // Every reason except 'refunded' must leave a CHARGED hold untouched: a
+  // charged hold's lifecycle ends via refund, and a charge that stamps
+  // charged_at in the tiny window before an expiry/cancel release must never
+  // be relabelled 'expired'/'cancelled'/etc (design note #10). Only
+  // applyCardHoldChargeRefund releases a charged hold, and it passes 'refunded'.
+  const excludeCharged = reason !== 'refunded';
+
+  let selectQuery = admin
     .from('booking_card_holds')
     .select('id, booking_id, venue_id, stripe_connected_account_id, stripe_customer_id, fee_pence')
     .in('booking_id', ids)
     .is('released_at', null);
+  if (excludeCharged) selectQuery = selectQuery.is('charged_at', null);
+  const { data: holds, error: selErr } = await selectQuery;
 
   if (selErr) {
     console.error('[card-hold-release] failed to load holds', selErr);
@@ -66,12 +75,18 @@ export async function releaseCardHoldsForBookings(
   const nowIso = new Date().toISOString();
   const holdIds = openHolds.map((h) => h.id);
 
-  const { data: released, error: updErr } = await admin
+  let updateQuery = admin
     .from('booking_card_holds')
     .update({ released_at: nowIso, release_reason: reason, updated_at: nowIso })
     .in('id', holdIds)
-    .is('released_at', null)
-    .select('id, booking_id, venue_id, stripe_connected_account_id, stripe_customer_id, fee_pence');
+    .is('released_at', null);
+  // Re-assert the guard on the UPDATE too: a charge can land between the SELECT
+  // above and here, so a charged hold must not be relabelled for a non-refund
+  // reason (race with the just-completed charge).
+  if (excludeCharged) updateQuery = updateQuery.is('charged_at', null);
+  const { data: released, error: updErr } = await updateQuery.select(
+    'id, booking_id, venue_id, stripe_connected_account_id, stripe_customer_id, fee_pence',
+  );
 
   if (updErr) {
     console.error('[card-hold-release] failed to release holds', updErr);

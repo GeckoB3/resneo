@@ -266,7 +266,7 @@ export function CardHoldDetailSection({
               type="button"
               disabled={actionDisabled}
               onClick={() => onLegacyDepositAction('send_payment_link')}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
             >
               {CARD_HOLD_RESEND_LINK_LABEL}
             </button>
@@ -276,7 +276,7 @@ export function CardHoldDetailSection({
               type="button"
               disabled={actionDisabled}
               onClick={() => onLegacyDepositAction('waive')}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
             >
               {CARD_HOLD_WAIVE_LABEL}
             </button>
@@ -286,7 +286,7 @@ export function CardHoldDetailSection({
               type="button"
               disabled={actionDisabled}
               onClick={() => setChargeDialogOpen(true)}
-              className="rounded-lg bg-red-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              className="inline-flex min-h-9 items-center rounded-lg bg-red-600 px-2.5 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
             >
               {CARD_HOLD_CHARGE_ACTION_LABEL}
             </button>
@@ -296,7 +296,7 @@ export function CardHoldDetailSection({
               type="button"
               disabled={actionDisabled}
               onClick={() => setRefundConfirmOpen(true)}
-              className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              className="inline-flex min-h-9 items-center rounded-lg border border-red-200 bg-white px-2.5 py-2 text-[11px] font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
             >
               {CARD_HOLD_REFUND_ACTION_LABEL}
             </button>
@@ -320,7 +320,6 @@ export function CardHoldDetailSection({
           open={refundConfirmOpen}
           onOpenChange={setRefundConfirmOpen}
           title={CARD_HOLD_REFUND_ACTION_LABEL}
-          description={`This refunds the charged no-show fee to ${guestName}'s card. The card hold ends and the fee cannot be charged again.`}
           size="sm"
           showClose={false}
           contentClassName="max-w-sm"
@@ -348,7 +347,10 @@ export function CardHoldDetailSection({
             </div>
           }
         >
-          {null}
+          <p className="text-sm text-slate-600">
+            This refunds the charged no-show fee to {guestName}&apos;s card. The card hold ends and
+            the fee cannot be charged again.
+          </p>
         </Dialog>
       ) : null}
     </div>

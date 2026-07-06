@@ -21,6 +21,7 @@ type HoldRow = {
   stripe_customer_id: string | null;
   fee_pence: number;
   released_at: string | null;
+  charged_at?: string | null;
   release_reason?: string | null;
   updated_at?: string;
 };
@@ -158,6 +159,35 @@ describe('releaseCardHoldsForBookings', () => {
     expect(customerDelMock).toHaveBeenCalledTimes(1);
     expect(customerDelMock).toHaveBeenCalledWith('cus_1', { stripeAccount: 'acct_1' });
     expect(result.deletedCustomerIds).toEqual(['cus_1']);
+  });
+
+  it('leaves a charged hold untouched for a non-refund reason (expiry race)', async () => {
+    const state: State = {
+      holds: [hold({ id: 'h1', booking_id: 'b1', charged_at: '2026-07-05T10:00:00.000Z' })],
+      events: [],
+    };
+    const admin = makeAdmin(state);
+
+    const result = await releaseCardHoldsForBookings(admin, ['b1'], 'expired');
+
+    expect(result.releasedBookingIds).toEqual([]);
+    expect(state.holds[0]!.released_at).toBeNull();
+    expect(state.events).toHaveLength(0);
+    expect(customerDelMock).not.toHaveBeenCalled();
+  });
+
+  it('releases a charged hold for the refund reason (the only path that may)', async () => {
+    const state: State = {
+      holds: [hold({ id: 'h1', booking_id: 'b1', charged_at: '2026-07-05T10:00:00.000Z' })],
+      events: [],
+    };
+    const admin = makeAdmin(state);
+
+    const result = await releaseCardHoldsForBookings(admin, ['b1'], 'refunded');
+
+    expect(result.releasedBookingIds).toEqual(['b1']);
+    expect(state.holds[0]!.released_at).not.toBeNull();
+    expect(state.holds[0]!.release_reason).toBe('refunded');
   });
 
   it('is idempotent: a second call finds no open holds and no-ops', async () => {

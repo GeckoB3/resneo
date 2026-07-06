@@ -131,7 +131,7 @@ function SuccessContent() {
             )}
             <button
               onClick={() => window.history.back()}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+              className="mt-5 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-700"
             >
               Try again
             </button>

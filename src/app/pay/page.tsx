@@ -89,9 +89,9 @@ function BookingDetailsCard({ info }: { info: BookingInfo }) {
           <span>{info.party_size} guest{info.party_size !== 1 ? 's' : ''}</span>
         </div>
         {info.venue_address && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <span className="text-base">&#128205;</span>
-            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(info.venue_address)}`} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">{info.venue_address}</a>
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(info.venue_address)}`} target="_blank" rel="noopener noreferrer" className="min-w-0 break-words text-brand-600 hover:underline">{info.venue_address}</a>
           </div>
         )}
       </div>
@@ -265,7 +265,7 @@ function PayForm({
           onChange={(e) => onEmailChange(e.target.value)}
           onBlur={() => setEmailTouched(true)}
           placeholder="your@email.com"
-          className={`w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
+          className={`min-h-[44px] w-full rounded-xl border bg-white px-3.5 py-3 text-sm transition-colors focus:outline-none focus:ring-2 ${
             emailTouched && !emailValid
               ? 'border-red-300 focus:border-red-400 focus:ring-red-500/20'
               : 'border-slate-200 focus:border-brand-500 focus:ring-brand-500/20'

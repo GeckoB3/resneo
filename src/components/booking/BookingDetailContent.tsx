@@ -242,7 +242,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   )}
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
                     <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">{cardHoldState ? 'Card hold' : 'Deposit'}</p>
-                    <p className={`truncate text-xs font-bold ${
+                    <p className={`text-xs font-bold ${cardHoldState ? 'leading-tight' : 'truncate'} ${
                       d.deposit_status === 'Paid'
                         ? 'text-emerald-700'
                         : d.deposit_status === 'Pending'

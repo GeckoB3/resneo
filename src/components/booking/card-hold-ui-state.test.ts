@@ -174,7 +174,7 @@ describe('resolveCardHoldUiState: 9.1 state table', () => {
     );
   });
 
-  it('waived-with-hold is inactive: legacy actions stay hidden, nothing else renders', () => {
+  it('waived-with-hold is inactive: legacy actions stay hidden, shows the waived line', () => {
     const s = resolveCardHoldUiState(
       { status: 'Pending', deposit_status: 'Waived' },
       hold({ released_at: '2026-07-01T10:00:00Z' }),
@@ -182,7 +182,7 @@ describe('resolveCardHoldUiState: 9.1 state table', () => {
     );
     expect(s?.kind).toBe('inactive');
     expect(s?.pill).toBeNull();
-    expect(s?.lines).toEqual([]);
+    expect(s?.lines).toEqual(['The card request was waived. No card is on file.']);
     expect(s?.hideLegacyDepositActions).toBe(true);
     expect(s?.showResendLink).toBe(false);
     expect(s?.showChargeAction).toBe(false);

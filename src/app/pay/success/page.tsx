@@ -87,11 +87,22 @@ function SuccessContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
             </div>
-            <h1 className="text-xl font-bold text-slate-900">Payment processing</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              Your payment is being processed. This can take a few minutes for some payment methods.
-              You&rsquo;ll receive a confirmation once it clears.
-            </p>
+            {mode === 'setup' ? (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Almost done</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  We are confirming your card details. You&rsquo;ll receive a confirmation shortly.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Payment processing</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your payment is being processed. This can take a few minutes for some payment methods.
+                  You&rsquo;ll receive a confirmation once it clears.
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -102,10 +113,22 @@ function SuccessContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
               </svg>
             </div>
-            <h1 className="text-xl font-bold text-slate-900">Payment failed</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              Your payment was not completed. Please go back and try again with a different card.
-            </p>
+            {mode === 'setup' ? (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Card not saved</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your card details could not be saved, so your booking is not secured yet. Please go
+                  back and try again, or use a different card.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">Payment failed</h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your payment was not completed. Please go back and try again with a different card.
+                </p>
+              </>
+            )}
             <button
               onClick={() => window.history.back()}
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"

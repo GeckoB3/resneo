@@ -15,6 +15,8 @@ import {
   CARD_HOLD_PILL_REFUNDED,
   CARD_HOLD_PILL_REQUEST_SENT,
   CARD_HOLD_REQUEST_CANCELLED_LINE,
+  CARD_HOLD_WAIVED_LINE,
+  CARD_HOLD_WINDOW_EXPIRED_LINE,
   cardHoldAwaitingCardLine,
   cardHoldChargeFailureLine,
   cardHoldChargedLine,
@@ -96,6 +98,12 @@ export function resolveCardHoldUiState(
   const released = cardHold?.released_at != null;
   const feePence = cardHold ? cardHold.fee_pence : null;
 
+  const now = opts.now ?? new Date();
+  const windowEndsAt = cardHold?.charge_window_ends_at
+    ? Date.parse(cardHold.charge_window_ends_at)
+    : Number.NaN;
+  const windowExpired = Number.isFinite(windowEndsAt) && now.getTime() > windowEndsAt;
+
   let kind: CardHoldUiKind;
   if (ds === 'Charged') {
     kind = 'charged';
@@ -127,6 +135,11 @@ export function resolveCardHoldUiState(
       if (cardHold?.charge_failure_code) {
         lines.push(cardHoldChargeFailureLine(cardHold.charge_failure_code));
       }
+      // Explain the missing Charge button once the window has passed for a
+      // saved, still-No-Show-chargeable-looking hold.
+      if (booking.status === 'No-Show' && cardHold?.saved && windowExpired) {
+        lines.push(CARD_HOLD_WINDOW_EXPIRED_LINE);
+      }
       break;
     case 'ended':
       pill = { label: CARD_HOLD_PILL_ENDED, variant: 'neutral' };
@@ -141,23 +154,21 @@ export function resolveCardHoldUiState(
       lines.push(cardHoldRefundedLine(cardHold?.charged_pence ?? null));
       break;
     case 'inactive':
+      // A waived request is the only inactive state with something to say.
+      if (ds === 'Waived') lines.push(CARD_HOLD_WAIVED_LINE);
       break;
   }
 
   // Client mirror of the §9.2a guards 2-6 (the server re-checks all of them):
   // No-Show status, 'Card Held', hold open, saved card, within the charge window.
-  const now = opts.now ?? new Date();
-  const windowEndsAt = cardHold?.charge_window_ends_at
-    ? Date.parse(cardHold.charge_window_ends_at)
-    : Number.NaN;
   const chargeEligible =
     booking.status === 'No-Show' &&
     ds === 'Card Held' &&
     cardHold != null &&
     cardHold.saved &&
     cardHold.released_at == null &&
-    Number.isFinite(windowEndsAt) &&
-    now.getTime() <= windowEndsAt;
+    !windowExpired &&
+    Number.isFinite(windowEndsAt);
 
   return {
     kind,

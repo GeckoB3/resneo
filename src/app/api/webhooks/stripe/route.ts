@@ -17,6 +17,7 @@ import { sendCardHoldChargedReceipt } from '@/lib/communications/send-templated'
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import {
   claimStripeWebhookEvent,
+  markStripeWebhookEventProcessed,
   releaseStripeWebhookEvent,
 } from '@/lib/webhooks/stripe-event-idempotency';
 import { fulfillClassCreditPurchaseFromPaymentIntent } from '@/lib/class-commerce/fulfill-credit-purchase';
@@ -174,7 +175,12 @@ export async function POST(request: NextRequest) {
   const connectedAccountId = (event as Stripe.Event & { account?: string }).account;
   console.log(`[Stripe webhook] ${event.type} (event: ${event.id})${connectedAccountId ? ` connected_account: ${connectedAccountId}` : ''}`);
 
-  try {
+  // The claim is not "processed" until this returns successfully: mark
+  // completion only after the handler resolves, and release (delete the claim)
+  // on error so Stripe's retry reprocesses. A hard crash between claim and
+  // completion leaves completed_at null, so a redelivery reclaims it once the
+  // claim goes stale rather than dropping the event.
+  const runHandlers = async (): Promise<NextResponse> => {
     if (event.type === 'payment_intent.succeeded') {
       const pi = event.data.object as Stripe.PaymentIntent;
       const meta = pi.metadata ?? {};
@@ -204,6 +210,7 @@ export async function POST(request: NextRequest) {
           paymentIntentId: pi.id,
           bookingId: meta.booking_id ?? null,
           amountReceivedPence: pi.amount_received ?? pi.amount,
+          connectedAccountId: connectedAccountId ?? null,
         });
         if (completion?.applied) {
           // Receipt email after the response (idempotent: dedupe comm log).
@@ -269,11 +276,19 @@ export async function POST(request: NextRequest) {
             `[Stripe webhook] PI ${pi.id} succeeded but its booking unit is Cancelled; needs reconciliation`,
             { bookingId },
           );
-          await supabase.from('reconciliation_alerts').insert({
+          const { error: alertErr } = await supabase.from('reconciliation_alerts').insert({
             booking_id: bookingId,
             expected_status: 'Booked',
             actual_stripe_status: pi.status,
           });
+          if (alertErr) {
+            // The alert is the only durable trace that money was taken for a
+            // cancelled unit: if it fails to persist, do NOT ack. Throw so the
+            // claim is released and Stripe redelivers (a duplicate alert on
+            // retry is far better than losing it).
+            console.error('[Stripe webhook] reconciliation alert insert failed', alertErr, { bookingId });
+            throw new Error('Failed to record reconciliation alert for cancelled unit');
+          }
           return NextResponse.json({ received: true });
         }
         throw new Error(`confirmBookingsForSucceededPaymentIntent failed: ${confirmResult.reason}`);
@@ -337,6 +352,7 @@ export async function POST(request: NextRequest) {
           failureCode:
             pi.last_payment_error?.code ?? pi.last_payment_error?.decline_code ?? 'payment_failed',
           failureAtIso: new Date(event.created * 1000).toISOString(),
+          connectedAccountId: connectedAccountId ?? null,
         });
         console.error('payment_intent.payment_failed (card-hold fee)', pi.id, pi.last_payment_error?.message);
         return NextResponse.json({ received: true });
@@ -700,6 +716,12 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ received: true });
+  };
+
+  try {
+    const response = await runHandlers();
+    await markStripeWebhookEventProcessed(supabase, event.id);
+    return response;
   } catch (err) {
     await releaseStripeWebhookEvent(supabase, event.id);
     console.error('Webhook processing failed:', event.id, event.type, err);

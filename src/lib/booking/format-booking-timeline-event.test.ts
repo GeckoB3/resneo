@@ -64,6 +64,85 @@ describe('formatBookingTimelineEvent', () => {
   });
 });
 
+describe('card-hold timeline events (§11)', () => {
+  it('shows all five card-hold event types', () => {
+    for (const type of [
+      'card_hold_saved',
+      'card_hold_released',
+      'card_hold_charged',
+      'card_hold_charge_failed',
+      'card_hold_charge_refunded',
+    ]) {
+      expect(
+        shouldShowBookingTimelineEvent({
+          id: type,
+          event_type: type,
+          created_at: '2026-07-05T12:00:00Z',
+          payload: null,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it('formats card-hold events with amounts and reasons', () => {
+    expect(
+      formatBookingTimelineEvent({
+        id: '1',
+        event_type: 'card_hold_saved',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: { fee_pence: 2500 },
+      }),
+    ).toEqual({ title: 'Card saved for no-show fee', detail: 'No-show fee up to £25.00' });
+
+    expect(
+      formatBookingTimelineEvent({
+        id: '2',
+        event_type: 'card_hold_charged',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: { charged_pence: 1000 },
+      }),
+    ).toEqual({ title: 'No-show fee charged', detail: '£10.00 charged to the saved card' });
+
+    expect(
+      formatBookingTimelineEvent({
+        id: '3',
+        event_type: 'card_hold_charge_refunded',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: { charged_pence: 1000 },
+      }),
+    ).toEqual({ title: 'No-show fee refunded', detail: '£10.00 refunded' });
+
+    expect(
+      formatBookingTimelineEvent({
+        id: '4',
+        event_type: 'card_hold_released',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: { release_reason: 'expired' },
+      }),
+    ).toEqual({ title: 'Card hold ended', detail: 'Reason: charge window passed' });
+
+    expect(
+      formatBookingTimelineEvent({
+        id: '5',
+        event_type: 'card_hold_charge_failed',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: { failure_code: 'card_declined' },
+      }),
+    ).toEqual({ title: 'No-show fee charge failed', detail: 'Reason: card declined' });
+  });
+
+  it('degrades gracefully with no payload', () => {
+    expect(
+      formatBookingTimelineEvent({
+        id: '6',
+        event_type: 'card_hold_charged',
+        created_at: '2026-07-05T12:00:00Z',
+        payload: null,
+      }),
+    ).toEqual({ title: 'No-show fee charged' });
+  });
+});
+
 describe('bookingTimelineEventsForDisplay', () => {
   it('filters and formats in order', () => {
     const rows = bookingTimelineEventsForDisplay([

@@ -290,6 +290,38 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
     expect(result).toEqual({ ok: true, confirmedIds: [], alreadyConfirmed: true });
   });
 
+  it('reports alreadyConfirmed (not booking_cancelled) when a sibling is live or past', async () => {
+    // Stripe replays payment_intent.succeeded days later against a unit whose
+    // rows have moved on (one Cancelled by a partial group cancel, one now
+    // Completed). Any non-Cancelled row means the unit is not the sweep race.
+    const rows = [
+      pendingBooking('b1', { status: 'Completed' }),
+      pendingBooking('b2', { status: 'Cancelled' }),
+    ];
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') return { data: rows, error: null };
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+    });
+    expect(result).toEqual({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+  });
+
+  it('reports booking_cancelled when every row of the unit is Cancelled', async () => {
+    const rows = [pendingBooking('b1', { status: 'Cancelled' })];
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') return { data: rows, error: null };
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+    });
+    expect(result).toEqual({ ok: false, reason: 'booking_cancelled' });
+  });
+
   it('confirms a plain deposit row to Paid', async () => {
     const bookings = [pendingBooking('b1', { deposit_amount_pence: 2000 })];
     const { admin, calls } = makeAdmin((call) => {

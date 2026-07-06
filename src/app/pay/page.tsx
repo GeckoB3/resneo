@@ -305,13 +305,22 @@ function PayContent() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'success' | 'error'>(() =>
     token ? 'loading' : 'error',
   );
-  const [errorMsg, setErrorMsg] = useState<string | null>(() => (!token ? 'Invalid link' : null));
+  const [errorMsg, setErrorMsg] = useState<string | null>(() =>
+    !token ? 'This link is not valid. Please open the link from your email or text message again.' : null,
+  );
 
   useEffect(() => {
     if (!token) return;
     fetch(`/api/booking/pay?t=${encodeURIComponent(token)}`)
       .then((r) => {
-        if (!r.ok) return r.json().then((j) => Promise.reject(new Error(j.error ?? 'Failed')));
+        if (!r.ok)
+          return r
+            .json()
+            .then((j) =>
+              Promise.reject(
+                new Error(j.error ?? 'Something went wrong loading this link. Please try again.'),
+              ),
+            );
         return r.json();
       })
       .then((data) => {

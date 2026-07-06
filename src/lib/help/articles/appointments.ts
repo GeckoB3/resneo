@@ -728,7 +728,7 @@ If a staff member is stuck, they can still use **Support** from the sidebar foot
       content: `
 # Get paid the way you promise
 
-ResNeo never holds your funds—card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
+ResNeo never holds your funds. Card charges route through **Stripe Connect** straight to your business account. Your job is to configure **when** money is due and **what** happens if someone cancels.
 
 **What this covers:** a short go-live checklist, card holds for no-show protection, staff-created bookings when payment is required, and keeping messages aligned with your policy.
 
@@ -785,7 +785,7 @@ Charged in error, or the client had a genuine reason? Open the booking and choos
 
 ## Confirm or cancel links
 
-Automated messages may include **confirm or cancel** links (for example \`/confirm/{bookingId}/{token}\`). Guests should understand deposit implications before they tap—mirror that language in your templates.
+Automated messages may include **confirm or cancel** links (for example \`/confirm/{bookingId}/{token}\`). Guests should understand deposit implications before they tap. Mirror that language in your templates.
 
 ## Refunds and disputes
 
@@ -793,7 +793,7 @@ Cancellation windows live on each catalogue row. When you change a window, updat
 
 ## Troubleshooting payments
 
-Start with [Troubleshooting — Stripe](/help/troubleshooting/stripe-issues) if Connect is disconnected or payments fail mid-checkout—most issues are incomplete onboarding or expired cards.
+Start with [Troubleshooting: Stripe](/help/troubleshooting/stripe-issues) if Connect is disconnected or payments fail mid-checkout. Most issues are incomplete onboarding or expired cards.
 `.trim(),
     },
     {

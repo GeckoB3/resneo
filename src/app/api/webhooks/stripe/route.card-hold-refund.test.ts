@@ -27,6 +27,7 @@ vi.mock('@/lib/supabase', () => ({ getSupabaseAdminClient: vi.fn() }));
 
 vi.mock('@/lib/webhooks/stripe-event-idempotency', () => ({
   claimStripeWebhookEvent: vi.fn(async () => 'claimed'),
+  markStripeWebhookEventProcessed: vi.fn(async () => undefined),
   releaseStripeWebhookEvent: vi.fn(async () => undefined),
 }));
 

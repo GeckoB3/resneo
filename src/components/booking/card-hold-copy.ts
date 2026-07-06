@@ -140,6 +140,17 @@ export function cardHoldEndedLine(releasedAtIso: string | null): string {
   return 'The card hold has ended.';
 }
 
+/** `'Waived'` deposit_status: the card request was waived before any card was saved (§9.1). */
+export const CARD_HOLD_WAIVED_LINE = 'The card request was waived. No card is on file.';
+
+/**
+ * Appended to the held line when the 14-day charge window has passed, so staff
+ * understand why the Charge button is no longer offered (mirrors the server's
+ * `hold_expired` 409).
+ */
+export const CARD_HOLD_WINDOW_EXPIRED_LINE =
+  'The charge window has ended, so the no-show fee can no longer be charged.';
+
 /** `'Charged'` (§9.1). Degrades gracefully when amount or date is unknown. */
 export function cardHoldChargedLine(
   chargedPence: number | null,

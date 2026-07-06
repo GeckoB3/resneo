@@ -590,16 +590,25 @@ export async function POST(request: NextRequest) {
             );
             refundSucceeded = true;
           } catch (refundErr) {
-            logBookingOp({
-              operation: "refund_failed",
-              venue_id: booking.venue_id as string,
-              booking_id: bookingId,
-              booking_model: cancelInferred,
-              error:
-                refundErr instanceof Error
-                  ? refundErr.message
-                  : String(refundErr),
-            });
+            // A prior attempt (or the dashboard) already refunded this PI: the
+            // money is back with the guest, so converge instead of failing. This
+            // also lets a retry succeed after a previous cancel-update failure
+            // left the booking uncancelled but the refund already issued.
+            const code = (refundErr as { code?: string } | null)?.code;
+            if (code === 'charge_already_refunded') {
+              refundSucceeded = true;
+            } else {
+              logBookingOp({
+                operation: "refund_failed",
+                venue_id: booking.venue_id as string,
+                booking_id: bookingId,
+                booking_model: cancelInferred,
+                error:
+                  refundErr instanceof Error
+                    ? refundErr.message
+                    : String(refundErr),
+              });
+            }
           }
         }
       }

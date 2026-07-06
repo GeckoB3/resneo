@@ -35,6 +35,7 @@ import {
 
 const mockPiCreate = vi.mocked(stripe.paymentIntents.create);
 const mockPiCancel = vi.mocked(stripe.paymentIntents.cancel);
+const mockRefundCreate = vi.mocked(stripe.refunds.create);
 const mockReceipt = vi.mocked(sendCardHoldChargedReceipt);
 const mockRelease = vi.mocked(releaseCardHoldsForBookings);
 
@@ -60,6 +61,8 @@ function makeDb(initial: { hold: Row | null; booking: Row | null }) {
       if (op === 'neq') return row[key] !== value;
       if (op === 'is') return row[key] == null;
       if (op === 'in') return Array.isArray(value) && value.includes(row[key]);
+      // not(key, 'is', null) => the column is NOT null
+      if (op === 'not') return row[key] != null;
       return false;
     });
   };
@@ -112,6 +115,8 @@ function makeDb(initial: { hold: Row | null; booking: Row | null }) {
       builder.eq = chain((k, v) => ctx.filters.push(['eq', k as string, v]));
       builder.neq = chain((k, v) => ctx.filters.push(['neq', k as string, v]));
       builder.is = chain((k, v) => ctx.filters.push(['is', k as string, v]));
+      // PostgREST .not(column, operator, value); we only use .not(col, 'is', null).
+      builder.not = chain((k, _op, v) => ctx.filters.push(['not', k as string, v]));
       builder.in = chain((k, v) => ctx.filters.push(['in', k as string, v]));
       builder.maybeSingle = () => {
         const { data } = exec();
@@ -325,8 +330,9 @@ describe('chargeCardHoldNoShowFee success (§8.3)', () => {
 });
 
 describe('chargeCardHoldNoShowFee interleaved race (§8.3 steps 1-3)', () => {
-  it('lets exactly one of two interleaved requests charge; the loser cancels its own PI and gets invalid_state', async () => {
+  it('lets exactly one of two interleaved requests charge; the loser refunds its own succeeded PI and gets invalid_state', async () => {
     const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
+    mockRefundCreate.mockResolvedValue({} as never);
 
     // Barrier: neither PI create resolves until BOTH requests have created one,
     // i.e. both are past the claim (step 1) before either persists (step 3).
@@ -362,12 +368,19 @@ describe('chargeCardHoldNoShowFee interleaved race (§8.3 steps 1-3)', () => {
     expect(new Set(keys).size).toBe(2);
     expect(keys.sort()).toEqual(['card-hold-charge-h1-1', 'card-hold-charge-h1-2']);
 
-    // The loser cancelled its OWN just-created PI, not the winner's.
+    // The loser's PI succeeded synchronously (both requests get a succeeded PI
+    // under the barrier), so a cancel would throw: it REFUNDS its own PI
+    // instead, and never touches the winner's (concurrency review F2). No
+    // reconciliation alert is raised when the refund lands.
     const winner = winners[0] as { ok: true; paymentIntentId: string };
-    expect(mockPiCancel).toHaveBeenCalledTimes(1);
-    const cancelledId = mockPiCancel.mock.calls[0]![0];
-    expect(cancelledId).not.toBe(winner.paymentIntentId);
-    expect(mockPiCancel.mock.calls[0]![1]).toEqual({ stripeAccount: 'acct_snapshot' });
+    expect(mockPiCancel).not.toHaveBeenCalled();
+    expect(mockRefundCreate).toHaveBeenCalledTimes(1);
+    const refundCall = mockRefundCreate.mock.calls[0] as unknown as [
+      { payment_intent: string },
+      { stripeAccount: string },
+    ];
+    expect(refundCall[0].payment_intent).not.toBe(winner.paymentIntentId);
+    expect(refundCall[1]).toEqual({ stripeAccount: 'acct_snapshot' });
 
     // Exactly one charge applied.
     expect(state.hold?.charge_payment_intent_id).toBe(winner.paymentIntentId);
@@ -538,10 +551,26 @@ describe('applyCardHoldChargedState / completeCardHoldChargeFromWebhook (§8.6.1
       paymentIntentId: 'pi_fee',
       bookingId: 'b1',
       amountReceivedPence: 1500,
+      connectedAccountId: 'acct_snapshot',
     });
     expect(completion).toMatchObject({ applied: true });
     expect(state.hold?.charge_payment_intent_id).toBe('pi_fee');
     expect(state.hold?.charged_pence).toBe(1500);
+  });
+
+  it('refuses the booking_id fallback when the event account differs from the hold account', async () => {
+    // Cross-tenant hold poisoning: a fee PI on a foreign account carrying the
+    // victim booking_id must not backfill or charge the victim hold.
+    const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
+    const completion = await completeCardHoldChargeFromWebhook(admin, {
+      paymentIntentId: 'pi_attacker',
+      bookingId: 'b1',
+      amountReceivedPence: 1500,
+      connectedAccountId: 'acct_attacker',
+    });
+    expect(completion).toBeNull();
+    expect(state.hold?.charge_payment_intent_id).toBeNull();
+    expect(state.booking?.deposit_status).toBe('Card Held');
   });
 
   it('skips (returns null) when the hold on file carries a different PI', async () => {
@@ -553,6 +582,7 @@ describe('applyCardHoldChargedState / completeCardHoldChargeFromWebhook (§8.6.1
       paymentIntentId: 'pi_fee',
       bookingId: 'b1',
       amountReceivedPence: 1500,
+      connectedAccountId: 'acct_snapshot',
     });
     expect(completion).toBeNull();
     expect(state.booking?.deposit_status).toBe('Card Held');
@@ -631,12 +661,25 @@ describe('recordCardHoldChargeFailure (§8.6.3)', () => {
       bookingId: 'b1',
       failureCode: 'card_declined',
       failureAtIso: '2026-07-05T10:00:00.000Z',
+      connectedAccountId: 'acct_snapshot',
     });
     expect(state.hold).toMatchObject({
       charge_failure_code: 'card_declined',
       charge_failure_at: '2026-07-05T10:00:00.000Z',
     });
     expect(state.booking?.deposit_status).toBe('Card Held');
+  });
+
+  it('refuses the booking_id fallback when the event account differs from the hold account', async () => {
+    const { admin, state } = makeDb({ hold: holdRow(), booking: bookingRow() });
+    await recordCardHoldChargeFailure(admin, {
+      paymentIntentId: null,
+      bookingId: 'b1',
+      failureCode: 'card_declined',
+      failureAtIso: '2026-07-05T10:00:00.000Z',
+      connectedAccountId: 'acct_attacker',
+    });
+    expect(state.hold?.charge_failure_code ?? null).toBeNull();
   });
 
   it('reopens the claim when the persisted PI is the one that failed asynchronously', async () => {
@@ -667,6 +710,7 @@ describe('recordCardHoldChargeFailure (§8.6.3)', () => {
       bookingId: 'b1',
       failureCode: 'card_declined',
       failureAtIso: '2026-07-05T10:00:00.000Z',
+      connectedAccountId: 'acct_snapshot',
     });
     expect(state.hold).toMatchObject({
       charge_failure_code: 'card_declined',

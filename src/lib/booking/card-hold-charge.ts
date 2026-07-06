@@ -215,6 +215,32 @@ export async function applyCardHoldChargedState(
         bookingId: input.bookingId,
       });
     }
+  } else {
+    // applied=false with money genuinely taken on THIS PI can mean the hold was
+    // released (expiry cron) in the tiny window between the PI-id persist and
+    // this stamp: the charge stands but there is no receipt or charged event.
+    // Surface it for the operator rather than leaving a silent stuck charge
+    // (concurrency review F3 residual). Keyed on this PI + released + uncharged.
+    const { data: anomaly } = await admin
+      .from('booking_card_holds')
+      .select('id')
+      .eq('id', input.holdId)
+      .eq('charge_payment_intent_id', input.paymentIntentId)
+      .is('charged_at', null)
+      .not('released_at', 'is', null)
+      .maybeSingle();
+    if (anomaly) {
+      const { error: alertErr } = await admin.from('reconciliation_alerts').insert({
+        booking_id: input.bookingId,
+        expected_status: 'Charged',
+        actual_stripe_status: `charged_on_released_hold:${input.paymentIntentId}`,
+      });
+      if (alertErr) {
+        console.error('[card-hold-charge] released-hold charge alert insert failed', alertErr, {
+          bookingId: input.bookingId,
+        });
+      }
+    }
   }
 
   return { applied };
@@ -228,9 +254,22 @@ export async function applyCardHoldChargedState(
  */
 export async function completeCardHoldChargeFromWebhook(
   admin: SupabaseClient,
-  params: { paymentIntentId: string; bookingId?: string | null; amountReceivedPence: number },
+  params: {
+    paymentIntentId: string;
+    bookingId?: string | null;
+    amountReceivedPence: number;
+    /**
+     * The connected account the event arrived on. When resolving a hold via
+     * the attacker-controllable metadata.booking_id fallback, the hold's
+     * snapshotted account MUST match this or the write is refused: a fee PI is
+     * always created on the hold's own account, so a mismatch means a
+     * different account's event is pointing at this booking (cross-tenant hold
+     * poisoning). Null (unknown account) skips the fallback for safety.
+     */
+    connectedAccountId?: string | null;
+  },
 ): Promise<{ applied: boolean; bookingId: string; venueId: string; chargedPence: number } | null> {
-  const { paymentIntentId, bookingId, amountReceivedPence } = params;
+  const { paymentIntentId, bookingId, amountReceivedPence, connectedAccountId } = params;
 
   const { data: byPi, error: byPiErr } = await admin
     .from('booking_card_holds')
@@ -257,6 +296,18 @@ export async function completeCardHoldChargeFromWebhook(
       throw byBookingErr;
     }
     const candidate = (byBooking ?? null) as ChargeableHoldRow | null;
+    if (candidate && candidate.stripe_connected_account_id !== connectedAccountId) {
+      // The fee PI lives on a different account than the hold snapshotted:
+      // a genuine fee PI would be on the hold's own account. Refuse to
+      // backfill or apply from a foreign account's event.
+      console.warn('[card-hold-charge] webhook fee PI account does not match the hold account, skipping', {
+        paymentIntentId,
+        bookingId,
+        eventAccount: connectedAccountId,
+        holdAccount: candidate.stripe_connected_account_id,
+      });
+      return null;
+    }
     if (candidate) {
       if (candidate.charge_payment_intent_id == null) {
         const { error: setErr } = await admin
@@ -316,9 +367,11 @@ export async function recordCardHoldChargeFailure(
     bookingId?: string | null;
     failureCode: string;
     failureAtIso: string;
+    /** Event account; the booking_id fallback requires a matching hold account (see completeCardHoldChargeFromWebhook). */
+    connectedAccountId?: string | null;
   },
 ): Promise<void> {
-  const { paymentIntentId, bookingId, failureCode, failureAtIso } = params;
+  const { paymentIntentId, bookingId, failureCode, failureAtIso, connectedAccountId } = params;
 
   let hold: ChargeableHoldRow | null = null;
   if (paymentIntentId) {
@@ -335,7 +388,19 @@ export async function recordCardHoldChargeFailure(
       .select(HOLD_CHARGE_COLUMNS + ', charge_failure_at')
       .eq('booking_id', bookingId)
       .maybeSingle();
-    hold = (data ?? null) as ChargeableHoldRow | null;
+    const candidate = (data ?? null) as ChargeableHoldRow | null;
+    // Same cross-tenant guard as the success path: only accept a booking_id
+    // fallback when the hold's snapshot account matches the event's account.
+    if (candidate && candidate.stripe_connected_account_id !== connectedAccountId) {
+      console.warn('[card-hold-charge] payment_failed fallback account mismatch, skipping', {
+        paymentIntentId,
+        bookingId,
+        eventAccount: connectedAccountId,
+        holdAccount: candidate.stripe_connected_account_id,
+      });
+      return;
+    }
+    hold = candidate;
   }
   if (!hold) {
     console.warn('[card-hold-charge] payment_failed webhook found no hold, skipping', {
@@ -360,7 +425,11 @@ export async function recordCardHoldChargeFailure(
     .eq('id', hold.id)
     .is('charged_at', null);
   if (error) {
+    // Throw so the webhook 500s and Stripe redelivers: swallowing this would
+    // ack the event and lose the failure record, leaving the claim closed and
+    // every retry blocked until the window expires (concurrency review F4).
     console.error('[card-hold-charge] failure record failed', error, { holdId: hold.id });
+    throw new Error('Failed to record the card-hold charge failure');
   }
 
   // When the PERSISTED PI is the one that failed asynchronously, the claim
@@ -376,9 +445,12 @@ export async function recordCardHoldChargeFailure(
       .eq('charge_payment_intent_id', paymentIntentId)
       .is('charged_at', null);
     if (reopenErr) {
+      // Same reasoning: a swallowed reopen failure leaves the claim closed and
+      // blocks all retries. Throw to force a Stripe redelivery.
       console.error('[card-hold-charge] failed-PI claim reopen failed', reopenErr, {
         holdId: hold.id,
       });
+      throw new Error('Failed to reopen the card-hold charge claim');
     }
   }
 }
@@ -432,6 +504,62 @@ export interface ChargeCardHoldNoShowFeeParams {
   /** Defaults to the hold's full fee_pence; clamped server-side to [1, fee_pence]. */
   amountPence?: number | null;
   staffId: string;
+}
+
+/**
+ * Undo an orphan fee PaymentIntent (a concurrent-charge loser, or a charge on
+ * a hold that was released between the guards and the persist). Cancel it if it
+ * is still cancellable; if it has already succeeded, REFUND it so no money
+ * stands (concurrency review F2: cancelling a succeeded PI always throws, so
+ * the pre-fix path left the guest double-charged with only a log line). A
+ * reconciliation alert is inserted only when neither cancel nor refund lands.
+ */
+async function disposeOrphanFeePaymentIntent(
+  admin: SupabaseClient,
+  params: {
+    pi: { id: string; status: string };
+    bookingId: string;
+    stripeConnectedAccountId: string;
+  },
+): Promise<void> {
+  const { pi, bookingId, stripeConnectedAccountId } = params;
+  const account = { stripeAccount: stripeConnectedAccountId };
+
+  // A synchronously-succeeded off-session PI cannot be cancelled; refund it.
+  if (pi.status === 'succeeded') {
+    try {
+      await stripe.refunds.create({ payment_intent: pi.id }, account);
+      return;
+    } catch (refundErr) {
+      console.error('[card-hold-charge] orphan PI refund failed', refundErr, { pi: pi.id });
+    }
+  } else {
+    try {
+      await stripe.paymentIntents.cancel(pi.id, account);
+      return;
+    } catch (cancelErr) {
+      // It may have moved to succeeded between our read and the cancel: refund.
+      console.error('[card-hold-charge] orphan PI cancel failed, attempting refund', cancelErr, {
+        pi: pi.id,
+      });
+      try {
+        await stripe.refunds.create({ payment_intent: pi.id }, account);
+        return;
+      } catch (refundErr) {
+        console.error('[card-hold-charge] orphan PI refund also failed', refundErr, { pi: pi.id });
+      }
+    }
+  }
+
+  // Neither disposal landed: surface the uncancelled PI for the operator.
+  const { error: alertErr } = await admin.from('reconciliation_alerts').insert({
+    booking_id: bookingId,
+    expected_status: 'single_charge',
+    actual_stripe_status: `duplicate_pi_uncancelled:${pi.id}`,
+  });
+  if (alertErr) {
+    console.error('[card-hold-charge] duplicate-PI alert insert failed', alertErr, { pi: pi.id });
+  }
 }
 
 /**
@@ -581,38 +709,29 @@ export async function chargeCardHoldNoShowFee(
     return { ok: false, code: 'charge_failed', message: 'The charge could not be completed. Please try again.' };
   }
 
-  // §8.3 step 3: conditionally persist the PI id. Zero rows means a concurrent
-  // request won the race between steps 1 and 3: cancel our own PI and 409.
+  // §8.3 step 3: conditionally persist the PI id. Zero rows means either a
+  // concurrent request won the race between steps 1 and 3, OR the hold was
+  // released (cancelled/expired) after our guards passed. Both require us to
+  // undo our own PI so no orphan charge stands.
   const { data: persisted, error: persistErr } = await admin
     .from('booking_card_holds')
     .update({ charge_payment_intent_id: pi.id, updated_at: new Date().toISOString() })
     .eq('id', hold.id)
     .is('charge_payment_intent_id', null)
+    // Do not persist onto a hold released between the guards and here: the
+    // expiry cron can release mid-charge, and charging a released hold must
+    // never stand (concurrency review F3).
+    .is('released_at', null)
     .select('id');
   if (persistErr || (persisted ?? []).length === 0) {
     if (persistErr) {
       console.error('[card-hold-charge] PI persist failed', persistErr, { holdId: hold.id, pi: pi.id });
     }
-    try {
-      await stripe.paymentIntents.cancel(pi.id, { stripeAccount: hold.stripe_connected_account_id });
-    } catch (cancelErr) {
-      // Best effort per §8.3: if the PI already succeeded, the standard refund
-      // action is the operator remedy. Surface it in-product (review finding:
-      // a succeeded loser PI is otherwise invisible outside the logs).
-      console.error('[card-hold-charge] losing PI cancel failed (operator remedy: refund)', cancelErr, {
-        pi: pi.id,
-      });
-      const { error: alertErr } = await admin.from('reconciliation_alerts').insert({
-        booking_id: bookingId,
-        expected_status: 'single_charge',
-        actual_stripe_status: `duplicate_pi_uncancelled:${pi.id}`,
-      });
-      if (alertErr) {
-        console.error('[card-hold-charge] duplicate-PI alert insert failed', alertErr, {
-          pi: pi.id,
-        });
-      }
-    }
+    await disposeOrphanFeePaymentIntent(admin, {
+      pi,
+      bookingId,
+      stripeConnectedAccountId: hold.stripe_connected_account_id,
+    });
     return {
       ok: false,
       code: 'invalid_state',

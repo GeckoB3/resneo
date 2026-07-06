@@ -37,21 +37,33 @@ export async function GET(request: NextRequest) {
 
     const token = request.nextUrl.searchParams.get('t');
     if (!token?.trim()) {
-      return NextResponse.json({ error: 'Missing token' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'This payment link is not complete. Please open the link from your email or text message again.' },
+        { status: 400 },
+      );
     }
 
     const verified = verifyPaymentLinkToken(token);
     if (!verified.ok && verified.reason === 'misconfigured') {
       console.error('GET /api/booking/pay: PAYMENT_TOKEN_SECRET not set');
-      return NextResponse.json({ error: 'Service temporarily unavailable' }, { status: 503 });
+      return NextResponse.json(
+        { error: 'This payment page is unavailable right now. Please try again in a few minutes or contact the venue.' },
+        { status: 503 },
+      );
     }
     if (!verified.ok) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'This payment link is not valid. Please use the most recent link the venue sent you, or contact the venue for a new one.' },
+        { status: 400 },
+      );
     }
 
     const { bookingId, exp } = verified;
     if (Date.now() > exp || !bookingId) {
-      return NextResponse.json({ error: 'Link expired' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'This link has expired. Please contact the venue and they will send you a new one.' },
+        { status: 400 },
+      );
     }
 
     const supabase = getSupabaseAdminClient();
@@ -154,7 +166,7 @@ export async function GET(request: NextRequest) {
       });
 
       if (!setupIntent.client_secret) {
-        return NextResponse.json({ error: 'Payment not available' }, { status: 500 });
+        return NextResponse.json({ error: 'We could not load this payment right now. Please try again in a few minutes or contact the venue.' }, { status: 500 });
       }
 
       // Capture-unit total: sibling rows (group members, cart lines) share the SI;
@@ -191,7 +203,7 @@ export async function GET(request: NextRequest) {
 
     // Payment mode (existing behaviour): the deposit PI lives on the venue's current account.
     if (!venue?.stripe_connected_account_id) {
-      return NextResponse.json({ error: 'Venue payment not configured' }, { status: 500 });
+      return NextResponse.json({ error: 'This venue cannot take card payments yet. Please contact the venue.' }, { status: 500 });
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
@@ -200,7 +212,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (!paymentIntent.client_secret) {
-      return NextResponse.json({ error: 'Payment not available' }, { status: 500 });
+      return NextResponse.json({ error: 'We could not load this payment right now. Please try again in a few minutes or contact the venue.' }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -212,6 +224,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     console.error('GET /api/booking/pay failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Something went wrong at our end. Please try again in a few minutes.' }, { status: 500 });
   }
 }

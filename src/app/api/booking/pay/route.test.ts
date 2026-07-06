@@ -238,6 +238,6 @@ describe('GET /api/booking/pay (payment mode unchanged)', () => {
     const res = await GET(payRequest());
     expect(res.status).toBe(500);
     const json = await res.json();
-    expect(json.error).toBe('Venue payment not configured');
+    expect(json.error).toBe('This venue cannot take card payments yet. Please contact the venue.');
   });
 });

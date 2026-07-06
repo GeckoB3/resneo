@@ -11,7 +11,7 @@ export function formatCommunicationLogLabel(messageType: string): string {
     pre_visit_reminder: 'Pre-visit reminder',
     booking_modification: 'Booking modification',
     cancellation_confirmation: 'Cancellation confirmation',
-    auto_cancel_notification: 'Auto-cancel (unpaid deposit)',
+    auto_cancel_notification: 'Auto-cancel (deposit or card details missing)',
     custom_message: 'Custom message',
     no_show_notification: 'No-show notification',
     post_visit_thankyou: 'Post-visit thank you',

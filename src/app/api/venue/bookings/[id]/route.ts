@@ -710,6 +710,14 @@ export async function PATCH(
         let depositPenceForMessage: number | null =
           typeof booking.deposit_amount_pence === 'number' ? booking.deposit_amount_pence : null;
         let hadPaidDeposit = booking.deposit_status === 'Paid';
+        // Only rows that actually held a paid deposit may be flipped to
+        // 'Refunded'. A card-hold sibling ('Card Held') in the same group unit
+        // shares the PI but was never charged: it must stay 'Card Held' and be
+        // cancel-only, so it does not render a false "no-show fee refunded"
+        // pill or inflate the refunded report count (§8.6.6 / §14).
+        let paidDepositIds = new Set<string>(
+          booking.deposit_status === 'Paid' ? [id] : [],
+        );
 
         if (groupBookingId) {
           const { data: groupRows } = await staff.db
@@ -723,6 +731,11 @@ export async function PATCH(
           if (idsToCancel.length === 0) {
             idsToCancel = [id];
           }
+          paidDepositIds = new Set(
+            (groupRows ?? [])
+              .filter((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid')
+              .map((r: { id: string }) => r.id),
+          );
           const withPi = (groupRows ?? []).find(
             (r: { stripe_payment_intent_id?: string | null }) => r.stripe_payment_intent_id,
           );
@@ -778,16 +791,34 @@ export async function PATCH(
         }
 
         if (refundSucceeded) {
-          await staff.db
-            .from('bookings')
-            .update({
-              status: 'Cancelled',
-              deposit_status: 'Refunded',
-              cancelled_by_staff_id: staff.id,
-              cancellation_actor_type: 'staff',
-              updated_at: new Date().toISOString(),
-            })
-            .in('id', idsToCancel);
+          // Flip only the actually-paid deposit rows to 'Refunded'; cancel the
+          // rest (including any 'Card Held' hold-only siblings) with status
+          // only, so a shared-PI refund never mislabels an uncharged hold.
+          const refundedIds = idsToCancel.filter((cid) => paidDepositIds.has(cid));
+          const cancelOnlyIds = idsToCancel.filter((cid) => !paidDepositIds.has(cid));
+          if (refundedIds.length > 0) {
+            await staff.db
+              .from('bookings')
+              .update({
+                status: 'Cancelled',
+                deposit_status: 'Refunded',
+                cancelled_by_staff_id: staff.id,
+                cancellation_actor_type: 'staff',
+                updated_at: new Date().toISOString(),
+              })
+              .in('id', refundedIds);
+          }
+          if (cancelOnlyIds.length > 0) {
+            await staff.db
+              .from('bookings')
+              .update({
+                status: 'Cancelled',
+                cancelled_by_staff_id: staff.id,
+                cancellation_actor_type: 'staff',
+                updated_at: new Date().toISOString(),
+              })
+              .in('id', cancelOnlyIds);
+          }
         } else {
           await staff.db
             .from('bookings')

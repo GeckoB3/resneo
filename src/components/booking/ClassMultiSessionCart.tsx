@@ -254,14 +254,14 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             <ul className="mt-2 list-inside list-disc space-y-1 text-slate-700">
               {commerce.credit_products.slice(0, 5).map((p) => (
                 <li key={p.id}>
-                  {p.name} — {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
+                  {p.name}: {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
                 </li>
               ))}
             </ul>
           ) : null}
           {commerce.course_products.length > 0 ? (
             <p className="mt-2 text-xs text-slate-600">
-              {commerce.course_products.length} course package{commerce.course_products.length === 1 ? '' : 's'} — see
+              {commerce.course_products.length} course package{commerce.course_products.length === 1 ? '' : 's'}. See
               your account or venue for full enrollment.
             </p>
           ) : null}
@@ -282,7 +282,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             onBack={() => {
               setPaymentSession(null);
               setError(
-                'Payment was not completed. Pending holds may still apply — refresh or contact the venue if you need help.',
+                'Payment was not completed. Pending holds may still apply. Refresh the page or contact the venue if you need help.',
               );
             }}
             cancellationPolicy={undefined}
@@ -325,7 +325,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                     <option value="">Choose a session…</option>
                     {instanceOptions.map((i) => (
                       <option key={i.instance_id} value={i.instance_id}>
-                        {i.class_name} — {i.instance_date} {i.start_time} ({i.remaining} left)
+                        {i.class_name}: {i.instance_date} {i.start_time} ({i.remaining} left)
                       </option>
                     ))}
                   </select>

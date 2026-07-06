@@ -124,7 +124,11 @@ async function classifyZeroRowConfirm(
 function classifyZeroRowStatuses(
   statuses: Array<string | null>,
 ): 'already_confirmed' | 'cancelled' {
-  if (statuses.some((s) => s === 'Booked')) return 'already_confirmed';
+  // Any non-Cancelled row means the unit is live or already past (a Booked row
+  // legitimately moves on to Confirmed / Seated / Completed / No-Show, and
+  // Stripe can replay payment_intent.succeeded days later against such a row).
+  // Only an all-Cancelled unit is the abandonment-sweep race we must surface.
+  if (statuses.some((s) => s && s !== 'Cancelled')) return 'already_confirmed';
   if (statuses.some((s) => s === 'Cancelled')) return 'cancelled';
   return 'already_confirmed';
 }
@@ -237,7 +241,12 @@ export async function confirmBookingsForSucceededPaymentIntent(
   const { data: holdRows, error: holdErr } = await admin
     .from('booking_card_holds')
     .select(CARD_HOLD_CONFIRM_COLUMNS)
-    .in('booking_id', candidateIds);
+    .in('booking_id', candidateIds)
+    // Exclude released holds so a stale-tab confirm of a long-since-released
+    // hold (e.g. an expired payment_with_setup 'Failed' row) can never stamp a
+    // payment method onto a dead hold or classify the row as 'Card Held'
+    // (mirrors the setup path's released_at guard).
+    .is('released_at', null);
 
   if (holdErr) {
     console.error('[confirmBookingsForSucceededPaymentIntent] hold load failed:', holdErr, logContext);

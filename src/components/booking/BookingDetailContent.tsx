@@ -241,7 +241,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                     </div>
                   )}
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">{cardHoldState ? 'Card hold' : 'Deposit'}</p>
                     <p className={`truncate text-xs font-bold ${
                       d.deposit_status === 'Paid'
                         ? 'text-emerald-700'
@@ -461,7 +461,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <CompactInfo dense={isPopover} label={isTableStyle ? 'Covers' : 'Guests'} value={String(d.party_size)} />
                   <CompactInfo
                     dense={isPopover}
-                    label="Deposit"
+                    label={cardHoldState ? 'Card hold' : 'Deposit'}
                     value={
                       cardHoldState?.pill
                         ? cardHoldState.pill.label

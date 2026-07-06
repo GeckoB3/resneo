@@ -184,7 +184,7 @@ export function CardHoldChargeDialog({
             onChange={(e) => setAmountInput(e.target.value)}
             disabled={charging}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
-            aria-invalid={!amountValid}
+            aria-invalid={!amountValid && amountInput.trim().length > 0}
           />
         </div>
         <p className="text-[11px] text-slate-500">

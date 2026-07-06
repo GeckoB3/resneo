@@ -20,6 +20,31 @@ function bookingLabel(booking: BookingEmailData): string {
 }
 
 /**
+ * The charge date in the venue's local timezone, so a charge just after
+ * midnight UK time (BST) does not render the previous day. Falls back to the
+ * UTC calendar date when the timezone is unknown or the value is unparseable.
+ */
+function formatChargedOn(
+  chargedAt: string | null | undefined,
+  timezone: string | null | undefined,
+): string | null {
+  if (!chargedAt) return null;
+  const d = new Date(chargedAt);
+  if (isNaN(d.getTime())) return null;
+  try {
+    return d.toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      ...(timezone ? { timeZone: timezone } : {}),
+    });
+  } catch {
+    return formatDate(chargedAt.slice(0, 10));
+  }
+}
+
+/**
  * No-show fee receipt (card_hold deposits §10.2.2), sent on charge success by
  * the charge engine and the fee-PI webhook (comm-log type
  * `card_hold_charged_email`). Email is the receipt of record; no SMS in v1.
@@ -34,7 +59,7 @@ export function renderCardHoldChargedEmail(
   const amount = formatCardHoldFeePence(charge.chargedPence);
   const label = bookingLabel(booking);
   const appt = isAppointment(booking);
-  const chargedOn = charge.chargedAt ? formatDate(charge.chargedAt.slice(0, 10)) : null;
+  const chargedOn = formatChargedOn(charge.chargedAt, venue.timezone);
 
   const bodyCore =
     `You missed your ${label} at ${venue.name} on ${date} at ${time}. ` +

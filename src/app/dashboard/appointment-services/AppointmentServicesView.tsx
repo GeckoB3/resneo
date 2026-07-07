@@ -3,7 +3,17 @@
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
@@ -109,6 +119,56 @@ interface PractitionerServiceLink {
   custom_colour?: string | null;
 }
 
+
+function GripVerticalIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm8-15a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+    </svg>
+  );
+}
+
+/** Sortable wrapper for a service card; hands the drag handle to the card so it can sit in the header. */
+function SortableServiceCard({
+  id,
+  label,
+  canReorder,
+  children,
+}: {
+  id: string;
+  label: string;
+  canReorder: boolean;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !canReorder,
+  });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.92 : undefined,
+    zIndex: isDragging ? 2 : undefined,
+    position: isDragging ? 'relative' : undefined,
+  };
+  const dragHandle = canReorder ? (
+    <button
+      type="button"
+      className="inline-flex h-8 w-8 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
+      aria-label={`Reorder ${label}`}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVerticalIcon className="h-4 w-4" />
+    </button>
+  ) : null;
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children(dragHandle)}
+    </div>
+  );
+}
 
 function formatDuration(mins: number): string {
   if (mins < 60) return `${mins}min`;
@@ -289,6 +349,90 @@ export function AppointmentServicesView({
     if (linkedPractitionerIds.length === 0) return [];
     return services;
   }, [isAdmin, services, linkedPractitionerIds.length]);
+
+  // Manual display order (admins): drag a card, or use the arrow buttons, then the
+  // order persists via /reorder and drives the public + staff booking service lists.
+  const [orderedServiceIds, setOrderedServiceIds] = useState<string[]>([]);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrderedServiceIds(services.map((s) => s.id));
+  }, [services]);
+
+  const canReorderServices = isAdmin && services.length > 1;
+
+  const orderedVisibleServices = useMemo(() => {
+    const byId = new Map(visibleServices.map((s) => [s.id, s]));
+    const inOrder = orderedServiceIds
+      .map((id) => byId.get(id))
+      .filter((s): s is Service => Boolean(s));
+    const seen = new Set(inOrder.map((s) => s.id));
+    return [...inOrder, ...visibleServices.filter((s) => !seen.has(s.id))];
+  }, [visibleServices, orderedServiceIds]);
+
+  const reorderSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const persistServiceOrder = useCallback(
+    async (nextIds: string[], previousIds: string[]) => {
+      setReorderSaving(true);
+      setReorderError(null);
+      try {
+        const res = await fetch('/api/venue/appointment-services/reorder', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_ids: nextIds }),
+        });
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(j.error ?? 'Failed to save the new order');
+        }
+        // Keep local rows in sync so a later refetch-free rerender keeps this order.
+        setServices((prev) => {
+          const pos = new Map(nextIds.map((id, idx) => [id, idx]));
+          return [...prev]
+            .map((s) => ({ ...s, sort_order: pos.get(s.id) ?? s.sort_order }))
+            .sort((a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+        });
+      } catch (err) {
+        setOrderedServiceIds(previousIds);
+        setReorderError(err instanceof Error ? err.message : 'Failed to save the new order');
+      } finally {
+        setReorderSaving(false);
+      }
+    },
+    [],
+  );
+
+  const onServiceDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!canReorderServices || reorderSaving) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = orderedServiceIds.indexOf(active.id as string);
+      const newIndex = orderedServiceIds.indexOf(over.id as string);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const previousIds = orderedServiceIds;
+      const nextIds = arrayMove(orderedServiceIds, oldIndex, newIndex);
+      setOrderedServiceIds(nextIds);
+      void persistServiceOrder(nextIds, previousIds);
+    },
+    [canReorderServices, reorderSaving, orderedServiceIds, persistServiceOrder],
+  );
+
+  const moveServiceByOffset = useCallback(
+    (serviceId: string, offset: -1 | 1) => {
+      if (!canReorderServices || reorderSaving) return;
+      const oldIndex = orderedServiceIds.indexOf(serviceId);
+      const newIndex = oldIndex + offset;
+      if (oldIndex < 0 || newIndex < 0 || newIndex >= orderedServiceIds.length) return;
+      const previousIds = orderedServiceIds;
+      const nextIds = arrayMove(orderedServiceIds, oldIndex, newIndex);
+      setOrderedServiceIds(nextIds);
+      void persistServiceOrder(nextIds, previousIds);
+    },
+    [canReorderServices, reorderSaving, orderedServiceIds, persistServiceOrder],
+  );
 
   function staffMayCustomizeAny(svc: Service): boolean {
     return Boolean(
@@ -679,7 +823,21 @@ export function AppointmentServicesView({
         </SectionCard>
       ) : (
         <div className="space-y-3">
-          {visibleServices.map((svc) => {
+          {canReorderServices ? (
+            <p className="text-xs text-slate-500">
+              Drag the handle (or use the arrows) to set the order services appear in on your public
+              booking page and in the staff booking flow.
+            </p>
+          ) : null}
+          {reorderError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+              {reorderError}
+            </div>
+          ) : null}
+          <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onServiceDragEnd}>
+            <SortableContext items={orderedVisibleServices.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-3">
+          {orderedVisibleServices.map((svc, svcIndex) => {
             const linkedCalendars = practitionersForService(svc.id);
             const display = mergeAppointmentServiceWithPractitionerLink(
               svc as unknown as AppointmentService,
@@ -693,7 +851,9 @@ export function AppointmentServicesView({
             const variants = svc.variants ?? [];
             const addonGroups = svc.addon_groups ?? [];
             return (
-              <SectionCard key={svc.id} className={!svc.is_active ? 'opacity-75' : ''}>
+              <SortableServiceCard key={svc.id} id={svc.id} label={svc.name} canReorder={canReorderServices}>
+                {(dragHandle) => (
+              <SectionCard className={!svc.is_active ? 'opacity-75' : ''}>
                 <SectionCard.Header
                   title={display.name}
                   description={
@@ -703,6 +863,33 @@ export function AppointmentServicesView({
                   }
                   right={
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {canReorderServices ? (
+                        <span className="mr-1 flex items-center gap-1">
+                          {dragHandle}
+                          <button
+                            type="button"
+                            onClick={() => moveServiceByOffset(svc.id, -1)}
+                            disabled={reorderSaving || svcIndex === 0}
+                            aria-label={`Move ${svc.name} up`}
+                            className="inline-flex h-8 w-6 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path d="M5 15l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveServiceByOffset(svc.id, 1)}
+                            disabled={reorderSaving || svcIndex === orderedVisibleServices.length - 1}
+                            aria-label={`Move ${svc.name} down`}
+                            className="inline-flex h-8 w-6 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        </span>
+                      ) : null}
                       <span
                         className="h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-200/80"
                         style={{ backgroundColor: display.colour }}
@@ -931,8 +1118,13 @@ export function AppointmentServicesView({
                   </div>
                 </SectionCard.Body>
               </SectionCard>
+                )}
+              </SortableServiceCard>
             );
           })}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       )}
         </>

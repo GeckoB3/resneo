@@ -10,6 +10,8 @@ type PreferredWindow = 'all_day' | 'time_range';
 interface CatalogService {
   id: string;
   name: string;
+  /** Venue-chosen display order (lower first); mirrors the booking flow service picker. */
+  sort_order?: number;
 }
 
 export interface WaitlistCatalogPractitioner {
@@ -34,15 +36,16 @@ interface AppointmentWaitlistJoinProps {
 const ANY_PREFERENCE = '';
 
 export function buildServiceOptions(catalogStaff: WaitlistCatalogPractitioner[]): CatalogService[] {
-  const byId = new Map<string, string>();
+  const byId = new Map<string, CatalogService>();
   for (const practitioner of catalogStaff) {
     for (const service of practitioner.services) {
-      byId.set(service.id, service.name);
+      if (!byId.has(service.id)) byId.set(service.id, service);
     }
   }
-  return [...byId.entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Venue-chosen order first (matches the booking flow picker); name breaks ties.
+  return [...byId.values()].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name),
+  );
 }
 
 export function buildPreferenceOptions(

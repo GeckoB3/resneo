@@ -576,7 +576,8 @@ export async function GET(request: NextRequest) {
           .from('service_items')
           .select('*')
           .eq('venue_id', catalogVenueId)
-          .order('sort_order', { ascending: true }),
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true }),
         admin.from('unified_calendars').select('id').eq('venue_id', catalogVenueId),
       ]);
 
@@ -657,7 +658,8 @@ export async function GET(request: NextRequest) {
         .from('appointment_services')
         .select('*')
         .eq('venue_id', catalogVenueId)
-        .order('sort_order', { ascending: true }),
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
       admin
         .from('practitioner_services')
         .select('*, practitioner:practitioners!inner(venue_id)')

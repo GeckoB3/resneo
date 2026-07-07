@@ -50,6 +50,8 @@ export interface AppointmentCatalogPractitioner {
     price_pence: number | null;
     deposit_pence: number | null;
     payment_requirement?: ClassPaymentRequirement;
+    /** Venue-chosen display order (lower first); service pickers sort by this, then name. */
+    sort_order?: number;
     /** Hours before start for deposit refund; from service row. */
     cancellation_notice_hours: number;
     /** Active sub-options. When non-empty the booking flow must collect a variant choice. */
@@ -176,7 +178,8 @@ async function fetchUnifiedAppointmentCatalog(
       .select('*')
       .eq('venue_id', venueId)
       .eq('is_active', true)
-      .order('sort_order'),
+      .order('sort_order')
+      .order('name'),
     supabase
       .from('calendar_service_assignments')
       .select('id, calendar_id, service_item_id, custom_duration_minutes, custom_price_pence')
@@ -240,6 +243,7 @@ async function fetchUnifiedAppointmentCatalog(
           buffer_minutes: svc.buffer_minutes ?? 0,
           price_pence: svc.price_pence,
           deposit_pence: svc.deposit_pence,
+          sort_order: svc.sort_order ?? 0,
           payment_requirement: resolveCatalogPaymentRequirement({
             service: svc,
             variants,
@@ -294,7 +298,8 @@ export async function fetchAppointmentCatalog(
       .select('*')
       .eq('venue_id', venueId)
       .eq('is_active', true)
-      .order('sort_order'),
+      .order('sort_order')
+      .order('name'),
     supabase.from('practitioner_services').select('*, practitioners!inner(venue_id)').eq('practitioners.venue_id', venueId),
   ]);
 
@@ -347,6 +352,7 @@ export async function fetchAppointmentCatalog(
           buffer_minutes: svc.buffer_minutes ?? 0,
           price_pence: svc.price_pence,
           deposit_pence: svc.deposit_pence,
+          sort_order: svc.sort_order ?? 0,
           payment_requirement: resolveCatalogPaymentRequirement({
             service: svc,
             variants,

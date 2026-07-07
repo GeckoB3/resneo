@@ -30,6 +30,7 @@ export async function listBookingPageServices(
   );
 
   const byId = new Map<string, BookingPagePublicService>();
+  const sortOrderById = new Map<string, number>();
 
   for (const practitioner of practitioners) {
     for (const svc of practitioner.services) {
@@ -44,6 +45,7 @@ export async function listBookingPageServices(
           price_pence: svc.price_pence,
           duration_minutes: svc.duration_minutes,
         });
+        sortOrderById.set(svc.id, svc.sort_order ?? 0);
         continue;
       }
       if (!existing.description && svc.description?.trim()) {
@@ -55,5 +57,11 @@ export async function listBookingPageServices(
     }
   }
 
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  // Venue-chosen order (Dashboard → Services drag order); name breaks ties so venues
+  // that never reordered keep the alphabetical listing.
+  return [...byId.values()].sort(
+    (a, b) =>
+      (sortOrderById.get(a.id) ?? 0) - (sortOrderById.get(b.id) ?? 0) ||
+      a.name.localeCompare(b.name, 'en'),
+  );
 }

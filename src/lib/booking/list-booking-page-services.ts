@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
+import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 
 function parseServicePhotosFromConfig(raw: unknown): Record<string, string> {
@@ -30,6 +31,7 @@ export async function listBookingPageServices(
   );
 
   const byId = new Map<string, BookingPagePublicService>();
+  const sortOrderById = new Map<string, number>();
 
   for (const practitioner of practitioners) {
     for (const svc of practitioner.services) {
@@ -44,6 +46,7 @@ export async function listBookingPageServices(
           price_pence: svc.price_pence,
           duration_minutes: svc.duration_minutes,
         });
+        sortOrderById.set(svc.id, svc.sort_order ?? 0);
         continue;
       }
       if (!existing.description && svc.description?.trim()) {
@@ -55,5 +58,10 @@ export async function listBookingPageServices(
     }
   }
 
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  return [...byId.values()].sort((a, b) =>
+    compareByVenueServiceOrder(
+      { sort_order: sortOrderById.get(a.id), name: a.name },
+      { sort_order: sortOrderById.get(b.id), name: b.name },
+    ),
+  );
 }

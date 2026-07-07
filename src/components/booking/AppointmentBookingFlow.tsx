@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
@@ -316,6 +317,8 @@ interface CatalogPractitioner {
     price_pence: number | null;
     deposit_pence?: number | null;
     payment_requirement?: ClassPaymentRequirement;
+    /** Venue-chosen display order (lower first); the service picker sorts by this, then name. */
+    sort_order?: number;
     /** From service_items / appointment_services; used for deposit refund copy before booking completes. */
     cancellation_notice_hours?: number;
     /** Optional sub-options. When present, the customer must pick one before slot selection. */
@@ -1385,6 +1388,7 @@ export function AppointmentBookingFlow({
         description: string | null;
         duration_minutes: number;
         minPricePence: number | null;
+        sortOrder: number;
         location_type?: import('@/types/booking-models').ServiceLocationType;
       }
     >();
@@ -1399,6 +1403,7 @@ export function AppointmentBookingFlow({
             description: s.description?.trim() ? s.description.trim() : null,
             duration_minutes: s.duration_minutes,
             minPricePence: price,
+            sortOrder: s.sort_order ?? 0,
             location_type: s.location_type,
           });
         } else {
@@ -1411,7 +1416,14 @@ export function AppointmentBookingFlow({
         }
       }
     }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    // Venue-chosen order first (Dashboard → Services drag order); name breaks ties so
+    // venues that never reordered keep the old alphabetical listing.
+    return Array.from(map.values()).sort((a, b) =>
+      compareByVenueServiceOrder(
+        { sort_order: a.sortOrder, name: a.name },
+        { sort_order: b.sortOrder, name: b.name },
+      ),
+    );
   }, [catalogStaff]);
 
   const onlyListedServiceId = useMemo(() => {

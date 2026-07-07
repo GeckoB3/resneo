@@ -132,6 +132,11 @@ export interface CollectiveCatalogService {
   price_pence: number | null;
   deposit_pence: number | null;
   payment_requirement: 'none';
+  /**
+   * Position of the offering in the combined catalogue (host display_order, then the
+   * member venues' own service order); the booking flow picker sorts by this.
+   */
+  sort_order: number;
   cancellation_notice_hours: number;
   /** This calendar's OWN source-service variants/add-ons (each venue keeps its own). */
   variants: AppointmentCatalogVariant[];
@@ -255,7 +260,7 @@ export async function loadCollectiveAppointmentCatalog(
     return entry;
   };
 
-  for (const item of catalogue.items) {
+  for (const [itemIndex, item] of catalogue.items.entries()) {
     for (const provider of item.providers) {
       const data = venueData[provider.venueId];
       if (!data) continue;
@@ -276,6 +281,9 @@ export async function loadCollectiveAppointmentCatalog(
           price_pence: provider.pricePence,
           deposit_pence: meta?.deposit ?? null,
           payment_requirement: 'none',
+          // `catalogue.items` is already sorted (host display_order → member venue
+          // service order → name), so the index is the display position.
+          sort_order: itemIndex,
           cancellation_notice_hours: DEFAULT_CANCELLATION_NOTICE_HOURS,
           variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
           addon_groups: addonGroups(provider.venueId, provider.sourceServiceId),

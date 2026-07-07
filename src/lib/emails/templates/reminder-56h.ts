@@ -31,8 +31,8 @@ function buildRefundNotice(
     ? `You've paid a deposit of \u00A3${amount}. If your plans change, you can cancel for a full refund before <strong>${fmt}</strong>. After this time, the deposit is non-refundable.`
     : `You've paid a deposit of \u00A3${amount}. Under the venue's policy, the deadline to cancel for a refund has already passed, so this deposit is not refundable if you cancel.`;
   return [
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${AMBER_BG};border:1px solid #FFE69C;border-radius:8px;margin:16px 0">`,
-    `<tr><td style="padding:16px;font-size:14px;color:${AMBER_TEXT}">`,
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${AMBER_BG};border:1px solid #FFE69C;border-radius:12px;margin:20px 0 0">`,
+    `<tr><td style="padding:16px 18px;font-size:14px;line-height:1.6;color:${AMBER_TEXT};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">`,
     `<strong>Deposit refund notice</strong><br/>`,
     body,
     "</td></tr></table>",

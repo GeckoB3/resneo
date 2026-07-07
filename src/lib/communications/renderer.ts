@@ -11,7 +11,7 @@ import {
   formatTime,
 } from '@/lib/emails/templates/base-template';
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
-import { renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
+import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
@@ -860,9 +860,7 @@ export function renderCommunicationEmail(
     // card, in the slot the deposit callout uses (mirrors how deposit receipt
     // lines are appended to the confirmation).
     const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
-    const holdNoticeHtml = holdNotice
-      ? `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`
-      : null;
+    const holdNoticeHtml = holdNotice ? buildCardHoldNoticeHtml(holdNotice) : null;
 
     html = renderBookingConfirmationDocumentHtml({
       booking: opts.booking,

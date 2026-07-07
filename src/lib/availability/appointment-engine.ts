@@ -440,12 +440,13 @@ export function getOfferedAppointmentServicesForPractitioner(
   practitionerServices: PractitionerService[],
 ): AppointmentService[] {
   // Keyed by service so the result follows the order of `services` (callers pass it
-  // sorted by sort_order), not the arbitrary order of the link rows.
-  const linkByServiceId = new Map(
-    practitionerServices
-      .filter((ps) => ps.practitioner_id === practitioner.id)
-      .map((ps) => [ps.service_id, ps]),
-  );
+  // sorted by sort_order), not the arbitrary order of the link rows. First link wins
+  // on (impossible-by-constraint) duplicates, matching the previous find() semantics.
+  const linkByServiceId = new Map<string, PractitionerService>();
+  for (const ps of practitionerServices) {
+    if (ps.practitioner_id !== practitioner.id) continue;
+    if (!linkByServiceId.has(ps.service_id)) linkByServiceId.set(ps.service_id, ps);
+  }
   return services
     .map((svc) => {
       if (!svc.is_active) return null;

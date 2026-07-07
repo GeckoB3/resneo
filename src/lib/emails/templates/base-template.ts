@@ -109,7 +109,7 @@ export function buildBookingDetailsCard(opts: {
       opts.priceDisplay?.trim() ?
         `<tr><td style="padding:12px 0 0 0;border-top:1px solid #e5e5e5;font-size:14px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtmlMultiline(opts.priceDisplay.trim())}</td></tr>`
       : "";
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:18px 20px">${header}${tableRows.join("")}${summaryRow}</td></tr></table>`;
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:18px 20px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tbody>${header}${tableRows.join("")}${summaryRow}</tbody></table></td></tr></table>`;
   }
 
   if (variant === "appointment") {
@@ -181,7 +181,7 @@ export function buildBookingDetailsCard(opts: {
   }
 
   if (rows.length === 0) return "";
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:20px 22px">${rows.join("")}</td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:20px 22px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tbody>${rows.join("")}</tbody></table></td></tr></table>`;
 }
 
 /** Compact date for group lines (reuse full formatDate if needed). */
@@ -224,7 +224,7 @@ export function buildDepositCallout(
 
 export function buildCtaButton(label: string, url: string): string {
   return [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px auto">',
+    '<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:28px auto">',
     '<tr><td style="background-color:' +
       BRAND +
       ';border-radius:9999px;text-align:center">',

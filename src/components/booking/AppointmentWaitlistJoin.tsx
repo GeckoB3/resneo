@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useId, useMemo, useState } from 'react';
+import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { WaitlistFieldLabel, WaitlistRequiredLegend } from '@/components/booking/WaitlistFormField';
@@ -43,9 +44,7 @@ export function buildServiceOptions(catalogStaff: WaitlistCatalogPractitioner[])
     }
   }
   // Venue-chosen order first (matches the booking flow picker); name breaks ties.
-  return [...byId.values()].sort(
-    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name),
-  );
+  return [...byId.values()].sort(compareByVenueServiceOrder);
 }
 
 export function buildPreferenceOptions(

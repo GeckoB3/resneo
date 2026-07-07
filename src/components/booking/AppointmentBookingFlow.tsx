@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
@@ -1417,8 +1418,11 @@ export function AppointmentBookingFlow({
     }
     // Venue-chosen order first (Dashboard → Services drag order); name breaks ties so
     // venues that never reordered keep the old alphabetical listing.
-    return Array.from(map.values()).sort(
-      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+    return Array.from(map.values()).sort((a, b) =>
+      compareByVenueServiceOrder(
+        { sort_order: a.sortOrder, name: a.name },
+        { sort_order: b.sortOrder, name: b.name },
+      ),
     );
   }, [catalogStaff]);
 

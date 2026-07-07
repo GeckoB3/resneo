@@ -18,7 +18,7 @@ import {
 } from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from "@/lib/emails/external-links";
-import { renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
+import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
 function isAppointmentStyle(booking: BookingEmailData): boolean {
@@ -73,7 +73,7 @@ export function renderBookingConfirmation(
   // the deposit slot of the details card (all models).
   const holdNotice = cardHoldConfirmationNotice(booking, venue.name);
   if (holdNotice) {
-    const holdHtml = `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`;
+    const holdHtml = buildCardHoldNoticeHtml(holdNotice);
     depositHtml = depositHtml ? depositHtml + holdHtml : holdHtml;
   }
 

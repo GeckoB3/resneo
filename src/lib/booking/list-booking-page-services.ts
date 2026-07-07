@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
+import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 
 function parseServicePhotosFromConfig(raw: unknown): Record<string, string> {
@@ -57,11 +58,10 @@ export async function listBookingPageServices(
     }
   }
 
-  // Venue-chosen order (Dashboard → Services drag order); name breaks ties so venues
-  // that never reordered keep the alphabetical listing.
-  return [...byId.values()].sort(
-    (a, b) =>
-      (sortOrderById.get(a.id) ?? 0) - (sortOrderById.get(b.id) ?? 0) ||
-      a.name.localeCompare(b.name, 'en'),
+  return [...byId.values()].sort((a, b) =>
+    compareByVenueServiceOrder(
+      { sort_order: sortOrderById.get(a.id), name: a.name },
+      { sort_order: sortOrderById.get(b.id), name: b.name },
+    ),
   );
 }

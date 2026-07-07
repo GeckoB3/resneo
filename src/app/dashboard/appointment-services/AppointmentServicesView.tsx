@@ -397,11 +397,14 @@ export function AppointmentServicesView({
       } catch (err) {
         setOrderedServiceIds(previousIds);
         setReorderError(err instanceof Error ? err.message : 'Failed to save the new order');
+        // A failed save may have partially applied on the server; refetch so the
+        // list reflects what the booking page will actually show.
+        void fetchAll();
       } finally {
         setReorderSaving(false);
       }
     },
-    [],
+    [fetchAll],
   );
 
   const onServiceDragEnd = useCallback(
@@ -838,6 +841,9 @@ export function AppointmentServicesView({
             <SortableContext items={orderedVisibleServices.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-3">
           {orderedVisibleServices.map((svc, svcIndex) => {
+            // Disable dragging while a save is in flight so a second move cannot be
+            // silently dropped by the in-flight guard in onServiceDragEnd.
+            const dragEnabled = canReorderServices && !reorderSaving;
             const linkedCalendars = practitionersForService(svc.id);
             const display = mergeAppointmentServiceWithPractitionerLink(
               svc as unknown as AppointmentService,
@@ -851,7 +857,7 @@ export function AppointmentServicesView({
             const variants = svc.variants ?? [];
             const addonGroups = svc.addon_groups ?? [];
             return (
-              <SortableServiceCard key={svc.id} id={svc.id} label={svc.name} canReorder={canReorderServices}>
+              <SortableServiceCard key={svc.id} id={svc.id} label={svc.name} canReorder={dragEnabled}>
                 {(dragHandle) => (
               <SectionCard className={!svc.is_active ? 'opacity-75' : ''}>
                 <SectionCard.Header

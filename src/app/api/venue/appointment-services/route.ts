@@ -545,6 +545,28 @@ async function assertPractitionerIdsBelongToVenueLegacy(
 /** USE stores services in `service_items` when primary is unified_scheduling or it is enabled as a secondary. */
 const venueUsesUnifiedServiceItems = venueUsesUnifiedAppointmentServiceData;
 
+/**
+ * Display position for a newly created service. Venues that have dragged their
+ * services into an order (any existing row > 0, written by the /reorder endpoint)
+ * get new services appended at the end; untouched venues keep 0 so the
+ * alphabetical fallback ordering still applies everywhere.
+ */
+async function nextServiceSortOrder(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  table: 'service_items' | 'appointment_services',
+  venueId: string,
+): Promise<number> {
+  const { data } = await admin
+    .from(table)
+    .select('sort_order')
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const max = (data?.sort_order as number | null) ?? 0;
+  return max > 0 ? max + 1 : 0;
+}
+
 const OWNER_VENUE_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -856,7 +878,9 @@ export async function POST(request: NextRequest) {
         price_type: 'fixed' as const,
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
-        sort_order: parsed.data.sort_order ?? 0,
+        sort_order:
+          parsed.data.sort_order ??
+          (await nextServiceSortOrder(admin, 'service_items', staff.venue_id)),
         staff_may_customize_name: staffMayAllTrue ? true : (parsed.data.staff_may_customize_name ?? false),
         staff_may_customize_description: staffMayAllTrue ? true : (parsed.data.staff_may_customize_description ?? false),
         staff_may_customize_duration: staffMayAllTrue ? true : (parsed.data.staff_may_customize_duration ?? false),
@@ -966,6 +990,9 @@ export async function POST(request: NextRequest) {
       venue_id: staff.venue_id,
       created_by_staff_id: staff.id,
       ...restCreate,
+      sort_order:
+        parsed.data.sort_order ??
+        (await nextServiceSortOrder(admin, 'appointment_services', staff.venue_id)),
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
       processing_time_blocks: normalizedParentProcessing,
       payment_requirement: pay.payment_requirement,

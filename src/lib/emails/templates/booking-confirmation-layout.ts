@@ -95,6 +95,30 @@ function isLongPriceValue(value: string): boolean {
   return value.includes('\n') || value.length > 36;
 }
 
+/** Total row for receipt-style detail tables: bold two-column for short values, stacked block for long ones. */
+function buildTotalRowHtml(totalValue: string): string {
+  return isLongPriceValue(totalValue)
+    ? `<tr>` +
+      `<td colspan="2" style="padding:16px 0 2px;vertical-align:top">` +
+      `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Total</p>` +
+      `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.6">${escapeHtmlMultiline(totalValue)}</p>` +
+      `</td>` +
+      `</tr>`
+    : `<tr>` +
+      `<td style="padding:16px 12px 2px 0;vertical-align:top">` +
+      `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">Total</p>` +
+      `</td>` +
+      `<td style="padding:16px 0 2px;text-align:right;vertical-align:top;white-space:nowrap">` +
+      `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">${escapeHtmlMultiline(totalValue)}</p>` +
+      `</td>` +
+      `</tr>`;
+}
+
+/** Card-on-file notice shown in the details card deposit slot (card-hold bookings). */
+export function buildCardHoldNoticeHtml(noticeText: string): string {
+  return `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${escapeHtml(noticeText)}</div>`;
+}
+
 // ─── Account portal callout (rendered as the final card, above the footer) ────
 
 const ACCOUNT_CALLOUT_BG = '#eef4fa';
@@ -137,7 +161,9 @@ function buildActionButtons(opts: {
       `text-decoration:none;background:#f8fafc;white-space:nowrap">${escapeHtml(b.label)}</a>`,
   );
 
-  return `<div style="margin:24px 0 0;text-align:center">${pills.join('')}</div>`;
+  // Join with a non-breaking space so clients that ignore margins on inline
+  // elements (Outlook desktop) still get separation between the pills.
+  return `<div style="margin:24px 0 0;text-align:center">${pills.join('&nbsp;')}</div>`;
 }
 
 // ─── Appointment line-item detail rows ────────────────────────────────────────
@@ -292,23 +318,7 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
     // The cell already carries a "Total" label, so drop any leading "Total:" prefix
     // from the structured price text to avoid "Total  Total: £x".
     const totalValue = priceDisplay?.trim().replace(/^Total:\s*/i, '') ?? '';
-    const totalRow = totalValue
-      ? isLongPriceValue(totalValue)
-        ? `<tr>` +
-          `<td colspan="2" style="padding:16px 0 2px;vertical-align:top">` +
-          `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Total</p>` +
-          `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.6">${escapeHtmlMultiline(totalValue)}</p>` +
-          `</td>` +
-          `</tr>`
-        : `<tr>` +
-          `<td style="padding:16px 12px 2px 0;vertical-align:top">` +
-          `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">Total</p>` +
-          `</td>` +
-          `<td style="padding:16px 0 2px;text-align:right;vertical-align:top;white-space:nowrap">` +
-          `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">${escapeHtmlMultiline(totalValue)}</p>` +
-          `</td>` +
-          `</tr>`
-      : '';
+    const totalRow = totalValue ? buildTotalRowHtml(totalValue) : '';
 
     return (
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0 0">` +
@@ -350,23 +360,7 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
         `</td></tr>`
       : '';
 
-    const totalRow = totalPrice
-      ? isLongPriceValue(totalPrice)
-        ? `<tr>` +
-          `<td colspan="2" style="padding:16px 0 2px;vertical-align:top">` +
-          `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Total</p>` +
-          `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.6">${escapeHtmlMultiline(totalPrice)}</p>` +
-          `</td>` +
-          `</tr>`
-        : `<tr>` +
-          `<td style="padding:16px 12px 2px 0;vertical-align:top">` +
-          `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">Total</p>` +
-          `</td>` +
-          `<td style="padding:16px 0 2px;text-align:right;vertical-align:top">` +
-          `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">${escapeHtmlMultiline(totalPrice)}</p>` +
-          `</td>` +
-          `</tr>`
-      : '';
+    const totalRow = totalPrice ? buildTotalRowHtml(totalPrice) : '';
 
     return (
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0 0">` +
@@ -800,7 +794,7 @@ function buildTransactionalDetailRows(opts: {
 
 function ctaPillButton(label: string, href: string, outlined = false): string {
   return (
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto">` +
+    `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto">` +
     `<tr><td align="center" style="border-radius:9999px;background:${outlined ? CARD_BG : ACCENT};${outlined ? `border:2px solid ${ACCENT};` : ''}">` +
     `<a href="${escapeHtml(href)}" target="_blank" ` +
     `style="display:inline-block;padding:${outlined ? '13px 34px' : '15px 36px'};font-family:${FONT};font-size:15px;font-weight:600;` +

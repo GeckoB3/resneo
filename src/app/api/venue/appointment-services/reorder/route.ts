@@ -6,7 +6,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 const reorderSchema = z.object({
-  service_ids: z.array(z.string().uuid()).min(1).max(500),
+  service_ids: z.array(z.string().uuid()).min(1).max(1000),
 });
 
 /**
@@ -33,7 +33,10 @@ export async function PUT(request: NextRequest) {
     }
     const serviceIds = parsed.data.service_ids;
     if (new Set(serviceIds).size !== serviceIds.length) {
-      return NextResponse.json({ error: 'Duplicate service ids in order list.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Something went wrong while saving the order. Refresh the page and try again.' },
+        { status: 400 },
+      );
     }
 
     const admin = getSupabaseAdminClient();

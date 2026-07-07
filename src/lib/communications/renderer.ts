@@ -861,7 +861,7 @@ export function renderCommunicationEmail(
     // lines are appended to the confirmation).
     const holdNotice = cardHoldConfirmationNotice(opts.booking, opts.venue.name);
     const holdNoticeHtml = holdNotice
-      ? `<div style="margin:16px 0 0;padding:14px 16px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:10px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`
+      ? `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:#334155;line-height:1.6">${escapeHtml(holdNotice)}</div>`
       : null;
 
     html = renderBookingConfirmationDocumentHtml({

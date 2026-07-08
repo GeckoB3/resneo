@@ -1,17 +1,20 @@
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+
 /**
  * ISO timestamp for the last moment a client can cancel and still receive a deposit refund:
- * appointment start minus `hoursBefore` (UTC, consistent with existing booking rows).
+ * appointment start minus `hoursBefore`. `bookingDate` + `bookingTime` are venue-local
+ * wall clock (as stored on booking rows), so they must be interpreted in the venue
+ * timezone, not as UTC: reading 09:30 BST as 09:30Z lands the deadline an hour late.
+ * The display helpers below format in the same zone.
  */
 export function cancellationDeadlineHoursBefore(
   bookingDate: string,
   bookingTime: string,
   hoursBefore: number,
+  timeZone: string = 'Europe/London',
 ): string {
-  const [y, m, d] = bookingDate.split('-').map(Number);
-  const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
-  const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
-  dt.setHours(dt.getHours() - hoursBefore);
-  return dt.toISOString();
+  const startMs = venueLocalWallTimeToUtcMs(bookingDate, bookingTime, timeZone);
+  return new Date(startMs - hoursBefore * 3_600_000).toISOString();
 }
 
 /** Human-readable last moment for refund (London), aligned with `cancellationDeadlineHoursBefore`. */

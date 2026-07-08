@@ -3,9 +3,17 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { requireCompliancePlan } from '@/lib/compliance/auth';
 import { complianceRequirementCreateSchema } from '@/lib/compliance/zod-schemas';
-import { addRequirement, listRequirementsForService } from '@/lib/compliance/requirements-service';
+import {
+  addRequirement,
+  listRequirementsForService,
+  listRequirementsForVenue,
+} from '@/lib/compliance/requirements-service';
 
-/** GET /api/venue/compliance/requirements?service_id= (or appointment_service_id / service_item_id). */
+/**
+ * GET /api/venue/compliance/requirements?service_id= (or appointment_service_id /
+ * service_item_id). Without a service filter it returns every requirement for the
+ * venue, which the settings service list uses for per-service indicators.
+ */
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -17,11 +25,10 @@ export async function GET(request: NextRequest) {
     const sp = request.nextUrl.searchParams;
     const serviceId =
       sp.get('service_id') ?? sp.get('appointment_service_id') ?? sp.get('service_item_id');
-    if (!serviceId) {
-      return NextResponse.json({ error: 'A service_id query parameter is required.' }, { status: 400 });
-    }
 
-    const requirements = await listRequirementsForService(staff.db, staff.venue_id, serviceId);
+    const requirements = serviceId
+      ? await listRequirementsForService(staff.db, staff.venue_id, serviceId)
+      : await listRequirementsForVenue(staff.db, staff.venue_id);
     return NextResponse.json({ requirements });
   } catch (err) {
     console.error('GET /api/venue/compliance/requirements failed:', err);

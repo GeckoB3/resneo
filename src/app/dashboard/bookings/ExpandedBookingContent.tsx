@@ -215,6 +215,8 @@ export interface BookingDetailLite {
   combination_staff_notes?: string | null;
   /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
   card_hold?: CardHoldSummary | null;
+  /** The service's payment mode ('full_payment' | 'deposit' | 'card_hold' | 'none'); null when not an appointment service booking. */
+  service_payment_requirement?: string | null;
   cde_context?: {
     inferred_model: BookingModel;
     title: string;
@@ -783,6 +785,10 @@ export function ExpandedBookingContent({
   const depositAmtStr = effectiveBooking.deposit_amount_pence
     ? `£${(effectiveBooking.deposit_amount_pence / 100).toFixed(2)}`
     : null;
+  // Full-payment services collect the whole price at booking, so the panel
+  // says "Paid in full" / "Refund payment" rather than deposit copy. Card
+  // holds take precedence: their block owns the payment display.
+  const isFullPayment = !cardHoldState && activeDetail?.service_payment_requirement === 'full_payment';
   const serviceLine = resolveExpandedBookingServiceLine(
     {
       service_name: booking.service_name,
@@ -1140,7 +1146,15 @@ export function ExpandedBookingContent({
     key: 'deposit',
     node: (
     <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-      <span className="font-medium text-slate-500">{cardHoldState ? 'Card hold' : 'Deposit'}</span>
+      <span className="font-medium text-slate-500">
+        {cardHoldState
+          ? 'Card hold'
+          : isFullPayment && effectiveBooking.deposit_status === 'Paid'
+            ? 'Paid in full'
+            : isFullPayment
+              ? 'Payment'
+              : 'Deposit'}
+      </span>
       <span
         className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' || effectiveBooking.deposit_status === 'Charged' ? 'text-amber-700' : effectiveBooking.deposit_status === 'Card Held' ? 'text-sky-700' : 'text-slate-800'}`}
       >
@@ -1149,7 +1163,9 @@ export function ExpandedBookingContent({
           : effectiveBooking.deposit_status === 'Not Required'
             ? 'None'
             : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
-              ? `${depositAmtStr} paid`
+              ? isFullPayment
+                ? depositAmtStr
+                : `${depositAmtStr} paid`
               : effectiveBooking.deposit_status === 'Card Held'
                 ? 'Card held'
                 : effectiveBooking.deposit_status === 'Charged'
@@ -1919,7 +1935,7 @@ export function ExpandedBookingContent({
               </>
             ) : null}
             {!cardHoldState && effectiveBooking.deposit_status === 'Paid' ? (
-              <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Refund deposit</button>
+              <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('refund'); }} className="rounded-lg border border-red-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">{isFullPayment ? 'Refund payment' : 'Refund deposit'}</button>
             ) : null}
             <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void resendConfirmation(); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Resend confirmation</button>
           </div>

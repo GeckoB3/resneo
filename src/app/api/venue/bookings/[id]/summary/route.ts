@@ -5,6 +5,7 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
+import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
 import type { BookingModel } from '@/types/booking-models';
 
 /**
@@ -33,11 +34,18 @@ export async function GET(
     const bookingTimeStr =
       typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
-    const [detailBundle, cde_context] = await Promise.all([
+    const [detailBundle, cde_context, service_payment_requirement] = await Promise.all([
       loadStaffBookingDetailBundle(staff.db, id, scopeVenueId, { includeTimeline: false }),
       resolveCdeBookingContext(
         staff.db,
         booking as Parameters<typeof resolveCdeBookingContext>[1],
+      ),
+      // The payment labels ("Paid in full" / deposit copy) render from the
+      // first paint, so the summary must carry the payment mode too; without
+      // it the label flashes deposit copy until the full GET lands.
+      resolveBookingServicePaymentRequirement(
+        staff.db,
+        booking as { appointment_service_id?: string | null; service_item_id?: string | null },
       ),
     ]);
 
@@ -81,6 +89,7 @@ export async function GET(
       service_variant_name,
       service_variant_price_pence,
       addons,
+      service_payment_requirement,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id]/summary failed:', err);

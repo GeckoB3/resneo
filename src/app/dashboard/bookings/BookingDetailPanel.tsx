@@ -37,6 +37,7 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+import { mergeBookingSummaryOverDetail } from '@/app/dashboard/bookings/booking-detail-summary-merge';
 import {
   bookingDisplayEndHm,
   estimatedEndIsoFromSchedule,
@@ -118,6 +119,13 @@ export function BookingDetailPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const detailCache = useOptionalDashboardDetailCache();
   const [detail, setDetail] = useState<BookingDetail | null>(null);
+  // Mirror of `detail` for async loaders: loadBookingCore closes over stale
+  // state, and the summary response must merge over whatever is currently
+  // shown (see mergeBookingSummaryOverDetail).
+  const detailRef = useRef<BookingDetail | null>(null);
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -242,9 +250,10 @@ export function BookingDetailPanel({
       if (summaryRes.ok) {
         const summary = (await summaryRes.json()) as BookingDetail;
         if (summary.id === bookingId) {
-          setDetail(summary);
-          setAssignedTables(summary.table_assignments ?? []);
-          detailCache?.primeVenueBookingDetail(bookingId, summary as unknown as VenueBookingDetailPayload);
+          const merged = mergeBookingSummaryOverDetail(detailRef.current, summary);
+          setDetail(merged);
+          setAssignedTables(merged.table_assignments ?? []);
+          detailCache?.primeVenueBookingDetail(bookingId, merged as unknown as VenueBookingDetailPayload);
         }
       }
 

@@ -21,7 +21,14 @@
 import { useSyncExternalStore } from 'react';
 
 export type ConsentChoice = 'granted' | 'denied';
-export type ConsentState = ConsentChoice | 'unknown';
+/**
+ * 'pending' = the cookie has not been read yet (server render and the
+ * hydration pass); 'unknown' = the cookie was read and no choice exists.
+ * The banner renders ONLY on 'unknown': rendering it while 'pending' would
+ * put it in the server HTML for every visitor, flashing it at returning
+ * visitors until hydration reads their stored choice.
+ */
+export type ConsentState = ConsentChoice | 'unknown' | 'pending';
 
 const COOKIE_NAME = 'resneo_cookie_consent';
 const CHANGE_EVENT = 'resneo:cookie-consent-change';
@@ -43,7 +50,7 @@ function readSnapshot(): ConsentState {
 }
 
 function readServerSnapshot(): ConsentState {
-  return 'unknown';
+  return 'pending';
 }
 
 function subscribe(onChange: () => void): () => void {

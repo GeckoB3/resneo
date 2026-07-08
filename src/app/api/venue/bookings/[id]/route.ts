@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
-import { resolveAppointmentPaymentRequirement } from '@/lib/appointments/appointment-service-payment';
+import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
@@ -198,29 +198,10 @@ export async function GET(
       // The service's payment mode, so the staff panel can label a paid
       // full-payment booking "Paid in full" / "Refund payment" instead of
       // deposit copy. Same source as the booking-flow policy card.
-      (async (): Promise<string | null> => {
-        const itemId = (booking as { service_item_id?: string | null }).service_item_id ?? null;
-        const apptId = (booking as { appointment_service_id?: string | null }).appointment_service_id ?? null;
-        const table = itemId ? 'service_items' : apptId ? 'appointment_services' : null;
-        const svcId = itemId ?? apptId;
-        if (!table || !svcId) return null;
-        const { data: svc } = await scopeDb
-          .from(table)
-          .select('payment_requirement, deposit_pence')
-          .eq('id', svcId)
-          .maybeSingle();
-        if (!svc) return null;
-        const row = svc as { payment_requirement?: string | null; deposit_pence?: number | null };
-        return resolveAppointmentPaymentRequirement({
-          payment_requirement: (row.payment_requirement ?? undefined) as Parameters<
-            typeof resolveAppointmentPaymentRequirement
-          >[0]['payment_requirement'],
-          deposit_pence: row.deposit_pence ?? null,
-        });
-      })().catch((e) => {
-        console.error('GET /api/venue/bookings/[id] payment requirement resolve failed:', e);
-        return null;
-      }),
+      resolveBookingServicePaymentRequirement(
+        scopeDb,
+        booking as { appointment_service_id?: string | null; service_item_id?: string | null },
+      ),
     ]);
 
     if (!detailBundle) {

@@ -13,9 +13,11 @@ import {
  * Bottom-anchored cookie-consent banner. Shows until the visitor accepts or
  * declines analytics cookies; the choice gates Google Analytics (see AnalyticsGate).
  *
- * While consent is "unknown" on the server and first client paint the banner
- * renders nothing, avoiding a hydration mismatch; once mounted it appears only if
- * no choice has been made. Hidden on routes where analytics is suppressed.
+ * Renders ONLY when consent is 'unknown' (cookie read, no choice stored). On
+ * the server and the hydration paint the state is 'pending', so the banner is
+ * never part of the server HTML; it appears after hydration for new visitors
+ * only, instead of flashing at returning visitors while their stored choice
+ * loads. Hidden on routes where analytics is suppressed.
  */
 export function CookieConsentBanner() {
   const consent = useCookieConsent();

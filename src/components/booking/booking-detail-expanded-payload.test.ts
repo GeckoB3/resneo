@@ -38,4 +38,14 @@ describe('buildDetailForExpanded', () => {
     const out = buildDetailForExpanded(detailFixture(), { isHydrated: true, assignedTables: [] });
     expect(out.card_hold).toBeNull();
   });
+
+  it('passes service_payment_requirement through for the full-payment labels', () => {
+    const out = buildDetailForExpanded(detailFixture({ service_payment_requirement: 'full_payment' }), {
+      isHydrated: true,
+      assignedTables: [],
+    });
+    expect(out.service_payment_requirement).toBe('full_payment');
+    const missing = buildDetailForExpanded(detailFixture(), { isHydrated: true, assignedTables: [] });
+    expect(missing.service_payment_requirement).toBeNull();
+  });
 });

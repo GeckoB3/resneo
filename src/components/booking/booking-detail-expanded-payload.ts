@@ -90,6 +90,9 @@ export function buildDetailForExpanded(
     // back to the enum-only state and the admin charge/refund actions never
     // render (e.g. Charge no-show fee on the calendar's booking detail).
     card_hold: d.card_hold ?? null,
+    // Drives the full-payment labels (Paid in full / Refund payment) on the
+    // popover/modal layouts, same as card_hold above.
+    service_payment_requirement: d.service_payment_requirement ?? null,
     events: d.events.map((event) => ({
       id: event.id,
       event_type: event.event_type,

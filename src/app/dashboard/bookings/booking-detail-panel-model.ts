@@ -45,6 +45,8 @@ export interface BookingDetail {
   deposit_amount_pence: number | null;
   /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
   card_hold?: CardHoldSummary | null;
+  /** The service's payment mode ('full_payment' | 'deposit' | 'card_hold' | 'none'); null when not an appointment service booking. */
+  service_payment_requirement?: string | null;
   dietary_notes: string | null;
   occasion: string | null;
   special_requests: string | null;

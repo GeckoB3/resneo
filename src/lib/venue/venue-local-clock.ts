@@ -58,6 +58,47 @@ export function venueLocalDateTimeToUtcMs(dateYmd: string, timeHHmm: string, tim
   return anchor;
 }
 
+/** Offset of `timeZone` from UTC at `utcMs` (positive east of UTC), read via Intl. */
+function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const wallAsUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour') % 24,
+    get('minute'),
+    get('second'),
+  );
+  return wallAsUtc - Math.floor(utcMs / 1000) * 1000;
+}
+
+/**
+ * Convert a venue-local wall time (date + HH:mm) to UTC epoch milliseconds,
+ * exact for ANY minute value. Unlike {@link venueLocalDateTimeToUtcMs}, which
+ * probes a 15-minute grid (and falls back to noon for off-grid times, so it
+ * must not be used for booking start times on 5/10-minute marks), this
+ * resolves via the timezone offset with a second pass for DST transitions.
+ * A nonexistent spring-forward wall time maps to the instant the clocks
+ * skipped to.
+ */
+export function venueLocalWallTimeToUtcMs(dateYmd: string, timeHHmm: string, timeZone: string): number {
+  const [y, mo, d] = dateYmd.split('-').map(Number);
+  const [h, min] = timeHHmm.slice(0, 5).split(':').map(Number);
+  const guess = Date.UTC(y!, mo! - 1, d!, h!, min!, 0);
+  const first = guess - timeZoneOffsetMs(guess, timeZone);
+  return guess - timeZoneOffsetMs(first, timeZone);
+}
+
 /**
  * End of the calendar day (last millisecond) of `capturedAtUtc` in the venue timezone,
  * as a UTC Date. Used for "per visit" compliance records (validity_period_days = 0), which

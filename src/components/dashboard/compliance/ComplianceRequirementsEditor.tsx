@@ -31,9 +31,19 @@ function typeSupportsClientOnline(captureMethods: string[] | undefined): boolean
 export function ComplianceRequirementsEditor({
   appointmentServiceId,
   complianceEnabled,
+  embedded = false,
+  onChanged,
 }: {
   appointmentServiceId: string;
   complianceEnabled: boolean;
+  /**
+   * Render without the SectionCard chrome. Used inside the Settings → Compliance
+   * service accordion, where the surrounding panel already provides the card,
+   * heading and description, and the double card wastes width on small screens.
+   */
+  embedded?: boolean;
+  /** Called after a requirement is added or removed, so hosts can refresh counts. */
+  onChanged?: () => void;
 }) {
   const reqUrl = `/api/venue/compliance/requirements?appointment_service_id=${encodeURIComponent(appointmentServiceId)}`;
   const {
@@ -118,31 +128,26 @@ export function ComplianceRequirementsEditor({
         return;
       }
       await mutateReqs();
+      onChanged?.();
     } finally {
       setBusyId(null);
     }
   }
 
-  return (
-    <SectionCard>
-      <SectionCard.Header
-        eyebrow="Compliance"
-        title="Compliance requirements"
-        description="Records this service requires before a booking. Missing or expired records warn or block at booking time."
-        right={
-          allTypes.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              disabled={availableTypes.length === 0}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Add requirement
-            </button>
-          ) : undefined
-        }
-      />
-      <SectionCard.Body>
+  const addButton =
+    allTypes.length > 0 ? (
+      <button
+        type="button"
+        onClick={() => setAdding(true)}
+        disabled={availableTypes.length === 0}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        Add requirement
+      </button>
+    ) : undefined;
+
+  const body = (
+    <>
         {error && (
           <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
             {error}
@@ -165,8 +170,10 @@ export function ComplianceRequirementsEditor({
           <ul className="divide-y divide-slate-100">
             {requirements.map((r) => (
               <li key={r.id} className="py-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="min-w-0 flex-1">
+                {/* Stack the controls under the name on small screens; a fixed-width
+                    select next to the name overflows the card there and gets clipped. */}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="min-w-0 sm:flex-1">
                     <p className="truncate text-sm font-medium text-slate-800">
                       {r.compliance_type_name}
                       {!r.compliance_type_is_active && (
@@ -177,30 +184,32 @@ export function ComplianceRequirementsEditor({
                       {CATEGORY_LABELS[r.compliance_type_category] ?? r.compliance_type_category}
                     </Pill>
                   </div>
-                  <label className="sr-only" htmlFor={`enforcement-${r.id}`}>
-                    When this requirement is unmet
-                  </label>
-                  <select
-                    id={`enforcement-${r.id}`}
-                    value={r.enforcement}
-                    disabled={busyId === r.id}
-                    onChange={(e) => updateEnforcement(r.id, e.target.value)}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700"
-                  >
-                    {ENFORCEMENT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => removeRequirement(r.id)}
-                    disabled={busyId === r.id}
-                    className="text-sm font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <label className="sr-only" htmlFor={`enforcement-${r.id}`}>
+                      When this requirement is unmet
+                    </label>
+                    <select
+                      id={`enforcement-${r.id}`}
+                      value={r.enforcement}
+                      disabled={busyId === r.id}
+                      onChange={(e) => updateEnforcement(r.id, e.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 sm:flex-none"
+                    >
+                      {ENFORCEMENT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeRequirement(r.id)}
+                      disabled={busyId === r.id}
+                      className="shrink-0 text-sm font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
                 {ENFORCEMENT_DESCRIPTIONS[r.enforcement] && (
                   <p className="mt-1.5 text-xs text-slate-500">{ENFORCEMENT_DESCRIPTIONS[r.enforcement]}</p>
@@ -240,7 +249,7 @@ export function ComplianceRequirementsEditor({
                         value={r.online_collection}
                         disabled={busyId === r.id}
                         onChange={(e) => updateCollection(r.id, e.target.value)}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                        className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
                       >
                         {ONLINE_COLLECTION_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -272,15 +281,42 @@ export function ComplianceRequirementsEditor({
             ))}
           </ul>
         )}
-      </SectionCard.Body>
+    </>
+  );
 
-      <AddRequirementDialog
-        open={adding}
-        onOpenChange={setAdding}
-        serviceId={appointmentServiceId}
-        availableTypes={availableTypes}
-        onAdded={() => mutateReqs()}
+  const dialog = (
+    <AddRequirementDialog
+      open={adding}
+      onOpenChange={setAdding}
+      serviceId={appointmentServiceId}
+      availableTypes={availableTypes}
+      onAdded={() => {
+        void mutateReqs();
+        onChanged?.();
+      }}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div>
+        {addButton && <div className="mb-3 flex justify-end">{addButton}</div>}
+        {body}
+        {dialog}
+      </div>
+    );
+  }
+
+  return (
+    <SectionCard>
+      <SectionCard.Header
+        eyebrow="Compliance"
+        title="Compliance requirements"
+        description="Records this service requires before a booking. Missing or expired records warn or block at booking time."
+        right={addButton}
       />
+      <SectionCard.Body>{body}</SectionCard.Body>
+      {dialog}
     </SectionCard>
   );
 }

@@ -92,6 +92,29 @@ export async function listRequirementsForService(
   return (data ?? []).map((r) => mapRequirementRow(r as Record<string, unknown>));
 }
 
+/**
+ * List every requirement for a venue in one query, used by the Settings →
+ * Compliance service list to show per-service indicators without a request
+ * per service. Rows carry both service FK columns so the caller can group by
+ * whichever one the venue uses.
+ */
+export async function listRequirementsForVenue(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<RequirementRow[]> {
+  const { data, error } = await admin
+    .from('service_compliance_requirements')
+    .select(
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+    )
+    .eq('venue_id', venueId);
+  if (error) {
+    console.error('[listRequirementsForVenue] failed:', error.message);
+    return [];
+  }
+  return (data ?? []).map((r) => mapRequirementRow(r as Record<string, unknown>));
+}
+
 export async function addRequirement(
   admin: SupabaseClient,
   params: {

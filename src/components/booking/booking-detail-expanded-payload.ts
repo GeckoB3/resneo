@@ -86,6 +86,10 @@ export function buildDetailForExpanded(
         }
       : null,
     communications: d.communications,
+    // Card-hold summary (§9.1/§9.2): without it the popover/modal layouts fall
+    // back to the enum-only state and the admin charge/refund actions never
+    // render (e.g. Charge no-show fee on the calendar's booking detail).
+    card_hold: d.card_hold ?? null,
     events: d.events.map((event) => ({
       id: event.id,
       event_type: event.event_type,

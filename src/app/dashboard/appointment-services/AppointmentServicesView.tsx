@@ -48,7 +48,9 @@ import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessag
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import useSWR from 'swr';
 import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
+import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -215,6 +217,25 @@ export function AppointmentServicesView({
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   const [error, setError] = useState<string | null>(null);
+
+  // Venue-wide compliance requirements, so each service card can show an
+  // at-a-glance indicator. Refreshed when requirements change in the editor.
+  const { data: complianceSummary, mutate: mutateComplianceSummary } = useSWR<{
+    requirements: Array<{
+      appointment_service_id: string | null;
+      service_item_id: string | null;
+      compliance_type_name: string;
+    }>;
+  }>(complianceEnabled ? '/api/venue/compliance/requirements' : null, complianceJsonFetcher);
+  const complianceTypeNamesByService = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const r of complianceSummary?.requirements ?? []) {
+      const serviceId = r.appointment_service_id ?? r.service_item_id;
+      if (!serviceId) continue;
+      m.set(serviceId, [...(m.get(serviceId) ?? []), r.compliance_type_name]);
+    }
+    return m;
+  }, [complianceSummary]);
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
@@ -856,6 +877,7 @@ export function AppointmentServicesView({
               (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
             const variants = svc.variants ?? [];
             const addonGroups = svc.addon_groups ?? [];
+            const complianceTypeNames = complianceTypeNamesByService.get(svc.id) ?? [];
             return (
               <SortableServiceCard key={svc.id} id={svc.id} label={svc.name} canReorder={dragEnabled}>
                 {(dragHandle) => (
@@ -909,6 +931,14 @@ export function AppointmentServicesView({
                           {svc.variants!.filter((v) => v.is_active).length} variant
                           {svc.variants!.filter((v) => v.is_active).length === 1 ? '' : 's'}
                         </Pill>
+                      ) : null}
+                      {complianceTypeNames.length > 0 ? (
+                        <span title={complianceTypeNames.join(', ')}>
+                          <Pill variant="info" size="sm" dot>
+                            {complianceTypeNames.length} compliance requirement
+                            {complianceTypeNames.length === 1 ? '' : 's'}
+                          </Pill>
+                        </span>
                       ) : null}
                       {!svc.is_active ? (
                         <Pill variant="warning" size="sm">
@@ -1287,6 +1317,7 @@ export function AppointmentServicesView({
                 <ComplianceRequirementsEditor
                   appointmentServiceId={editingId}
                   complianceEnabled={complianceEnabled}
+                  onChanged={() => void mutateComplianceSummary()}
                 />
               </div>
             )}

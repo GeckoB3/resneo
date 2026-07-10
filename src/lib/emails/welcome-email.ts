@@ -30,6 +30,13 @@ export function renderWelcomeEmail(baseUrl: string): { subject: string; html: st
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+@media only screen and (max-width:480px){
+  .app-btn{display:block !important;width:100% !important;margin:0 0 10px !important;}
+  .app-btn a{display:block !important;}
+  .app-btn-gap{display:none !important;}
+}
+</style>
 </head>
 <body style="margin:0;padding:0;background-color:#F4F0E9;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#F4F0E9">
@@ -67,9 +74,9 @@ export function renderWelcomeEmail(baseUrl: string): { subject: string; html: st
 <div style="font-size:18px;font-weight:600;color:#15324C;margin:0 0 7px">Take ResNeo with you</div>
 <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#5E5446">Your business diary, wherever you go. Download the official ResNeo app straight to your phone.</p>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td style="background-color:#003B6F;border-radius:40px;text-align:center"><a href="${appStoreUrl}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:40px">Download the iPhone app</a></td>
-<td style="width:12px;font-size:0;line-height:0">&nbsp;</td>
-<td style="background-color:#003B6F;border-radius:40px;text-align:center"><a href="${googlePlayUrl}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:40px">Download the Android app</a></td>
+<td class="app-btn" style="background-color:#003B6F;border-radius:40px;text-align:center"><a href="${appStoreUrl}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:40px">Download the iPhone app</a></td>
+<td class="app-btn-gap" style="width:12px;font-size:0;line-height:0">&nbsp;</td>
+<td class="app-btn" style="background-color:#003B6F;border-radius:40px;text-align:center"><a href="${googlePlayUrl}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:40px">Download the Android app</a></td>
 </tr></table>
 </td></tr>
 </table>

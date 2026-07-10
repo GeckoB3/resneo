@@ -16,8 +16,8 @@ const APP_STORE_BADGE =
   'https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1782432000';
 
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.resneo.app';
-// Self-hosted "Get it on Google Play" badge (Google no longer serves hotlinkable badge images).
-const GOOGLE_PLAY_BADGE = '/app/google-play-badge.svg';
+// Self-hosted official "Get it on Google Play" badge (Google no longer serves hotlinkable images).
+const GOOGLE_PLAY_BADGE = '/app/google-play-badge.png';
 
 /** Intrinsic aspect ratio of the exported app screenshots (1284 × 2778). */
 const SHOT_RATIO = 2778 / 1284;
@@ -108,9 +108,9 @@ export function AppShowcase() {
                 <img
                   src={GOOGLE_PLAY_BADGE}
                   alt="Get it on Google Play"
-                  width={189}
-                  height={56}
-                  style={{ width: 189, height: 56, objectFit: 'contain' }}
+                  width={168}
+                  height={50}
+                  style={{ width: 168, height: 50, objectFit: 'contain' }}
                 />
               </a>
             </div>

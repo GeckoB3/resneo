@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { renderBookingConfirmation } from "./booking-confirmation";
 import { renderDepositRequestSms } from "./deposit-request-sms";
 import { renderDepositRequestEmail } from "./deposit-request-email";
+import { renderCardHoldRequestSms } from "./card-hold-request-sms";
+import { renderCardHoldRequestEmail } from "./card-hold-request-email";
 import { renderDepositConfirmation } from "./deposit-confirmation";
 import { renderReminder56h } from "./reminder-56h";
 import { renderDayOfReminderEmail } from "./day-of-reminder-email";
@@ -161,6 +163,113 @@ describe("renderDepositRequestEmail", () => {
     expect(result.html).toContain("https://pay.link/abc");
     expect(result.html).toContain("20.00");
     expect(result.text).toContain("https://pay.link/abc");
+  });
+});
+
+const EM_DASH = /—/;
+
+describe("renderCardHoldRequestEmail", () => {
+  it("renders the card-request email with heading, body core, fee, and link", () => {
+    const result = renderCardHoldRequestEmail(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+      2500,
+    );
+    expect(result.subject).toBe(
+      "Add your card details to confirm your booking at The Golden Whisk",
+    );
+    expect(result.html).toContain("Card details needed");
+    expect(result.html).toContain(
+      "No payment is taken now. Add your card details to secure your booking. The Golden Whisk may charge a no-show fee of up to £25.00 if you do not attend.",
+    );
+    expect(result.html).toContain("Add card details");
+    expect(result.html).toContain("https://pay.link/abc");
+    expect(result.text).toContain(
+      "No payment is taken now. Add your card details to secure your booking. The Golden Whisk may charge a no-show fee of up to £25.00 if you do not attend.",
+    );
+    expect(result.text).toContain("Add card details: https://pay.link/abc");
+  });
+
+  it("never renders deposit-refund-deadline copy even when refund_cutoff is set", () => {
+    // SAMPLE_BOOKING carries refund_cutoff; holds have no refund deadline.
+    const result = renderCardHoldRequestEmail(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+      2500,
+    );
+    expect(result.html.toLowerCase()).not.toContain("refund");
+    expect(result.text.toLowerCase()).not.toContain("refund");
+  });
+
+  it("reminder variant prefixes the subject", () => {
+    const result = renderCardHoldRequestEmail(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+      2500,
+      { reminder: true },
+    );
+    expect(result.subject).toBe(
+      "Reminder: add your card details to confirm your booking at The Golden Whisk",
+    );
+  });
+
+  it("contains no em-dashes", () => {
+    const result = renderCardHoldRequestEmail(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+      2500,
+    );
+    expect(result.subject).not.toMatch(EM_DASH);
+    expect(result.html).not.toMatch(EM_DASH);
+    expect(result.text).not.toMatch(EM_DASH);
+  });
+});
+
+describe("renderCardHoldRequestSms", () => {
+  it("includes venue, date, time, reassurance clause, and link within 160 chars", () => {
+    const result = renderCardHoldRequestSms(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+    );
+    expect(result.body).toContain(
+      "The Golden Whisk: card details needed to secure your booking for",
+    );
+    expect(result.body).toContain("No payment is taken now.");
+    expect(result.body).toContain("Add: https://pay.link/abc");
+    expect(result.body.length).toBeLessThanOrEqual(160);
+    expect(result.body).not.toMatch(EM_DASH);
+  });
+
+  it("drops the reassurance clause first when the message would exceed 160 chars", () => {
+    const longPaymentLink =
+      "https://www.reserveni.com/pay/v2.eyJib29raW5nSWQiOiJiLTAwMSIsInNpZyI6IjEyMzQ1Njc4OTAiLCJleHAiOjE4MzAwMDAwMDB9";
+    const result = renderCardHoldRequestSms(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      longPaymentLink,
+    );
+    expect(result.body).not.toContain("No payment is taken now.");
+    expect(result.body).toContain(
+      "The Golden Whisk: card details needed to secure your booking for",
+    );
+    expect(result.body).toContain(`Add: ${longPaymentLink}`);
+  });
+
+  it("reminder variant prefixes Reminder:", () => {
+    const result = renderCardHoldRequestSms(
+      SAMPLE_BOOKING,
+      SAMPLE_VENUE,
+      "https://pay.link/abc",
+      { reminder: true },
+    );
+    expect(result.body).toContain(
+      "Reminder: The Golden Whisk: card details needed to secure your booking for",
+    );
   });
 });
 

@@ -7,6 +7,7 @@ import {
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -177,6 +178,17 @@ export async function cancelStaffBookingWithNotify(
       console.error('[staff-cancel-booking] cancel update failed:', cancelErr, { bookingId });
       return { cancelled: false, reason: 'not_found' };
     }
+  }
+
+  // §9.3 — this helper serves the VENUE-INITIATED cancel cascades (class
+  // instance and event cancels), so holds are always released, deliberately
+  // NOT the late-cancellation keep (settleCardHoldsOnCancellation): a guest
+  // must never stay chargeable for a cancellation the venue made. Group
+  // cancels release per sibling row. Best-effort: the cancel already happened.
+  try {
+    await releaseCardHoldsForBookings(admin, idsToCancel, 'cancelled');
+  } catch (holdErr) {
+    console.error('[staff-cancel-booking] card-hold release failed:', holdErr, { bookingId });
   }
 
   for (const row of beforeRows ?? []) {

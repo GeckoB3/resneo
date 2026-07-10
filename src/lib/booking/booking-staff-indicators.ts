@@ -11,6 +11,8 @@ export interface BookingStaffIndicatorInput {
 }
 
 export function showDepositPendingPill(row: BookingStaffIndicatorInput): boolean {
+  // Card-hold states ('Card Held', 'Charged') intentionally do not show this pill: nothing is
+  // owed upfront, so there is no pending deposit to chase.
   if (row.deposit_status !== 'Pending') return false;
   const pence = row.deposit_amount_pence ?? 0;
   return pence > 0;

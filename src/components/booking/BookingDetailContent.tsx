@@ -31,6 +31,9 @@ import {
   CompactInfo,
   DepositRefundBanner,
 } from '@/app/dashboard/bookings/booking-detail-panel-ui';
+import { resolveCardHoldUiState } from '@/components/booking/card-hold-ui-state';
+import { CardHoldDetailSection } from '@/components/booking/CardHoldDetailSection';
+import { useDashboardToolbarVenueOptional } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 
 export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext }) {
   const {
@@ -117,6 +120,16 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
   /** Party-size noun: dining counts "covers"; everything else counts "guests". */
   const partyNoun = (n: number) => (isTableStyle ? 'cover' : 'guest') + (n === 1 ? '' : 's');
   const partySizeLabel = `${d.party_size} ${partyNoun(d.party_size)}`;
+
+  // Card-hold display + action gating (§9.1/§9.2). Charging is admin-only; the
+  // dashboard layout provides the viewer role via the toolbar venue context
+  // (absent context = treat as non-admin, the server enforces regardless).
+  const isAdmin = useDashboardToolbarVenueOptional()?.isAdmin ?? false;
+  const cardHoldState = resolveCardHoldUiState(
+    { status: d.status, deposit_status: d.deposit_status },
+    d.card_hold ?? null,
+    { isAdmin },
+  );
 
   return (
     <>
@@ -228,19 +241,21 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                     </div>
                   )}
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">Deposit</p>
-                    <p className={`truncate text-xs font-bold ${
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">{cardHoldState ? 'Card hold' : 'Deposit'}</p>
+                    <p className={`text-xs font-bold ${cardHoldState ? 'leading-tight' : 'truncate'} ${
                       d.deposit_status === 'Paid'
                         ? 'text-emerald-700'
                         : d.deposit_status === 'Pending'
                           ? 'text-amber-700'
                           : 'text-slate-700'
                     }`}>
-                      {depositPaid && depositAmountStr
-                        ? `${depositAmountStr} paid`
-                        : d.deposit_status === 'Not Required'
-                          ? 'None'
-                          : d.deposit_status}
+                      {cardHoldState?.pill
+                        ? cardHoldState.pill.label
+                        : depositPaid && depositAmountStr
+                          ? `${depositAmountStr} paid`
+                          : d.deposit_status === 'Not Required'
+                            ? 'None'
+                            : d.deposit_status}
                     </p>
                   </div>
                 </div>
@@ -446,13 +461,15 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   <CompactInfo dense={isPopover} label={isTableStyle ? 'Covers' : 'Guests'} value={String(d.party_size)} />
                   <CompactInfo
                     dense={isPopover}
-                    label="Deposit"
+                    label={cardHoldState ? 'Card hold' : 'Deposit'}
                     value={
-                      depositPaid && depositAmountStr
-                        ? `${depositAmountStr} paid`
-                        : d.deposit_status === 'Not Required'
-                          ? 'None'
-                          : d.deposit_status
+                      cardHoldState?.pill
+                        ? cardHoldState.pill.label
+                        : depositPaid && depositAmountStr
+                          ? `${depositAmountStr} paid`
+                          : d.deposit_status === 'Not Required'
+                            ? 'None'
+                            : d.deposit_status
                     }
                     valueClass={
                       d.deposit_status === 'Paid'
@@ -587,17 +604,43 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
           <SectionCard>
             <SectionCard.Body className={sectionPadding}>
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Deposit</p>
-                {d.deposit_status === 'Paid' && (
-                  <Pill variant="success" size="sm" dot>{depositAmountStr ? `${depositAmountStr} paid` : 'Paid'}</Pill>
-                )}
-                {d.deposit_status === 'Refunded' && (
-                  <Pill variant="brand" size="sm">{depositAmountStr ? `${depositAmountStr} refunded` : 'Refunded'}</Pill>
-                )}
-                {d.deposit_status === 'Pending' && (
-                  <Pill variant="warning" size="sm" dot>Pending</Pill>
-                )}
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                  {cardHoldState ? 'Card hold' : 'Deposit'}
+                </p>
+                {cardHoldState?.pill ? (
+                  <Pill variant={cardHoldState.pill.variant} size="sm" dot={cardHoldState.pill.dot}>
+                    {cardHoldState.pill.label}
+                  </Pill>
+                ) : !cardHoldState ? (
+                  <>
+                    {d.deposit_status === 'Paid' && (
+                      <Pill variant="success" size="sm" dot>{depositAmountStr ? `${depositAmountStr} paid` : 'Paid'}</Pill>
+                    )}
+                    {d.deposit_status === 'Refunded' && (
+                      <Pill variant="brand" size="sm">{depositAmountStr ? `${depositAmountStr} refunded` : 'Refunded'}</Pill>
+                    )}
+                    {d.deposit_status === 'Pending' && (
+                      <Pill variant="warning" size="sm" dot>Pending</Pill>
+                    )}
+                  </>
+                ) : null}
               </div>
+              {cardHoldState ? (
+                /* §9.1 hiding rule: a hold row replaces the three legacy deposit
+                   actions with the card-aware set (Resend link / Waive on
+                   awaiting-card, admin charge / refund on held / charged). */
+                <CardHoldDetailSection
+                  bookingId={bookingId}
+                  guestName={displayBookingGuestName(d.guest, initialSnapshot?.guestName)}
+                  state={cardHoldState}
+                  actionDisabled={actionLoading || !isHydrated}
+                  onLegacyDepositAction={(action) => void runDepositAction(action)}
+                  onChanged={async () => {
+                    await load();
+                    onUpdated();
+                  }}
+                />
+              ) : (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {d.deposit_status !== 'Paid' && d.deposit_status !== 'Refunded' && (
                   <>
@@ -638,6 +681,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                   </button>
                 )}
               </div>
+              )}
             </SectionCard.Body>
           </SectionCard>
 

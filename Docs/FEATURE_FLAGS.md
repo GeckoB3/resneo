@@ -9,8 +9,9 @@ Controlled rollout for Phase 1a work in [Resneo-Appointments-Review-And-Roadmap.
 | `waitlist_v2` | Appointment schedule waitlist (guest join, staff offer with guest notify, staff book/confirm, auto-offer on appointment cancel, `waitlist_converted` audit event) | P1a.3 |
 | `guest_self_reschedule` | Guest reschedule on manage link (`/api/confirm` modify). Cancellation notice applies to refunds on cancel, not to whether reschedule is allowed. **No fee / deposit-forfeit on modify until P1b.1** | P1a.2 (shipped); fees P1b.1 |
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
-| `class_commerce_enabled` | Gates the entire class-commerce surface area: credit packs, courses, memberships, recurring reservations, and the dashboard products UI. See [reserveni-class-products-plan.md](./reserveni-class-products-plan.md) §10. Off-state hides the dashboard `/dashboard/class-timetable/products` page and returns 403 from all `/api/venue/class-{credit,course,membership}-products/*` routes. Existing class instances and guest bookings continue to work — the flag strictly gates **prepaid commerce** surfaces. | Class products §10 |
+| `class_commerce_enabled` | Gates the entire class-commerce surface area: credit packs, courses, memberships, recurring reservations, and the dashboard products UI. See [reserveni-class-products-plan.md](./archive/reserveni-class-products-plan.md) §10. Off-state hides the dashboard `/dashboard/class-timetable/products` page and returns 403 from all `/api/venue/class-{credit,course,membership}-products/*` routes. Existing class instances and guest bookings continue to work — the flag strictly gates **prepaid commerce** surfaces. | Class products §10 |
 | `compliance_records_enabled` | Gates the Compliance Records feature (patch tests, consent/intake forms, service requirements, public form submission). See [reserveni-compliance-spec.md](./reserveni-compliance-spec.md). Off-state hides the `/dashboard/compliance` nav item, the Settings → Compliance tab, the booking/contact compliance sections, and the service-editor requirements section; all `/api/venue/compliance/*` routes return 403. Also requires `isAppointmentPlanTier(pricing_tier)` (not available on restaurant/founding SKUs). | Compliance v1 |
+| `card_hold_deposits` | Card hold deposits: card on file with a chargeable no-show fee, no payment taken at booking. Default **off** (not in `FLAG_DEFAULT_ON`). Gates **creation of new holds only** (config acceptance of `card_hold`, booking-flow branches, staff-toggle visibility); it never gates charging, refunding, or releasing existing holds — guests keep the deal they consented to. See [CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md](./CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md) §6.1. | Card hold v1 |
 
 When `compliance_records_enabled` is on, venues can set a `compliance` config object in the same JSONB (Settings → Compliance → General settings):
 
@@ -32,7 +33,9 @@ When `any_available_practitioner` is on, venues can set `any_available_practitio
 | `mode` | `priority` (default) or `random` | How to choose a calendar when several are free at the same time |
 | `calendar_order` | UUID[] | Priority list (Settings → Beta features → calendar order UI) |
 
-All flags default to **off** until enabled per venue or via environment override.
+The flag schema also carries a nested `waitlist_config` sub-object (alongside `any_available_practitioner_config` and `compliance`) in the same JSONB, tied to `waitlist_v2` (see `src/lib/feature-flags/types.ts`).
+
+All flags default to **off** until enabled per venue or via environment override, **except `guest_self_reschedule`**, which defaults **on** unless a venue explicitly stores `false` (per `FLAG_DEFAULT_ON` in `src/lib/feature-flags/resolve.ts`). An environment override still wins over both.
 
 ## Resolution order
 
@@ -49,6 +52,7 @@ All flags default to **off** until enabled per venue or via environment override
 | `any_available_practitioner` | `FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER` |
 | `class_commerce_enabled` | `FEATURE_FLAG_CLASS_COMMERCE_ENABLED` |
 | `compliance_records_enabled` | `FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED` |
+| `card_hold_deposits` | `FEATURE_FLAG_CARD_HOLD_DEPOSITS` |
 
 Example (enable all in staging):
 

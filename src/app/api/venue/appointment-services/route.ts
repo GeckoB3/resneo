@@ -39,6 +39,7 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { normalizeBookingStartForStorage } from '@/lib/appointments/booking-interval';
+import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -50,7 +51,10 @@ const staffMaySchema = {
   staff_may_customize_colour: z.boolean().optional(),
 };
 
-const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment', 'card_hold']);
+
+/** Card holds require a no-show fee of at least £1 (design doc §6.2); the hold table enforces fee_pence > 0. */
+const CARD_HOLD_MIN_FEE_PENCE = 100;
 
 const locationTypeSchema = z.enum(['business_venue', 'client_address', 'online']);
 
@@ -140,6 +144,16 @@ const serviceSchema = z
         });
       }
     }
+    if (req === 'card_hold') {
+      const d = data.deposit_pence;
+      if (d == null || d < CARD_HOLD_MIN_FEE_PENCE) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Set a no-show fee of at least £1 for card holds',
+          path: ['deposit_pence'],
+        });
+      }
+    }
     if (data.custom_availability_enabled === true && isServiceCustomScheduleEmpty(data.custom_working_hours ?? null)) {
       ctx.addIssue({
         code: 'custom',
@@ -205,6 +219,16 @@ const servicePatchSchema = z
         });
       }
     }
+    if (data.payment_requirement === 'card_hold') {
+      const d = data.deposit_pence;
+      if (d == null || d < CARD_HOLD_MIN_FEE_PENCE) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Set a no-show fee of at least £1 for card holds',
+          path: ['deposit_pence'],
+        });
+      }
+    }
   });
 
 function assertPatchCustomAvailabilityCoherent(params: {
@@ -241,7 +265,37 @@ function normalizeServicePaymentFields(data: {
     (data.deposit_pence != null && data.deposit_pence > 0 ? 'deposit' : 'none');
   if (req === 'none') return { payment_requirement: 'none', deposit_pence: null };
   if (req === 'deposit') return { payment_requirement: 'deposit', deposit_pence: data.deposit_pence ?? 0 };
+  // Card hold: deposit_pence stores the no-show fee (>= 100, validated in the zod schemas).
+  if (req === 'card_hold') return { payment_requirement: 'card_hold', deposit_pence: data.deposit_pence ?? 0 };
   return { payment_requirement: 'full_payment', deposit_pence: null };
+}
+
+/**
+ * Card-hold config acceptance is gated on the `card_hold_deposits` venue flag (design doc
+ * §6.2): every write path rejects `'card_hold'` with 403 `feature_disabled` when the flag
+ * resolves off. Returns the 403 response, or null when the flag is on.
+ */
+async function rejectCardHoldWhenFlagOff(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+): Promise<NextResponse | null> {
+  const { resolved } = await loadVenueFeatureFlags(admin, venueId);
+  return resolved.card_hold_deposits ? null : featureFlagDisabledResponse('card_hold_deposits');
+}
+
+/**
+ * Variant deposit overrides become the card-hold no-show fee when set (§6.3), so they carry
+ * the same £1 minimum as the base fee (§6.2). Null/absent overrides fall back to the base fee.
+ */
+function findInvalidCardHoldVariantFee(
+  variants: z.infer<typeof variantsArraySchema>,
+): string | null {
+  for (const v of variants) {
+    if (v.deposit_pence != null && v.deposit_pence < CARD_HOLD_MIN_FEE_PENCE) {
+      return `Option "${v.name}": set a no-show fee of at least £1, or leave it blank to use the service fee.`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -491,6 +545,28 @@ async function assertPractitionerIdsBelongToVenueLegacy(
 /** USE stores services in `service_items` when primary is unified_scheduling or it is enabled as a secondary. */
 const venueUsesUnifiedServiceItems = venueUsesUnifiedAppointmentServiceData;
 
+/**
+ * Display position for a newly created service. Venues that have dragged their
+ * services into an order (any existing row > 0, written by the /reorder endpoint)
+ * get new services appended at the end; untouched venues keep 0 so the
+ * alphabetical fallback ordering still applies everywhere.
+ */
+async function nextServiceSortOrder(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  table: 'service_items' | 'appointment_services',
+  venueId: string,
+): Promise<number> {
+  const { data } = await admin
+    .from(table)
+    .select('sort_order')
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const max = (data?.sort_order as number | null) ?? 0;
+  return max > 0 ? max + 1 : 0;
+}
+
 const OWNER_VENUE_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -522,7 +598,8 @@ export async function GET(request: NextRequest) {
           .from('service_items')
           .select('*')
           .eq('venue_id', catalogVenueId)
-          .order('sort_order', { ascending: true }),
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true }),
         admin.from('unified_calendars').select('id').eq('venue_id', catalogVenueId),
       ]);
 
@@ -603,7 +680,8 @@ export async function GET(request: NextRequest) {
         .from('appointment_services')
         .select('*')
         .eq('venue_id', catalogVenueId)
-        .order('sort_order', { ascending: true }),
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
       admin
         .from('practitioner_services')
         .select('*, practitioner:practitioners!inner(venue_id)')
@@ -731,6 +809,16 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    if (parsed.data.payment_requirement === 'card_hold') {
+      const flagRejection = await rejectCardHoldWhenFlagOff(admin, staff.venue_id);
+      if (flagRejection) return flagRejection;
+      const variantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+      if (variantFeeError) {
+        return NextResponse.json({ error: variantFeeError }, { status: 400 });
+      }
+    }
+
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
     const practitionerIdsForLinks = normalizePractitionerIdsInput(body.practitioner_ids) ?? [];
 
@@ -790,7 +878,9 @@ export async function POST(request: NextRequest) {
         price_type: 'fixed' as const,
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
-        sort_order: parsed.data.sort_order ?? 0,
+        sort_order:
+          parsed.data.sort_order ??
+          (await nextServiceSortOrder(admin, 'service_items', staff.venue_id)),
         staff_may_customize_name: staffMayAllTrue ? true : (parsed.data.staff_may_customize_name ?? false),
         staff_may_customize_description: staffMayAllTrue ? true : (parsed.data.staff_may_customize_description ?? false),
         staff_may_customize_duration: staffMayAllTrue ? true : (parsed.data.staff_may_customize_duration ?? false),
@@ -900,6 +990,9 @@ export async function POST(request: NextRequest) {
       venue_id: staff.venue_id,
       created_by_staff_id: staff.id,
       ...restCreate,
+      sort_order:
+        parsed.data.sort_order ??
+        (await nextServiceSortOrder(admin, 'appointment_services', staff.venue_id)),
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
       processing_time_blocks: normalizedParentProcessing,
       payment_requirement: pay.payment_requirement,
@@ -1066,6 +1159,16 @@ export async function PATCH(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    if (parsed.data.payment_requirement === 'card_hold') {
+      const flagRejection = await rejectCardHoldWhenFlagOff(admin, staff.venue_id);
+      if (flagRejection) return flagRejection;
+      const variantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+      if (variantFeeError) {
+        return NextResponse.json({ error: variantFeeError }, { status: 400 });
+      }
+    }
+
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
     if (useUnified) {
@@ -1096,6 +1199,20 @@ export async function PATCH(request: NextRequest) {
       });
       if (!customCoherent.ok) {
         return NextResponse.json({ error: customCoherent.message }, { status: 400 });
+      }
+
+      // Variants-only patch on a STORED card_hold service: the £1 variant-fee floor
+      // still applies (§6.2). No flag gate here (§6.1): servicing existing card-hold
+      // config is allowed even when the flag has since been turned off.
+      if (
+        variantsProvided &&
+        parsed.data.payment_requirement === undefined &&
+        (serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold'
+      ) {
+        const storedHoldVariantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+        if (storedHoldVariantFeeError) {
+          return NextResponse.json({ error: storedHoldVariantFeeError }, { status: 400 });
+        }
       }
 
       let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
@@ -1214,8 +1331,20 @@ export async function PATCH(request: NextRequest) {
         updatePayload.deposit_pence = norm.deposit_pence;
       } else if (parsed.data.deposit_pence !== undefined) {
         const dp = parsed.data.deposit_pence ?? 0;
-        updatePayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
-        updatePayload.deposit_pence = dp > 0 ? dp : null;
+        if ((serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold') {
+          // A deposit-only patch must not silently convert a card hold into an upfront
+          // charge; the row stays card_hold and the fee keeps its £1 minimum (§6.2).
+          if (dp < CARD_HOLD_MIN_FEE_PENCE) {
+            return NextResponse.json(
+              { error: 'Set a no-show fee of at least £1 for card holds' },
+              { status: 400 },
+            );
+          }
+          updatePayload.deposit_pence = dp;
+        } else {
+          updatePayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
+          updatePayload.deposit_pence = dp > 0 ? dp : null;
+        }
       }
 
       delete updatePayload.location_type;
@@ -1351,6 +1480,20 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: legacyCustomCoherent.message }, { status: 400 });
     }
 
+    // Variants-only patch on a STORED card_hold service: the £1 variant-fee floor
+    // still applies (§6.2). No flag gate here (§6.1): servicing existing card-hold
+    // config is allowed even when the flag has since been turned off.
+    if (
+      variantsProvided &&
+      parsed.data.payment_requirement === undefined &&
+      (serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold'
+    ) {
+      const storedHoldVariantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
+      if (storedHoldVariantFeeError) {
+        return NextResponse.json({ error: storedHoldVariantFeeError }, { status: 400 });
+      }
+    }
+
     let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
     let requestedPractitionerIds = practitioner_ids;
     let patchPayload: Record<string, unknown> = { ...parsed.data };
@@ -1464,8 +1607,20 @@ export async function PATCH(request: NextRequest) {
       patchPayload.deposit_pence = norm.deposit_pence;
     } else if (parsed.data.deposit_pence !== undefined) {
       const dp = parsed.data.deposit_pence ?? 0;
-      patchPayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
-      patchPayload.deposit_pence = dp > 0 ? dp : null;
+      if ((serviceRow as { payment_requirement?: string | null }).payment_requirement === 'card_hold') {
+        // A deposit-only patch must not silently convert a card hold into an upfront
+        // charge; the row stays card_hold and the fee keeps its £1 minimum (§6.2).
+        if (dp < CARD_HOLD_MIN_FEE_PENCE) {
+          return NextResponse.json(
+            { error: 'Set a no-show fee of at least £1 for card holds' },
+            { status: 400 },
+          );
+        }
+        patchPayload.deposit_pence = dp;
+      } else {
+        patchPayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
+        patchPayload.deposit_pence = dp > 0 ? dp : null;
+      }
     }
 
     delete patchPayload.location_type;

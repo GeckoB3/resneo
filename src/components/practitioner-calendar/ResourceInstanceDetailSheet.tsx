@@ -18,6 +18,11 @@ import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { timeToMinutes } from '@/lib/availability';
 import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import type { StaffExpandedBookingModifySource } from '@/components/booking/StaffExpandedBookingModifyModal';
+import {
+  resolveCardHoldUiState,
+  type CardHoldSummary,
+} from '@/components/booking/card-hold-ui-state';
+import { CardHoldStateLine } from '@/components/booking/CardHoldDetailSection';
 
 interface BookingDetailPayload {
   id: string;
@@ -29,6 +34,8 @@ interface BookingDetailPayload {
   party_size: number;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
+  /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
+  card_hold?: CardHoldSummary | null;
   resource_payment_requirement?: ClassPaymentRequirement | null;
   checked_in_at: string | null;
   special_requests?: string | null;
@@ -53,6 +60,7 @@ function resourcePaymentModeLabel(m: ClassPaymentRequirement | null | undefined)
   if (m === 'none') return 'Pay at venue';
   if (m === 'deposit') return 'Deposit (online)';
   if (m === 'full_payment') return 'Full payment (online)';
+  if (m === 'card_hold') return 'Card hold (no payment taken)';
   return '—';
 }
 
@@ -441,6 +449,23 @@ export function ResourceInstanceDetailSheet({
               </>
             ) : null}
           </p>
+          {(() => {
+            /* Hold state line (§9.1 other-staff-surfaces bullet): state only,
+               non-admin resolution; the charge action lives on the full booking
+               detail, reachable via the "Open full booking" link below. */
+            if (!detail) return null;
+            const hold = resolveCardHoldUiState(
+              { status: detail.status, deposit_status: detail.deposit_status ?? '' },
+              detail.card_hold ?? null,
+              { isAdmin: false },
+            );
+            if (!hold || (!hold.pill && hold.lines.length === 0)) return null;
+            return (
+              <div className="mt-1.5">
+                <CardHoldStateLine state={hold} />
+              </div>
+            );
+          })()}
         </div>
       </div>
 

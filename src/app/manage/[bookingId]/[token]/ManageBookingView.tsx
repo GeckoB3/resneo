@@ -13,6 +13,21 @@ import {
   type GuestClassInstanceOption,
 } from '@/components/booking/GuestClassModifyInstancePicker';
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import {
+  guestCardHoldHeldLine,
+  guestCardHoldLateCancelWarning,
+} from '@/lib/booking/guest-card-hold-summary';
+
+/** Guest-safe card-hold summary from GET /api/confirm (card_hold deposits §10.1). */
+interface CardHoldSummary {
+  fee_pence: number;
+  state: 'awaiting_card' | 'held' | 'released' | 'charged' | 'refunded';
+  charged_pence: number | null;
+  charged_at: string | null;
+  /** Only present for `awaiting_card` (staff link flow, card not saved yet). */
+  payment_link?: string | null;
+}
 
 interface BookingDetails {
   booking_id: string;
@@ -25,6 +40,7 @@ interface BookingDetails {
   party_size: number;
   deposit_paid: boolean;
   deposit_amount_pence: number | null;
+  card_hold?: CardHoldSummary | null;
   status: string;
   is_appointment?: boolean;
   booking_model?: BookingModel;
@@ -44,6 +60,8 @@ interface BookingDetails {
   /** Outstanding compliance forms the guest should complete before their visit. */
   compliance_forms?: Array<{ name: string; url: string }>;
   refund_notice_hours?: number;
+  /** Last instant the guest can cancel free of charge (deposit refund / card-hold release). */
+  cancellation_deadline?: string | null;
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
   venue_public?: VenuePublic | null;
@@ -144,6 +162,8 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
+  const [cardHoldMessage, setCardHoldMessage] = useState<string | null>(null);
+  const [cardHoldKept, setCardHoldKept] = useState(false);
   const [showModify, setShowModify] = useState(false);
   const [modifySuccess, setModifySuccess] = useState(false);
 
@@ -182,6 +202,8 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       if (!res.ok) throw new Error(data.error ?? 'Failed');
       setCancelled(true);
       if (data.refund_message) setRefundMessage(data.refund_message);
+      if (data.card_hold_message) setCardHoldMessage(data.card_hold_message);
+      if (data.card_hold_kept) setCardHoldKept(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -248,6 +270,26 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
           </div>
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <p className="text-sm text-slate-500">{subtitle}</p>
+          {cardHoldMessage && (
+            <div
+              className={
+                cardHoldKept
+                  ? 'rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-left'
+                  : 'rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left'
+              }
+            >
+              <p
+                className={
+                  cardHoldKept ? 'text-sm font-medium text-amber-800' : 'text-sm font-medium text-blue-800'
+                }
+              >
+                {cardHoldKept ? 'No-show fee may apply' : 'Card hold released'}
+              </p>
+              <p className={cardHoldKept ? 'mt-1 text-sm text-amber-700' : 'mt-1 text-sm text-blue-700'}>
+                {cardHoldMessage}
+              </p>
+            </div>
+          )}
           {refundMessage && (
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left">
               <p className="text-sm font-medium text-blue-800">Deposit refund</p>
@@ -318,6 +360,19 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
     rawRefundHours == null || rawRefundHours <= 0
       ? `This ${bookingNoun} is non-refundable.`
       : `Full refund if cancelled ${rawRefundHours}+ hours before your ${bookingNoun}. No refund within ${rawRefundHours} hours or for no-shows.`;
+
+  // Card-hold late-cancellation warning (§9.3 amended): once the deadline has
+  // passed and a saved hold is open, cancelling no longer avoids the fee, so
+  // say so before the guest confirms.
+  const holdDeadlineMs = details.cancellation_deadline
+    ? Date.parse(details.cancellation_deadline)
+    : Number.NaN;
+  const cardHoldLateCancelWarning =
+    details.card_hold?.state === 'held' &&
+    Number.isFinite(holdDeadlineMs) &&
+    Date.now() > holdDeadlineMs
+      ? guestCardHoldLateCancelWarning(details.venue_name, details.card_hold.fee_pence)
+      : null;
 
   return (
     <div className="w-full min-w-0 max-w-lg">
@@ -391,6 +446,46 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm">
               <span className="font-medium text-emerald-800">Deposit paid:</span>{' '}
               <span className="text-emerald-700">&pound;{(details.deposit_amount_pence / 100).toFixed(2)}</span>
+            </div>
+          )}
+
+          {/* Card-hold deposits (§10.1). `released` renders nothing special
+              (the booking is likely cancelled by then). */}
+          {details.card_hold?.state === 'awaiting_card' && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm space-y-2.5">
+              <p className="text-amber-900">
+                Add your card details to secure this booking. No payment is taken.
+              </p>
+              {details.card_hold.payment_link && (
+                <a
+                  href={details.card_hold.payment_link}
+                  className="block w-full rounded-lg bg-brand-600 px-4 py-2.5 text-center text-sm font-medium text-white hover:bg-brand-700"
+                >
+                  Add card details
+                </a>
+              )}
+            </div>
+          )}
+          {details.card_hold?.state === 'held' && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+              <p className="text-blue-800">
+                {guestCardHoldHeldLine(
+                  details.venue_name,
+                  details.card_hold.fee_pence,
+                  details.cancellation_deadline,
+                )}
+              </p>
+            </div>
+          )}
+          {details.card_hold?.state === 'charged' && details.card_hold.charged_pence != null && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+              <p className="text-slate-700">
+                {`A no-show fee of ${formatCardHoldFeePence(details.card_hold.charged_pence)} was charged for this booking${
+                  details.card_hold.charged_at
+                    ? ` on ${new Date(details.card_hold.charged_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                    : ''
+                }.`}
+              </p>
             </div>
           )}
 
@@ -525,6 +620,9 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
                 <p className="text-xs text-red-700">
                   {`Are you sure you want to cancel this ${bookingNoun}?`}
                 </p>
+              )}
+              {cardHoldLateCancelWarning && (
+                <p className="text-xs font-medium text-red-700">{cardHoldLateCancelWarning}</p>
               )}
               {error && <p className="text-xs text-red-600">{error}</p>}
               <div className="flex gap-2">

@@ -22,6 +22,7 @@ import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import {
   claimStripeWebhookEvent,
+  markStripeWebhookEventProcessed,
   releaseStripeWebhookEvent,
 } from '@/lib/webhooks/stripe-event-idempotency';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
@@ -189,6 +190,7 @@ export async function POST(request: NextRequest) {
         console.log(`[Subscription webhook] Unhandled event type: ${event.type}`);
     }
 
+    await markStripeWebhookEventProcessed(supabase, event.id, '[Subscription webhook]');
     return NextResponse.json({ received: true });
   } catch (err) {
     await releaseStripeWebhookEvent(supabase, event.id, '[Subscription webhook]');

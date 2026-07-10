@@ -9,6 +9,7 @@ import { PaymentStep } from './PaymentStep';
 import { ConfirmationStep } from './ConfirmationStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { isCardHoldPaymentMode, type CardHoldPaymentMode } from './card-hold-copy';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 
@@ -45,7 +46,16 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     return Math.min(Math.max(2, min), max);
   });
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
-  const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
+  const [createResult, setCreateResult] = useState<{
+    booking_id: string;
+    client_secret?: string;
+    stripe_account_id?: string;
+    requires_deposit: boolean;
+    /** Card capture mode from the create response ('setup' = card hold, no payment today). */
+    payment_mode?: CardHoldPaymentMode;
+    card_hold_fee_pence?: number | null;
+    card_hold_consent_text?: string | null;
+  } | null>(null);
   const [_paymentComplete, setPaymentComplete] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -264,7 +274,15 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         }
         throw new Error(data.error ?? 'Booking failed');
       }
-      setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, stripe_account_id: data.stripe_account_id, requires_deposit: data.requires_deposit ?? false });
+      setCreateResult({
+        booking_id: data.booking_id,
+        client_secret: data.client_secret,
+        stripe_account_id: data.stripe_account_id,
+        requires_deposit: data.requires_deposit ?? false,
+        payment_mode: data.payment_mode,
+        card_hold_fee_pence: data.card_hold_fee_pence ?? null,
+        card_hold_consent_text: data.card_hold_consent_text ?? null,
+      });
       if (data.requires_deposit && data.client_secret) {
         setStepIndex(steps.indexOf('payment'));
       } else {
@@ -388,11 +406,17 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           partySize={partySize}
           onComplete={handlePaymentComplete}
           onBack={goBack}
-          cancellationPolicy={tablePaymentPolicy}
+          // Hold modes: the consent line covers the cancellation rule, so the deposit
+          // refund-policy line is suppressed (design doc 7.3).
+          cancellationPolicy={isCardHoldPaymentMode(createResult.payment_mode) ? undefined : tablePaymentPolicy}
+          mode={createResult.payment_mode ?? 'payment'}
+          cardHoldFeePence={createResult.card_hold_fee_pence}
+          cardHoldConsentText={createResult.card_hold_consent_text}
+          venueName={venue.name}
         />
       )}
       {step === 'confirmation' && (
-        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} />
+        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} paymentMode={createResult?.payment_mode} />
       )}
     </div>
   );

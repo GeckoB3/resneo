@@ -611,6 +611,15 @@ async function enrichBookingEmailWithAddons(
   // flat single-booking handling here to avoid double-counting.
   if (base.group_appointments && base.group_appointments.length > 0) return base;
 
+  // Idempotency: `addons_total_price_pence` on email data is only ever set by
+  // this function, so its presence means the add-ons are already rolled into
+  // `booking_total_price_pence`. Several senders enrich internally while some
+  // callers pre-enrich (e.g. sendDepositPaidBookingComms before
+  // sendBookingConfirmationNotifications); without this guard the second pass
+  // added the add-on price again and confirmation emails showed an inflated
+  // total (a £35 service with a £10 add-on displayed £55).
+  if (base.addons_total_price_pence != null) return base;
+
   const { data: rows, error } = await supabase
     .from('booking_addons')
     .select(

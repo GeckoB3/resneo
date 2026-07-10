@@ -1,4 +1,5 @@
 import type { BookingModel } from '@/types/booking-models';
+import type { CardHoldSummary } from '@/components/booking/card-hold-ui-state';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
 
@@ -42,6 +43,10 @@ export interface BookingDetail {
   service_id?: string | null;
   deposit_status: string;
   deposit_amount_pence: number | null;
+  /** Card-hold summary from GET /api/venue/bookings/[id] (§9.1); null = no hold row. */
+  card_hold?: CardHoldSummary | null;
+  /** The service's payment mode ('full_payment' | 'deposit' | 'card_hold' | 'none'); null when not an appointment service booking. */
+  service_payment_requirement?: string | null;
   dietary_notes: string | null;
   occasion: string | null;
   special_requests: string | null;

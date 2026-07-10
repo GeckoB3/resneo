@@ -32,7 +32,16 @@ import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog'
  */
 export interface VenueCatalogueData {
   /** serviceId → name/duration/price (deduped across calendars). */
-  services: Map<string, { name: string; durationMinutes: number | null; pricePence: number | null }>;
+  services: Map<
+    string,
+    {
+      name: string;
+      durationMinutes: number | null;
+      pricePence: number | null;
+      /** The owning venue's chosen display order (Dashboard → Services drag order). */
+      sortOrder: number;
+    }
+  >;
   /** calendarId → name. */
   calendars: Map<string, { name: string }>;
   /** serviceId → calendarIds that offer it (for the availability fan-out). */
@@ -53,7 +62,10 @@ export async function loadVenueCatalogueData(
   } catch {
     practitioners = [];
   }
-  const services = new Map<string, { name: string; durationMinutes: number | null; pricePence: number | null }>();
+  const services = new Map<
+    string,
+    { name: string; durationMinutes: number | null; pricePence: number | null; sortOrder: number }
+  >();
   const calendars = new Map<string, { name: string }>();
   const serviceCalendars = new Map<string, string[]>();
   const serviceOrder: string[] = [];
@@ -69,6 +81,7 @@ export async function loadVenueCatalogueData(
           name: s.name,
           durationMinutes: s.duration_minutes ?? null,
           pricePence: s.price_pence ?? null,
+          sortOrder: s.sort_order ?? 0,
         });
         serviceOrder.push(s.id);
       }
@@ -602,12 +615,19 @@ export async function loadPublicCombinedCatalogue(
   }
 
   // Source services + calendars per eligible venue (model-agnostic).
-  const serviceIndex = new Map<string, { durationMinutes: number | null; pricePence: number | null }>();
+  const serviceIndex = new Map<
+    string,
+    { durationMinutes: number | null; pricePence: number | null; sortOrder: number }
+  >();
   const practitioner = new Map<string, { name: string }>();
   for (const venueId of eligibleVenueIds) {
     const data = await loadVenueCatalogueData(admin, venueId);
     for (const [id, s] of data.services) {
-      serviceIndex.set(`${venueId}:${id}`, { durationMinutes: s.durationMinutes, pricePence: s.pricePence });
+      serviceIndex.set(`${venueId}:${id}`, {
+        durationMinutes: s.durationMinutes,
+        pricePence: s.pricePence,
+        sortOrder: s.sortOrder,
+      });
     }
     for (const [id, c] of data.calendars) {
       practitioner.set(`${venueId}:${id}`, { name: c.name });
@@ -627,6 +647,10 @@ export async function loadPublicCombinedCatalogue(
   const itemIds = items.map((i) => i.id as string);
 
   const providersByItem = new Map<string, PublicCatalogueProvider[]>();
+  // itemId → lowest source-service sort_order across bookable providers. Lets the
+  // combined page follow the member venues' own service order (Dashboard → Services)
+  // when the host has not curated an explicit display_order.
+  const minSourceSortByItem = new Map<string, number>();
   if (itemIds.length > 0) {
     const { data: providerRows } = await admin
       .from('collective_service_providers')
@@ -651,6 +675,10 @@ export async function loadPublicCombinedCatalogue(
         practName = pr.name;
       }
       const itemId = raw.item_id as string;
+      const prevMin = minSourceSortByItem.get(itemId);
+      if (prevMin === undefined || source.sortOrder < prevMin) {
+        minSourceSortByItem.set(itemId, source.sortOrder);
+      }
       const view: PublicCatalogueProvider = {
         providerId: raw.id as string,
         venueId,
@@ -671,10 +699,15 @@ export async function loadPublicCombinedCatalogue(
   }
 
   const publicItems: PublicCatalogueItem[] = [];
+  const sortKeyByItem = new Map<string, { displayOrder: number; sourceOrder: number }>();
   for (const i of items) {
     const providers = providersByItem.get(i.id as string) ?? [];
     if (providers.length === 0) continue; // nothing bookable → hide the offering
     const prices = providers.map((p) => p.pricePence).filter((p): p is number => p != null);
+    sortKeyByItem.set(i.id as string, {
+      displayOrder: (i.display_order as number) ?? 0,
+      sourceOrder: minSourceSortByItem.get(i.id as string) ?? 0,
+    });
     publicItems.push({
       id: i.id as string,
       name: (i.name as string) ?? 'Service',
@@ -687,6 +720,18 @@ export async function loadPublicCombinedCatalogue(
       providers,
     });
   }
+
+  // Order: host-curated display_order first, then the member venues' own service
+  // order (lowest across providers), then name so untouched catalogues stay stable.
+  publicItems.sort((a, b) => {
+    const ka = sortKeyByItem.get(a.id) ?? { displayOrder: 0, sourceOrder: 0 };
+    const kb = sortKeyByItem.get(b.id) ?? { displayOrder: 0, sourceOrder: 0 };
+    return (
+      ka.displayOrder - kb.displayOrder ||
+      ka.sourceOrder - kb.sourceOrder ||
+      a.name.localeCompare(b.name, 'en')
+    );
+  });
 
   return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: publicItems };
 }

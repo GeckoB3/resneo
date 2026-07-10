@@ -2289,11 +2289,15 @@ function depositBadge(status: string, amountPence: number | null) {
     Paid: 'success',
     Refunded: 'brand',
     Pending: 'warning',
+    'Card Held': 'info',
+    Charged: 'warning',
   };
   const labelMap: Record<string, string> = {
     Paid: amt ? `${amt} paid` : 'Deposit paid',
     Refunded: amt ? `${amt} refunded` : 'Refunded',
     Pending: 'Deposit pending',
+    'Card Held': 'Card held',
+    Charged: 'Fee charged',
   };
   const variant = variantMap[status] ?? 'neutral';
   const label = labelMap[status] ?? status;

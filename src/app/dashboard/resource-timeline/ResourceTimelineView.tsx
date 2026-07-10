@@ -50,12 +50,13 @@ import {
   WeekHoursEditor,
   type ResourceListItem,
 } from './resource-timeline-ui';
+import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
+type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment' | 'card_hold';
 
 interface Resource {
   id: string;
@@ -282,6 +283,11 @@ const MAX_EXCEPTION_RANGE_DAYS = 366;
 function resourcePaymentSummary(r: Resource, formatPrice: (pence: number) => string): string {
   if (r.payment_requirement === 'none') return 'Pay at venue';
   if (r.payment_requirement === 'full_payment') return 'Full payment online';
+  if (r.payment_requirement === 'card_hold') {
+    return r.deposit_amount_pence != null
+      ? `Card hold, no-show fee ${formatPrice(r.deposit_amount_pence)}`
+      : 'Card hold';
+  }
   const dep = r.deposit_amount_pence != null ? formatPrice(r.deposit_amount_pence) : '—';
   return `Deposit ${dep} online`;
 }
@@ -291,6 +297,9 @@ function resourceBookingPaymentLine(b: ResourceBooking, formatPrice: (pence: num
   const pence = b.deposit_amount_pence;
   const st = b.deposit_status ?? '-';
   if (mode === 'none') return 'Pay at venue';
+  // Card-hold bookings take no money up front; the hold itself is surfaced by the
+  // booking's deposit_status once the card-hold booking flows ship.
+  if (mode === 'card_hold') return `Card hold (${st})`;
   if (pence != null && pence > 0) {
     if (mode === 'full_payment') return `Paid ${formatPrice(pence)} online (${st})`;
     if (mode === 'deposit') return `Deposit ${formatPrice(pence)} (${st})`;
@@ -318,6 +327,8 @@ export function ResourceTimelineView({
   stripeConnected?: boolean;
 }) {
   const sym = currency === 'EUR' ? '\u20ac' : '\u00a3';
+  /** Card-hold deposits rollout flag, resolved server-side by the dashboard layout (VenueFeatureFlagsProvider). */
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
@@ -898,6 +909,14 @@ export function ResourceTimelineView({
         return;
       }
     }
+    // Card hold has no price relationship, but the flat no-show fee must be at least £1 (design doc §6.2).
+    if (formPaymentReq === 'card_hold') {
+      const d = parseFloat(formDeposit);
+      if (!Number.isFinite(d) || d < 1) {
+        setError('Enter a no-show fee of at least £1.');
+        return;
+      }
+    }
     if (!formDisplayCalendarId) {
       setError('Choose a calendar column to show this resource on.');
       return;
@@ -917,7 +936,8 @@ export function ResourceTimelineView({
         max_booking_minutes: formMax,
         ...(formPrice !== '' && { price_per_slot_pence: pricePence }),
         payment_requirement: formPaymentReq,
-        ...(formPaymentReq === 'deposit'
+        // 'card_hold' stores its flat no-show fee in the same column as deposits.
+        ...(formPaymentReq === 'deposit' || formPaymentReq === 'card_hold'
           ? { deposit_amount_pence: Math.round(parseFloat(formDeposit) * 100) }
           : { deposit_amount_pence: null }),
         is_active: formActive,
@@ -1592,10 +1612,13 @@ export function ResourceTimelineView({
                 depositValue={formDeposit}
                 onDepositChange={setFormDeposit}
                 stripeConnected={stripeConnected}
+                cardHoldEnabled={cardHoldEnabled}
               />
               <StripePaymentWarning
                 stripeConnected={stripeConnected}
-                requiresOnlinePayment={formPaymentReq === 'deposit' || formPaymentReq === 'full_payment'}
+                requiresOnlinePayment={
+                  formPaymentReq === 'deposit' || formPaymentReq === 'full_payment' || formPaymentReq === 'card_hold'
+                }
               />
               </div>
               <label className="mt-4 flex cursor-pointer items-center gap-2.5 text-sm font-medium text-slate-700">

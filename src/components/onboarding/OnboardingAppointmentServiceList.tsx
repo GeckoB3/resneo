@@ -172,7 +172,12 @@ export function serviceDraftToApiPayload(
   opts: { isAdmin: boolean },
 ): Record<string, unknown> {
   const { isAdmin } = opts;
-  const depositPence = draft.payment_requirement === 'deposit' ? (poundsToPence(draft.deposit) ?? 0) : 0;
+  // Onboarding never offers card holds (charge-only per the card-hold design doc §6.2), but a
+  // service configured as card_hold in the dashboard can be re-saved here; keep its fee intact.
+  const depositPence =
+    draft.payment_requirement === 'deposit' || draft.payment_requirement === 'card_hold'
+      ? (poundsToPence(draft.deposit) ?? 0)
+      : 0;
   const usesVariantsPayload = isAdmin && draft.variants.length > 0;
   const primaryForParent =
     usesVariantsPayload && draft.variants.length > 0

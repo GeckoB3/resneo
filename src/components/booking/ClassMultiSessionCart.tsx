@@ -7,6 +7,8 @@ import { classOfferingsUrl, bookingConfirmPaymentUrl } from '@/lib/booking/booki
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import { PaymentStep } from './PaymentStep';
+import { type CardHoldPaymentMode } from './card-hold-copy';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import type { ClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 
 interface CartLine {
@@ -28,7 +30,12 @@ interface PaymentSessionState {
   stripe_account_id: string;
   primary_booking_id: string;
   total_amount_pence: number;
-  checkout_charge_kind: 'deposit' | 'full_payment';
+  /** Absent in setup mode (card hold: nothing is charged today). */
+  checkout_charge_kind?: 'deposit' | 'full_payment';
+  /** Card capture mode from the checkout response ('setup' = card hold, no payment today). */
+  payment_mode?: CardHoldPaymentMode;
+  card_hold_fee_pence?: number | null;
+  card_hold_consent_text?: string | null;
   group_booking_id: string;
   total_party_size: number;
 }
@@ -40,6 +47,8 @@ interface QuoteLine {
   booking_time: string;
   party_size: number;
   online_charge_pence: number;
+  /** No-show fee the venue may charge later (card hold; nothing charged today). */
+  card_hold_fee_pence?: number | null;
   ok: boolean;
   error?: string;
 }
@@ -47,6 +56,8 @@ interface QuoteLine {
 interface CartQuote {
   lines: QuoteLine[];
   total_online_charge_pence: number;
+  /** Sum of the card-hold lines' no-show fees; null when no line holds a card. */
+  card_hold_fee_pence?: number | null;
   all_ok: boolean;
 }
 
@@ -159,11 +170,16 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
     } catch {
       /* webhook fallback */
     }
+    const savedCardOnly = paymentSession.payment_mode === 'setup';
     setPaymentSession(null);
     setCart([]);
     setQuote(null);
     setError(null);
-    alert('Payment successful — your class bookings are confirmed.');
+    alert(
+      savedCardOnly
+        ? 'Card saved. No payment has been taken.'
+        : 'Payment successful. Your class bookings are confirmed.',
+    );
   }, [paymentSession]);
 
   async function runCheckout() {
@@ -196,7 +212,10 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
           stripe_account_id: data.stripe_account_id as string,
           primary_booking_id: data.primary_booking_id as string,
           total_amount_pence: data.total_amount_pence as number,
-          checkout_charge_kind: (data.checkout_charge_kind as 'deposit' | 'full_payment') ?? 'deposit',
+          checkout_charge_kind: data.checkout_charge_kind as 'deposit' | 'full_payment' | undefined,
+          payment_mode: (data.payment_mode as CardHoldPaymentMode | undefined) ?? 'payment',
+          card_hold_fee_pence: (data.card_hold_fee_pence as number | null | undefined) ?? null,
+          card_hold_consent_text: (data.card_hold_consent_text as string | null | undefined) ?? null,
           group_booking_id: data.group_booking_id as string,
           total_party_size: totalParty,
         });
@@ -237,14 +256,14 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             <ul className="mt-2 list-inside list-disc space-y-1 text-slate-700">
               {commerce.credit_products.slice(0, 5).map((p) => (
                 <li key={p.id}>
-                  {p.name} — {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
+                  {p.name}: {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
                 </li>
               ))}
             </ul>
           ) : null}
           {commerce.course_products.length > 0 ? (
             <p className="mt-2 text-xs text-slate-600">
-              {commerce.course_products.length} course package{commerce.course_products.length === 1 ? '' : 's'} — see
+              {commerce.course_products.length} course package{commerce.course_products.length === 1 ? '' : 's'}. See
               your account or venue for full enrollment.
             </p>
           ) : null}
@@ -265,12 +284,16 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             onBack={() => {
               setPaymentSession(null);
               setError(
-                'Payment was not completed. Pending holds may still apply — refresh or contact the venue if you need help.',
+                'Payment was not completed. Pending holds may still apply. Refresh the page or contact the venue if you need help.',
               );
             }}
             cancellationPolicy={undefined}
             summaryMode="total"
-            chargeKind={paymentSession.checkout_charge_kind}
+            chargeKind={paymentSession.checkout_charge_kind ?? 'deposit'}
+            mode={paymentSession.payment_mode ?? 'payment'}
+            cardHoldFeePence={paymentSession.card_hold_fee_pence}
+            cardHoldConsentText={paymentSession.card_hold_consent_text}
+            venueName={venue.name}
           />
         </div>
       ) : (
@@ -305,7 +328,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                     <option value="">Choose a session…</option>
                     {instanceOptions.map((i) => (
                       <option key={i.instance_id} value={i.instance_id}>
-                        {i.class_name} — {i.instance_date} {i.start_time} ({i.remaining} left)
+                        {i.class_name}: {i.instance_date} {i.start_time} ({i.remaining} left)
                       </option>
                     ))}
                   </select>
@@ -368,6 +391,12 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                       {line.class_name} · {line.booking_date} {line.booking_time} · {line.party_size} spot
                       {line.party_size !== 1 ? 's' : ''}
                       {!line.ok && line.error ? <span className="text-red-700"> · {line.error}</span> : null}
+                      {line.ok && line.card_hold_fee_pence != null ? (
+                        <span className="block text-xs text-slate-500">
+                          No-show fee up to {formatCardHoldFeePence(line.card_hold_fee_pence)}. Nothing is charged
+                          today.
+                        </span>
+                      ) : null}
                     </span>
                     <span className="font-semibold">£{(line.online_charge_pence / 100).toFixed(2)}</span>
                   </li>
@@ -377,6 +406,12 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
                 <span>Due now</span>
                 <span>£{((quoteSummary?.total_online_charge_pence ?? 0) / 100).toFixed(2)}</span>
               </div>
+              {quoteSummary?.card_hold_fee_pence != null ? (
+                <div className="mt-1.5 flex justify-between text-xs text-slate-600">
+                  <span>No-show fee up to</span>
+                  <span>{formatCardHoldFeePence(quoteSummary.card_hold_fee_pence)}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </>

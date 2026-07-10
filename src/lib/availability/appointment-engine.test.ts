@@ -4,6 +4,7 @@ import type { PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import {
   computeAppointmentAvailability,
+  getOfferedAppointmentServicesForPractitioner,
   validateAppointmentCustomInterval,
   type AppointmentEngineInput,
   type AppointmentBooking,
@@ -742,5 +743,38 @@ describe('appointment engine: add-on duration extends slot fitting', () => {
     const r = computeAppointmentAvailability(inputWithDuration(30 + 60));
     expect(r.practitioners[0]?.slots.some((s) => s.start_time === '12:00')).toBe(true);
     expect(r.practitioners[0]?.slots.some((s) => s.start_time === '13:00')).toBe(true);
+  });
+});
+
+describe('getOfferedAppointmentServicesForPractitioner', () => {
+  const practitioner = { id: 'p1', name: 'Alex', is_active: true } as unknown as import('@/types/booking-models').Practitioner;
+  const svc = (id: string, name: string): import('@/types/booking-models').AppointmentService =>
+    ({ id, name, duration_minutes: 30, buffer_minutes: 0, is_active: true } as import('@/types/booking-models').AppointmentService);
+  const link = (id: string, serviceId: string): PractitionerService => ({
+    id,
+    practitioner_id: 'p1',
+    service_id: serviceId,
+    custom_duration_minutes: null,
+    custom_price_pence: null,
+  });
+
+  it('preserves the order of the services array (venue sort_order), not the link-row order', () => {
+    // Services arrive sorted by the venue's chosen sort_order; links arrive in
+    // arbitrary insertion order and must not dictate the catalogue order.
+    const services = [svc('s3', 'Third'), svc('s1', 'First'), svc('s2', 'Second')];
+    const links = [link('l1', 's2'), link('l2', 's3'), link('l3', 's1')];
+    const offered = getOfferedAppointmentServicesForPractitioner(practitioner, services, links);
+    expect(offered.map((s) => s.id)).toEqual(['s3', 's1', 's2']);
+  });
+
+  it('skips inactive and unlinked services', () => {
+    const services = [
+      { ...svc('s1', 'First'), is_active: false },
+      svc('s2', 'Second'),
+      svc('s3', 'Unlinked'),
+    ];
+    const links = [link('l1', 's1'), link('l2', 's2')];
+    const offered = getOfferedAppointmentServicesForPractitioner(practitioner, services, links);
+    expect(offered.map((s) => s.id)).toEqual(['s2']);
   });
 });

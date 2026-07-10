@@ -17,6 +17,7 @@ import {
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { cardHoldBookingNoticeLine } from './card-hold-copy';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -128,8 +129,18 @@ interface DetailsStepProps {
   multiAppointmentSlots?: Array<{ date: string; time: string }>;
   /** Defaults country code (+44 for GB) from venue currency; falls back to GB. */
   phoneDefaultCountry?: CountryCode;
-  /** Resource / class: wording for the amount collected online before the appointment. */
-  appointmentChargeLabel?: 'deposit' | 'full_payment';
+  /**
+   * Resource / class: wording for the amount collected online before the appointment.
+   * `card_hold` means no money is due at booking; the fee is a no-show maximum and the
+   * legacy deposit / refund-policy copy is replaced by the hold notice (design doc 7.3).
+   */
+  appointmentChargeLabel?: 'deposit' | 'full_payment' | 'card_hold';
+  /**
+   * No-show hold fee (pence) shown alongside a paid deposit in mixed (payment_with_setup)
+   * contexts. For pure card-hold bookings pass `appointmentChargeLabel: 'card_hold'` and
+   * either this or `appointmentDepositPence` as the fee.
+   */
+  appointmentCardHoldFeePence?: number | null;
   /** Priced booking with pay-at-venue mode: show expected balance due on site. */
   payAtVenueBalancePence?: number | null;
   /** When set with payAtVenueBalancePence, explains why no online charge (e.g. resource pay at venue). */
@@ -169,6 +180,7 @@ export function DetailsStep({
   multiAppointmentSlots,
   phoneDefaultCountry = 'GB',
   appointmentChargeLabel = 'deposit',
+  appointmentCardHoldFeePence = null,
   payAtVenueBalancePence,
   payAtVenuePaymentRequirement,
   audience = 'public',
@@ -237,13 +249,22 @@ export function DetailsStep({
   const isClass = variant === 'class';
   const useAppointmentFields = isAppointment || isClass;
   const depositPence = appointmentDepositPence ?? 0;
-  const hasDeposit = useAppointmentFields && depositPence > 0;
+  // Card hold (design doc 7.3): no money is due at booking, so the deposit banner and its
+  // refund-policy copy are replaced with the hold notice below.
+  const isCardHoldCharge = appointmentChargeLabel === 'card_hold';
+  const cardHoldFeePence = isCardHoldCharge
+    ? appointmentCardHoldFeePence ?? depositPence
+    : appointmentCardHoldFeePence ?? 0;
+  const hasDeposit = useAppointmentFields && !isCardHoldCharge && depositPence > 0;
+  const showCardHoldOnly = useAppointmentFields && isCardHoldCharge && cardHoldFeePence > 0;
+  const isTableCardHoldSlot = !isAppointment && Boolean(requiresDeposit) && slot.deposit_type === 'card_hold';
   const payAtVenuePence = payAtVenueBalancePence ?? 0;
   const showPayAtVenue =
     useAppointmentFields &&
     payAtVenuePaymentRequirement === 'none' &&
     payAtVenuePence > 0 &&
-    !hasDeposit;
+    !hasDeposit &&
+    !showCardHoldOnly;
 
   const refundClassification = (() => {
     if (!hasDeposit || !slot.start_time) return null;
@@ -332,7 +353,12 @@ export function DetailsStep({
           }`}
         >
               <p className="text-sm font-semibold text-slate-900">Cancellation policy</p>
-          {!hasDeposit && !showPayAtVenue && <p className="mt-1 text-sm text-slate-600">Cancel for free anytime</p>}
+          {!hasDeposit && !showPayAtVenue && !showCardHoldOnly && (
+            <p className="mt-1 text-sm text-slate-600">Cancel for free anytime</p>
+          )}
+          {showCardHoldOnly && (
+            <p className="mt-1 text-sm text-slate-700">{cardHoldBookingNoticeLine(cardHoldFeePence)}</p>
+          )}
           {showPayAtVenue && (
             <p className="mt-1 text-sm text-slate-600">
               Payment of {currencySymbol}
@@ -382,6 +408,9 @@ export function DetailsStep({
                 </>
               )}
               <p className="text-xs text-amber-800/90">No refund after the deadline above. No-shows aren&apos;t refunded.</p>
+              {cardHoldFeePence > 0 && (
+                <p className="text-sm text-amber-900">{cardHoldBookingNoticeLine(cardHoldFeePence)}</p>
+              )}
             </div>
           )}
         </div>
@@ -393,12 +422,20 @@ export function DetailsStep({
             <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
             </svg>
-            <div className="space-y-1">
+            {isTableCardHoldSlot ? (
+              // Card-hold slot (design doc 7.3): replace the deposit banner with the hold
+              // notice and omit the deposit refund-policy line.
               <p className="text-sm font-medium text-amber-800">
-                Deposit of &pound;{depositPerPerson?.toFixed(2) ?? '5.00'} per person required
+                {cardHoldBookingNoticeLine(Math.round((slot.deposit_amount ?? 0) * 100))}
               </p>
-              <p className="text-xs text-amber-700">{formatOnlinePaidRefundPolicyLine(refundNoticeHours)}</p>
-            </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-amber-800">
+                  Deposit of &pound;{depositPerPerson?.toFixed(2) ?? '5.00'} per person required
+                </p>
+                <p className="text-xs text-amber-700">{formatOnlinePaidRefundPolicyLine(refundNoticeHours)}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -648,9 +685,11 @@ export function DetailsStep({
             : submitLabel ??
               ((isAppointment || isClass) && hasDeposit
               ? 'Continue to payment'
-              : !useAppointmentFields && requiresDeposit
-                ? 'Continue to Payment'
-                : 'Confirm Booking')}
+              : showCardHoldOnly || isTableCardHoldSlot
+                ? 'Continue'
+                : !useAppointmentFields && requiresDeposit
+                  ? 'Continue to Payment'
+                  : 'Confirm Booking')}
         </button>
       </form>
     </div>

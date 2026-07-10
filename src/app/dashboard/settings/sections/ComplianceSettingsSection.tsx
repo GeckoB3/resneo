@@ -8,8 +8,8 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
-import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
+import { ServiceRequirementsPanel } from '@/components/dashboard/compliance/ServiceRequirementsPanel';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
 import {
   CATEGORY_LABELS,
@@ -48,7 +48,7 @@ export function ComplianceSettingsSection({ isAdmin }: { isAdmin: boolean }) {
     <div className="space-y-4">
       <TabBar tabs={SUB_TABS} value={sub} onChange={setSub} />
       {sub === 'types' && <TypesPanel isAdmin={isAdmin} />}
-      {sub === 'requirements' && <RequirementsPanel />}
+      {sub === 'requirements' && <ServiceRequirementsPanel />}
       {sub === 'general' && <GeneralPanel isAdmin={isAdmin} />}
     </div>
   );
@@ -287,60 +287,6 @@ function LibraryDialog({
         </ul>
       </div>
     </Dialog>
-  );
-}
-
-// ─── Service requirements ───────────────────────────────────────────────────
-
-interface ServiceRow {
-  id: string;
-  name: string;
-  is_active?: boolean;
-}
-
-function RequirementsPanel() {
-  const { data: flags } = useSWR<{ raw: { compliance_records_enabled?: boolean } }>(
-    '/api/venue/feature-flags',
-    complianceJsonFetcher,
-  );
-  const { data, isLoading } = useSWR<{ services: ServiceRow[] }>(
-    '/api/venue/appointment-services',
-    complianceJsonFetcher,
-  );
-  const complianceEnabled = flags?.raw?.compliance_records_enabled ?? false;
-  const services = (data?.services ?? []).filter((s) => s.is_active !== false);
-
-  return (
-    <SectionCard elevated>
-      <SectionCard.Header
-        eyebrow="Compliance"
-        title="Service requirements"
-        description="Choose which compliance types each service requires, such as a patch test or a signed consent form. When a service needs a type, its bookings warn or block until the client has a valid record on file. You can set the same requirements while editing a service."
-      />
-      <SectionCard.Body>
-        {flags && !complianceEnabled ? (
-          <p className="text-sm text-slate-500">
-            Turn on <span className="font-medium">Enable compliance records</span> in the General settings tab to
-            connect services to compliance types.
-          </p>
-        ) : isLoading ? (
-          <p className="text-sm text-slate-500">Loading services…</p>
-        ) : services.length === 0 ? (
-          <p className="text-sm text-slate-500">No services to configure yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {services.map((s) => (
-              <details key={s.id} className="rounded-lg border border-slate-200">
-                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-800">{s.name}</summary>
-                <div className="border-t border-slate-100 p-3">
-                  <ComplianceRequirementsEditor appointmentServiceId={s.id} complianceEnabled={complianceEnabled} />
-                </div>
-              </details>
-            ))}
-          </div>
-        )}
-      </SectionCard.Body>
-    </SectionCard>
   );
 }
 

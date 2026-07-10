@@ -5,10 +5,12 @@ import {
 } from "@/lib/booking/cancellation-deadline";
 
 const BRAND = "#003B6F";
-const GREY_BG = "#F5F5F5";
+const GREY_BG = "#f8fafc";
 const AMBER_BG = "#FFF3CD";
 const AMBER_TEXT = "#664D03";
-const FOOTER_TEXT = "#888888";
+const FOOTER_TEXT = "#94a3b8";
+const PAGE_BG = "#f0f2f5";
+const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
 
 export function escapeHtml(text: string): string {
   return text
@@ -66,9 +68,9 @@ function buildTableStyleDetailRow(
 ): string {
   const border = showBorderBottom ? "border-bottom:1px solid #e2e8f0" : "";
   return (
-    `<tr><td style="padding:8px 0;${border}">` +
-    `<span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(label)}</span>` +
-    `<span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${valueHtmlEscaped}</span>` +
+    `<tr><td style="padding:10px 0;${border}">` +
+    `<span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">${escapeHtml(label)}</span>` +
+    `<span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${valueHtmlEscaped}</span>` +
     `</td></tr>`
   );
 }
@@ -107,48 +109,48 @@ export function buildBookingDetailsCard(opts: {
       opts.priceDisplay?.trim() ?
         `<tr><td style="padding:12px 0 0 0;border-top:1px solid #e5e5e5;font-size:14px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtmlMultiline(opts.priceDisplay.trim())}</td></tr>`
       : "";
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${header}${tableRows.join("")}${summaryRow}</td></tr></table>`;
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:18px 20px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tbody>${header}${tableRows.join("")}${summaryRow}</tbody></table></td></tr></table>`;
   }
 
   if (variant === "appointment") {
     if (opts.bookingDate) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Date</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.bookingDate)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Date</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.bookingDate)}</span></td></tr>`,
       );
     }
     if (opts.bookingTime) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Time</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.bookingTime)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Time</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.bookingTime)}</span></td></tr>`,
       );
     }
     if (opts.serviceName) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Service</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.serviceName)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Service</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.serviceName)}</span></td></tr>`,
       );
     }
     if (opts.practitionerName) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">With</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.practitionerName)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">With</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.practitionerName)}</span></td></tr>`,
       );
     }
     if (opts.priceDisplay) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Price and payment</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.45">${escapeHtmlMultiline(opts.priceDisplay)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Price and payment</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.55">${escapeHtmlMultiline(opts.priceDisplay)}</span></td></tr>`,
       );
     }
     if (opts.partySize && opts.partySize > 1) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">People</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${opts.partySize}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">People</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${opts.partySize}</span></td></tr>`,
       );
     }
     if (opts.venueAddress) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Location</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.venueAddress)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Location</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.venueAddress)}</span></td></tr>`,
       );
     }
     if (opts.specialRequests) {
       rows.push(
-        `<tr><td style="padding:8px 0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Notes</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.specialRequests)}</span></td></tr>`,
+        `<tr><td style="padding:10px 0"><span style="display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">Notes</span><span style="display:block;margin-top:6px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtml(opts.specialRequests)}</span></td></tr>`,
       );
     }
   } else {
@@ -179,7 +181,7 @@ export function buildBookingDetailsCard(opts: {
   }
 
   if (rows.length === 0) return "";
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:10px;margin:16px 0;box-shadow:0 1px 2px rgba(15,23,42,0.06)"><tr><td style="padding:18px 20px">${rows.join("")}</td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:12px;margin:20px 0"><tr><td style="padding:20px 22px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tbody>${rows.join("")}</tbody></table></td></tr></table>`;
 }
 
 /** Compact date for group lines (reuse full formatDate if needed). */
@@ -217,16 +219,16 @@ export function buildDepositCallout(
         " Under this venue's policy, deposits are only refunded if you cancel before a set time before your booking. That deadline has already passed, so this deposit is not refundable if you cancel.";
     }
   }
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${AMBER_BG};border:1px solid #FFE69C;border-radius:8px;margin:16px 0"><tr><td style="padding:16px;font-size:14px;color:${AMBER_TEXT}">${text}</td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${AMBER_BG};border:1px solid #FFE69C;border-radius:12px;margin:20px 0"><tr><td style="padding:16px 18px;font-size:14px;line-height:1.6;color:${AMBER_TEXT};font-family:${FONT}">${text}</td></tr></table>`;
 }
 
 export function buildCtaButton(label: string, url: string): string {
   return [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0">',
+    '<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:28px auto">',
     '<tr><td style="background-color:' +
       BRAND +
-      ';border-radius:8px;text-align:center">',
-    `<a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;padding:16px 32px;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">${escapeHtml(label)}</a>`,
+      ';border-radius:9999px;text-align:center">',
+    `<a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;padding:15px 36px;color:#ffffff;font-family:${FONT};font-size:15px;font-weight:600;text-decoration:none;border-radius:9999px">${escapeHtml(label)}</a>`,
     "</td></tr></table>",
   ].join("");
 }
@@ -250,7 +252,7 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
   const depositSection = opts.depositInfoHtml ?? "";
 
   const customSection = opts.customMessage
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:16px 0"><tr><td style="padding:16px;background-color:#F0F9FF;border-radius:8px;font-size:14px;color:#1E40AF;font-style:italic">${escapeHtml(opts.customMessage)}</td></tr></table>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0"><tr><td style="padding:16px 18px;background-color:#F0F9FF;border:1px solid #dbeafe;border-radius:12px;font-size:14px;line-height:1.6;color:#1E40AF;font-style:italic;font-family:${FONT}">${escapeHtml(opts.customMessage)}</td></tr></table>`
     : "";
 
   const ctaSection =
@@ -271,24 +273,24 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
   return [
     "<!DOCTYPE html>",
     '<html lang="en">',
-    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>',
-    '<body style="margin:0;padding:0;background-color:#f8fafc">',
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f8fafc">',
-    '<tr><td align="center" style="padding:24px 16px">',
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">',
+    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>',
+    `<body style="margin:0;padding:0;background-color:${PAGE_BG};-webkit-font-smoothing:antialiased">`,
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${PAGE_BG}">`,
+    '<tr><td align="center" style="padding:36px 16px 28px">',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">',
 
     // Header bar
-    `<tr><td style="padding:20px 24px;background-color:${BRAND}">`,
+    `<tr><td style="padding:22px 32px;background-color:${BRAND}">`,
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td>`,
     opts.venueLogoUrl
       ? `<img src="${escapeHtml(opts.venueLogoUrl)}" alt="${escapeHtml(opts.venueName)}" width="120" style="height:auto;display:block" />`
-      : `<span style="font-size:18px;font-weight:700;color:#ffffff">${escapeHtml(opts.venueName)}</span>`,
+      : `<span style="font-family:${FONT};font-size:17px;font-weight:700;letter-spacing:-0.01em;color:#ffffff">${escapeHtml(opts.venueName)}</span>`,
     "</td></tr></table>",
     "</td></tr>",
 
     // Body
-    `<tr><td style="padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1e293b">`,
-    `<h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#0f172a">${escapeHtml(opts.heading)}</h1>`,
+    `<tr><td style="padding:32px 32px 36px;font-family:${FONT};font-size:15px;line-height:1.65;color:#334155">`,
+    `<h1 style="margin:0 0 18px 0;font-size:24px;font-weight:700;letter-spacing:-0.02em;line-height:1.25;color:#0f172a">${escapeHtml(opts.heading)}</h1>`,
     opts.mainContent,
     bookingCard,
     depositSection,
@@ -299,9 +301,9 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
     "</td></tr>",
 
     // Footer
-    `<tr><td style="padding:20px 24px;border-top:1px solid #e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;color:${FOOTER_TEXT}">`,
-    `<p style="margin:0 0 8px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">ResNeo</a></p>`,
-    `<p style="margin:0;color:#aaa">${escapeHtml(footer)}</p>`,
+    `<tr><td style="padding:20px 32px;border-top:1px solid #e2e8f0;background-color:#f8fafc;font-family:${FONT};font-size:12px;line-height:1.6;color:${FOOTER_TEXT}">`,
+    `<p style="margin:0 0 6px 0">Powered by <a href="${base}" target="_blank" style="color:${BRAND};text-decoration:none;font-weight:600">ResNeo</a></p>`,
+    `<p style="margin:0;color:${FOOTER_TEXT}">${escapeHtml(footer)}</p>`,
     "</td></tr>",
 
     "</table>",

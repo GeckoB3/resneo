@@ -3,7 +3,17 @@
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
@@ -38,7 +48,9 @@ import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessag
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { DashboardEntityRowActions } from '@/components/ui/dashboard/DashboardEntityRowActions';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import useSWR from 'swr';
 import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/ComplianceRequirementsEditor';
+import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -110,6 +122,56 @@ interface PractitionerServiceLink {
 }
 
 
+function GripVerticalIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm8-15a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+    </svg>
+  );
+}
+
+/** Sortable wrapper for a service card; hands the drag handle to the card so it can sit in the header. */
+function SortableServiceCard({
+  id,
+  label,
+  canReorder,
+  children,
+}: {
+  id: string;
+  label: string;
+  canReorder: boolean;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !canReorder,
+  });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.92 : undefined,
+    zIndex: isDragging ? 2 : undefined,
+    position: isDragging ? 'relative' : undefined,
+  };
+  const dragHandle = canReorder ? (
+    <button
+      type="button"
+      className="inline-flex h-8 w-8 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
+      aria-label={`Reorder ${label}`}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVerticalIcon className="h-4 w-4" />
+    </button>
+  ) : null;
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children(dragHandle)}
+    </div>
+  );
+}
+
 function formatDuration(mins: number): string {
   if (mins < 60) return `${mins}min`;
   const h = Math.floor(mins / 60);
@@ -153,7 +215,27 @@ export function AppointmentServicesView({
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   const [error, setError] = useState<string | null>(null);
+
+  // Venue-wide compliance requirements, so each service card can show an
+  // at-a-glance indicator. Refreshed when requirements change in the editor.
+  const { data: complianceSummary, mutate: mutateComplianceSummary } = useSWR<{
+    requirements: Array<{
+      appointment_service_id: string | null;
+      service_item_id: string | null;
+      compliance_type_name: string;
+    }>;
+  }>(complianceEnabled ? '/api/venue/compliance/requirements' : null, complianceJsonFetcher);
+  const complianceTypeNamesByService = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const r of complianceSummary?.requirements ?? []) {
+      const serviceId = r.appointment_service_id ?? r.service_item_id;
+      if (!serviceId) continue;
+      m.set(serviceId, [...(m.get(serviceId) ?? []), r.compliance_type_name]);
+    }
+    return m;
+  }, [complianceSummary]);
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
@@ -288,6 +370,93 @@ export function AppointmentServicesView({
     if (linkedPractitionerIds.length === 0) return [];
     return services;
   }, [isAdmin, services, linkedPractitionerIds.length]);
+
+  // Manual display order (admins): drag a card, or use the arrow buttons, then the
+  // order persists via /reorder and drives the public + staff booking service lists.
+  const [orderedServiceIds, setOrderedServiceIds] = useState<string[]>([]);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrderedServiceIds(services.map((s) => s.id));
+  }, [services]);
+
+  const canReorderServices = isAdmin && services.length > 1;
+
+  const orderedVisibleServices = useMemo(() => {
+    const byId = new Map(visibleServices.map((s) => [s.id, s]));
+    const inOrder = orderedServiceIds
+      .map((id) => byId.get(id))
+      .filter((s): s is Service => Boolean(s));
+    const seen = new Set(inOrder.map((s) => s.id));
+    return [...inOrder, ...visibleServices.filter((s) => !seen.has(s.id))];
+  }, [visibleServices, orderedServiceIds]);
+
+  const reorderSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const persistServiceOrder = useCallback(
+    async (nextIds: string[], previousIds: string[]) => {
+      setReorderSaving(true);
+      setReorderError(null);
+      try {
+        const res = await fetch('/api/venue/appointment-services/reorder', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_ids: nextIds }),
+        });
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(j.error ?? 'Failed to save the new order');
+        }
+        // Keep local rows in sync so a later refetch-free rerender keeps this order.
+        setServices((prev) => {
+          const pos = new Map(nextIds.map((id, idx) => [id, idx]));
+          return [...prev]
+            .map((s) => ({ ...s, sort_order: pos.get(s.id) ?? s.sort_order }))
+            .sort((a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+        });
+      } catch (err) {
+        setOrderedServiceIds(previousIds);
+        setReorderError(err instanceof Error ? err.message : 'Failed to save the new order');
+        // A failed save may have partially applied on the server; refetch so the
+        // list reflects what the booking page will actually show.
+        void fetchAll();
+      } finally {
+        setReorderSaving(false);
+      }
+    },
+    [fetchAll],
+  );
+
+  const onServiceDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!canReorderServices || reorderSaving) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = orderedServiceIds.indexOf(active.id as string);
+      const newIndex = orderedServiceIds.indexOf(over.id as string);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const previousIds = orderedServiceIds;
+      const nextIds = arrayMove(orderedServiceIds, oldIndex, newIndex);
+      setOrderedServiceIds(nextIds);
+      void persistServiceOrder(nextIds, previousIds);
+    },
+    [canReorderServices, reorderSaving, orderedServiceIds, persistServiceOrder],
+  );
+
+  const moveServiceByOffset = useCallback(
+    (serviceId: string, offset: -1 | 1) => {
+      if (!canReorderServices || reorderSaving) return;
+      const oldIndex = orderedServiceIds.indexOf(serviceId);
+      const newIndex = oldIndex + offset;
+      if (oldIndex < 0 || newIndex < 0 || newIndex >= orderedServiceIds.length) return;
+      const previousIds = orderedServiceIds;
+      const nextIds = arrayMove(orderedServiceIds, oldIndex, newIndex);
+      setOrderedServiceIds(nextIds);
+      void persistServiceOrder(nextIds, previousIds);
+    },
+    [canReorderServices, reorderSaving, orderedServiceIds, persistServiceOrder],
+  );
 
   function staffMayCustomizeAny(svc: Service): boolean {
     return Boolean(
@@ -678,7 +847,24 @@ export function AppointmentServicesView({
         </SectionCard>
       ) : (
         <div className="space-y-3">
-          {visibleServices.map((svc) => {
+          {canReorderServices ? (
+            <p className="text-xs text-slate-500">
+              Drag the handle (or use the arrows) to set the order services appear in on your public
+              booking page and in the staff booking flow.
+            </p>
+          ) : null}
+          {reorderError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+              {reorderError}
+            </div>
+          ) : null}
+          <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onServiceDragEnd}>
+            <SortableContext items={orderedVisibleServices.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-3">
+          {orderedVisibleServices.map((svc, svcIndex) => {
+            // Disable dragging while a save is in flight so a second move cannot be
+            // silently dropped by the in-flight guard in onServiceDragEnd.
+            const dragEnabled = canReorderServices && !reorderSaving;
             const linkedCalendars = practitionersForService(svc.id);
             const display = mergeAppointmentServiceWithPractitionerLink(
               svc as unknown as AppointmentService,
@@ -686,8 +872,16 @@ export function AppointmentServicesView({
                 ? myLinkForService(svc.id) ?? undefined
                 : undefined,
             );
+            const paymentRequirement =
+              display.payment_requirement ??
+              (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+            const variants = svc.variants ?? [];
+            const addonGroups = svc.addon_groups ?? [];
+            const complianceTypeNames = complianceTypeNamesByService.get(svc.id) ?? [];
             return (
-              <SectionCard key={svc.id} className={!svc.is_active ? 'opacity-75' : ''}>
+              <SortableServiceCard key={svc.id} id={svc.id} label={svc.name} canReorder={dragEnabled}>
+                {(dragHandle) => (
+              <SectionCard className={!svc.is_active ? 'opacity-75' : ''}>
                 <SectionCard.Header
                   title={display.name}
                   description={
@@ -697,6 +891,33 @@ export function AppointmentServicesView({
                   }
                   right={
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {canReorderServices ? (
+                        <span className="mr-1 flex items-center gap-1">
+                          {dragHandle}
+                          <button
+                            type="button"
+                            onClick={() => moveServiceByOffset(svc.id, -1)}
+                            disabled={reorderSaving || svcIndex === 0}
+                            aria-label={`Move ${svc.name} up`}
+                            className="inline-flex h-8 w-6 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path d="M5 15l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveServiceByOffset(svc.id, 1)}
+                            disabled={reorderSaving || svcIndex === orderedVisibleServices.length - 1}
+                            aria-label={`Move ${svc.name} down`}
+                            className="inline-flex h-8 w-6 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        </span>
+                      ) : null}
                       <span
                         className="h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-200/80"
                         style={{ backgroundColor: display.colour }}
@@ -710,6 +931,14 @@ export function AppointmentServicesView({
                           {svc.variants!.filter((v) => v.is_active).length} variant
                           {svc.variants!.filter((v) => v.is_active).length === 1 ? '' : 's'}
                         </Pill>
+                      ) : null}
+                      {complianceTypeNames.length > 0 ? (
+                        <span title={complianceTypeNames.join(', ')}>
+                          <Pill variant="info" size="sm" dot>
+                            {complianceTypeNames.length} compliance requirement
+                            {complianceTypeNames.length === 1 ? '' : 's'}
+                          </Pill>
+                        </span>
                       ) : null}
                       {!svc.is_active ? (
                         <Pill variant="warning" size="sm">
@@ -732,9 +961,7 @@ export function AppointmentServicesView({
                       {formatPrice(display.price_pence)}
                     </Pill>
                     {(() => {
-                      const pr =
-                        display.payment_requirement ??
-                        (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+                      const pr = paymentRequirement;
                       if (pr === 'full_payment') {
                         return (
                           <Pill variant="success" size="sm">
@@ -749,6 +976,24 @@ export function AppointmentServicesView({
                           </Pill>
                         );
                       }
+                      if (pr === 'card_hold') {
+                        // D5: for card-hold services the deposit column holds the
+                        // no-show fee; no money is taken at booking time.
+                        return (
+                          <>
+                            <Pill variant="info" size="sm">
+                              {display.deposit_pence != null && display.deposit_pence > 0
+                                ? `Card hold: ${formatPrice(display.deposit_pence)} no-show fee`
+                                : 'Card hold'}
+                            </Pill>
+                            {!cardHoldEnabled ? (
+                              <Pill variant="warning" size="sm">
+                                Card holds are switched off in Settings
+                              </Pill>
+                            ) : null}
+                          </>
+                        );
+                      }
                       return (
                         <Pill variant="neutral" size="sm">
                           No online payment
@@ -756,6 +1001,74 @@ export function AppointmentServicesView({
                       );
                     })()}
                   </div>
+                      {variants.length > 0 ? (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Variants
+                          </p>
+                          <ul className="mt-1 space-y-0.5">
+                            {variants.map((v) => {
+                              const parts = [formatDuration(v.duration_minutes)];
+                              if (v.price_pence != null) parts.push(formatPrice(v.price_pence));
+                              if (v.deposit_pence != null && v.deposit_pence > 0) {
+                                parts.push(
+                                  paymentRequirement === 'card_hold'
+                                    ? `${formatPrice(v.deposit_pence)} no-show fee`
+                                    : `${formatPrice(v.deposit_pence)} deposit`,
+                                );
+                              }
+                              return (
+                                <li key={v.id} className="text-xs leading-snug text-slate-600">
+                                  <span className="font-medium text-slate-700">{v.name}</span>
+                                  <span> · {parts.join(' · ')}</span>
+                                  {!v.is_active ? (
+                                    <span className="text-slate-400"> · inactive</span>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {addonGroups.length > 0 ? (
+                        <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Add-ons
+                          </p>
+                          <ul className="mt-1 space-y-0.5">
+                            {addonGroups.map(({ group, addons }) => {
+                              const activeAddons = addons.filter((a) => a.is_active && !a.archived_at);
+                              const shown = activeAddons.slice(0, 4);
+                              const extra = activeAddons.length - shown.length;
+                              return (
+                                <li key={group.id} className="text-xs leading-snug text-slate-600">
+                                  <span className="font-medium text-slate-700">{group.name}</span>
+                                  <span className="text-slate-500">
+                                    {' '}
+                                    · {group.min_select > 0 ? 'required' : 'optional'}
+                                  </span>
+                                  {shown.length > 0 ? (
+                                    <span>
+                                      {' '}
+                                      ·{' '}
+                                      {shown
+                                        .map((a) =>
+                                          a.additional_price_pence > 0
+                                            ? `${a.name} (+${formatPrice(a.additional_price_pence)})`
+                                            : a.name,
+                                        )
+                                        .join(', ')}
+                                      {extra > 0 ? ` and ${extra} more` : ''}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400"> · no active options</span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
                       {!isAdmin &&
                         linkedPractitionerIds.length > 0 &&
                         (
@@ -841,8 +1154,13 @@ export function AppointmentServicesView({
                   </div>
                 </SectionCard.Body>
               </SectionCard>
+                )}
+              </SortableServiceCard>
             );
           })}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       )}
         </>
@@ -876,6 +1194,7 @@ export function AppointmentServicesView({
               setForm={setForm}
               isAdmin={isAdmin}
               stripeConnected={stripeConnected}
+              cardHoldEnabled={cardHoldEnabled}
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
               venueOpeningHours={venueOpeningHours}
@@ -998,6 +1317,7 @@ export function AppointmentServicesView({
                 <ComplianceRequirementsEditor
                   appointmentServiceId={editingId}
                   complianceEnabled={complianceEnabled}
+                  onChanged={() => void mutateComplianceSummary()}
                 />
               </div>
             )}

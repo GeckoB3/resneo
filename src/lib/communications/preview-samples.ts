@@ -20,6 +20,8 @@ const BASE_TABLE_BOOKING: BookingEmailData = {
   dietary_notes: '1 vegetarian, 1 gluten-free',
   deposit_amount_pence: 2000,
   deposit_status: 'Paid',
+  // Card-hold previews (§10.3): sample no-show fee for the card-request keys.
+  card_hold_fee_pence: 2500,
   manage_booking_link:
     'https://www.resneo.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
   confirm_cancel_link:

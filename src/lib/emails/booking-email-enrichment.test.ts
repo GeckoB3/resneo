@@ -497,4 +497,47 @@ describe('enrichBookingEmailForComms with add-ons', () => {
     expect(out.addon_lines).toBeUndefined();
     expect(out.addons_total_price_pence).toBeUndefined();
   });
+
+  it('does not double-count add-ons when enrichment runs twice', async () => {
+    // Regression: sendDepositPaidBookingComms enriches, then
+    // sendBookingConfirmationNotifications enriches again inside the sender.
+    // The second pass must not roll the add-on price into the total again
+    // (a £35 service with a £10 add-on emailed a £55 total).
+    const addonRows = [
+      {
+        addon_name_snapshot: 'Option 1',
+        addon_group_name_snapshot: 'Test Group',
+        price_pence_at_booking: 1000,
+        duration_minutes_at_booking: 15,
+      },
+    ];
+    const once = await enrichBookingEmailForComms(makeAddonClient(addonRows), bookingId, {
+      ...base,
+      booking_total_price_pence: 3500,
+    });
+    expect(once.booking_total_price_pence).toBe(4500);
+
+    const twice = await enrichBookingEmailForComms(makeAddonClient(addonRows), bookingId, once);
+    expect(twice.booking_total_price_pence).toBe(4500);
+    expect(twice.addons_total_price_pence).toBe(1000);
+    expect(twice.addon_lines).toEqual(['Test Group: Option 1 (+£10.00, +15 min)']);
+  });
+
+  it('skips re-enrichment even when all add-ons are free (total 0)', async () => {
+    const addonRows = [
+      {
+        addon_name_snapshot: 'Patch test',
+        addon_group_name_snapshot: null,
+        price_pence_at_booking: 0,
+        duration_minutes_at_booking: 10,
+      },
+    ];
+    const once = await enrichBookingEmailForComms(makeAddonClient(addonRows), bookingId, {
+      ...base,
+      booking_total_price_pence: 3500,
+    });
+    const twice = await enrichBookingEmailForComms(makeAddonClient(addonRows), bookingId, once);
+    expect(twice.booking_total_price_pence).toBe(3500);
+    expect(twice.addons_total_duration_minutes).toBe(10);
+  });
 });

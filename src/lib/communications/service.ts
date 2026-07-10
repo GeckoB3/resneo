@@ -252,6 +252,15 @@ async function buildGuestBookingContext(
           : null) ?? bookingData?.dietary_notes ?? null,
       deposit_amount_pence:
         coerceDepositPence(payload) ?? bookingData?.deposit_amount_pence ?? null,
+      // Card-hold comms (§10.3): the consented no-show fee, passed by the
+      // card-request/reminder senders in the payload.
+      card_hold_fee_pence:
+        typeof payload.card_hold_fee_pence === 'number' &&
+        Number.isFinite(payload.card_hold_fee_pence)
+          ? payload.card_hold_fee_pence
+          : null,
+      // Auto-cancel copy variant (§12.1): card details, not a deposit, were missing.
+      card_hold: payload.card_hold === true,
       deposit_status:
         (typeof payload.deposit_status === 'string' ? payload.deposit_status : null) ??
         bookingData?.deposit_status ??
@@ -360,6 +369,10 @@ function mapMessageType(type: MessageType) {
   switch (type) {
     case 'deposit_payment_reminder':
       return { key: 'deposit_payment_reminder' as const, mode: 'dedupe' as const };
+    case 'card_hold_request':
+      return { key: 'card_hold_request' as const, mode: 'dedupe' as const };
+    case 'card_hold_payment_reminder':
+      return { key: 'card_hold_payment_reminder' as const, mode: 'dedupe' as const };
     case 'auto_cancel_notification':
       return { key: 'auto_cancel_notification' as const, mode: 'dedupe' as const };
     case 'no_show_notification':

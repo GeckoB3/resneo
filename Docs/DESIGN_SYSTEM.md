@@ -4,7 +4,7 @@
 **Date:** May 2026  
 **Code:** `src/components/ui/primitives/` · `src/components/ui/dashboard/` · `src/app/globals.css`
 
-This document covers the **UI foundation slice** primitives and rules. Broader IA, calendar polish, and marketing unification live in [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./UI_EXCELLENCE_REVIEW_AND_PLAN.md).
+This document covers the **UI foundation slice** primitives and rules. Broader IA, calendar polish, and marketing unification live in [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./archive/UI_EXCELLENCE_REVIEW_AND_PLAN.md).
 
 ---
 
@@ -139,6 +139,6 @@ Stories live in `src/components/ui/primitives/*.stories.tsx`.
 
 ## Related documents
 
-- [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./UI_EXCELLENCE_REVIEW_AND_PLAN.md)
+- [UI_EXCELLENCE_REVIEW_AND_PLAN.md](./archive/UI_EXCELLENCE_REVIEW_AND_PLAN.md)
 - [Resneo-Appointments-Review-And-Roadmap.md](./Resneo-Appointments-Review-And-Roadmap.md) — P0.1, P0.2
 - `.cursor/rules/frontend.mdc` — mobile, accessibility, loading states

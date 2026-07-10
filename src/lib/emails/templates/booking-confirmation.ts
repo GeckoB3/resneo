@@ -12,10 +12,13 @@ import {
   escapeHtml,
 } from "./base-template";
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
-import { confirmationStructuredPriceText } from "@/lib/communications/booking-confirmation-pricing";
+import {
+  cardHoldConfirmationNotice,
+  confirmationStructuredPriceText,
+} from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from "@/lib/emails/external-links";
-import { renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
+import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
 function isAppointmentStyle(booking: BookingEmailData): boolean {
@@ -64,6 +67,14 @@ export function renderBookingConfirmation(
       formatDepositAmount(booking.deposit_amount_pence!),
       booking.refund_cutoff ?? null,
     );
+  }
+
+  // Card-hold deposits (§10.2): open hold -> append the card-on-file notice in
+  // the deposit slot of the details card (all models).
+  const holdNotice = cardHoldConfirmationNotice(booking, venue.name);
+  if (holdNotice) {
+    const holdHtml = buildCardHoldNoticeHtml(holdNotice);
+    depositHtml = depositHtml ? depositHtml + holdHtml : holdHtml;
   }
 
   const accountPortal =
@@ -158,6 +169,7 @@ export function renderBookingConfirmation(
       "",
     );
   }
+  if (holdNotice) textParts.push(holdNotice, "");
   if (venue.address) textParts.push(`Address: ${venue.address}`);
   if (!appt && booking.special_requests)
     textParts.push(`Special requests: ${booking.special_requests}`);

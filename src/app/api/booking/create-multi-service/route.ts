@@ -57,6 +57,14 @@ import {
   linkBookingComplianceRecords,
 } from '@/lib/compliance/booking-capture';
 import { complianceBookingSubmissionsSchema } from '@/lib/compliance/zod-schemas';
+import {
+  resolveCaptureMode,
+  createCardHoldCustomer,
+  createCardHoldSetupIntent,
+  insertCardHoldRows,
+} from '@/lib/booking/card-hold-capture';
+import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
@@ -153,7 +161,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings',
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags',
       )
       .eq('id', venue_id)
       .single();
@@ -161,6 +169,12 @@ export async function POST(request: NextRequest) {
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
+
+    // Card-hold flag resolved once per request (design doc §6.1/§7.1).
+    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
+      'card_hold_deposits',
+      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
+    );
 
     const authClient = await createClient();
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
@@ -214,6 +228,8 @@ export async function POST(request: NextRequest) {
       duration_minutes: number;
       buffer_minutes: number;
       deposit_pence: number;
+      /** No-show fee (pence) when this service's requirement is 'card_hold' (spec 7.1). */
+      card_hold_fee_pence: number | null;
       estimated_end_time: string | null;
       service_display_name: string;
       service_price_pence: number | null;
@@ -347,6 +363,7 @@ export async function POST(request: NextRequest) {
 
       let estimatedEndTime: string | null = null;
       let depositPence = 0;
+      let segCardHoldFeePence: number | null = null;
       if (svc) {
         const [y, mo, d] = booking_date.split('-').map(Number);
         const [hh, mm] = timeStr.split(':').map(Number);
@@ -360,7 +377,20 @@ export async function POST(request: NextRequest) {
           addons_total_price_pence: segAddonTotals.total_price_pence,
         });
         if (online != null && online.amountPence > 0) {
-          depositPence = online.amountPence;
+          if (online.chargeLabel === 'card_hold') {
+            // Card hold (spec 7.1): fixed fee, no money due at booking for this row.
+            // Flag off resolves as 'none' (spec 6.3).
+            if (cardHoldEnabled) {
+              segCardHoldFeePence = online.amountPence;
+            } else {
+              console.warn(
+                '[booking/create-multi-service] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
+                { venue_id, service_id: seg.service_id },
+              );
+            }
+          } else {
+            depositPence = online.amountPence;
+          }
         }
       }
 
@@ -378,6 +408,7 @@ export async function POST(request: NextRequest) {
         duration_minutes: durationMins,
         buffer_minutes: bufferMins,
         deposit_pence: depositPence,
+        card_hold_fee_pence: segCardHoldFeePence,
         estimated_end_time: estimatedEndTime,
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
@@ -415,8 +446,13 @@ export async function POST(request: NextRequest) {
 
     const totalDepositPence = validated.reduce((sum, p) => sum + p.deposit_pence, 0);
     const requiresDeposit = totalDepositPence > 0;
+    // Capture unit = every row of this bundle (spec 7.0/D7): per-service card-hold
+    // fees make per-row hold rows; mixed bundles use payment_with_setup.
+    const totalCardHoldFeePence = validated.reduce((sum, p) => sum + (p.card_hold_fee_pence ?? 0), 0);
+    const hasCardHold = validated.some((p) => p.card_hold_fee_pence != null);
+    const hasPaymentStep = requiresDeposit || hasCardHold;
 
-    if (requiresDeposit && !venue.stripe_connected_account_id) {
+    if (hasPaymentStep && !venue.stripe_connected_account_id) {
       return NextResponse.json(
         { error: 'Venue has not set up payments; deposits are required for these services.' },
         { status: 400 },
@@ -591,7 +627,7 @@ export async function POST(request: NextRequest) {
         party_size: 1,
         /** Must be set explicitly — defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
-        status: requiresDeposit ? 'Pending' : 'Booked',
+        status: hasPaymentStep ? 'Pending' : 'Booked',
         source,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
@@ -599,8 +635,11 @@ export async function POST(request: NextRequest) {
         guest_first_name: guestFirst,
         guest_last_name: guestLast,
         guest_phone: phoneE164,
+        // Card-hold rows await the card save like deposit rows await payment (spec 7.1):
+        // deposit_status Pending with deposit_amount_pence NULL.
         deposit_amount_pence: seg.deposit_pence > 0 ? seg.deposit_pence : null,
-        deposit_status: seg.deposit_pence > 0 ? 'Pending' : 'Not Required',
+        deposit_status:
+          seg.deposit_pence > 0 || seg.card_hold_fee_pence != null ? 'Pending' : 'Not Required',
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: seg.estimated_end_time,
@@ -662,9 +701,25 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Capture mode over the whole bundle (spec 7.0/D7): 'none'/'payment' behave
+    // exactly as before; 'setup' saves the card with no charge; 'payment_with_setup'
+    // charges the money AND vaults the card on one PaymentIntent.
+    const captureMode = resolveCaptureMode(
+      validated.map((seg, i) => ({
+        bookingId: bookingIds[i]!,
+        chargePence: seg.deposit_pence,
+        cardHoldFeePence: seg.card_hold_fee_pence,
+      })),
+    );
+    const cardHoldRowInputs = validated.flatMap((seg, i) =>
+      seg.card_hold_fee_pence != null
+        ? [{ bookingId: bookingIds[i]!, feePence: seg.card_hold_fee_pence }]
+        : [],
+    );
+
     let client_secret: string | null = null;
 
-    if (requiresDeposit && totalDepositPence > 0 && venue.stripe_connected_account_id) {
+    if (captureMode === 'payment' && requiresDeposit && totalDepositPence > 0 && venue.stripe_connected_account_id) {
       try {
         const primaryId = bookingIds[0]!;
         const paymentIntent = await stripe.paymentIntents.create(
@@ -695,9 +750,93 @@ export async function POST(request: NextRequest) {
         await supabase.from('bookings').delete().in('id', bookingIds);
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
+    } else if (
+      (captureMode === 'setup' || captureMode === 'payment_with_setup') &&
+      venue.stripe_connected_account_id
+    ) {
+      const stripeAccountId = venue.stripe_connected_account_id;
+      let cardHoldCustomerId: string | null = null;
+      try {
+        // Dedicated booking-scoped Customer for the capture unit (D2).
+        const customer = await createCardHoldCustomer({
+          leadBookingId: bookingIds[0]!,
+          venueId: venue_id,
+          stripeConnectedAccountId: stripeAccountId,
+          email: guest.email ?? (emailNorm || null),
+          name: formatGuestDisplayName(guest.first_name, guest.last_name),
+        });
+        cardHoldCustomerId = customer.id;
+
+        if (captureMode === 'setup') {
+          // No money due: SetupIntent only (spec 7.0).
+          const setupIntent = await createCardHoldSetupIntent({
+            customerId: customer.id,
+            leadBookingId: bookingIds[0]!,
+            venueId: venue_id,
+            stripeConnectedAccountId: stripeAccountId,
+          });
+          await insertCardHoldRows(supabase, cardHoldRowInputs, {
+            venueId: venue_id,
+            stripeConnectedAccountId: stripeAccountId,
+            stripeCustomerId: customer.id,
+            stripeSetupIntentId: setupIntent.id,
+            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence, refundWindowHours),
+          });
+          client_secret = setupIntent.client_secret;
+        } else {
+          // Mixed bundle (D7): today's PaymentIntent gains customer +
+          // setup_future_usage + card-only so one confirmation charges the money
+          // AND vaults the card (spec 7.0). Card-hold rows share the unit PI id;
+          // their hold rows carry no SetupIntent.
+          const paymentIntent = await stripe.paymentIntents.create(
+            {
+              amount: totalDepositPence,
+              currency: 'gbp',
+              customer: customer.id,
+              setup_future_usage: 'off_session',
+              payment_method_types: ['card'],
+              metadata: {
+                booking_id: bookingIds[0]!,
+                booking_ids: bookingIds.join(','),
+                group_booking_id: groupBookingId,
+                venue_id,
+              },
+            },
+            { stripeAccount: stripeAccountId },
+          );
+          client_secret = paymentIntent.client_secret;
+
+          await supabase
+            .from('bookings')
+            .update({
+              stripe_payment_intent_id: paymentIntent.id,
+              updated_at: new Date().toISOString(),
+            })
+            .in('id', bookingIds);
+
+          await insertCardHoldRows(supabase, cardHoldRowInputs, {
+            venueId: venue_id,
+            stripeConnectedAccountId: stripeAccountId,
+            stripeCustomerId: customer.id,
+            stripeSetupIntentId: null,
+            termsSnapshot: buildCardHoldTermsSnapshot(venue.name, totalCardHoldFeePence, refundWindowHours),
+          });
+        }
+      } catch (stripeErr) {
+        console.error('Multi-service card hold setup failed:', stripeErr);
+        await supabase.from('bookings').delete().in('id', bookingIds);
+        if (cardHoldCustomerId) {
+          try {
+            await stripe.customers.del(cardHoldCustomerId, { stripeAccount: stripeAccountId });
+          } catch (cleanupErr) {
+            console.error('Card hold customer cleanup failed:', cleanupErr);
+          }
+        }
+        return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+      }
     }
 
-    if (!requiresDeposit && (guest.email || guest.phone)) {
+    if (captureMode === 'none' && (guest.email || guest.phone)) {
       const manageToken = generateConfirmToken();
       const primaryBookingId = bookingIds[0]!;
       await supabase
@@ -758,11 +897,21 @@ export async function POST(request: NextRequest) {
         group_booking_id: groupBookingId,
         booking_ids: bookingIds,
         primary_booking_id: bookingIds[0],
-        requires_deposit: requiresDeposit,
+        // requires_deposit is true whenever a payment step must render (spec §18):
+        // setup mode carries the SetupIntent secret in the existing client_secret field.
+        requires_deposit: hasPaymentStep,
+        payment_mode: captureMode === 'none' ? ('payment' as const) : captureMode,
+        card_hold_fee_pence: hasCardHold ? totalCardHoldFeePence : null,
+        // The exact consent line the server snapshotted (§7.5); the payment step
+        // displays this string so shown text and dispute evidence cannot drift.
+        card_hold_consent_text:
+          hasCardHold && totalCardHoldFeePence > 0
+            ? renderCardHoldConsentText(venue.name, totalCardHoldFeePence, refundWindowHours)
+            : undefined,
         total_deposit_pence: totalDepositPence,
         client_secret: client_secret ?? undefined,
-        stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
-        status: requiresDeposit ? 'Pending' : 'Booked',
+        stripe_account_id: hasPaymentStep ? venue.stripe_connected_account_id : undefined,
+        status: hasPaymentStep ? 'Pending' : 'Booked',
         cancellation_notice_hours: refundWindowHours,
       },
       { status: 201 },

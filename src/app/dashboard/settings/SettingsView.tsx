@@ -47,6 +47,7 @@ import type { VenueBillingQuotePayload } from '@/lib/stripe/billing-quote';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { useUpdateVenueFeatureFlags } from '@/components/providers/VenueFeatureFlagsProvider';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -1123,6 +1124,10 @@ function SettingsViewInner({
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
   const searchParams = useSearchParams();
+  // Pushes freshly-saved feature flags into the dashboard-wide provider so a
+  // toggle (e.g. Card hold deposits) takes effect everywhere immediately; the
+  // layout only re-supplies flags on a full server render.
+  const updateVenueFeatureFlags = useUpdateVenueFeatureFlags();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const isAppointmentsProduct = isAppointmentsProductVenue(venue?.pricing_tier ?? null);
   /**
@@ -1539,7 +1544,7 @@ function SettingsViewInner({
             <FeatureFlagsSection
               initialRaw={initialFeatureFlagsRaw}
               initialResolved={initialFeatureFlagsResolved}
-              onSaved={() => {}}
+              onSaved={(_, resolved) => updateVenueFeatureFlags?.(resolved)}
             />
           ) : null}
         </div>

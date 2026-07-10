@@ -15,6 +15,12 @@ import {
 } from '@/lib/booking/staff-booking-access';
 import { normalizeLinkedBookingRpcChanges } from '@/lib/linked-accounts/linked-booking-patch';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
+import {
+  resolveAppointmentServiceOnlineCharge,
+  type AppointmentServicePaymentFields,
+} from '@/lib/appointments/appointment-service-payment';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -135,6 +141,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update the booking.' }, { status: 500 });
     }
 
+    // Card-hold §9.3 (amended) — this cross-venue cancel goes through the SQL
+    // RPC and none of the other cancel hooks, so settle any open hold here:
+    // released before the deadline, kept chargeable after it (a staff-recorded
+    // late cancellation). Best effort: the cancel already happened.
+    if (parsed.data.changes.status === 'Cancelled') {
+      try {
+        await settleCardHoldsOnCancellation(admin, [parsed.data.bookingId]);
+      } catch (holdErr) {
+        console.error('linked-calendar booking cancel: card-hold settle failed:', holdErr);
+      }
+    }
+
     // §17.3 — email the owning venue per its preferences.
     void notifyCrossVenueBookingWrite({
       admin,
@@ -252,7 +270,7 @@ export async function POST(request: NextRequest) {
     if (input.appointmentServiceId) {
       const { data: service } = await admin
         .from('appointment_services')
-        .select('id, venue_id')
+        .select('id, venue_id, payment_requirement, deposit_pence, price_pence')
         .eq('id', input.appointmentServiceId)
         .maybeSingle();
       if (!service || service.venue_id !== input.ownerVenueId) {
@@ -260,6 +278,35 @@ export async function POST(request: NextRequest) {
           { error: 'That service does not belong to the linked venue.' },
           { status: 400 },
         );
+      }
+
+      // Card-hold services are rejected on this route (spec D6): the RPC below has
+      // zero payment logic, so a card-hold booking created here would confirm with
+      // no hold. Gated on the OWNER venue's card_hold_deposits flag; a zero-fee
+      // card_hold config resolves as none and is allowed through, matching the
+      // Phase 1 resolvers.
+      const serviceCharge = resolveAppointmentServiceOnlineCharge(
+        service as unknown as AppointmentServicePaymentFields,
+      );
+      if (serviceCharge?.chargeLabel === 'card_hold') {
+        const { data: ownerVenue } = await admin
+          .from('venues')
+          .select('feature_flags')
+          .eq('id', input.ownerVenueId)
+          .maybeSingle();
+        const cardHoldEnabled = resolveAppointmentsFeatureFlag(
+          'card_hold_deposits',
+          parseVenueFeatureFlags(ownerVenue?.feature_flags),
+        );
+        if (cardHoldEnabled) {
+          return NextResponse.json(
+            {
+              code: 'card_hold_service_unsupported',
+              error: 'This service requires a card hold. Create the booking from the main booking form.',
+            },
+            { status: 400 },
+          );
+        }
       }
     }
 

@@ -2,7 +2,7 @@
 
 **Status:** Living reference — aligned with current MVP implementation where noted
 **Owner:** Andrew
-**Last updated:** 29 April 2026
+**Last updated:** 4 July 2026
 **Purpose:** This is the canonical reference document for how user accounts work in Resneo. It is intended for use in Cursor as a long-running context document. When implementing any feature that touches users, customers, authentication, or booking identity, this document is the source of truth.
 
 ---
@@ -418,7 +418,15 @@ The trailing signature is an 18-character base64url prefix of `HMAC-SHA256(secre
 
 Verifying the segment grants access to that one booking only. The user is NOT logged in via this link — it's a scoped capability token, not an authentication.
 
-**Legacy v1** stateless links used the shape `/m/{payload}.{signature}` (16-byte booking id encoding + 12-char HMAC). They remain accepted only until **2026-08-01 00:00:00 UTC** (`LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS` in code); after that cutoff only v2 links verify.
+**v3 compact scoped token (now emitted):** `createShortManageLink()` in `src/lib/short-manage-link.ts` now produces a v3 link:
+
+```
+https://{public_host}/m/v3.{base64url_payload}.{base64url_signature}
+```
+
+The `base64url_payload` is a 20-byte binary blob (not JSON): the 16-byte booking id followed by a 4-byte big-endian Unix-seconds expiry. The trailing signature is a 12-character base64url prefix of `HMAC-SHA256(secret, "manage3:" + payload_bytes)`. Default expiry is **14 days** (`MANAGE_LINK_TTL_SEC`). Like v2, verifying it grants scoped access to that one booking only; it is not an authentication. `resolveShortManageBookingId()` accepts v3, v2, and legacy v1 segments, so links already emailed out keep working.
+
+**Legacy v1** stateless links used the shape `/m/{payload}.{signature}` (16-byte booking id encoding + 12-char HMAC). They remain accepted only until **2026-08-01 00:00:00 UTC** (`LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS` in code); after that cutoff only v2 and v3 links verify.
 
 If the user wants to do anything beyond what the token allows (see other bookings, buy credits, etc.), they're prompted to log in via the standard magic link flow.
 
@@ -678,7 +686,7 @@ Build in this order. Do not skip ahead.
 
 This section maps the user-account-related endpoints. Full API spec is in a separate document.
 
-Current implementation note: the repo currently uses App Router endpoints such as `/api/auth/send-magic-link` rather than a versioned `/api/v1` namespace. The `/api/v1` paths below are the desired stable external/mobile API surface. Web implementation may start with existing route names, but mobile-facing endpoints should settle on this versioned shape before release.
+Current implementation note: the versioned `/api/v1` namespace has now shipped, so the paths in the tables below are the current, live external/mobile API surface (not aspirational). Routes exist under `src/app/api/v1/` for auth (`auth/magic-link/request`, `auth/magic-link/callback`, `auth/logout`, `auth/password/set`, `auth/account`), profile (`me`, `me/profile`, `me/email/change`), devices (`me/devices`), bookings (`me/bookings`), and booking management (`manage-booking/verify`, `manage-booking/[token]`). Older App Router endpoints such as `/api/auth/send-magic-link` still exist; several v1 routes re-export those handlers. In particular, `DELETE /api/v1/auth/account` re-exports the soft `delete-request` flow (`src/app/api/v1/auth/account/route.ts` re-exports `POST` from `src/app/api/account/delete-request/route.ts`).
 
 ### 11.1 Authentication
 
@@ -768,7 +776,7 @@ Operational emails (booking confirmations, reminders) are sent regardless of con
 
 **Silent signup:** Account creation as a side effect of booking, without the user explicitly creating an account.
 
-**Tokenised booking management link:** A signed URL segment (MVP: **v2 HMAC** under `/m/v2.…`, see Section 5.2) that grants scoped access to one booking without requiring login. JWT query tokens are an optional future shape, not the MVP default.
+**Tokenised booking management link:** A signed URL segment that grants scoped access to one booking without requiring login (see Section 5.2). Newly generated links use the **v3 compact scoped token** (`/m/v3.{payload}.{sig}`, 14-day default expiry); **v2 HMAC** (`/m/v2.…`) and legacy **v1** links are still accepted. JWT query tokens are an optional future shape, not the current default.
 
 **Magic link login:** Email-based passwordless authentication. Supabase Auth handles delivery.
 
@@ -807,6 +815,8 @@ When the design changes, record it here with date and rationale. Future-you and 
 **2026-04-29:** **Product sequencing:** Prioritise **saved payment methods** next among account-wallet features. **Credits, memberships, courses, recurring bookings** stay documented but should appear disabled or empty in `/account` until their data models and venue surfaces are specified.
 
 **2026-04-29:** **Deletion anonymisation:** Guest placeholder emails use `deleted-{user_id}-{guest_id}@reserveni.deleted` so venue-scoped uniqueness and audit trails remain safe.
+
+**2026-07-04:** **Foundation migrations landed.** The June 2026 account-foundation migrations are now in place: `20260629120000_user_accounts_foundation.sql` (user_profiles / user_devices / guest and staff account-linkage fields) and `20260630120000_request_account_deletion_guest_email.sql` (guest-email handling for account deletion requests). The `/api/v1` namespace has shipped and the manage-link format now emits v3 compact scoped tokens.
 
 ---
 

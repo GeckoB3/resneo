@@ -13,6 +13,10 @@ export type CommunicationMessageKey =
   | 'deposit_confirmation'
   | 'confirm_or_cancel_prompt'
   | 'deposit_payment_reminder'
+  // Card-hold deposits (§10.3): own policy entries; deposit-request
+  // customisations do not govern card-hold comms.
+  | 'card_hold_request'
+  | 'card_hold_payment_reminder'
   | 'pre_visit_reminder'
   | 'booking_modification'
   | 'cancellation_confirmation'
@@ -118,6 +122,23 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
     deposit_payment_reminder: {
       enabled: true,
       channels: ['sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: 2,
+      hoursAfter: null,
+    },
+    // Card-hold deposits (§10.3): both card-request keys default to email + SMS.
+    card_hold_request: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    card_hold_payment_reminder: {
+      enabled: true,
+      channels: ['email', 'sms'],
       emailCustomMessage: null,
       smsCustomMessage: null,
       hoursBefore: 2,
@@ -407,6 +428,8 @@ const ALLOWED_CHANNELS_BY_MESSAGE: Record<
   deposit_confirmation: EMAIL_ONLY,
   confirm_or_cancel_prompt: EMAIL_AND_SMS,
   deposit_payment_reminder: EMAIL_AND_SMS,
+  card_hold_request: EMAIL_AND_SMS,
+  card_hold_payment_reminder: EMAIL_AND_SMS,
   pre_visit_reminder: EMAIL_AND_SMS,
   booking_modification: EMAIL_AND_SMS,
   cancellation_confirmation: EMAIL_AND_SMS,
@@ -525,6 +548,16 @@ function sanitizeLanePolicies(
       'deposit_payment_reminder',
       row.deposit_payment_reminder,
       fallback.deposit_payment_reminder,
+    ),
+    card_hold_request: sanitizeMessagePolicy(
+      'card_hold_request',
+      row.card_hold_request,
+      fallback.card_hold_request,
+    ),
+    card_hold_payment_reminder: sanitizeMessagePolicy(
+      'card_hold_payment_reminder',
+      row.card_hold_payment_reminder,
+      fallback.card_hold_payment_reminder,
     ),
     pre_visit_reminder: sanitizeMessagePolicy(
       'pre_visit_reminder',

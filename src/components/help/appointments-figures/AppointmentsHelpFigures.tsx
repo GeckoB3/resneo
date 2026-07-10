@@ -703,7 +703,7 @@ function PaymentsFlowSvg() {
         </g>
       ))}
       <text x="310" y="140" textAnchor="middle" fill={slate} fontSize="9">
-        Payments flow (concept) — no card data stored in ResNeo
+        Payments flow (concept): no card data is stored in ResNeo
       </text>
     </svg>
   );

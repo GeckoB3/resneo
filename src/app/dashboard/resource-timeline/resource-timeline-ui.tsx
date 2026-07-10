@@ -437,19 +437,26 @@ export function ResourcePaymentCards({
   depositValue,
   onDepositChange,
   stripeConnected,
+  cardHoldEnabled = false,
 }: {
-  value: 'none' | 'deposit' | 'full_payment';
-  onChange: (v: 'none' | 'deposit' | 'full_payment') => void;
+  value: 'none' | 'deposit' | 'full_payment' | 'card_hold';
+  onChange: (v: 'none' | 'deposit' | 'full_payment' | 'card_hold') => void;
   sym: string;
   depositValue: string;
   onDepositChange: (v: string) => void;
   stripeConnected: boolean;
+  /** Card-hold deposits venue flag; the option is offered only when this is on. */
+  cardHoldEnabled?: boolean;
   children?: ReactNode;
 }) {
   const options = [
     { v: 'none' as const, label: 'Pay at venue', hint: 'No card required online' },
     { v: 'deposit' as const, label: 'Deposit online', hint: 'Hold funds via Stripe' },
     { v: 'full_payment' as const, label: 'Pay in full', hint: 'Charge full amount at booking' },
+    // Rendered only when the venue flag is on (or the resource is already configured this way).
+    ...(cardHoldEnabled || value === 'card_hold'
+      ? [{ v: 'card_hold' as const, label: 'Card hold', hint: 'Store a card, charge only no-shows' }]
+      : []),
   ];
   return (
     <div className="space-y-3">
@@ -471,6 +478,17 @@ export function ResourcePaymentCards({
           </button>
         ))}
       </div>
+      {value === 'card_hold' ? (
+        <p className="text-xs text-slate-500">
+          No payment is taken when the client books. Their card is stored securely and you can charge a no-show fee
+          if they do not attend.
+        </p>
+      ) : null}
+      {!cardHoldEnabled && value === 'card_hold' ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          Card hold is disabled for this venue; this service currently takes no deposit.
+        </p>
+      ) : null}
       {value === 'deposit' ? (
         <div className="max-w-xs">
           <label className={fieldLabelClass}>Deposit amount ({sym})</label>
@@ -486,7 +504,22 @@ export function ResourcePaymentCards({
           <p className={fieldHintClass}>Charged when the guest books. Balance may be due at the venue.</p>
         </div>
       ) : null}
-      {!stripeConnected && (value === 'deposit' || value === 'full_payment') ? (
+      {value === 'card_hold' ? (
+        <div className="max-w-xs">
+          <label className={fieldLabelClass}>No-show fee (£)</label>
+          <input
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={depositValue}
+            onChange={(e) => onDepositChange(e.target.value)}
+            placeholder="e.g. 10.00"
+            className={fieldInputClass}
+          />
+          <p className={fieldHintClass}>At least £1. Charged only if you mark the booking as a no-show.</p>
+        </div>
+      ) : null}
+      {!stripeConnected && (value === 'deposit' || value === 'full_payment' || value === 'card_hold') ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           Connect Stripe in settings before guests can pay online.
         </p>

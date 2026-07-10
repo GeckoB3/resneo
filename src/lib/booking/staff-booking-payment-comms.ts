@@ -4,8 +4,18 @@ import { after } from 'next/server';
 import { stripe } from '@/lib/stripe';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { createOrGetBookingShortLink, createOrGetPaymentShortLink } from '@/lib/booking-short-links';
-import { sendBookingConfirmationNotifications, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
+import {
+  sendBookingConfirmationNotifications,
+  sendCardHoldRequestNotifications,
+  sendDepositRequestNotifications,
+} from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import {
+  createCardHoldCustomer,
+  createCardHoldSetupIntent,
+  insertCardHoldRows,
+} from '@/lib/booking/card-hold-capture';
+import { buildCardHoldTermsSnapshot } from '@/lib/booking/card-hold-terms';
 import type { BookingModel } from '@/types/booking-models';
 
 export type StaffBookingEmailExtras = {
@@ -17,7 +27,10 @@ export type StaffBookingEmailExtras = {
 };
 
 /**
- * After inserting a staff-created non-table booking: optional PI + deposit request, else confirm comms.
+ * After inserting a staff-created booking: card-hold setup + card-request comms,
+ * or optional PI + deposit request, else confirm comms. `cardHoldFeePence` and
+ * `requiresDeposit` are mutually exclusive (an entity is either deposit-type or
+ * card-hold-type, spec D6); the card-hold branch wins when both are passed.
  * On Stripe failure, throws so the caller can roll back the booking insert.
  */
 export async function applyStaffBookingPaymentAndComms(params: {
@@ -42,6 +55,17 @@ export async function applyStaffBookingPaymentAndComms(params: {
   dietary_notes: string | null;
   requiresDeposit: boolean;
   depositAmountPence: number;
+  /**
+   * Non-null when a card hold must be captured for this booking (spec 7.6): the
+   * no-show fee in pence. Creates the dedicated Customer + SetupIntent + hold
+   * row, then sends the card-request link instead of any deposit comms.
+   */
+  cardHoldFeePence?: number | null;
+  /**
+   * The notice hours behind the booking's cancellation_deadline; quoted in the
+   * hold consent text so late cancellations are covered (§9.3 amended).
+   */
+  cancellationNoticeHours?: number | null;
   emailExtras: StaffBookingEmailExtras;
   logContext: string;
 }): Promise<{ payment_url?: string }> {
@@ -65,6 +89,8 @@ export async function applyStaffBookingPaymentAndComms(params: {
     dietary_notes,
     requiresDeposit,
     depositAmountPence,
+    cardHoldFeePence,
+    cancellationNoticeHours,
     emailExtras,
     logContext,
   } = params;
@@ -74,7 +100,83 @@ export async function applyStaffBookingPaymentAndComms(params: {
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
 
   let payment_url: string | undefined;
-  if (requiresDeposit && depositAmountPence > 0 && stripeConnectedAccountId) {
+  if (cardHoldFeePence != null && cardHoldFeePence > 0 && stripeConnectedAccountId) {
+    // Card hold (spec 7.6): dedicated booking-scoped Customer + SetupIntent on the
+    // venue's connected account, one hold row, then the card-request link. No money
+    // is charged and no deposit-request comms are ever sent on this path.
+    let cardHoldCustomerId: string | null = null;
+    try {
+      const customer = await createCardHoldCustomer({
+        leadBookingId: bookingId,
+        venueId,
+        stripeConnectedAccountId,
+        email: guestEmail,
+        name: guestName,
+      });
+      cardHoldCustomerId = customer.id;
+      const setupIntent = await createCardHoldSetupIntent({
+        customerId: customer.id,
+        leadBookingId: bookingId,
+        venueId,
+        stripeConnectedAccountId,
+      });
+      await insertCardHoldRows(admin, [{ bookingId, feePence: cardHoldFeePence }], {
+        venueId,
+        stripeConnectedAccountId,
+        stripeCustomerId: customer.id,
+        stripeSetupIntentId: setupIntent.id,
+        termsSnapshot: buildCardHoldTermsSnapshot(venueName, cardHoldFeePence, cancellationNoticeHours),
+      });
+      payment_url = await createOrGetPaymentShortLink(venueId, bookingId, publicBaseUrl);
+    } catch (stripeErr) {
+      console.error(`Card hold setup failed (${logContext}):`, stripeErr);
+      if (cardHoldCustomerId) {
+        try {
+          await stripe.customers.del(cardHoldCustomerId, { stripeAccount: stripeConnectedAccountId });
+        } catch (cleanupErr) {
+          console.error(`Card hold customer cleanup failed (${logContext}):`, cleanupErr);
+        }
+      }
+      throw new Error('payment_failed');
+    }
+
+    const holdPayload = {
+      id: bookingId,
+      guest_name: guestName,
+      guest_email: guestEmail,
+      guest_phone: guestPhone,
+      booking_date,
+      booking_time,
+      booking_model: emailExtras.booking_model,
+      party_size,
+      special_requests,
+      dietary_notes,
+    };
+    after(async () => {
+      try {
+        const results = await sendCardHoldRequestNotifications(
+          holdPayload,
+          venueRowToEmailData({
+            name: venueName,
+            address: venueAddress ?? null,
+            email: venueProfileEmail ?? null,
+            reply_to_email: venueReplyToEmail ?? null,
+          }),
+          venueId,
+          payment_url!,
+          cardHoldFeePence,
+        );
+        if (!results.email.sent && !results.sms.sent) {
+          console.warn(`[after] ${logContext} card request notifications not sent:`, {
+            email: results.email.reason,
+            sms: results.sms.reason,
+          });
+        }
+      } catch (err) {
+        console.error(`[after] ${logContext} card request notifications failed:`, err);
+      }
+    });
+  } else if (requiresDeposit && depositAmountPence > 0 && stripeConnectedAccountId) {
     try {
       const paymentIntent = await stripe.paymentIntents.create(
         {

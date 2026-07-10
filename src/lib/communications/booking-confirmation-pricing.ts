@@ -4,6 +4,7 @@ import {
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
+import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 
 export function formatMoneyOrNull(pence: number | null | undefined): string | null {
   if (typeof pence !== 'number') return null;
@@ -36,10 +37,52 @@ export function inferredTotalPricePence(booking: BookingEmailData): number | nul
 }
 
 /**
+ * Card-hold deposits (§10.2): whether this booking carries an open card hold
+ * the confirmation copy should describe. `card_hold_fee_pence` is only
+ * populated for open holds (senders pass the consented fee; the confirmation
+ * enrichment loads it from unreleased hold rows), so the fee's presence is the
+ * primary signal; terminal money states guard against stale data.
+ */
+export function bookingHasOpenCardHoldDisplay(booking: BookingEmailData): boolean {
+  const fee = booking.card_hold_fee_pence ?? 0;
+  if (fee <= 0) return false;
+  const ds = (booking.deposit_status ?? '').toLowerCase();
+  return ds !== 'charged' && ds !== 'refunded' && ds !== 'waived' && ds !== 'failed';
+}
+
+/**
+ * The §10.2 confirmation-email hold section, with the venue named. Returned as
+ * one plain-text paragraph; null when the booking has no open hold.
+ * Deadline-aware (§9.3 amended): with a cancellation deadline (refund_cutoff)
+ * the guest must cancel before that instant to avoid the fee; late
+ * cancellations may still be charged.
+ */
+export function cardHoldConfirmationNotice(
+  booking: BookingEmailData,
+  venueName: string,
+): string | null {
+  if (!bookingHasOpenCardHoldDisplay(booking)) return null;
+  const fee = formatCardHoldFeePence(booking.card_hold_fee_pence!);
+  const cutoff = booking.refund_cutoff;
+  const cutoffValid = typeof cutoff === 'string' && Number.isFinite(Date.parse(cutoff));
+  const cancelClause = cutoffValid
+    ? `Cancel before ${formatRefundDeadlineIso(cutoff!)} to avoid any charge.`
+    : `Cancel before your booking starts to avoid any charge.`;
+  return (
+    `No payment has been taken. Your card is securely on file and ${venueName} ` +
+    `may charge a no-show fee of up to ${fee} if you do not attend` +
+    `${cutoffValid ? ' or cancel late' : ''}. ` +
+    cancelClause
+  );
+}
+
+/**
  * Whether the confirmation should present the booking as free (no monetary charge).
- * Excludes pending/paid deposits where money is still involved.
+ * Excludes pending/paid deposits where money is still involved, and card-hold
+ * bookings ("free" would hide the no-show fee the guest consented to, §10.2).
  */
 export function isFreeBookingDisplay(booking: BookingEmailData): boolean {
+  if (bookingHasOpenCardHoldDisplay(booking)) return false;
   const t = inferredTotalPricePence(booking);
   if (t != null && t > 0) return false;
   const ds = (booking.deposit_status ?? '').toLowerCase();
@@ -188,6 +231,14 @@ function groupBookingPriceLines(booking: BookingEmailData): string[] {
 }
 
 function paymentStatusLine(booking: BookingEmailData): string | null {
+  // Card-hold bookings get a dedicated status line instead of "free" /
+  // "pay at venue" (§10.2). A hold booking is never 'Paid' (§14), so this
+  // cannot shadow the paid-deposit branches below.
+  if (bookingHasOpenCardHoldDisplay(booking)) {
+    const fee = formatCardHoldFeePence(booking.card_hold_fee_pence!);
+    return `No payment taken. Card held for a no-show fee of up to ${fee}.`;
+  }
+
   const ds = (booking.deposit_status ?? '').toLowerCase();
   const paidPence = booking.deposit_amount_pence;
   const totalPence = booking.booking_total_price_pence ?? null;
@@ -358,6 +409,10 @@ export function eventBookingConfirmationSmsPriceSuffix(booking: BookingEmailData
   } else if (ds === 'pending' && (paidPence ?? 0) > 0) {
     const dep = formatMoneyOrNull(paidPence);
     parts.push(dep ? `${dep} deposit due` : 'deposit due');
+  } else if (bookingHasOpenCardHoldDisplay(booking)) {
+    // Card-hold event bookings (§10.2): never "free" / "pay at venue".
+    const fee = formatCardHoldFeePence(booking.card_hold_fee_pence!);
+    parts.push(`card held, no payment taken, no-show fee up to ${fee}`);
   } else if (isFreeBookingDisplay(booking)) {
     parts.push('free');
   } else if (totalFmt) {
@@ -369,6 +424,13 @@ export function eventBookingConfirmationSmsPriceSuffix(booking: BookingEmailData
 }
 
 export function bookingConfirmationSmsPriceSuffix(booking: BookingEmailData): string {
+  // Card-hold bookings (§10.2): dedicated short suffix, same leading-space
+  // pattern as the other branches so it slots into the 160-char SMS budget.
+  if (bookingHasOpenCardHoldDisplay(booking)) {
+    const fee = formatCardHoldFeePence(booking.card_hold_fee_pence!);
+    return ` Card held, no payment taken. No-show fee up to ${fee}.`;
+  }
+
   const ds = (booking.deposit_status ?? '').toLowerCase();
   const paidPence = booking.deposit_amount_pence;
   const totalPence = booking.booking_total_price_pence ?? null;

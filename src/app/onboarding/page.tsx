@@ -138,6 +138,7 @@ interface EventDraft {
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
+  // Deliberately charge-only: 'card_hold' is not offered during onboarding (design doc §6.2); venues configure it from the dashboard editors afterwards.
   payment_requirement: 'none' | 'deposit' | 'full_payment';
   deposit_pounds: string;
 }
@@ -267,6 +268,7 @@ function buildOnboardingExperienceEventPostBody(
 }
 
 /** Aligns with dashboard Class timetable → Add class type (`BLANK_CT` / `buildClassTypePayload`). */
+// Deliberately charge-only: 'card_hold' is not offered during onboarding (design doc §6.2); venues configure it from the dashboard editors afterwards.
 type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
 
 interface ClassDraft {
@@ -340,6 +342,7 @@ function buildClassTypePayloadFromDraft(c: ClassDraft): Record<string, unknown> 
   };
 }
 
+// Deliberately charge-only: 'card_hold' is not offered during onboarding (design doc §6.2); venues configure it from the dashboard editors afterwards.
 type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
 
 /** Aligned with dashboard Resource timeline Add Resource (exceptions omitted in onboarding). */
@@ -2043,7 +2046,9 @@ export default function OnboardingPage() {
           }
           const pricePence = poundsToMinor(c.price);
           const req = c.payment_requirement;
-          if (req !== 'none' && pricePence <= 0) {
+          // Exhaustive on charge modes only: any other value (e.g. a future 'card_hold')
+          // must fall through as none-like here, since only deposit/full payment need a price.
+          if ((req === 'deposit' || req === 'full_payment') && pricePence <= 0) {
             setError(
               `Set a price per person for "${c.name.trim()}" when using deposit or full payment online.`,
             );

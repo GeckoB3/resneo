@@ -18,6 +18,7 @@ export const VALUE_MAP_TARGETS: Record<string, { label: string; canonical: reado
   },
   deposit_status: {
     label: 'Deposit status',
+    // Card-hold statuses ('Card Held', 'Charged') are intentionally excluded: imports must never produce them (they require a real booking_card_holds row).
     canonical: ['Not Required', 'Pending', 'Paid', 'Refunded', 'Forfeited', 'Waived'],
   },
 };

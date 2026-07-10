@@ -12,6 +12,7 @@
  *   E2E_VENUE_SLUG=e2e-smoke-appointments
  *   E2E_VENUE_NAME=E2E Smoke Salon
  *   E2E_SERVICE_NAME=E2E Smoke Consultation
+ *   E2E_CARD_HOLD_SERVICE_NAME=E2E Smoke Card Hold Consultation
  */
 
 import { config } from 'dotenv';
@@ -26,8 +27,11 @@ config({ path: join(__dirname, '..', '.env.e2e') });
 const VENUE_SLUG = process.env.E2E_VENUE_SLUG?.trim() || 'e2e-smoke-appointments';
 const VENUE_NAME = process.env.E2E_VENUE_NAME?.trim() || 'E2E Smoke Salon';
 const SERVICE_NAME = process.env.E2E_SERVICE_NAME?.trim() || 'E2E Smoke Consultation';
+const CARD_HOLD_SERVICE_NAME =
+  process.env.E2E_CARD_HOLD_SERVICE_NAME?.trim() || 'E2E Smoke Card Hold Consultation';
 const STRIPE_ACCOUNT = process.env.E2E_STRIPE_CONNECTED_ACCOUNT_ID?.trim() || null;
 const DEPOSIT_PENCE = Number(process.env.E2E_DEPOSIT_PENCE ?? 1000);
+const CARD_HOLD_FEE_PENCE = Number(process.env.E2E_CARD_HOLD_FEE_PENCE ?? 1500);
 
 const DEFAULT_WORKING_HOURS = {
   1: [{ start: '09:00', end: '17:00' }],
@@ -73,6 +77,9 @@ async function main() {
       waitlist_v2: true,
       guest_self_reschedule: true,
       any_available_practitioner: true,
+      // Required so the card-hold smoke service below is configurable/bookable
+      // (card-hold creation paths are gated on this venue flag).
+      card_hold_deposits: true,
     },
     booking_rules: {
       cancellation_notice_hours: 1,
@@ -117,66 +124,88 @@ async function main() {
     console.log('[e2e-seed] Created calendar:', calendarId);
   }
 
-  const { data: services } = await admin
-    .from('service_items')
-    .select('id')
-    .eq('venue_id', venueId)
-    .eq('name', SERVICE_NAME)
-    .limit(1);
-
-  let serviceId = services?.[0]?.id;
-  if (!serviceId) {
-    const { data: svc, error: svcErr } = await admin
+  /** Create-or-update a smoke service and make sure it is linked to the calendar. */
+  async function ensureService(name, paymentFields) {
+    const { data: services } = await admin
       .from('service_items')
-      .insert({
-        venue_id: venueId,
-        name: SERVICE_NAME,
-        duration_minutes: 30,
-        buffer_minutes: 0,
-        price_pence: 5000,
-        deposit_pence: DEPOSIT_PENCE,
-        payment_requirement: 'deposit',
-        is_active: true,
-        is_bookable_online: true,
-      })
       .select('id')
-      .single();
-    if (svcErr) throw svcErr;
-    serviceId = svc.id;
-    console.log('[e2e-seed] Created service:', serviceId, SERVICE_NAME);
-  } else {
-    await admin
-      .from('service_items')
-      .update({
-        deposit_pence: DEPOSIT_PENCE,
-        payment_requirement: 'deposit',
-        is_active: true,
-        is_bookable_online: true,
-      })
-      .eq('id', serviceId);
-    console.log('[e2e-seed] Updated service deposit:', serviceId);
+      .eq('venue_id', venueId)
+      .eq('name', name)
+      .limit(1);
+
+    let serviceId = services?.[0]?.id;
+    if (!serviceId) {
+      const { data: svc, error: svcErr } = await admin
+        .from('service_items')
+        .insert({
+          venue_id: venueId,
+          name,
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          price_pence: 5000,
+          ...paymentFields,
+          is_active: true,
+          is_bookable_online: true,
+        })
+        .select('id')
+        .single();
+      if (svcErr) throw svcErr;
+      serviceId = svc.id;
+      console.log('[e2e-seed] Created service:', serviceId, name);
+    } else {
+      const { error: updErr } = await admin
+        .from('service_items')
+        .update({
+          ...paymentFields,
+          is_active: true,
+          is_bookable_online: true,
+        })
+        .eq('id', serviceId);
+      if (updErr) throw updErr;
+      console.log('[e2e-seed] Updated service payment config:', serviceId, name);
+    }
+
+    const { data: link } = await admin
+      .from('calendar_service_assignments')
+      .select('id')
+      .eq('calendar_id', calendarId)
+      .eq('service_item_id', serviceId)
+      .maybeSingle();
+
+    if (!link) {
+      const { error: linkErr } = await admin.from('calendar_service_assignments').insert({
+        calendar_id: calendarId,
+        service_item_id: serviceId,
+      });
+      if (linkErr) throw linkErr;
+      console.log('[e2e-seed] Linked service to calendar:', name);
+    }
+    return serviceId;
   }
 
-  const { data: link } = await admin
-    .from('calendar_service_assignments')
-    .select('id')
-    .eq('calendar_id', calendarId)
-    .eq('service_item_id', serviceId)
-    .maybeSingle();
+  // Classic upfront-deposit service.
+  await ensureService(SERVICE_NAME, {
+    deposit_pence: DEPOSIT_PENCE,
+    payment_requirement: 'deposit',
+  });
 
-  if (!link) {
-    const { error: linkErr } = await admin.from('calendar_service_assignments').insert({
-      calendar_id: calendarId,
-      service_item_id: serviceId,
-    });
-    if (linkErr) throw linkErr;
-    console.log('[e2e-seed] Linked service to calendar');
-  }
+  // Card-hold service (spec §17): no payment at booking; the guest's card is
+  // stored and staff can charge a no-show fee up to deposit_pence later.
+  // Requires feature_flags.card_hold_deposits on the venue (set above).
+  await ensureService(CARD_HOLD_SERVICE_NAME, {
+    deposit_pence: CARD_HOLD_FEE_PENCE,
+    payment_requirement: 'card_hold',
+  });
+
+  // NB: this fixture venue is appointments-only (unified_scheduling) and the
+  // script does not seed booking_restrictions, so no card-hold table rule is
+  // seeded here.
 
   console.log('\n[e2e-seed] Done. Add to .env.local:\n');
   console.log(`E2E_VENUE_SLUG=${VENUE_SLUG}`);
   console.log(`E2E_VENUE_NAME=${VENUE_NAME}`);
   console.log(`E2E_SERVICE_NAME=${SERVICE_NAME}`);
+  console.log(`E2E_CARD_HOLD_SERVICE_NAME=${CARD_HOLD_SERVICE_NAME}`);
   console.log(`\nPublic booking URL: ${process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'}/book/${VENUE_SLUG}`);
 }
 

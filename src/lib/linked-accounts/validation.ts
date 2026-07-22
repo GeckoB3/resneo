@@ -238,6 +238,7 @@ export const catalogueActionSchema = z.object({
   // (a member consents by joining the collective; no per-service approval).
   action: z.enum([
     'create_item',
+    'create_items',
     'update_item',
     'archive_item',
     'add_provider',
@@ -258,6 +259,22 @@ export const catalogueActionSchema = z.object({
   /** Used by create_item to seed providers from a set of source services in one call. */
   sourceServiceIds: z
     .array(z.object({ venueId: z.string().uuid(), sourceServiceId: z.string().uuid() }))
+    .max(50)
+    .optional(),
+  /**
+   * Used by create_items to add several member services to the page in one call —
+   * each becomes its own offering (same-named services are merged into one). The
+   * name is the source service's own name.
+   */
+  services: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(160),
+        venueId: z.string().uuid(),
+        sourceServiceId: z.string().uuid(),
+      }),
+    )
+    .min(1)
     .max(50)
     .optional(),
   // Provider fields (add_provider / remove_provider).
